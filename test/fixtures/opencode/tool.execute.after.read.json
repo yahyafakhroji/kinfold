@@ -1,0 +1,33 @@
+{
+  "kind": "tool.execute.after",
+  "payload": {
+    "tool": "read",
+    "sessionID": "ses_fixture0011",
+    "agent": "build",
+    "messageID": "msg_fixture0015",
+    "id": "chatcmpl-tool-8e520a35f03a42da",
+    "input": {
+      "path": "package.json"
+    },
+    "status": "completed",
+    "result": {
+      "output": {
+        "type": "file",
+        "uri": "file:///Users/dev/Dev/rea/shared-agent-memory/package.json",
+        "name": "package.json",
+        "content": "{\n  \"name\": \"shared-agent-memory\",\n  \"version\": \"0.0.1\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"description\": \"One local memory store shared by Claude Code, OpenCode and other AI coding agents.\",\n  \"scripts\": {\n    \"test\": \"bun test\",\n    \"typecheck\": \"tsc --noEmit\"\n  },\n  \"devDependencies\": {\n    \"@types/bun\": \"1.1.13\",\n    \"typescript\": \"5.6.3\"\n  }\n}\n",
+        "encoding": "utf8",
+        "mime": "application/json"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Read file package.json, lines 1-15\n1: {\n2:   \"name\": \"shared-agent-memory\",\n3:   \"version\": \"0.0.1\",\n4:   \"private\": true,\n5:   \"type\": \"module\",\n6:   \"description\": \"One local memory store shared by Claude Code, OpenCode and other AI coding agents.\",\n7:   \"scripts\": {\n8:     \"test\": \"bun test\",\n9:     \"typecheck\": \"tsc --noEmit\"\n10:   },\n11:   \"devDependencies\": {\n12:     \"@types/bun\": \"1.1.13\",\n13:     \"typescript\": \"5.6.3\"\n14:   }\n15: }"
+        }
+      ],
+      "metadata": {
+        "truncated": false
+      }
+    }
+  }
+}

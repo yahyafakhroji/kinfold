@@ -1,0 +1,22 @@
+{
+  "kind": "bus.session.text.ended",
+  "payload": {
+    "id": "evt_fixture0020",
+    "created": 1792841921893,
+    "type": "session.text.ended",
+    "durable": {
+      "aggregateID": "ses_fixture0011",
+      "seq": 37,
+      "version": 1
+    },
+    "location": {
+      "directory": "/Users/dev/Dev/rea/shared-agent-memory"
+    },
+    "data": {
+      "sessionID": "ses_fixture0011",
+      "assistantMessageID": "msg_fixture0021",
+      "ordinal": 0,
+      "text": "Fixture: package.json lists bun test; .env.example does not exist."
+    }
+  }
+}

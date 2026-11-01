@@ -1,0 +1,16 @@
+{
+  "kind": "bus.shell.exited",
+  "payload": {
+    "id": "evt_fixture0013",
+    "created": 1792841899703,
+    "type": "shell.exited",
+    "location": {
+      "directory": "/Users/dev/Dev/rea/shared-agent-memory"
+    },
+    "data": {
+      "id": "sh_fixture0014",
+      "exit": 1,
+      "status": "exited"
+    }
+  }
+}

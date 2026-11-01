@@ -1,0 +1,37 @@
+{
+  "kind": "tool.execute.after",
+  "payload": {
+    "tool": "shell",
+    "sessionID": "ses_fixture0011",
+    "agent": "build",
+    "messageID": "msg_fixture0015",
+    "id": "chatcmpl-tool-95979bd99b9ef7b4",
+    "input": {
+      "command": "cat .env.example"
+    },
+    "status": "completed",
+    "result": {
+      "output": {
+        "exit": 1,
+        "truncated": false,
+        "output": "cat: .env.example: No such file or directory\n",
+        "status": "completed"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "cat: .env.example: No such file or directory\n"
+        },
+        {
+          "type": "text",
+          "text": "Exited with code 1"
+        }
+      ],
+      "metadata": {
+        "status": "completed",
+        "truncated": false,
+        "exit": 1
+      }
+    }
+  }
+}

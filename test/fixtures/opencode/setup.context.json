@@ -1,0 +1,41 @@
+{
+  "kind": "setup.context",
+  "payload": {
+    "keys": [
+      "app",
+      "location",
+      "options",
+      "agent",
+      "aisdk",
+      "command",
+      "credential",
+      "event",
+      "experimental",
+      "generate",
+      "model",
+      "provider",
+      "integration",
+      "mcp",
+      "permission",
+      "plugin",
+      "reference",
+      "rpc",
+      "skill",
+      "storage",
+      "tool",
+      "vcs",
+      "websearch",
+      "worktree",
+      "session",
+      "shell"
+    ],
+    "location": {
+      "directory": "/Users/dev/Dev/rea/shared-agent-memory",
+      "project": {
+        "id": "0000000000000000000000000000000000000009",
+        "directory": "/Users/dev/Dev/rea/shared-agent-memory",
+        "canonical": "/Users/dev/Dev/rea/shared-agent-memory"
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "/Users/dev/.claude/projects/-Users-dev-Dev-rea-shared-agent-memory/00000000-0000-4000-8000-000000000001.jsonl",
+  "cwd": "/Users/dev/Dev/rea/shared-agent-memory",
+  "scratchpad_dir": "/tmp/fixture/scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000002",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/Users/dev/Dev/rea/shared-agent-memory/package.json"
+  },
+  "tool_response": {
+    "type": "text",
+    "file": {
+      "filePath": "/Users/dev/Dev/rea/shared-agent-memory/package.json",
+      "content": "{\n  \"name\": \"shared-agent-memory\",\n  \"version\": \"0.0.1\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"description\": \"One local memory store shared by Claude Code, OpenCode and other AI coding agents.\",\n  \"scripts\": {\n    \"test\": \"bun test\",\n    \"typecheck\": \"tsc --noEmit\"\n  },\n  \"devDependencies\": {\n    \"@types/bun\": \"1.1.13\",\n    \"typescript\": \"5.6.3\"\n  }\n}\n",
+      "numLines": 16,
+      "startLine": 1,
+      "totalLines": 16
+    }
+  },
+  "tool_use_id": "toolu_fixture0003",
+  "duration_ms": 13
+}

@@ -1,0 +1,117 @@
+// Our MCP server entry in Claude Code's and OpenCode's config, as pure
+// functions over the parsed file (the caller reads and writes it, as with
+// claude-hooks.ts). Claude Code keeps servers under `mcpServers` (user scope
+// in ~/.claude.json, project scope in .mcp.json) as { type: 'stdio', command,
+// args }. OpenCode 2.x keeps them under `mcp` in opencode.json as
+// { type: 'local', command: [bin, ...args] }, the shape claude-mem's
+// OpenCodeInstaller writes. OpenCode does no path substitution, so both use
+// the absolute bun and the absolute src/mcp/server.ts. An entry is ours when
+// it runs bun with a script ending in /src/mcp/server.ts; an entry under our
+// name that runs anything else is foreign and is never replaced or removed.
+
+import { isRecord } from '../contract/event'
+import { MCP_HOST_ENV } from '../mcp/read-reporter'
+import type { Settings } from './claude-hooks'
+
+export const MCP_SERVER_NAME = 'shared-agent-memory'
+const SERVER_SCRIPT_SUFFIX = '/src/mcp/server.ts'
+const BUN_COMMAND = /(^|\/)bun$/
+
+export interface McpTarget {
+  bunPath: string
+  serverScript: string
+}
+
+export type McpHost = 'claude-code' | 'opencode'
+
+/** yes: our entry with this target; stale: ours with another path; foreign: our name, someone else's server. */
+export type McpEntryState = 'yes' | 'no' | 'stale' | 'foreign'
+
+export interface McpMerge {
+  config: Settings
+  changed: boolean
+  state: McpEntryState
+}
+
+export interface McpRemove {
+  config: Settings
+  removed: boolean
+}
+
+const SECTION: Readonly<Record<McpHost, string>> = { 'claude-code': 'mcpServers', opencode: 'mcp' }
+
+/**
+ * Each entry names its host in SAM_MCP_HOST, so the server's read reports
+ * (P1-H) say which host fetched. Claude Code calls the map `env`, OpenCode
+ * `environment`. An entry written before this has no map, compares unequal,
+ * reads as stale, and the next `sam install` replaces it.
+ */
+export function claudeMcpEntry(target: McpTarget): Record<string, unknown> {
+  return { type: 'stdio', command: target.bunPath, args: [target.serverScript], env: { [MCP_HOST_ENV]: 'claude-code' } }
+}
+
+export function openCodeMcpEntry(target: McpTarget): Record<string, unknown> {
+  return { type: 'local', command: [target.bunPath, target.serverScript], enabled: true, environment: { [MCP_HOST_ENV]: 'opencode' } }
+}
+
+export function mcpEntryFor(host: McpHost, target: McpTarget): Record<string, unknown> {
+  return host === 'claude-code' ? claudeMcpEntry(target) : openCodeMcpEntry(target)
+}
+
+/** [command, ...args] of an entry in either host's shape, or null. */
+function argvOf(entry: unknown): readonly unknown[] | null {
+  if (!isRecord(entry)) return null
+  if (Array.isArray(entry.command)) return entry.command
+  if (typeof entry.command !== 'string') return null
+  return [entry.command, ...(Array.isArray(entry.args) ? entry.args : [])]
+}
+
+/** The server.ts path an entry runs, or null when it is not our server. */
+export function mcpServerScript(entry: unknown): string | null {
+  const argv = argvOf(entry)
+  if (argv === null || argv.length !== 2) return null
+  const [command, script] = argv
+  if (typeof command !== 'string' || typeof script !== 'string') return null
+  return BUN_COMMAND.test(command) && script.endsWith(SERVER_SCRIPT_SUFFIX) ? script : null
+}
+
+function sectionOf(config: Settings, host: McpHost): Readonly<Record<string, unknown>> {
+  const name = SECTION[host]
+  const section = config[name]
+  if (section === undefined) return {}
+  if (!isRecord(section)) throw new Error(`"${name}" is not an object; fix it by hand first`)
+  return section
+}
+
+export function inspectMcpEntry(config: Settings, host: McpHost, target: McpTarget): McpEntryState {
+  const section = sectionOf(config, host)
+  if (!Object.hasOwn(section, MCP_SERVER_NAME)) return 'no'
+  const entry = section[MCP_SERVER_NAME]
+  const script = mcpServerScript(entry)
+  if (script === null) return 'foreign'
+  return JSON.stringify(entry) === JSON.stringify(mcpEntryFor(host, target)) ? 'yes' : 'stale'
+}
+
+/**
+ * Adds or refreshes our entry; every other server and key stays. A foreign
+ * entry under our name throws, so the caller can tell the user instead of
+ * overwriting it. An entry already equal to ours returns the same object.
+ */
+export function mergeMcpEntry(config: Settings, host: McpHost, target: McpTarget): McpMerge {
+  const state = inspectMcpEntry(config, host, target)
+  if (state === 'foreign') throw new Error(`${SECTION[host]}.${MCP_SERVER_NAME} is another server; rename or remove it by hand first`)
+  if (state === 'yes') return { config, changed: false, state }
+  const section = sectionOf(config, host)
+  return { config: { ...config, [SECTION[host]]: { ...section, [MCP_SERVER_NAME]: mcpEntryFor(host, target) } }, changed: true, state }
+}
+
+/** Removes only our entry; the section goes only when that emptied it. A foreign entry stays. */
+export function removeMcpEntry(config: Settings, host: McpHost): McpRemove {
+  const section = sectionOf(config, host)
+  if (!Object.hasOwn(section, MCP_SERVER_NAME) || mcpServerScript(section[MCP_SERVER_NAME]) === null) return { config, removed: false }
+  const { [MCP_SERVER_NAME]: _ours, ...others } = section
+  const name = SECTION[host]
+  if (Object.keys(others).length > 0) return { config: { ...config, [name]: others }, removed: true }
+  const { [name]: _section, ...rest } = config
+  return { config: rest, removed: true }
+}

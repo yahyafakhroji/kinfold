@@ -1,0 +1,131 @@
+// Registers the MCP read server (src/mcp/server.ts) with each host. Claude
+// Code keeps user-scope servers in ~/.claude.json, a large file it rewrites
+// itself while running, so we read it only to inspect our entry and change it
+// through `claude mcp add-json|remove --scope user`, never by writing the file.
+// OpenCode reads opencode.json once per start, so we merge our `mcp` entry
+// into it with a backup, as claude-hooks.ts does for settings.json.
+
+import { join } from 'node:path'
+import type { InstallEnv } from './env'
+import { plannedBackup, readJsonObject, serializeJson } from './files'
+import { MCP_SERVER_NAME, type McpEntryState, type McpTarget, claudeMcpEntry, inspectMcpEntry, mergeMcpEntry, removeMcpEntry } from './mcp-config'
+import type { Action } from './plan'
+
+/** Same modes install.ts gives the files it creates in a host's config dir. */
+const DIR_MODE = 0o755
+const FILE_MODE = 0o644
+
+export interface McpPaths {
+  claudeUserConfig: string
+  opencodeConfig: string
+  opencodeDir: string
+}
+
+export function mcpPaths(env: Pick<InstallEnv, 'homeDir'>): McpPaths {
+  const opencodeDir = join(env.homeDir, '.config', 'opencode')
+  return { claudeUserConfig: join(env.homeDir, '.claude.json'), opencodeConfig: join(opencodeDir, 'opencode.json'), opencodeDir }
+}
+
+export function mcpTarget(env: Pick<InstallEnv, 'bunPath' | 'projectRoot'>): McpTarget {
+  return { bunPath: env.bunPath, serverScript: join(env.projectRoot, 'src', 'mcp', 'server.ts') }
+}
+
+const claudeAdd = (target: McpTarget): Action => ({
+  kind: 'command',
+  argv: ['claude', 'mcp', 'add-json', '--scope', 'user', MCP_SERVER_NAME, JSON.stringify(claudeMcpEntry(target))],
+  summary: 'register the SAM MCP server with Claude Code (user scope)',
+})
+
+const claudeRemove: Action = {
+  kind: 'command',
+  argv: ['claude', 'mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME],
+  summary: 'unregister the SAM MCP server from Claude Code',
+}
+
+function stateIn(path: string, host: 'claude-code' | 'opencode', target: McpTarget): McpEntryState | 'unknown' {
+  try {
+    const file = readJsonObject(path)
+    return file.exists ? inspectMcpEntry(file.value, host, target) : 'no'
+  } catch {
+    // A file that does not parse is reported and left alone, never rewritten.
+    return 'unknown'
+  }
+}
+
+export function claudeMcpState(env: InstallEnv): McpEntryState | 'unknown' {
+  return stateIn(mcpPaths(env).claudeUserConfig, 'claude-code', mcpTarget(env))
+}
+
+export function opencodeMcpState(env: InstallEnv): McpEntryState | 'unknown' {
+  return stateIn(mcpPaths(env).opencodeConfig, 'opencode', mcpTarget(env))
+}
+
+export function claudeMcpInstallActions(env: InstallEnv): Action[] {
+  const state = claudeMcpState(env)
+  const where = mcpPaths(env).claudeUserConfig
+  if (state === 'yes') {
+    env.out(`claude-code: MCP server already registered in ${where}`)
+    return []
+  }
+  if (state === 'foreign' || state === 'unknown') {
+    const why = state === 'foreign' ? `a server named ${MCP_SERVER_NAME} that is not ours is registered` : `${where} could not be read`
+    env.out(`claude-code: MCP server not registered (${why}); left alone`)
+    return []
+  }
+  return state === 'stale' ? [claudeRemove, claudeAdd(mcpTarget(env))] : [claudeAdd(mcpTarget(env))]
+}
+
+export function opencodeMcpInstallActions(env: InstallEnv): Action[] {
+  const paths = mcpPaths(env)
+  const file = readJsonObject(paths.opencodeConfig)
+  const state = file.exists ? inspectMcpEntry(file.value, 'opencode', mcpTarget(env)) : 'no'
+  if (state === 'yes') {
+    env.out(`opencode: MCP server already in ${paths.opencodeConfig}`)
+    return []
+  }
+  if (state === 'foreign') {
+    env.out(`opencode: an MCP server named ${MCP_SERVER_NAME} that is not ours is in ${paths.opencodeConfig}; left alone`)
+    return []
+  }
+  const merged = mergeMcpEntry(file.exists ? file.value : {}, 'opencode', mcpTarget(env))
+  const backup = file.exists ? plannedBackup(paths.opencodeConfig, env.now()) : null
+  return [
+    ...(file.exists ? [] : [{ kind: 'mkdir', path: paths.opencodeDir, mode: DIR_MODE } as const]),
+    ...(backup !== null ? [{ kind: 'backup', from: paths.opencodeConfig, to: backup } as const] : []),
+    {
+      kind: 'write',
+      path: paths.opencodeConfig,
+      content: serializeJson(merged.config, file.exists ? file.text : null),
+      mode: file.exists ? file.mode : FILE_MODE,
+      summary: `${state === 'stale' ? 'replace the stale' : 'add the'} SAM MCP server under "mcp"; every other key kept`,
+    },
+  ]
+}
+
+export function claudeMcpUninstallActions(env: InstallEnv): Action[] {
+  const state = claudeMcpState(env)
+  return state === 'yes' || state === 'stale' ? [claudeRemove] : []
+}
+
+export function opencodeMcpUninstallActions(env: InstallEnv): Action[] {
+  const path = mcpPaths(env).opencodeConfig
+  const file = readJsonObject(path)
+  if (!file.exists) return []
+  const state = inspectMcpEntry(file.value, 'opencode', mcpTarget(env))
+  if (state !== 'yes' && state !== 'stale') return []
+  const removed = removeMcpEntry(file.value, 'opencode')
+  const backup = plannedBackup(path, env.now())
+  return [
+    ...(backup !== null ? [{ kind: 'backup', from: path, to: backup } as const] : []),
+    { kind: 'write', path, content: serializeJson(removed.config, file.text), mode: file.mode, summary: 'remove the SAM MCP server; every other key kept' },
+  ]
+}
+
+export function mcpStatusLines(env: InstallEnv): string[] {
+  const paths = mcpPaths(env)
+  return [
+    `mcp server ${mcpTarget(env).serverScript}:`,
+    `  claude-code: ${claudeMcpState(env)} in ${paths.claudeUserConfig}`,
+    `  opencode: ${opencodeMcpState(env)} in ${paths.opencodeConfig}`,
+  ]
+}

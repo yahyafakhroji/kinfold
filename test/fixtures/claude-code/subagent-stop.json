@@ -1,0 +1,19 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "/Users/dev/.claude/projects/-Users-dev-Dev-rea-shared-agent-memory/00000000-0000-4000-8000-000000000001.jsonl",
+  "cwd": "/Users/dev/Dev/rea/shared-agent-memory",
+  "scratchpad_dir": "/tmp/fixture/scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000002",
+  "permission_mode": "auto",
+  "agent_id": "a5549c2da3c067a71",
+  "agent_type": "",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "SubagentStop",
+  "stop_hook_active": false,
+  "agent_transcript_path": "/Users/dev/.claude/projects/-Users-dev-Dev-rea-shared-agent-memory/00000000-0000-4000-8000-000000000001/subagents/agent-fixture0007.jsonl",
+  "last_assistant_message": "Fixture: the assistant summarized the files it read and the test run.",
+  "background_tasks": [],
+  "session_crons": []
+}

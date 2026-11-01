@@ -1,0 +1,27 @@
+{
+  "kind": "tool.execute.after",
+  "payload": {
+    "tool": "glob",
+    "sessionID": "ses_fixture0011",
+    "agent": "build",
+    "messageID": "msg_fixture0019",
+    "id": "chatcmpl-tool-b2184542eb4b75a0",
+    "input": {
+      "pattern": ".env*"
+    },
+    "status": "completed",
+    "result": {
+      "output": [],
+      "content": [
+        {
+          "type": "text",
+          "text": "No files found"
+        }
+      ],
+      "metadata": {
+        "count": 0,
+        "truncated": false
+      }
+    }
+  }
+}

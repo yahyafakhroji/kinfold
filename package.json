@@ -1,0 +1,21 @@
+{
+  "name": "shared-agent-memory",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "One local memory store shared by Claude Code, OpenCode and other AI coding agents.",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "daemon": "bun src/daemon/main.ts",
+    "hook": "bun src/cli/hook.ts",
+    "observe": "bun src/observer/once.ts",
+    "sam": "bun src/cli/sam.ts",
+    "mcp": "bun src/mcp/server.ts",
+    "dashboard": "bun src/cli/sam.ts dashboard"
+  },
+  "devDependencies": {
+    "@types/bun": "1.1.13",
+    "typescript": "5.6.3"
+  }
+}

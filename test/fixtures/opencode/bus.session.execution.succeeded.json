@@ -1,0 +1,16 @@
+{
+  "kind": "bus.session.execution.succeeded",
+  "payload": {
+    "id": "evt_fixture0022",
+    "created": 1792841921897,
+    "type": "session.execution.succeeded",
+    "durable": {
+      "aggregateID": "ses_fixture0011",
+      "seq": 40,
+      "version": 1
+    },
+    "data": {
+      "sessionID": "ses_fixture0011"
+    }
+  }
+}

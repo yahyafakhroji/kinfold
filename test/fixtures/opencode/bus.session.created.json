@@ -1,0 +1,31 @@
+{
+  "kind": "bus.session.created",
+  "payload": {
+    "id": "evt_fixture0010",
+    "created": 1792841878659,
+    "type": "session.created",
+    "durable": {
+      "aggregateID": "ses_fixture0011",
+      "seq": 0,
+      "version": 1
+    },
+    "location": {
+      "directory": "/Users/dev/Dev/rea/shared-agent-memory"
+    },
+    "data": {
+      "sessionID": "ses_fixture0011",
+      "projectID": "0000000000000000000000000000000000000009",
+      "location": {
+        "directory": "/Users/dev/Dev/rea/shared-agent-memory"
+      },
+      "subpath": "",
+      "slug": "happy-pixel",
+      "agent": "build",
+      "model": {
+        "id": "openrouter/auto",
+        "providerID": "openrouter"
+      },
+      "version": "2.1.4"
+    }
+  }
+}

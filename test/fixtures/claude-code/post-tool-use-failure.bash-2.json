@@ -1,0 +1,21 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "/Users/dev/.claude/projects/-Users-dev-Dev-rea-shared-agent-memory/00000000-0000-4000-8000-000000000001.jsonl",
+  "cwd": "/Users/dev/Dev/rea/shared-agent-memory",
+  "scratchpad_dir": "/tmp/fixture/scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000002",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "ls -a | rtk grep -i env",
+    "description": "Look for any env files in the project root"
+  },
+  "tool_use_id": "toolu_fixture0006",
+  "error": "Exit code 1",
+  "is_interrupt": false,
+  "duration_ms": 190
+}

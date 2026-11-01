@@ -1,0 +1,88 @@
+{
+  "kind": "session.context",
+  "payload": {
+    "sessionID": "ses_fixture0011",
+    "model": {
+      "id": "openrouter/auto",
+      "providerID": "openrouter",
+      "variant": "default"
+    },
+    "system": [
+      {
+        "type": "text",
+        "text": "[system prompt part omitted from fixture: 1471 chars]"
+      },
+      {
+        "type": "text",
+        "text": "[system prompt part omitted from fixture: 86 chars]"
+      },
+      {
+        "type": "text",
+        "text": "[system prompt part omitted from fixture: 92187 chars]"
+      },
+      {
+        "type": "text",
+        "text": "[system prompt part omitted from fixture: 238 chars]"
+      },
+      {
+        "type": "text",
+        "text": "[system prompt part omitted from fixture: 1531 chars]"
+      }
+    ],
+    "messages": [
+      {
+        "id": "msg_fixture0012",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "read package.json, run bun test, then  cat .env.exampl"
+          }
+        ],
+        "metadata": {}
+      }
+    ],
+    "options": {
+      "maxTokens": 256000
+    },
+    "agent": "build",
+    "tools": {
+      "edit": {
+        "description": "[omitted]"
+      },
+      "glob": {
+        "description": "[omitted]"
+      },
+      "grep": {
+        "description": "[omitted]"
+      },
+      "question": {
+        "description": "[omitted]"
+      },
+      "read": {
+        "description": "[omitted]"
+      },
+      "shell": {
+        "description": "[omitted]"
+      },
+      "skill": {
+        "description": "[omitted]"
+      },
+      "subagent": {
+        "description": "[omitted]"
+      },
+      "webfetch": {
+        "description": "[omitted]"
+      },
+      "websearch": {
+        "description": "[omitted]"
+      },
+      "write": {
+        "description": "[omitted]"
+      },
+      "execute": {
+        "description": "[omitted]"
+      }
+    }
+  }
+}

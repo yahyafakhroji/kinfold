@@ -1,0 +1,13 @@
+{
+  "kind": "session.prompt",
+  "payload": {
+    "sessionID": "ses_fixture0011",
+    "messageID": "msg_fixture0012",
+    "prompt": {
+      "text": "read package.json, run bun test, then  cat .env.exampl",
+      "files": [],
+      "agents": []
+    },
+    "delivery": "steer"
+  }
+}

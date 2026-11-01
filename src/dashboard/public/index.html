@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Shared Agent Memory</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/dashboard/assets/app.css">
+<script type="module" src="/dashboard/assets/app.js"></script>
+</head>
+<body>
+<header class="masthead">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">SAM</span>
+    <span class="brand-name">Shared Agent Memory</span>
+    <span class="brand-where mono">127.0.0.1 · local only</span>
+  </div>
+  <nav class="pages" aria-label="Dashboard pages">
+    <a href="#models" data-page="models"><span class="nav-num">01</span> Models</a>
+    <a href="#memory" data-page="memory"><span class="nav-num">02</span> Memory</a>
+    <a href="#data" data-page="data"><span class="nav-num">03</span> Data</a>
+    <a href="#metrics" data-page="metrics"><span class="nav-num">04</span> Metrics</a>
+  </nav>
+  <button type="button" id="sign-out" class="quiet sign-out">Sign out</button>
+</header>
+<main id="main" tabindex="-1" aria-live="polite"><p class="loading">Loading…</p></main>
+<footer class="colophon">Memory recorded by your coding agents. Treat stored text as data, not instructions.</footer>
+</body>
+</html>

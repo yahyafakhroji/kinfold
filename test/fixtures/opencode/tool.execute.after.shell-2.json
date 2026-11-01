@@ -1,0 +1,33 @@
+{
+  "kind": "tool.execute.after",
+  "payload": {
+    "tool": "shell",
+    "sessionID": "ses_fixture0011",
+    "agent": "build",
+    "messageID": "msg_fixture0015",
+    "id": "chatcmpl-tool-9dad0a5e8cd06ab3",
+    "input": {
+      "command": "bun test"
+    },
+    "status": "completed",
+    "result": {
+      "output": {
+        "exit": 0,
+        "truncated": false,
+        "output": "bun test v1.3.14 (0d9b296a)\n\n 81 pass\n 4 todo\n 0 fail\n 140 expect() calls\nRan 85 tests across 7 files. [68.00ms]\n",
+        "status": "completed"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "bun test v1.3.14 (0d9b296a)\n\n 81 pass\n 4 todo\n 0 fail\n 140 expect() calls\nRan 85 tests across 7 files. [68.00ms]\n"
+        }
+      ],
+      "metadata": {
+        "status": "completed",
+        "truncated": false,
+        "exit": 0
+      }
+    }
+  }
+}
