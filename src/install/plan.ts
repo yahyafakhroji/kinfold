@@ -17,6 +17,8 @@ import { BACKUP_REMOVAL_SUMMARY, removeHmacBackup, removeRedundantBackup, restor
 import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
 import { describeSqlite3mcInstall, installSqlite3mc } from './sqlite3mc-install'
 import { installVec0 } from './vec0-install'
+import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describeMoveDataDir, describeRemoveLegacyEntry, moveDataDir, removeLegacyEntry, stopLegacyAgent } from './rename-migration'
+import { legacyBootoutArgv } from './launch-agent'
 import type { Vec0Asset } from '../vectors/vec0-release'
 
 export const HEALTH_WAIT_MS = 15_000
@@ -52,6 +54,16 @@ export type Action =
   | { kind: 'install-sqlite3mc'; path: string }
   /** db-key for a store the daemon has yet to create, made at run time and added without replacing any entry (P2-E). */
   | { kind: 'create-db-key'; path: string }
+  /** Rename migration: bootout dev.shared-agent-memory.daemon when launchd has it loaded. */
+  | { kind: 'stop-legacy-agent'; uid: number }
+  /** Rename migration: stops here while any daemon answers /health; it would keep writing to the store being moved. */
+  | { kind: 'migration-daemon-down'; port: number }
+  /** Rename migration: the old service's value created under kinfold (never replacing one) and read back equal; a different kinfold value throws. */
+  | { kind: 'copy-keychain-entry'; ref: string }
+  /** Rename migration: one renameSync, then a symlink at `from` pointing to `to`; linkOnly when the rename ran already. */
+  | { kind: 'move-data-dir'; from: string; to: string; linkOnly?: boolean }
+  /** Rename migration: the old service's entry deleted, only while the kinfold copy reads back equal. */
+  | { kind: 'remove-legacy-keychain-entry'; ref: string }
 
 /** A step that ran but chose to leave something in place, and why. */
 export interface StepNote {
@@ -89,6 +101,11 @@ export function describeAction(action: Action): string {
     case 'install-vec0': return `download ${action.asset.url} and write its ${action.asset.member} to ${action.path} (mode 0600), after checking both against the pinned sha256`
     case 'install-sqlite3mc': return describeSqlite3mcInstall(action.path)
     case 'create-db-key': return describeCreateDbKey(action.path)
+    case 'stop-legacy-agent': return `${legacyBootoutArgv(action.uid).join(' ')} (if loaded): stop the daemon installed under the old name`
+    case 'migration-daemon-down': return `check that no daemon answers /health on port ${action.port} (one still running must be stopped first; nothing is moved while it runs)`
+    case 'copy-keychain-entry': return describeCopyKeychainEntry(action.ref)
+    case 'move-data-dir': return describeMoveDataDir(action.from, action.to, action.linkOnly === true)
+    case 'remove-legacy-keychain-entry': return describeRemoveLegacyEntry(action.ref)
   }
 }
 
@@ -153,6 +170,11 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'install-vec0': return installVec0(env, action.path, action.asset)
     case 'install-sqlite3mc': return installSqlite3mc(env, action.path)
     case 'create-db-key': return createDbKey(env, action.path)
+    case 'stop-legacy-agent': return stopLegacyAgent(env)
+    case 'migration-daemon-down': return checkDaemonDown(env, action.port)
+    case 'copy-keychain-entry': return copyKeychainEntry(env, action.ref)
+    case 'move-data-dir': return moveDataDir(env, action.from, action.to)
+    case 'remove-legacy-keychain-entry': return removeLegacyEntry(env, action.ref)
   }
 }
 

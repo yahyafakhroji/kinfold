@@ -69,6 +69,8 @@ export interface InstallEnv {
   arch?: string
   /** Test seam for the sqlite3mc compile (about 10 s); default src/sqlite/build.ts. */
   buildSqlite3mc?: (input: BuildInput) => string
+  /** Test seam for the migration's one data dir rename; default fs.renameSync. */
+  renameDir?: (from: string, to: string) => void
   /** Where Codex.app and Cursor.app are looked for; default /Applications and ~/Applications. */
   applicationsDirs?: readonly string[]
 }

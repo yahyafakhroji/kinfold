@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { type RunningDaemon, startDaemon } from '../daemon/daemon'
 import { wantedEpochs } from '../daemon/hmac-rotation'
-import { LEGACY_KEYCHAIN_SERVICE } from '../names'
+import { DATA_DIR_NAME, LEGACY_KEYCHAIN_SERVICE, LEGACY_LAUNCH_AGENT_LABEL } from '../names'
 import { DB_KEY_REF } from '../secrets/credentials'
 import { epochAt, previousEpoch } from '../secrets/hmac-keys'
 import { ITEM_NOT_FOUND_EXIT, type SecurityCommand, createKeychainProvider } from '../secrets/keychain'
@@ -63,8 +63,11 @@ export interface FakeWorld {
   legacyKeychain: Set<string>
   legacyKeychainValues: Map<string, string>
   checks: ObserverSettings[]
-  /** busyAfterBootout: how many bootstraps after a bootout get exit 5, as launchd does mid-teardown. */
-  launchd: { loaded: boolean; daemon: RunningDaemon | null; busyAfterBootout: number; busy: number }
+  /**
+   * busyAfterBootout: how many bootstraps after a bootout get exit 5, as launchd does mid-teardown.
+   * legacyLoaded and legacyDaemon: the pre-rename LaunchAgent (dev.shared-agent-memory.daemon), which only print and bootout reach.
+   */
+  launchd: { loaded: boolean; daemon: RunningDaemon | null; busyAfterBootout: number; busy: number; legacyLoaded: boolean; legacyDaemon: RunningDaemon | null }
   allowedPorts: Set<number>
   /** "METHOD /path" of every HTTP call the installer made, allowed or not. */
   fetches: string[]
@@ -113,8 +116,30 @@ function securityCommand(world: FakeWorld): SecurityCommand {
   return (args) => world.env.security({ args })
 }
 
+/**
+ * A daemon on a free loopback port reading the world's Keychain, as the real
+ * daemon reads the real one: a db-key the world holds encrypts a new store.
+ * The fake bootstrap starts one in the world's data dir; a test can start one
+ * by hand (a legacy install's, say) and must stop it itself.
+ */
+export function startWorldDaemon(world: FakeWorld, dataDir: string): RunningDaemon {
+  const keychain = createKeychainProvider(securityCommand(world))
+  const dbKeys = credentialDbKeyStore('keychain', keychain, () => world.keychain.has(DB_KEY_REF) || world.legacyKeychain.has(DB_KEY_REF))
+  const daemon = startDaemon({ dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, keychain, dbKeys })
+  world.allowedPorts.add(daemon.port)
+  return daemon
+}
+
 async function launchctl(world: FakeWorld, argv: readonly string[]): Promise<CommandResult> {
   const verb = argv[1]
+  if ((verb === 'print' || verb === 'bootout') && argv[2]?.endsWith(`/${LEGACY_LAUNCH_AGENT_LABEL}`) === true) {
+    if (verb === 'print') return { exitCode: world.launchd.legacyLoaded ? 0 : 113, stdout: '' }
+    if (!world.launchd.legacyLoaded) return { exitCode: 3, stdout: '' }
+    world.launchd.legacyLoaded = false
+    await world.launchd.legacyDaemon?.stop()
+    world.launchd.legacyDaemon = null
+    return { exitCode: 0, stdout: '' }
+  }
   if (verb === 'print') return { exitCode: world.launchd.loaded ? 0 : 113, stdout: '' }
   if (verb === 'bootstrap') {
     if (world.launchd.loaded) return { exitCode: 5, stdout: '' }
@@ -123,12 +148,7 @@ async function launchctl(world: FakeWorld, argv: readonly string[]): Promise<Com
       return { exitCode: 5, stdout: '' }
     }
     world.launchd.loaded = true
-    const keychain = createKeychainProvider(securityCommand(world))
-    // The world's own Keychain, as the real daemon reads the real one: a db-key install created encrypts the new store.
-    const dbKeys = credentialDbKeyStore('keychain', keychain, () => world.keychain.has(DB_KEY_REF) || world.legacyKeychain.has(DB_KEY_REF))
-    const daemon = startDaemon({ dataDir: world.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, keychain, dbKeys })
-    world.launchd.daemon = daemon
-    world.allowedPorts.add(daemon.port)
+    world.launchd.daemon = startWorldDaemon(world, world.dataDir)
     return { exitCode: 0, stdout: '' }
   }
   if (verb === 'bootout') {
@@ -203,10 +223,10 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
   const secrets = [...(options.secrets ?? [])]
   let clock = WORLD_CLOCK_START
   const world = {
-    root, home, cwd, dataDir: join(home, '.shared-agent-memory'), projectRoot: join(root, 'checkout'),
+    root, home, cwd, dataDir: join(home, DATA_DIR_NAME), projectRoot: join(root, 'checkout'),
     out: [], commands: [], securityCalls: [], keychain: new Set(options.keychainRefs ?? []), keychainValues: new Map<string, string>(),
     legacyKeychain: new Set(options.legacyKeychainRefs ?? []), legacyKeychainValues: new Map<string, string>(), checks: [],
-    launchd: { loaded: false, daemon: null, busyAfterBootout: 0, busy: 0 }, allowedPorts: new Set<number>(), fetches: [],
+    launchd: { loaded: false, daemon: null, busyAfterBootout: 0, busy: 0, legacyLoaded: false, legacyDaemon: null }, allowedPorts: new Set<number>(), fetches: [],
   } as unknown as FakeWorld
   world.env = {
     // An arch with no pinned sqlite-vec build: a fake world never plans the real GitHub download (vec0-install.test.ts covers that step).
@@ -225,6 +245,7 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
   if (options.withLibrary ?? true) placeBuiltLibrary(world.dataDir, world.env.platform)
   world.cleanup = async () => {
     await world.launchd.daemon?.stop()
+    await world.launchd.legacyDaemon?.stop()
     rmSync(root, { recursive: true, force: true })
   }
   return world

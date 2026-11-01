@@ -20,4 +20,8 @@ export const LEGACY_MCP_SERVER_NAME = 'shared-agent-memory'
 export const PLUGIN_FILE_NAME = 'kinfold.js'
 export const LEGACY_PLUGIN_FILE_NAME = 'shared-agent-memory.js'
 
+/** First-line ownership marker of the OpenCode plugin shim. */
+export const SHIM_MARKER = 'kinfold'
+export const LEGACY_SHIM_MARKER = 'shared-agent-memory'
+
 export const LOG_PREFIX = 'kinfold-daemon'

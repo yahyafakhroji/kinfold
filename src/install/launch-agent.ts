@@ -7,6 +7,7 @@
 
 import { delimiter, dirname, isAbsolute } from 'node:path'
 import { envName } from '../env-names'
+import { LEGACY_LAUNCH_AGENT_LABEL } from '../names'
 import { type InstallEnv, LAUNCH_AGENT_LABEL, installPaths } from './env'
 
 /** 0o077 as launchd's decimal Umask key. */
@@ -85,11 +86,20 @@ export function printArgv(uid: number): string[] {
   return [LAUNCHCTL, 'print', `${guiDomain(uid)}/${LAUNCH_AGENT_LABEL}`]
 }
 
+/** The pre-rename agent (dev.shared-agent-memory.daemon); only the migration stops it. */
+export function legacyPrintArgv(uid: number): string[] {
+  return [LAUNCHCTL, 'print', `${guiDomain(uid)}/${LEGACY_LAUNCH_AGENT_LABEL}`]
+}
+
+export function legacyBootoutArgv(uid: number): string[] {
+  return [LAUNCHCTL, 'bootout', `${guiDomain(uid)}/${LEGACY_LAUNCH_AGENT_LABEL}`]
+}
+
 /** `launchctl print` is read-only; exit 0 means launchd knows the service. */
-export async function isAgentLoaded(env: InstallEnv): Promise<boolean> {
+export async function isAgentLoaded(env: InstallEnv, argv: readonly string[] = printArgv(env.uid)): Promise<boolean> {
   if (env.platform !== 'darwin') return false
   try {
-    return (await env.run({ argv: printArgv(env.uid), timeoutMs: 5_000 })).exitCode === 0
+    return (await env.run({ argv, timeoutMs: 5_000 })).exitCode === 0
   } catch {
     return false
   }

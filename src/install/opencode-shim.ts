@@ -4,7 +4,9 @@
 // relies on the same rule, and 2.x warns about file paths listed in
 // opencode.json), so opencode.json and opencode.jsonc stay untouched.
 
-const SHIM_MARKER = 'shared-agent-memory'
+// Shims written now carry SHIM_MARKER on their first line; a pre-rename
+// install wrote LEGACY_SHIM_MARKER there.
+import { LEGACY_SHIM_MARKER, SHIM_MARKER } from '../names'
 const IMPORT_PATTERN = /export\s*\{\s*default\s*\}\s*from\s*"([^"]*\/src\/plugins\/opencode\.ts)"/
 
 export type ShimState = 'yes' | 'no' | 'stale' | 'foreign'
@@ -30,4 +32,15 @@ export function inspectShim(text: string | null, pluginEntry: string): ShimState
   const target = shimTarget(text)
   if (target === null) return 'foreign'
   return target === pluginEntry ? 'yes' : 'stale'
+}
+
+/**
+ * A file the migration may remove: it re-exports a checkout's plugin and its
+ * first line carries our marker, new or legacy. Stricter than inspectShim, so
+ * a hand-written file that happens to re-export the plugin is left alone.
+ */
+export function isOwnShim(text: string | null): boolean {
+  if (text === null || shimTarget(text) === null) return false
+  const first = text.split('\n', 1)[0] ?? ''
+  return first.startsWith(`// ${SHIM_MARKER}:`) || first.startsWith(`// ${LEGACY_SHIM_MARKER}:`)
 }

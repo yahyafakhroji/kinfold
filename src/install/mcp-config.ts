@@ -106,13 +106,23 @@ export function mergeMcpEntry(config: Settings, host: McpHost, target: McpTarget
   return { config: { ...config, [SECTION[host]]: { ...section, [MCP_SERVER_NAME]: mcpEntryFor(host, target) } }, changed: true, state }
 }
 
+/** True when `name` holds an entry that runs our server (any path); a foreign entry or none is false. */
+export function hasOurMcpEntryNamed(config: Settings, host: McpHost, name: string): boolean {
+  const section = sectionOf(config, host)
+  return Object.hasOwn(section, name) && mcpServerScript(section[name]) !== null
+}
+
+/** Removes only our entry under `name`; the section goes only when that emptied it. A foreign entry stays. */
+export function removeMcpEntryNamed(config: Settings, host: McpHost, name: string): McpRemove {
+  if (!hasOurMcpEntryNamed(config, host, name)) return { config, removed: false }
+  const { [name]: _ours, ...others } = sectionOf(config, host)
+  const sectionName = SECTION[host]
+  if (Object.keys(others).length > 0) return { config: { ...config, [sectionName]: others }, removed: true }
+  const { [sectionName]: _section, ...rest } = config
+  return { config: rest, removed: true }
+}
+
 /** Removes only our entry; the section goes only when that emptied it. A foreign entry stays. */
 export function removeMcpEntry(config: Settings, host: McpHost): McpRemove {
-  const section = sectionOf(config, host)
-  if (!Object.hasOwn(section, MCP_SERVER_NAME) || mcpServerScript(section[MCP_SERVER_NAME]) === null) return { config, removed: false }
-  const { [MCP_SERVER_NAME]: _ours, ...others } = section
-  const name = SECTION[host]
-  if (Object.keys(others).length > 0) return { config: { ...config, [name]: others }, removed: true }
-  const { [name]: _section, ...rest } = config
-  return { config: rest, removed: true }
+  return removeMcpEntryNamed(config, host, MCP_SERVER_NAME)
 }

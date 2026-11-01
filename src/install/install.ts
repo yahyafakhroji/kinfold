@@ -8,7 +8,8 @@
 // --takeover the install waits for the user to stop it and never kills it.
 
 import { existsSync } from 'node:fs'
-import { DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
+import { join } from 'node:path'
+import { DAEMON_INFO_FILE, DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
 import { mergeSamHooks } from './claude-hooks'
 import { type Health, checkHealth, readDaemonInfo } from './daemon-client'
 import { dbKeyActions } from './db-encryption'
@@ -16,7 +17,7 @@ import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
 import { type InstallEnv, errorMessage, installPaths } from './env'
 import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
-import { bootoutArgv, bootstrapArgv, isAgentLoaded, plistContent } from './launch-agent'
+import { bootoutArgv, bootstrapArgv, isAgentLoaded, legacyPrintArgv, plistContent } from './launch-agent'
 import { ChoiceError, type ChoiceOptions, type ObserverChoice, chooseObservers, describeInput } from './observer-choice'
 import { hmacMigrationActions } from './hmac-migration'
 import { hostHookInstallActions, hostVersionActions } from './host-wiring'
@@ -24,6 +25,7 @@ import { claudeMcpInstallActions, opencodeMcpInstallActions } from './mcp-wiring
 import { inspectShim, shimContent } from './opencode-shim'
 import { scanDataDirModes } from './permissions'
 import { type Action, runPlan, stopCommand } from './plan'
+import { renameMigrationActions } from './rename-migration'
 import { sqlite3mcInstallActions } from './sqlite3mc-install'
 import { vec0InstallActions } from './vec0-install'
 
@@ -46,15 +48,23 @@ export interface DaemonSituation {
   loaded: boolean
   pid: number | null
   port: number
-  /** Up, but not ours: our LaunchAgent is not loaded. */
+  /** Up, but not ours: neither our LaunchAgent nor the pre-rename one is loaded. */
   foreign: boolean
 }
 
+/** Before the rename migration runs, daemon.json is still in the old data dir. */
+function daemonInfoDir(env: InstallEnv): string {
+  const legacy = installPaths(env).legacyDataDir
+  return !existsSync(join(env.dataDir, DAEMON_INFO_FILE)) && existsSync(join(legacy, DAEMON_INFO_FILE)) ? legacy : env.dataDir
+}
+
 export async function daemonSituation(env: InstallEnv): Promise<DaemonSituation> {
-  const info = readDaemonInfo(env.dataDir)
+  const info = readDaemonInfo(daemonInfoDir(env))
   const health = await checkHealth(env, info.port)
   const loaded = await isAgentLoaded(env)
-  return { health, loaded, pid: info.pid, port: info.port, foreign: health.up && !loaded }
+  // The pre-rename agent's daemon is ours too: the migration stops it, so it is never a second writer.
+  const legacyLoaded = health.up && !loaded && existsSync(installPaths(env).legacyLaunchAgentPlist) && (await isAgentLoaded(env, legacyPrintArgv(env.uid)))
+  return { health, loaded, pid: info.pid, port: info.port, foreign: health.up && !loaded && !legacyLoaded }
 }
 
 export function foreignDaemonMessage(situation: DaemonSituation): string[] {
@@ -195,10 +205,37 @@ async function prepare(env: InstallEnv, options: InstallOptions): Promise<Prepar
   return { hosts, detections, situation }
 }
 
+/**
+ * The rename migration runs as its own plan before the install plan is built,
+ * so every later step plans against the moved data dir and the kinfold
+ * Keychain entries (planned before, the HMAC step would mint a new master
+ * over the copied one). A dry run therefore stops after listing it.
+ * Returns the situation to plan with, or null when a dry run stopped here.
+ */
+async function migrate(env: InstallEnv, prepared: Prepared, dryRun: boolean): Promise<Prepared | null> {
+  const actions = renameMigrationActions(env, prepared.hosts)
+  if (actions.length === 0) return prepared
+  env.out(`migration: an install under the old name Shared Agent Memory was found; it moves to the Kinfold names first`)
+  await runPlan(env, actions, dryRun)
+  if (dryRun) {
+    env.out(`the install steps are planned once the migration has run, against ${env.dataDir}; run kinfold install --dry-run again then to see them`)
+    return null
+  }
+  env.out('migration: done')
+  return { ...prepared, situation: await daemonSituation(env) }
+}
+
 export async function install(env: InstallEnv, options: InstallOptions): Promise<number> {
   try {
-    const prepared = await prepare(env, options)
-    if (typeof prepared === 'number') return prepared
+    const found = await prepare(env, options)
+    if (typeof found === 'number') return found
+    const prepared = await migrate(env, found, options.dryRun)
+    if (prepared === null) {
+      if (!found.situation.foreign || options.takeover) return EXIT_OK
+      for (const line of foreignDaemonMessage(found.situation)) env.out(line)
+      env.out('a real install would stop here, before step 1.')
+      return EXIT_BLOCKED
+    }
     const choices = await chooseObservers(env, prepared.hosts, options)
     for (const choice of choices) {
       env.out(`observer ${choice.input.host}: ${describeInput(choice.input)} (${choice.origin}); ${choice.credentialNote}; check ${choice.check}`)
