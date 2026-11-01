@@ -63,6 +63,7 @@ test('no non-test source file still tells the user to run `sam <command>`', () =
   const walk = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
       entry.isDirectory() ? walk(join(dir, entry.name)) : entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [join(dir, entry.name)] : [])
-  const hits = walk(join(import.meta.dir, '..')).filter((file) => stale.test(readFileSync(file, 'utf8')))
+  const stderrPrefix = /`sam: /
+  const hits = walk(join(import.meta.dir, '..')).filter((file) => stale.test(readFileSync(file, 'utf8')) || stderrPrefix.test(readFileSync(file, 'utf8')))
   expect(hits).toEqual([])
 })

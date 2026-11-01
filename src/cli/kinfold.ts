@@ -1,4 +1,4 @@
-// `bun src/cli/kinfold.ts <install|uninstall|status>` (also `bun run sam`), plus the
+// `bun src/cli/kinfold.ts <install|uninstall|status>` (also `bun run kinfold`), plus the
 // data-control commands `size|retention|scan|findings|purge`, which only call
 // the daemon's /data routes (src/data-control/cli.ts), and `dashboard`, which
 // asks the daemon for a one-time login link (src/dashboard/cli.ts). This is
@@ -91,7 +91,7 @@ async function main(): Promise<void> {
   try {
     process.exit(await runKinfold(process.argv.slice(2), systemEnv()))
   } catch (error: unknown) {
-    process.stderr.write(`sam: ${error instanceof Error ? error.message : String(error)}\n`)
+    process.stderr.write(`kinfold: ${error instanceof Error ? error.message : String(error)}\n`)
     process.exit(EXIT_FAILED)
   }
 }
