@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { runSam } from '../cli/sam'
+import { runKinfold } from '../cli/kinfold'
 import { startDaemon } from '../daemon/daemon'
 import { parseArgs, parseDataArgs } from '../install/args'
 import { EXIT_USAGE } from '../install/install'
@@ -67,13 +67,13 @@ test('bad data flags are usage errors, and install/uninstall/status still parse 
   expect(errorOf(['findings', 'all'])).toStartWith('unknown argument "all"')
   expect(errorOf(['status'])).toBe('not a data command')
   expect(parseArgs(['status']).ok).toBe(true)
-  expect(parseArgs(['size'])).toEqual({ ok: false, error: expect.stringContaining('usage: bun src/cli/sam.ts <install|uninstall|status|size|') })
+  expect(parseArgs(['size'])).toEqual({ ok: false, error: expect.stringContaining('usage: kinfold <install|uninstall|status|size|') })
 })
 
-test('runSam sends each data command to the running daemon and prints its answer', async () => {
+test('runKinfold sends each data command to the running daemon and prints its answer', async () => {
   startWorldDaemon()
   for (const argv of [['size'], ['retention'], ['retention', '--set', 'events=14'], ['scan'], ['findings'], ['purge', '--host', 'nobody', '--dry-run']]) {
-    expect(await runSam(argv, world.env)).toBe(0)
+    expect(await runKinfold(argv, world.env)).toBe(0)
   }
   expect(world.fetches).toEqual(['GET /data/size', 'GET /data/retention', 'PUT /data/retention', 'POST /data/scan', 'GET /data/findings', 'POST /data/purge'])
   expect(world.out).toContain('retention: events 14 days (payload), prompts keep (text), observations keep, summaries keep')
@@ -84,25 +84,25 @@ test('runSam sends each data command to the running daemon and prints its answer
 })
 
 test('a data command without a daemon fails with exit 1, and a usage error exits 2 without a request', async () => {
-  expect(await runSam(['size'], world.env)).toBe(1)
-  expect(world.out.at(-1)).toBe('sam size failed: the daemon is not running (no daemon.json or daemon.token)')
-  expect(await runSam(['purge'], world.env)).toBe(EXIT_USAGE)
+  expect(await runKinfold(['size'], world.env)).toBe(1)
+  expect(world.out.at(-1)).toBe('kinfold size failed: the daemon is not running (no daemon.json or daemon.token)')
+  expect(await runKinfold(['purge'], world.env)).toBe(EXIT_USAGE)
   expect(world.fetches).toEqual([])
   startWorldDaemon()
-  expect(await runSam(['findings', '--redact', '77'], world.env)).toBe(1)
-  expect(world.out.at(-1)).toBe('sam findings failed: POST /data/findings/77/resolve answered 404: no such finding')
+  expect(await runKinfold(['findings', '--redact', '77'], world.env)).toBe(1)
+  expect(world.out.at(-1)).toBe('kinfold findings failed: POST /data/findings/77/resolve answered 404: no such finding')
 })
 
-test('sam retention previews a change and saves only with --yes', async () => {
+test('kinfold retention previews a change and saves only with --yes', async () => {
   startWorldDaemon()
-  expect(await runSam(['retention', '--set', 'prompts=3'], world.env)).toBe(0)
+  expect(await runKinfold(['retention', '--set', 'prompts=3'], world.env)).toBe(0)
   expect(world.out.at(-1)).toBe('run again with --yes to save and apply')
   world.out.length = 0
-  expect(await runSam(['retention'], world.env)).toBe(0)
+  expect(await runKinfold(['retention'], world.env)).toBe(0)
   expect(world.out[0]).toContain('prompts keep (text)')
-  expect(await runSam(['retention', '--set', 'prompts=3', '--yes'], world.env)).toBe(0)
+  expect(await runKinfold(['retention', '--set', 'prompts=3', '--yes'], world.env)).toBe(0)
   expect(world.out.at(-1)).toBe('applied now: events 0, prompts 0, observations 0, summaries 0')
   world.out.length = 0
-  expect(await runSam(['retention'], world.env)).toBe(0)
+  expect(await runKinfold(['retention'], world.env)).toBe(0)
   expect(world.out[0]).toContain('prompts 3 days (text)')
 })

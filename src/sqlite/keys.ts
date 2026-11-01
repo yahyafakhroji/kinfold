@@ -19,7 +19,7 @@ import { SqliteError } from './types'
 export const DB_KEYSTORE_ENV = envName('DB_KEYSTORE')
 
 export interface DbKeyStore {
-  /** Where the key lives, for `sam status`. */
+  /** Where the key lives, for `kinfold status`. */
   name: string
   /** The key as 64 hex characters, or null when the store has none. Throws a SqliteError (kind no_key) when the lookup fails. */
   read(): string | null

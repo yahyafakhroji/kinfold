@@ -1,4 +1,4 @@
-// The login page. `sam dashboard` opens /dashboard/login#code=<code>; a
+// The login page. `kinfold dashboard` opens /dashboard/login#code=<code>; a
 // fragment is never sent in a request or a Referer. This script reads the
 // code, removes it from the address bar and history at once, and trades it
 // for a session cookie through POST /dashboard/session. The code works once,
@@ -32,7 +32,7 @@ async function login(code) {
       location.replace('/dashboard/')
       return
     }
-    say('This login link is wrong, used or expired. Run `sam dashboard` in a terminal for a new one.', 'error')
+    say('This login link is wrong, used or expired. Run `kinfold dashboard` in a terminal for a new one.', 'error')
   } catch {
     say('The daemon did not answer. Is it running?', 'error')
   }
@@ -40,5 +40,5 @@ async function login(code) {
 
 const code = codeFromHash(location.hash)
 history.replaceState(null, '', '/dashboard/login')
-if (code === null) say('Open the dashboard with `sam dashboard` in a terminal. It opens a one-time link that signs you in.', 'quiet')
+if (code === null) say('Open the dashboard with `kinfold dashboard` in a terminal. It opens a one-time link that signs you in.', 'quiet')
 else login(code)

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { runSam } from '../cli/sam'
+import { runKinfold } from '../cli/kinfold'
 import { startDaemon } from '../daemon/daemon'
 import { parseDashboardArgs } from '../install/args'
 import { EXIT_USAGE } from '../install/install'
@@ -20,9 +20,9 @@ function startWorldDaemon(): number {
 
 const LOGIN_URL = /^http:\/\/127\.0\.0\.1:(\d+)\/dashboard\/login#code=([A-Za-z0-9_-]{43})$/
 
-test('`sam dashboard --print` prints one login URL with the code in the fragment, and nothing else', async () => {
+test('`kinfold dashboard --print` prints one login URL with the code in the fragment, and nothing else', async () => {
   const port = startWorldDaemon()
-  expect(await runSam(['dashboard', '--print'], world.env)).toBe(0)
+  expect(await runKinfold(['dashboard', '--print'], world.env)).toBe(0)
   expect(world.out).toHaveLength(1)
   const match = LOGIN_URL.exec(world.out[0]!)
   expect(match).not.toBeNull()
@@ -33,7 +33,7 @@ test('`sam dashboard --print` prints one login URL with the code in the fragment
 
 test('the printed code logs a browser in once', async () => {
   const port = startWorldDaemon()
-  await runSam(['dashboard', '--print'], world.env)
+  await runKinfold(['dashboard', '--print'], world.env)
   const code = LOGIN_URL.exec(world.out[0]!)![2]!
   const session = (): Promise<Response> => fetch(`http://127.0.0.1:${port}/dashboard/session`, {
     method: 'POST',
@@ -48,7 +48,7 @@ test('without --print it opens the URL with the platform opener, and prints it o
   startWorldDaemon()
   const opened: string[][] = []
   const env = { ...world.env, platform: 'darwin' as const, run: async (request: { argv: readonly string[] }) => (opened.push([...request.argv]), { exitCode: 0, stdout: '' }) }
-  expect(await runSam(['dashboard'], env)).toBe(0)
+  expect(await runKinfold(['dashboard'], env)).toBe(0)
   expect(opened).toHaveLength(1)
   expect(opened[0]![0]).toBe('open')
   expect(opened[0]![1]).toMatch(LOGIN_URL)
@@ -56,15 +56,15 @@ test('without --print it opens the URL with the platform opener, and prints it o
 
   world.out.length = 0
   const failing = { ...env, run: async () => ({ exitCode: 127, stdout: '' }) }
-  expect(await runSam(['dashboard'], failing)).toBe(0)
+  expect(await runKinfold(['dashboard'], failing)).toBe(0)
   expect(world.out[0]).toBe('could not open a browser (open exited 127); open this link within 60 s:')
   expect(world.out[1]).toMatch(LOGIN_URL)
 })
 
 test('a daemon that is down is exit 1 with one line; bad flags are usage errors', async () => {
-  expect(await runSam(['dashboard', '--print'], world.env)).toBe(1)
-  expect(world.out).toEqual(['sam dashboard failed: the daemon is not running (no daemon.json or daemon.token)'])
-  expect(await runSam(['dashboard', '--open'], world.env)).toBe(EXIT_USAGE)
+  expect(await runKinfold(['dashboard', '--print'], world.env)).toBe(1)
+  expect(world.out).toEqual(['kinfold dashboard failed: the daemon is not running (no daemon.json or daemon.token)'])
+  expect(await runKinfold(['dashboard', '--open'], world.env)).toBe(EXIT_USAGE)
   expect(parseDashboardArgs(['dashboard'])).toEqual({ ok: true, value: { command: 'dashboard', print: false } })
   expect(parseDashboardArgs(['dashboard', '--print'])).toEqual({ ok: true, value: { command: 'dashboard', print: true } })
   expect(parseDashboardArgs(['dashboard', '--print', '--print'])?.ok).toBe(false)

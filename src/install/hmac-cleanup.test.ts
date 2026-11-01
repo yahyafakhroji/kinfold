@@ -145,7 +145,7 @@ test('uninstall --remove-hmac-keys restores hmac.key from hmac-legacy, deletes b
   expect(w.out.some((line) => line.startsWith('kept keychain entry hmac-'))).toBe(false)
   expect(keyBytes(w)).toEqual([])
   expect(await statusOut(w)).toEqual([
-    'hmac keys: hmac.key file (run sam install to move it to the keychain); keychain hmac-master missing, hmac-legacy missing',
+    'hmac keys: hmac.key file (run kinfold install to move it to the keychain); keychain hmac-master missing, hmac-legacy missing',
     `  sub-keys in ${subKeyDir(w.dataDir)}: none`,
   ])
 })

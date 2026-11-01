@@ -11,7 +11,7 @@ export type ShimState = 'yes' | 'no' | 'stale' | 'foreign'
 
 export function shimContent(pluginEntry: string): string {
   return [
-    `// ${SHIM_MARKER}: written by \`sam install\`, removed by \`sam uninstall\`.`,
+    `// ${SHIM_MARKER}: written by \`kinfold install\`, removed by \`kinfold uninstall\`.`,
     '// OpenCode 2.x loads every plugin in this folder; the plugin itself lives in',
     '// the checkout below. Its default export must be { id, setup } and nothing else.',
     `export { default } from ${JSON.stringify(pluginEntry)};`,
@@ -19,7 +19,7 @@ export function shimContent(pluginEntry: string): string {
   ].join('\n')
 }
 
-/** The plugin entry a SAM shim re-exports, or null when the text is not one. */
+/** The plugin entry a Kinfold shim re-exports, or null when the text is not one. */
 export function shimTarget(text: string): string | null {
   return IMPORT_PATTERN.exec(text)?.[1] ?? null
 }

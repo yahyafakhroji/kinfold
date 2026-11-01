@@ -42,7 +42,7 @@ test('the wrong key and no key are both refused with a reason, and neither key a
   const path = seed(holding(KEY))
   const other = newDbKey()
   expect(() => openStoreFile(path, { keys: holding(other) })).toThrow(expect.objectContaining({ kind: 'bad_key', code: 'SQLITE_NOTADB' }))
-  expect(() => openStoreFile(path, { keys: holding(null) })).toThrow(expect.objectContaining({ kind: 'no_key', message: expect.stringContaining('sam key recover') }))
+  expect(() => openStoreFile(path, { keys: holding(null) })).toThrow(expect.objectContaining({ kind: 'no_key', message: expect.stringContaining('kinfold key recover') }))
   try {
     openStoreFile(path, { keys: holding(other) })
   } catch (error: unknown) {
@@ -93,9 +93,9 @@ test('the key store returns a hex key or null, and a failed or bad lookup never 
   expect(newDbKey()).toMatch(/^[0-9a-f]{64}$/)
 })
 
-test('a new store with no key is refused where a real key store exists, so the key from sam install always comes first', () => {
+test('a new store with no key is refused where a real key store exists, so the key from kinfold install always comes first', () => {
   const named: DbKeyStore = { name: 'keychain', read: () => null, exists: () => false }
-  expect(() => openStore(dataDir, { keys: named })).toThrow(expect.objectContaining({ kind: 'no_key', message: expect.stringContaining('run sam install') }))
+  expect(() => openStore(dataDir, { keys: named })).toThrow(expect.objectContaining({ kind: 'no_key', message: expect.stringContaining('run kinfold install') }))
   expect(fileState(join(dataDir, 'memory.db'))).toBe('new')
 })
 
@@ -116,6 +116,6 @@ test.skipIf(!existsSync(STOCK))('a stock SQLite, which would ignore the key and 
   const script = `import { openEncrypted } from '${join(import.meta.dir, 'open.ts')}'
 try { openEncrypted(${JSON.stringify(path)}, '${KEY}'); console.log('OPENED') } catch (e) { console.log(e.kind, e.message) }`
   const run = Bun.spawnSync([process.execPath, '-e', script], { env: { ...process.env, KINFOLD_SQLITE3MC_LIB: STOCK }, stdout: 'pipe', stderr: 'pipe' })
-  expect(run.stdout.toString().trim()).toBe('library the SQLite library is not a sqlite3mc build; run sam install')
+  expect(run.stdout.toString().trim()).toBe('library the SQLite library is not a sqlite3mc build; run kinfold install')
   expect(existsSync(path)).toBe(false)
 })

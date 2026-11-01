@@ -66,7 +66,7 @@ async function createSession(request: Request, deps: DashboardDeps): Promise<Res
   const secret = deps.auth.redeemCode(code.value)
   if (secret === null) {
     deps.log('dashboard session refused reason=code')
-    return json(401, { error: 'this login link is wrong, used or expired; run `sam dashboard` again' })
+    return json(401, { error: 'this login link is wrong, used or expired; run `kinfold dashboard` again' })
   }
   deps.log('dashboard session created')
   return new Response(null, { status: 204, headers: { 'set-cookie': sessionCookie(secret) } })

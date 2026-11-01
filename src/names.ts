@@ -1,6 +1,6 @@
 // Every product name in one place, each next to the legacy name it replaced.
 // The legacy names exist only so install and migration can find and remove what
-// an earlier "Shared Agent Memory" install left behind.
+// an earlier "Kinfold" install left behind.
 
 export const PRODUCT = 'Kinfold'
 export const CLI_NAME = 'kinfold'

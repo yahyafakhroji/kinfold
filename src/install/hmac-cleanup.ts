@@ -120,7 +120,7 @@ function removalActions(env: InstallEnv, hasMaster: boolean, hasLegacy: boolean,
   ]
 }
 
-/** `sam uninstall --remove-hmac-keys`: restore hmac.key, delete both entries, remove hmac.d/. */
+/** `kinfold uninstall --remove-hmac-keys`: restore hmac.key, delete both entries, remove hmac.d/. */
 export function hmacRemoval(env: InstallEnv, dryRun: boolean): HmacRemoval {
   const writer = credentialWriterFor(env.platform, env.security)
   if (writer === null) return { actions: [], notes: [`hmac keys: no keychain on ${env.platform}; nothing to remove`] }

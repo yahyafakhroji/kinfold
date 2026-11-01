@@ -29,9 +29,9 @@ export interface ServerDeps {
   token: string
   version: string
   schemaVersion: number
-  /** The HMAC key mode, live (P1-K): /health reports it so `sam install` knows the daemon reads the master. Never key bytes. */
+  /** The HMAC key mode, live (P1-K): /health reports it so `kinfold install` knows the daemon reads the master. Never key bytes. */
   hmacMode?: () => HmacMode
-  /** Whether sqlite-vec loaded (P2-A); /health reports it so `sam status` can say why search is keyword-only. */
+  /** Whether sqlite-vec loaded (P2-A); /health reports it so `kinfold status` can say why search is keyword-only. */
   vectorSearch?: 'on' | 'off'
   /** POST /search/semantic (token only): nearest observations to a query. Absent: answers unavailable. */
   semanticSearch?: (request: SemanticRequest) => Promise<SemanticAnswer>
@@ -168,7 +168,7 @@ async function panelRoute(request: Request, url: URL, deps: ServerDeps): Promise
 
 const DASHBOARD_PAGES = new Set(['/dashboard', '/dashboard/'])
 
-/** A signed-out browser opening the app page goes to the login page, which explains `sam dashboard`. */
+/** A signed-out browser opening the app page goes to the login page, which explains `kinfold dashboard`. */
 function refused(request: Request, path: string, access: Access, result: Extract<AccessResult, { ok: false }>, deps: ServerDeps): Response {
   if (access === 'cookie' && result.status === 401 && request.method === 'GET' && DASHBOARD_PAGES.has(path)) {
     return new Response(null, { status: 303, headers: { location: '/dashboard/login' } })

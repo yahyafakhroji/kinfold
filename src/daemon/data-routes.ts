@@ -1,6 +1,6 @@
 // The /data routes (P1 data control), behind the same token and Host rules as
 // every other route (server.ts checks both before it gets here). The
-// dashboard and `sam size|retention|scan|findings|purge` call them; the
+// dashboard and `kinfold size|retention|scan|findings|purge` call them; the
 // daemon stays the only writer (D3). Answers carry ids, counts, rule names,
 // sizes and project keys; never stored text. Logs drop project keys too.
 

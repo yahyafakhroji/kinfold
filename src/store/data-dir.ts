@@ -17,7 +17,7 @@ export const DB_FILE = 'memory.db'
 export const SPOOL_DIR = 'spool'
 export const TOKEN_FILE = 'daemon.token'
 export const DAEMON_INFO_FILE = 'daemon.json'
-/** The pre-P1-J marker key; after `sam install` migrates it, it lives in the Keychain and this file is gone. */
+/** The pre-P1-J marker key; after `kinfold install` migrates it, it lives in the Keychain and this file is gone. */
 export const HMAC_KEY_FILE = 'hmac.key'
 /** Per-epoch marker sub-keys the daemon derives from the Keychain master: hmac.d/<YYYYMM>.key. */
 export const HMAC_SUBKEY_DIR = 'hmac.d'

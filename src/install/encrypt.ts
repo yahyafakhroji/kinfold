@@ -1,4 +1,4 @@
-// `sam encrypt | decrypt | rekey | key show-recovery | key recover | key resume`
+// `kinfold encrypt | decrypt | rekey | key show-recovery | key recover | key resume`
 // (P2-E slice E3). The database part is src/sqlite/convert.ts; this file
 // orders the rest so no step can strand the store without its key:
 //   - a new key goes into the Keychain, and is read back, before the store
@@ -10,7 +10,7 @@
 //     a hand-started one makes the command refuse, and the maintenance marker
 //     keeps hooks and MCP servers off the file meanwhile;
 //   - the marker is also the journal: it names the operation and the Keychain
-//     entry that opens the result, so `sam key resume` can finish or undo a run
+//     entry that opens the result, so `kinfold key resume` can finish or undo a run
 //     that was killed, from what is on disk (a backup left behind is always the
 //     original);
 //   - SIGINT, SIGTERM and SIGHUP wait while the store is being changed.
@@ -45,7 +45,7 @@ class Refusal extends Error {}
 
 type Op = 'encrypt' | 'decrypt' | 'rekey'
 
-/** What the marker records: enough for `sam key resume` to tell how a killed run ended. */
+/** What the marker records: enough for `kinfold key resume` to tell how a killed run ended. */
 export interface Journal {
   op: Op
   pid: number
@@ -167,8 +167,8 @@ function undo(ctx: Context, op: Op): void {
 
 const STRANDED: Record<Op, string> = {
   encrypt: 'a last step failed',
-  rekey: `the new key is still under ${DB_KEY_NEXT_REF}, not ${DB_KEY_REF}; run sam key resume`,
-  decrypt: `the Keychain still holds ${DB_KEY_REF}; run sam key resume`,
+  rekey: `the new key is still under ${DB_KEY_NEXT_REF}, not ${DB_KEY_REF}; run kinfold key resume`,
+  decrypt: `the Keychain still holds ${DB_KEY_REF}; run kinfold key resume`,
 }
 
 function journalFor(op: Op): Journal {
@@ -224,7 +224,7 @@ async function converting(ctx: Context, op: Op, from: string | null, to: string 
         result = await convertWhenFree(ctx, from, to)
       } catch (error: unknown) {
         if (error instanceof ConvertError && error.stage === 'restore') {
-          // The original may be only in the backup: no key goes, and the marker stays for sam key resume.
+          // The original may be only in the backup: no key goes, and the marker stays for kinfold key resume.
           keepMarker = true
           throw error
         }
@@ -252,17 +252,17 @@ async function converting(ctx: Context, op: Op, from: string | null, to: string 
 function requireNoRun(ctx: Context): void {
   if (!existsSync(maintenancePath(ctx.path))) return
   const journal = readJournal(ctx.path)
-  if (journal !== null && alive(journal.pid) && journal.pid !== process.pid) throw new Refusal(`a sam ${journal.op} is running (pid ${journal.pid}); wait for it`)
-  throw new Refusal(`a sam ${journal?.op ?? 'encrypt, decrypt or rekey'} was cut short; run sam key resume first`)
+  if (journal !== null && alive(journal.pid) && journal.pid !== process.pid) throw new Refusal(`a kinfold ${journal.op} is running (pid ${journal.pid}); wait for it`)
+  throw new Refusal(`a kinfold ${journal?.op ?? 'encrypt, decrypt or rekey'} was cut short; run kinfold key resume first`)
 }
 
 function requireState(ctx: Context, want: 'plain' | 'encrypted'): void {
   requireNoRun(ctx)
-  if (existsSync(backupPath(ctx.path))) throw new Refusal(`${backupPath(ctx.path)} is left from a run that was cut short; run sam key resume first`)
+  if (existsSync(backupPath(ctx.path))) throw new Refusal(`${backupPath(ctx.path)} is left from a run that was cut short; run kinfold key resume first`)
   const state = fileState(ctx.path)
   if (state === want) return
   if (state === 'new') throw new Refusal(`${ctx.path} does not exist yet`)
-  throw new Refusal(want === 'plain' ? 'memory.db is already encrypted' : 'memory.db is not encrypted; sam encrypt converts it')
+  throw new Refusal(want === 'plain' ? 'memory.db is already encrypted' : 'memory.db is not encrypted; kinfold encrypt converts it')
 }
 
 function requireInteractive(ctx: Context, why: string): void {
@@ -271,18 +271,18 @@ function requireInteractive(ctx: Context, why: string): void {
 
 function readKey(ctx: Context): string {
   const key = ctx.keys.read()
-  if (key === null) throw new Refusal(`the Keychain has no ${DB_KEY_REF}; restore it with sam key recover`)
+  if (key === null) throw new Refusal(`the Keychain has no ${DB_KEY_REF}; restore it with kinfold key recover`)
   return key
 }
 
 async function encrypt(ctx: Context): Promise<void> {
   requireState(ctx, 'plain')
-  requireInteractive(ctx, 'sam encrypt shows a recovery code and')
+  requireInteractive(ctx, 'kinfold encrypt shows a recovery code and')
   if (ctx.writer.exists(DB_KEY_REF)) {
     const typed = await ctx.env.io.ask(`The Keychain already holds ${DB_KEY_REF}, which may open an older encrypted copy of memory.db. Type replace to give this store a new key: `)
     if (typed.trim() !== 'replace') throw new Refusal(`nothing changed; ${DB_KEY_REF} is kept`)
   }
-  ctx.log('sam encrypt converts memory.db to an encrypted file (ChaCha20-Poly1305), with its key in the Keychain.')
+  ctx.log('kinfold encrypt converts memory.db to an encrypted file (ChaCha20-Poly1305), with its key in the Keychain.')
   ctx.log('The plaintext backup it takes is deleted afterwards, but an SSD, APFS snapshots or Time Machine may keep old blocks; full-disk encryption (FileVault) covers those.')
   const key = newDbKey()
   if (!(await confirmCode(ctx, encodeRecoveryCode(key)))) throw new Refusal('those were not the last two groups; nothing changed')
@@ -292,10 +292,10 @@ async function encrypt(ctx: Context): Promise<void> {
 
 async function rekey(ctx: Context): Promise<void> {
   requireState(ctx, 'encrypted')
-  requireInteractive(ctx, 'sam rekey shows a new recovery code and')
+  requireInteractive(ctx, 'kinfold rekey shows a new recovery code and')
   const old = readKey(ctx)
   const key = newDbKey()
-  ctx.log('sam rekey gives memory.db a new key. The old key and the old recovery code stop working.')
+  ctx.log('kinfold rekey gives memory.db a new key. The old key and the old recovery code stop working.')
   if (!(await confirmCode(ctx, encodeRecoveryCode(key)))) throw new Refusal('those were not the last two groups; nothing changed')
   await converting(ctx, 'rekey', old, key, () => storeKey(ctx, DB_KEY_NEXT_REF, key))
   ctx.log('memory.db has a new key.')
@@ -303,17 +303,17 @@ async function rekey(ctx: Context): Promise<void> {
 
 async function decrypt(ctx: Context): Promise<void> {
   requireState(ctx, 'encrypted')
-  requireInteractive(ctx, 'sam decrypt asks you to confirm and')
+  requireInteractive(ctx, 'kinfold decrypt asks you to confirm and')
   const key = readKey(ctx)
-  const typed = await ctx.env.io.ask('sam decrypt stores memory.db in plaintext again and deletes its Keychain key. Type decrypt to go on: ')
+  const typed = await ctx.env.io.ask('kinfold decrypt stores memory.db in plaintext again and deletes its Keychain key. Type decrypt to go on: ')
   if (typed.trim() !== 'decrypt') throw new Refusal('nothing changed')
   await converting(ctx, 'decrypt', key, null, () => {})
   ctx.log('memory.db is plaintext.')
 }
 
 async function showRecovery(ctx: Context): Promise<void> {
-  requireInteractive(ctx, 'sam key show-recovery prints a secret, so it')
-  if (ctx.env.io.printsToTerminal === false) throw new Refusal('sam key show-recovery prints a secret, so it needs a terminal on stdout, not a pipe or a file')
+  requireInteractive(ctx, 'kinfold key show-recovery prints a secret, so it')
+  if (ctx.env.io.printsToTerminal === false) throw new Refusal('kinfold key show-recovery prints a secret, so it needs a terminal on stdout, not a pipe or a file')
   if (fileState(ctx.path) !== 'encrypted') throw new Refusal('memory.db is not encrypted; there is no recovery code')
   ctx.log(`recovery code: ${encodeRecoveryCode(readKey(ctx))}`)
 }
@@ -349,13 +349,13 @@ async function resume(ctx: Context): Promise<void> {
   const marker = maintenancePath(ctx.path)
   const backup = backupPath(ctx.path)
   if (!existsSync(marker) && !existsSync(backup)) {
-    ctx.log('nothing to resume: no sam encrypt, decrypt or rekey was cut short')
+    ctx.log('nothing to resume: no kinfold encrypt, decrypt or rekey was cut short')
     return
   }
   const journal = readJournal(ctx.path)
-  if (journal !== null && alive(journal.pid) && journal.pid !== process.pid) throw new Refusal(`a sam ${journal.op} is still running (pid ${journal.pid}); wait for it`)
+  if (journal !== null && alive(journal.pid) && journal.pid !== process.pid) throw new Refusal(`a kinfold ${journal.op} is still running (pid ${journal.pid}); wait for it`)
   if (journal === null) {
-    throw new Refusal(`${marker} does not say which run it belongs to; if memory.db opens (sam status), remove ${marker}${existsSync(backup) ? ` and keep ${backup} until you have checked it` : ''}`)
+    throw new Refusal(`${marker} does not say which run it belongs to; if memory.db opens (kinfold status), remove ${marker}${existsSync(backup) ? ` and keep ${backup} until you have checked it` : ''}`)
   }
   const source = keyAt(ctx, journal.source)
   // The target entry is gone once a rekey's last step ran; then nothing can be in the converted state under it.
@@ -363,7 +363,7 @@ async function resume(ctx: Context): Promise<void> {
   const converted = journal.target !== null && target === null ? null : checkedCounts(ctx.path, target)
   if (existsSync(backup)) {
     const original = checkedCounts(backup, source)
-    if (original === null) throw new Refusal(`${backup} does not open with the old key; nothing was changed. Keep it, and run sam key recover if memory.db does not open`)
+    if (original === null) throw new Refusal(`${backup} does not open with the old key; nothing was changed. Keep it, and run kinfold key recover if memory.db does not open`)
     if (converted !== null && sameCounts(original, converted)) {
       rmSync(backup, { force: true })
       finish(ctx, journal.op)
@@ -380,7 +380,7 @@ async function resume(ctx: Context): Promise<void> {
     undo(ctx, journal.op)
     ctx.log(`the ${journal.op} had not changed memory.db; it is as it was`)
   } else {
-    throw new Refusal('memory.db opens with neither key; nothing was deleted. Run sam key recover with your recovery code')
+    throw new Refusal('memory.db opens with neither key; nothing was deleted. Run kinfold key recover with your recovery code')
   }
   rmSync(marker, { force: true })
   if (!(await isAgentLoaded(ctx.env)) && existsSync(installPaths(ctx.env).launchAgentPlist)) await startDaemon(ctx, { restart: true })
@@ -400,7 +400,7 @@ export async function runKeyCommand(env: InstallEnv, command: KeyCommand): Promi
     await RUN[command](context(env))
     return EXIT_OK
   } catch (error: unknown) {
-    env.out(error instanceof Refusal || error instanceof ConvertError ? `sam ${command}: ${error.message}` : `sam ${command}: failed (${errorMessage(error)})`)
+    env.out(error instanceof Refusal || error instanceof ConvertError ? `kinfold ${command}: ${error.message}` : `kinfold ${command}: failed (${errorMessage(error)})`)
     return EXIT_FAILED
   }
 }

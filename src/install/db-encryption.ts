@@ -1,7 +1,7 @@
-// Database encryption in `sam install` and `sam status` (P2-E slice E2). On a
+// Database encryption in `kinfold install` and `kinfold status` (P2-E slice E2). On a
 // data dir with no memory.db yet, install puts a new random key in the
 // Keychain (db-key), so the daemon creates the store encrypted
-// (src/sqlite/open.ts). An existing store is never touched here: `sam
+// (src/sqlite/open.ts). An existing store is never touched here: `kinfold
 // encrypt` converts it (E3). Status reads the file's header and Keychain
 // metadata only, never the key, and warns when FileVault is off, since the
 // spool, logs and host transcripts sit outside memory.db.
@@ -25,7 +25,7 @@ export function dbKeyActions(env: InstallEnv): Action[] {
   const state = fileState(path)
   const writer = credentialWriterFor(env.platform, env.security)
   if (state === 'plain') {
-    env.out(`database: ${path} is plaintext; it stays that way until sam encrypt`)
+    env.out(`database: ${path} is plaintext; it stays that way until kinfold encrypt`)
     return []
   }
   if (state === 'encrypted') return []
@@ -81,7 +81,7 @@ async function diskEncryptionLine(env: InstallEnv): Promise<string | null> {
   return 'disk encryption: FileVault state unknown'
 }
 
-/** `sam status`: how memory.db is stored, whether its key entry exists (metadata only), and the disk encryption state. */
+/** `kinfold status`: how memory.db is stored, whether its key entry exists (metadata only), and the disk encryption state. */
 export async function dbStatusLines(env: InstallEnv): Promise<string[]> {
   const path = join(env.dataDir, DB_FILE)
   const state = fileState(path)
@@ -89,26 +89,26 @@ export async function dbStatusLines(env: InstallEnv): Promise<string[]> {
   const database = state === 'new'
     ? `database: not created yet (${keys})`
     : state === 'plain'
-      ? `database: plaintext; sam encrypt converts it (${keys})`
+      ? `database: plaintext; kinfold encrypt converts it (${keys})`
       : `database: encrypted (${keys})`
   const lines = [database]
   if (state === 'plain' && keys.endsWith('present')) {
     lines.push(`warning: memory.db is plaintext but the Keychain holds ${DB_KEY_REF}; the file was replaced by a plaintext copy, or a conversion failed`)
   }
   if (existsSync(maintenancePath(path))) {
-    lines.push(`warning: ${maintenancePath(path)} is there: a sam encrypt, decrypt or rekey is running or was cut short; nothing opens memory.db until it goes. If none is running, run sam key resume`)
+    lines.push(`warning: ${maintenancePath(path)} is there: a kinfold encrypt, decrypt or rekey is running or was cut short; nothing opens memory.db until it goes. If none is running, run kinfold key resume`)
   }
   if (existsSync(backupPath(path))) {
-    lines.push(`warning: ${backupPath(path)} is left from a conversion that was cut short; it is the original store; run sam key resume`)
+    lines.push(`warning: ${backupPath(path)} is left from a conversion that was cut short; it is the original store; run kinfold key resume`)
   }
   const writer = credentialWriterFor(env.platform, env.security)
   try {
-    if (writer?.exists(DB_KEY_NEXT_REF) === true) lines.push(`warning: the Keychain holds ${DB_KEY_NEXT_REF}: a sam rekey was cut short; run sam key resume`)
+    if (writer?.exists(DB_KEY_NEXT_REF) === true) lines.push(`warning: the Keychain holds ${DB_KEY_NEXT_REF}: a kinfold rekey was cut short; run kinfold key resume`)
   } catch {
     // keyPresence already reported a failing lookup.
   }
   if (state === 'encrypted' && keys.endsWith('missing')) {
-    lines.push(`warning: memory.db is encrypted and the Keychain has no ${DB_KEY_REF} under ${KEYCHAIN_SERVICE}; restore it with sam key recover`)
+    lines.push(`warning: memory.db is encrypted and the Keychain has no ${DB_KEY_REF} under ${KEYCHAIN_SERVICE}; restore it with kinfold key recover`)
   }
   const disk = await diskEncryptionLine(env)
   return disk === null ? lines : [...lines, disk]

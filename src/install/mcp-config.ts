@@ -45,7 +45,7 @@ const SECTION: Readonly<Record<McpHost, string>> = { 'claude-code': 'mcpServers'
  * Each entry names its host in KINFOLD_MCP_HOST, so the server's read reports
  * (P1-H) say which host fetched. Claude Code calls the map `env`, OpenCode
  * `environment`. An entry written before this has no map, compares unequal,
- * reads as stale, and the next `sam install` replaces it.
+ * reads as stale, and the next `kinfold install` replaces it.
  */
 export function claudeMcpEntry(target: McpTarget): Record<string, unknown> {
   return { type: 'stdio', command: target.bunPath, args: [target.serverScript], env: { [MCP_HOST_ENV]: 'claude-code' } }

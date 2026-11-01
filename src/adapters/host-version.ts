@@ -1,7 +1,7 @@
 // host_version without a process spawn on the hook hot path. Cursor puts
 // cursor_version on every payload and OpenCode puts data.version on
 // session.created; Claude Code and Codex carry no version at all. For those,
-// `sam install` records what `<host> --version` answered, plus the mtime of
+// `kinfold install` records what `<host> --version` answered, plus the mtime of
 // the binary it resolved, in <dataDir>/host-versions.json. A hook reads that
 // file (one read, one stat) and trusts it only while it is fresh:
 //   - a binary was stamped: fresh while that file still has the same mtime

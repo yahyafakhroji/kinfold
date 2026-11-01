@@ -10,7 +10,7 @@
 //      count with the one before, plus integrity_check and the FTS check;
 //   6. on any failure put the backup back; on success delete it.
 // Deleting the backup does not wipe its blocks on an SSD, and snapshots or
-// backups may hold copies; `sam encrypt` says so.
+// backups may hold copies; `kinfold encrypt` says so.
 
 import { chmodSync, copyFileSync, existsSync, renameSync, rmSync, statSync, statfsSync } from 'node:fs'
 import { dirname } from 'node:path'
@@ -102,7 +102,7 @@ export function convertStore(input: ConvertInput): ConvertResult {
   const started = performance.now()
   const { path, log } = input
   const expected = input.from === null ? 'plain' : 'encrypted'
-  if (!existsSync(maintenancePath(path))) throw new ConvertError('check', 'the maintenance marker is missing; convert only through sam encrypt, decrypt or rekey')
+  if (!existsSync(maintenancePath(path))) throw new ConvertError('check', 'the maintenance marker is missing; convert only through kinfold encrypt, decrypt or rekey')
   if (fileState(path) !== expected) throw new ConvertError('check', `memory.db is not ${expected === 'plain' ? 'plaintext' : 'encrypted'}`)
   if (input.from === input.to) throw new ConvertError('check', 'the old and new keys are the same')
   const size = statSync(path).size + (existsSync(`${path}-wal`) ? statSync(`${path}-wal`).size : 0)
@@ -167,7 +167,7 @@ export function convertStore(input: ConvertInput): ConvertResult {
     try {
       restoreBackup(path, backup)
     } catch {
-      throw new ConvertError('restore', `the conversion failed and the backup could not be put back; the original is ${backup}; run sam key resume`)
+      throw new ConvertError('restore', `the conversion failed and the backup could not be put back; the original is ${backup}; run kinfold key resume`)
     }
     log('convert: failed; the backup was put back')
     throw error instanceof ConvertError ? error : new ConvertError('rekey', `the conversion failed (${error instanceof Error ? error.name : 'error'}); memory.db is as it was`)

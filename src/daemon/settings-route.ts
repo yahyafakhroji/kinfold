@@ -40,7 +40,7 @@ function parseCredentialRef(value: unknown): Parsed<string | null> {
   } catch {
     return { ok: false, error: 'credentialRef must be a short lowercase name' }
   }
-  if (isSystemCredentialRef(value)) return { ok: false, error: 'credentialRef names a key SAM keeps for itself' }
+  if (isSystemCredentialRef(value)) return { ok: false, error: 'credentialRef names a key Kinfold keeps for itself' }
   return { ok: true, value }
 }
 

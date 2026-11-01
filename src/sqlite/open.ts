@@ -2,7 +2,7 @@
 // how: the SQLite header means plaintext, anything else means encrypted, and
 // an encrypted file needs the key. A store that does not exist yet is created
 // encrypted when the key store has a key, and plaintext otherwise, so an
-// existing plaintext store keeps opening as before until `sam encrypt`.
+// existing plaintext store keeps opening as before until `kinfold encrypt`.
 
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -46,7 +46,7 @@ export interface StoreOpenOptions extends PlainOpenOptions {
   env?: Readonly<Record<string, string | undefined>>
 }
 
-/** While this file sits in the data dir, `sam encrypt|decrypt|rekey` is changing memory.db and nothing else may open it. */
+/** While this file sits in the data dir, `kinfold encrypt|decrypt|rekey` is changing memory.db and nothing else may open it. */
 export const MAINTENANCE_FILE = 'maintenance'
 
 export function maintenancePath(dbPath: string): string {
@@ -89,7 +89,7 @@ export function plaintextBesideKey(path: string, keys: DbKeyStore = platformDbKe
 /** The store as its file says: plaintext, encrypted with the key, or (new) encrypted when a key exists. */
 export function openStoreFile(path: string, options: StoreOpenOptions = {}): Database {
   if (existsSync(maintenancePath(path))) {
-    throw new SqliteError('memory.db is being converted (sam encrypt, decrypt or rekey); try again when it finishes', 'SQLITE_BUSY', 5, 'maintenance')
+    throw new SqliteError('memory.db is being converted (kinfold encrypt, decrypt or rekey); try again when it finishes', 'SQLITE_BUSY', 5, 'maintenance')
   }
   const env = options.env ?? process.env
   const state = fileState(path)
@@ -97,8 +97,8 @@ export function openStoreFile(path: string, options: StoreOpenOptions = {}): Dat
   const keys = options.keys ?? platformDbKeyStore(env)
   const key = keys.read()
   if (key !== null) return openEncrypted(path, key, options, env)
-  if (state === 'encrypted') throw new SqliteError(`memory.db is encrypted and the ${keys.name} has no database key; run sam key recover`, 'SQLITE_AUTH', 23, 'no_key')
-  // A platform with a key store never creates a plaintext store by accident: sam install puts the key first.
-  if (keys.name !== NO_DB_KEYS.name) throw new SqliteError(`memory.db does not exist yet and the ${keys.name} has no database key; run sam install`, 'SQLITE_AUTH', 23, 'no_key')
+  if (state === 'encrypted') throw new SqliteError(`memory.db is encrypted and the ${keys.name} has no database key; run kinfold key recover`, 'SQLITE_AUTH', 23, 'no_key')
+  // A platform with a key store never creates a plaintext store by accident: kinfold install puts the key first.
+  if (keys.name !== NO_DB_KEYS.name) throw new SqliteError(`memory.db does not exist yet and the ${keys.name} has no database key; run kinfold install`, 'SQLITE_AUTH', 23, 'no_key')
   return openPlain(path, options, env)
 }

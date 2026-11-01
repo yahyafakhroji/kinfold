@@ -59,7 +59,7 @@ export function createMcpServer(options: McpServerOptions): McpServer {
   // opened, and an MCP server lives as long as the host session. Reopening
   // every READER_TTL_MS bounds how stale an answer can be at the cost of a few
   // prepared statements. A reader idle that long is closed too, so an idle
-  // session holds no handle on memory.db and `sam encrypt` can take the file.
+  // session holds no handle on memory.db and `kinfold encrypt` can take the file.
   let idle: Timer | null = null
   const closeReader = (): void => {
     reader?.close()

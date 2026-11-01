@@ -25,7 +25,7 @@ const FILE_MODE = 0o644
 export const HOST_HOOK_SPECS: Readonly<Record<CommandHookHost, CommandHookSpec>> = { codex: CODEX_HOOK_SPEC, cursor: CURSOR_HOOK_SPEC }
 
 /** Codex runs a non-managed hook only after the user reviews it in /hooks; the hash changes when we rewrite it. */
-export const CODEX_TRUST_NOTE = 'codex: open Codex and run /hooks to review and trust the SAM hooks; Codex skips untrusted hooks'
+export const CODEX_TRUST_NOTE = 'codex: open Codex and run /hooks to review and trust the Kinfold hooks; Codex skips untrusted hooks'
 
 function hostFiles(env: InstallEnv, host: CommandHookHost): { dir: string; file: string } {
   const paths = installPaths(env)
@@ -48,8 +48,8 @@ export function hostHookInstallActions(env: InstallEnv, host: CommandHookHost): 
   }
   const backup = plannedBackup(path, env.now())
   const parts = [
-    merge.added.length > 0 ? `add SAM hooks for ${merge.added.join(', ')}` : '',
-    merge.replaced.length > 0 ? `replace SAM hooks for ${merge.replaced.join(', ')}` : '',
+    merge.added.length > 0 ? `add Kinfold hooks for ${merge.added.join(', ')}` : '',
+    merge.replaced.length > 0 ? `replace Kinfold hooks for ${merge.replaced.join(', ')}` : '',
     'every other key and hook kept',
   ].filter((part) => part !== '')
   if (host === 'codex') env.out(CODEX_TRUST_NOTE)
@@ -69,7 +69,7 @@ export function hostHookUninstallActions(env: InstallEnv, host: CommandHookHost)
   const backup = plannedBackup(path, env.now())
   return [
     ...(backup !== null ? [{ kind: 'backup', from: path, to: backup } as const] : []),
-    { kind: 'write', path, content: serializeJson(result.settings, file.text), mode: file.mode, summary: `remove ${result.removed} SAM hook entries; every other key and hook kept` },
+    { kind: 'write', path, content: serializeJson(result.settings, file.text), mode: file.mode, summary: `remove ${result.removed} Kinfold hook entries; every other key and hook kept` },
   ]
 }
 

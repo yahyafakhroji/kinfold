@@ -25,7 +25,7 @@ import { isObserverProcess } from '../observer/env'
 import { resolveDataDir } from '../store/data-dir'
 import { createContextInjector } from './context-injector'
 
-export const OPENCODE_PLUGIN_ID = 'shared-agent-memory'
+export const OPENCODE_PLUGIN_ID = 'kinfold'
 
 type Handler = (event: unknown) => void
 type AsyncHandler = (event: unknown) => void | Promise<void>

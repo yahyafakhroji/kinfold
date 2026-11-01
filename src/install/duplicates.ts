@@ -1,4 +1,4 @@
-// Project-level SAM wiring next to the per-user install captures every event
+// Project-level Kinfold wiring next to the per-user install captures every event
 // twice. install and status look in the current directory's .claude settings
 // and .opencode/plugins and name what they find. Read-only: project files are
 // the user's, so the fix is theirs to make. A file that does not parse is
@@ -31,7 +31,7 @@ function samShims(dir: string): string[] {
     .filter((path) => shimTarget(readFileSync(path, 'utf8')) !== null)
 }
 
-/** Absolute paths of SAM wiring under `cwd`; `userFiles` (the per-user install's own files) never count. */
+/** Absolute paths of Kinfold wiring under `cwd`; `userFiles` (the per-user install's own files) never count. */
 export function findDuplicateWiring(cwd: string, userFiles: readonly string[]): string[] {
   const own = new Set(userFiles.map((path) => resolve(path)))
   const settings = PROJECT_SETTINGS.map((name) => join(cwd, name)).filter(hasSamHooks)
@@ -43,6 +43,6 @@ export function duplicateWarning(files: readonly string[]): string[] {
   return [
     'warning: this directory also wires shared-agent-memory, so its events would be captured twice:',
     ...files.map((file) => `  ${file}`),
-    '  remove those entries (or files) yourself; sam never edits project files.',
+    '  remove those entries (or files) yourself; kinfold never edits project files.',
   ]
 }

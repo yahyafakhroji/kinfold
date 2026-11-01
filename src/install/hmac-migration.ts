@@ -1,4 +1,4 @@
-// The HMAC key migration (P1-J), run by `sam install` only: the user runs it,
+// The HMAC key migration (P1-J), run by `kinfold install` only: the user runs it,
 // so it is the one place a Keychain entry gets created. It
 //   1. copies hmac.key into the Keychain as hmac-legacy (epoch 0, so every
 //      ref stored so far still verifies);
@@ -91,21 +91,21 @@ function presence(env: InstallEnv, ref: string): string {
   }
 }
 
-/** `sam status`: Keychain metadata, sub-key epochs, and any plain-text key or backup still on disk. */
+/** `kinfold status`: Keychain metadata, sub-key epochs, and any plain-text key or backup still on disk. */
 export function hmacStatusLines(env: InstallEnv): string[] {
   const legacyPath = join(env.dataDir, HMAC_KEY_FILE)
   const epochs = listSubKeyEpochs(env.dataDir)
   const master = presence(env, HMAC_MASTER_REF)
-  const mode = master === 'present' ? 'keychain master' : existsSync(legacyPath) ? 'hmac.key file (run sam install to move it to the keychain)' : 'none yet'
+  const mode = master === 'present' ? 'keychain master' : existsSync(legacyPath) ? 'hmac.key file (run kinfold install to move it to the keychain)' : 'none yet'
   return [
     `hmac keys: ${mode}; keychain ${HMAC_MASTER_REF} ${master}, ${HMAC_LEGACY_REF} ${presence(env, HMAC_LEGACY_REF)}`,
     `  sub-keys in ${subKeyDir(env.dataDir)}: ${epochs.length > 0 ? `epochs ${epochs.join(', ')}` : 'none'}`,
-    ...(master === 'present' && existsSync(legacyPath) ? [`  warning: ${legacyPath} still exists; run sam install to finish the migration`] : []),
+    ...(master === 'present' && existsSync(legacyPath) ? [`  warning: ${legacyPath} still exists; run kinfold install to finish the migration`] : []),
     ...existingBackups(legacyPath).map((path) => `  warning: plain-text key backup ${path}; delete it once you no longer need to roll back (rm ${path})`),
   ]
 }
 
-/** `sam uninstall` keeps the HMAC entries unless --remove-hmac-keys: without them stored refs can never be checked again. */
+/** `kinfold uninstall` keeps the HMAC entries unless --remove-hmac-keys: without them stored refs can never be checked again. */
 export function hmacKeptNotes(env: InstallEnv): string[] {
   const writer = credentialWriterFor(env.platform, env.security)
   if (writer === null) return []

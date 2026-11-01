@@ -84,9 +84,9 @@ test('on darwin-arm64 without the file the plan downloads it and restarts the da
 test('status names what is missing, or that the daemon needs a restart, or that search is on', () => {
   const arm = { ...w.env, arch: 'arm64' }
   const up = (vectorSearch: 'on' | 'off') => ({ up: true, version: '0.0.1', schemaVersion: 8, hmacMode: 'master', vectorSearch }) as const
-  expect(vectorStatusLine(arm, DOWN)).toBe('semantic search: off; missing the sqlite3mc library (sam install) and sqlite-vec 0.1.9 (sam install)')
+  expect(vectorStatusLine(arm, DOWN)).toBe('semantic search: off; missing the sqlite3mc library (kinfold install) and sqlite-vec 0.1.9 (kinfold install)')
   placeBuiltLibrary(w.dataDir, 'darwin')
-  expect(vectorStatusLine(arm, up('off'))).toBe('semantic search: off; missing sqlite-vec 0.1.9 (sam install)')
+  expect(vectorStatusLine(arm, up('off'))).toBe('semantic search: off; missing sqlite-vec 0.1.9 (kinfold install)')
   expect(vectorStatusLine(arm, up('on'))).toBe('semantic search: on')
   expect(vectorStatusLine(w.env, DOWN)).toBe('semantic search: off (no pinned sqlite-vec build for darwin-test-arch)')
 })

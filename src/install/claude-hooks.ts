@@ -38,7 +38,7 @@ export function samHookGroup(event: ClaudeHookEvent, target: HookTarget): Record
   return isTool ? { matcher: '*', hooks: [hook] } : { hooks: [hook] }
 }
 
-/** The hook.ts path a SAM entry runs, or null when the entry is not ours. */
+/** The hook.ts path a Kinfold entry runs, or null when the entry is not ours. */
 export function samHookScript(entry: unknown): string | null {
   if (!isRecord(entry) || typeof entry.command !== 'string') return null
   const args = entry.args

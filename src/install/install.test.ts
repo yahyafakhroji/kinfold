@@ -112,7 +112,7 @@ test('a stale hook path and a stale plugin path from a moved checkout are replac
   expect(text).not.toContain('/old/checkout')
   expect(JSON.parse(text).hooks.Stop).toEqual([samHookGroup('Stop', { bunPath: BUN, hookScript: paths.hookScript })])
   expect(readFileSync(paths.opencodePlugin, 'utf8')).not.toContain('/old/checkout')
-  expect(w.out.some((line) => line.includes('replace SAM hooks for Stop'))).toBe(true)
+  expect(w.out.some((line) => line.includes('replace Kinfold hooks for Stop'))).toBe(true)
   expect(w.out.some((line) => line.includes('replacing a stale plugin path'))).toBe(true)
 })
 

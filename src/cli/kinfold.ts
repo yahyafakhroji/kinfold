@@ -1,4 +1,4 @@
-// `bun src/cli/sam.ts <install|uninstall|status>` (also `bun run sam`), plus the
+// `bun src/cli/kinfold.ts <install|uninstall|status>` (also `bun run sam`), plus the
 // data-control commands `size|retention|scan|findings|purge`, which only call
 // the daemon's /data routes (src/data-control/cli.ts), and `dashboard`, which
 // asks the daemon for a one-time login link (src/dashboard/cli.ts). This is
@@ -22,7 +22,7 @@ import { status } from '../install/status'
 import { createCommandRunner, createPromptIO } from '../install/system'
 import { uninstall } from '../install/uninstall'
 
-export async function runSam(argv: readonly string[], env: InstallEnv): Promise<number> {
+export async function runKinfold(argv: readonly string[], env: InstallEnv): Promise<number> {
   const dashboard = parseDashboardArgs(argv)
   if (dashboard !== null) {
     if (dashboard.ok) return runDashboard(env, dashboard.value)
@@ -89,7 +89,7 @@ function systemEnv(): InstallEnv {
 
 async function main(): Promise<void> {
   try {
-    process.exit(await runSam(process.argv.slice(2), systemEnv()))
+    process.exit(await runKinfold(process.argv.slice(2), systemEnv()))
   } catch (error: unknown) {
     process.stderr.write(`sam: ${error instanceof Error ? error.message : String(error)}\n`)
     process.exit(EXIT_FAILED)

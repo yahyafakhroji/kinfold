@@ -1,4 +1,4 @@
-// `sam dashboard [--print]`: trades the daemon token (read from the data
+// `kinfold dashboard [--print]`: trades the daemon token (read from the data
 // dir, like every CLI command) for a one-time login code, then opens
 // http://127.0.0.1:<port>/dashboard/login#code=<code> in the browser, or
 // prints it with --print. The code sits in the URL fragment, which browsers
@@ -48,7 +48,7 @@ async function requestCode(env: DashboardCliEnv): Promise<CodeAnswer> {
 export async function runDashboard(env: DashboardCliEnv, args: DashboardArgs): Promise<number> {
   const answer = await requestCode(env)
   if (!answer.ok) {
-    env.out(`sam dashboard failed: ${answer.error}`)
+    env.out(`kinfold dashboard failed: ${answer.error}`)
     return EXIT_FAILED
   }
   const url = loginUrl(answer.port, answer.code)

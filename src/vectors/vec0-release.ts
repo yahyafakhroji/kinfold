@@ -1,5 +1,5 @@
-// The one sqlite-vec build SAM loads: v0.1.9's loadable macOS asset, pinned
-// by hash. `sam install` downloads the tarball and checks `tarballSha256`
+// The one sqlite-vec build Kinfold loads: v0.1.9's loadable macOS asset, pinned
+// by hash. `kinfold install` downloads the tarball and checks `tarballSha256`
 // (GitHub's published digest); the daemon checks `dylibSha256` before every
 // load, because loading a dylib runs its code. A new version means new
 // hashes here, read from the release, not from the downloaded bytes.

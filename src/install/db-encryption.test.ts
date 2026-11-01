@@ -61,7 +61,7 @@ test('an existing store is never touched, plaintext or encrypted', () => {
   const plain = world()
   seedStore(plain.dataDir, NO_DB_KEYS)
   expect(dbKeyActions(plain.env)).toEqual([])
-  expect(plain.out.some((line) => line.includes('plaintext; it stays that way until sam encrypt'))).toBe(true)
+  expect(plain.out.some((line) => line.includes('plaintext; it stays that way until kinfold encrypt'))).toBe(true)
   const encrypted = world()
   seedStore(encrypted.dataDir, holding(newDbKey()))
   expect(dbKeyActions(encrypted.env)).toEqual([])
@@ -79,11 +79,11 @@ test('status names how the store is kept and whether its key entry exists, from 
   const plainWithKey = world([DB_KEY_REF])
   seedStore(plainWithKey.dataDir, NO_DB_KEYS)
   const lines = await dbStatusLines(withFdesetup(plainWithKey.env, 'FileVault is On.\n'))
-  expect(lines.slice(0, 2)).toEqual(['database: plaintext; sam encrypt converts it (keychain db-key present)', expect.stringContaining('warning: memory.db is plaintext but the Keychain holds db-key')])
+  expect(lines.slice(0, 2)).toEqual(['database: plaintext; kinfold encrypt converts it (keychain db-key present)', expect.stringContaining('warning: memory.db is plaintext but the Keychain holds db-key')])
   expect(plainWithKey.securityCalls.every((call) => !call.args.includes('-w'))).toBe(true)
   const lost = world()
   seedStore(lost.dataDir, holding(newDbKey()))
-  expect((await dbStatusLines(withFdesetup(lost.env, 'FileVault is On.\n'))).slice(0, 2)).toEqual(['database: encrypted (keychain db-key missing)', expect.stringContaining('restore it with sam key recover')])
+  expect((await dbStatusLines(withFdesetup(lost.env, 'FileVault is On.\n'))).slice(0, 2)).toEqual(['database: encrypted (keychain db-key missing)', expect.stringContaining('restore it with kinfold key recover')])
 })
 
 test('FileVault off is a warning; a failed check says so; other platforms print no disk line yet', async () => {

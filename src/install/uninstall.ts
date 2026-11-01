@@ -1,4 +1,4 @@
-// `sam uninstall`: unload and remove the LaunchAgent, take our hook entries out
+// `kinfold uninstall`: unload and remove the LaunchAgent, take our hook entries out
 // of ~/.claude/settings.json and remove the OpenCode shim. Every other entry
 // stays. The data dir and the keychain entries stay too, because they hold the
 // user's memory and keys; the command prints how to remove them, and
@@ -47,15 +47,15 @@ function claudeActions(env: InstallEnv): Action[] {
   const backup = plannedBackup(path, env.now())
   return [
     ...(backup !== null ? [{ kind: 'backup', from: path, to: backup } as const] : []),
-    { kind: 'write', path, content: serializeJson(result.settings, file.text), mode: file.mode, summary: `remove ${result.removed} SAM hook entries; every other key and hook kept` },
+    { kind: 'write', path, content: serializeJson(result.settings, file.text), mode: file.mode, summary: `remove ${result.removed} Kinfold hook entries; every other key and hook kept` },
   ]
 }
 
 function opencodeActions(env: InstallEnv): Action[] {
   const paths = installPaths(env)
   const state = inspectShim(readTextOrNull(paths.opencodePlugin), paths.pluginEntry)
-  if (state === 'foreign') env.out(`opencode: ${paths.opencodePlugin} is not a SAM shim; left alone`)
-  return state === 'yes' || state === 'stale' ? [{ kind: 'remove', path: paths.opencodePlugin, summary: 'the SAM plugin shim' }] : []
+  if (state === 'foreign') env.out(`opencode: ${paths.opencodePlugin} is not a Kinfold shim; left alone`)
+  return state === 'yes' || state === 'stale' ? [{ kind: 'remove', path: paths.opencodePlugin, summary: 'the Kinfold plugin shim' }] : []
 }
 
 /** The default ref plus any ref a stored setting names. A dry run asks the daemon nothing (only /health is allowed). */

@@ -62,7 +62,7 @@ function usageError(error: string): ToolOutcome {
 }
 
 function noMemory(): ToolOutcome {
-  const text = 'No memory yet: the shared-agent-memory database does not exist, or cannot be read. Nothing has been recorded on this machine.'
+  const text = 'No memory yet: the Kinfold database does not exist, or cannot be read. Nothing has been recorded on this machine.'
   return { result: result(text, { status: 'no_memory' }), count: 0 }
 }
 

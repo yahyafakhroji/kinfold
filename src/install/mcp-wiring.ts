@@ -33,13 +33,13 @@ export function mcpTarget(env: Pick<InstallEnv, 'bunPath' | 'projectRoot'>): Mcp
 const claudeAdd = (target: McpTarget): Action => ({
   kind: 'command',
   argv: ['claude', 'mcp', 'add-json', '--scope', 'user', MCP_SERVER_NAME, JSON.stringify(claudeMcpEntry(target))],
-  summary: 'register the SAM MCP server with Claude Code (user scope)',
+  summary: 'register the Kinfold MCP server with Claude Code (user scope)',
 })
 
 const claudeRemove: Action = {
   kind: 'command',
   argv: ['claude', 'mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME],
-  summary: 'unregister the SAM MCP server from Claude Code',
+  summary: 'unregister the Kinfold MCP server from Claude Code',
 }
 
 function stateIn(path: string, host: 'claude-code' | 'opencode', target: McpTarget): McpEntryState | 'unknown' {
@@ -97,7 +97,7 @@ export function opencodeMcpInstallActions(env: InstallEnv): Action[] {
       path: paths.opencodeConfig,
       content: serializeJson(merged.config, file.exists ? file.text : null),
       mode: file.exists ? file.mode : FILE_MODE,
-      summary: `${state === 'stale' ? 'replace the stale' : 'add the'} SAM MCP server under "mcp"; every other key kept`,
+      summary: `${state === 'stale' ? 'replace the stale' : 'add the'} Kinfold MCP server under "mcp"; every other key kept`,
     },
   ]
 }
@@ -117,7 +117,7 @@ export function opencodeMcpUninstallActions(env: InstallEnv): Action[] {
   const backup = plannedBackup(path, env.now())
   return [
     ...(backup !== null ? [{ kind: 'backup', from: path, to: backup } as const] : []),
-    { kind: 'write', path, content: serializeJson(removed.config, file.text), mode: file.mode, summary: 'remove the SAM MCP server; every other key kept' },
+    { kind: 'write', path, content: serializeJson(removed.config, file.text), mode: file.mode, summary: 'remove the Kinfold MCP server; every other key kept' },
   ]
 }
 

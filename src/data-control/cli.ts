@@ -1,4 +1,4 @@
-// `sam size|retention|scan|findings|purge`: thin clients of the daemon's /data
+// `kinfold size|retention|scan|findings|purge`: thin clients of the daemon's /data
 // routes. The CLI never opens the database (D3); it reads daemon.json and
 // daemon.token like the installer does, sends one request, and prints the
 // answer as counts, sizes, ids and rule names. A daemon that is down or
@@ -162,7 +162,7 @@ export async function runDataCommand(env: DataCliEnv, args: DataArgs): Promise<n
   const plan = planFor(args)
   const answer = await call(env, plan.method, plan.path, plan.body)
   if (!answer.ok) {
-    env.out(`sam ${args.command} failed: ${answer.error}`)
+    env.out(`kinfold ${args.command} failed: ${answer.error}`)
     return EXIT_FAILED
   }
   for (const line of plan.lines(answer.body)) env.out(line)

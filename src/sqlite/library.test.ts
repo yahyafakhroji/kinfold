@@ -36,8 +36,8 @@ test('the manifest names the build that matches its hash', () => {
   expect(result).toEqual({ ok: true, path: join(libDir(dataDir), file), manifest: { file, sha256: sha('library bytes'), sourceSha256: SOURCE } })
 })
 
-test('no manifest, a missing file, or a hash that does not match each give a reason that says to run sam install', () => {
-  expect(checkLibrary(dataDir)).toEqual({ ok: false, reason: 'sqlite3mc library is not installed; run sam install' })
+test('no manifest, a missing file, or a hash that does not match each give a reason that says to run kinfold install', () => {
+  expect(checkLibrary(dataDir)).toEqual({ ok: false, reason: 'sqlite3mc library is not installed; run kinfold install' })
   const file = place('library bytes', sha('other bytes'))
   expect(checkLibrary(dataDir)).toMatchObject({ ok: false, reason: expect.stringContaining('does not match its recorded hash') })
   rmSync(join(libDir(dataDir), file))

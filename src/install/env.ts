@@ -1,7 +1,7 @@
 // Everything the installer touches outside its own code arrives in one
 // InstallEnv value: the home and data dirs, the platform, the bun binary, the
 // checkout, the command runner, the keychain command, the clock, HTTP and the
-// prompts. Only src/cli/sam.ts builds the real one; tests build a temp home
+// prompts. Only src/cli/kinfold.ts builds the real one; tests build a temp home
 // with fakes, so no test can reach ~/.claude, launchctl or the keychain.
 
 import { join } from 'node:path'
@@ -95,7 +95,7 @@ export interface InstallPaths {
   codexHooks: string
   cursorDir: string
   cursorHooks: string
-  /** What `sam install` recorded about each host's version (adapters/host-version.ts). */
+  /** What `kinfold install` recorded about each host's version (adapters/host-version.ts). */
   hostVersionsFile: string
   /** The data dir under the old name; migration moves it. */
   legacyDataDir: string

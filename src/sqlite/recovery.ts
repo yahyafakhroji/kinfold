@@ -44,7 +44,7 @@ export function encodeRecoveryCode(hexKey: string): string {
   return out.match(new RegExp(`.{1,${RECOVERY_GROUP}}`, 'g'))!.join('-')
 }
 
-/** The last group, which `sam encrypt` asks the person to type back. */
+/** The last group, which `kinfold encrypt` asks the person to type back. */
 export function lastGroup(code: string): string {
   return code.split('-').at(-1)!
 }

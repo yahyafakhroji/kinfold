@@ -1,6 +1,6 @@
-// `sam <install|uninstall|status> [flags]`. Hand-parsed, zero dependencies. A
+// `kinfold <install|uninstall|status> [flags]`. Hand-parsed, zero dependencies. A
 // flag that does not apply to the command is an error rather than ignored, so
-// `sam status --dry-run` cannot be mistaken for a promise.
+// `kinfold status --dry-run` cannot be mistaken for a promise.
 
 import type { Parsed } from '../context/types'
 import { parsePurgeBody, parseRetentionPut } from '../data-control/requests'
@@ -40,7 +40,7 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
 }
 
 export const USAGE = [
-  'usage: bun src/cli/sam.ts <install|uninstall|status|size|retention|scan|findings|purge|dashboard|encrypt|decrypt|rekey|key> [flags]',
+  'usage: kinfold <install|uninstall|status|size|retention|scan|findings|purge|dashboard|encrypt|decrypt|rekey|key> [flags]',
   '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>]...',
   '             [--skip-check] [--replace-credential] [--credential-stdin] [--takeover]',
   '  uninstall  [--dry-run] [--remove-credentials] [--remove-hmac-keys]',
@@ -57,10 +57,10 @@ export const USAGE = [
   '  decrypt    store memory.db in plaintext again and delete its key',
   '  rekey      give memory.db a new key and a new recovery code',
   '  key show-recovery | key recover   show the recovery code, or put the key back from one (on stdin or typed)',
-  '  key resume finish or undo a sam encrypt, decrypt or rekey that was cut short',
+  '  key resume finish or undo a kinfold encrypt, decrypt or rekey that was cut short',
 ].join('\n')
 
-// ---- Data control: `sam size|retention|scan|findings|purge` -----------------
+// ---- Data control: `kinfold size|retention|scan|findings|purge` -----------------
 // A separate dispatch from install/uninstall/status: these only talk to the
 // daemon's /data routes, and their bodies are checked here with the same
 // validators the daemon uses, so a usage error never reaches the daemon.
@@ -159,7 +159,7 @@ function purgeArgs(flags: readonly DataFlag[]): Parsed<DataArgs> {
   return parsed.ok ? { ok: true, value: { command: 'purge', body } } : { ok: false, error: `purge: ${parsed.error}` }
 }
 
-// ---- Dashboard: `sam dashboard [--print]` -------------------------------------
+// ---- Dashboard: `kinfold dashboard [--print]` -------------------------------------
 // Asks the daemon for a one-time login code and opens (or prints) the login
 // link. Its only flag is --print.
 

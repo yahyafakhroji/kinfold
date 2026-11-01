@@ -29,9 +29,9 @@ export function loadVec0(db: Database, dataDir: string, platform: string = proce
   const asset = vec0AssetFor(platform, arch)
   if (asset === null) return { ok: false, reason: `no pinned sqlite-vec build for ${platform}-${arch}` }
   const path = vec0Path(dataDir)
-  if (!existsSync(path)) return { ok: false, reason: `${path} is missing; run sam install` }
+  if (!existsSync(path)) return { ok: false, reason: `${path} is missing; run kinfold install` }
   try {
-    if (sha256File(path) !== asset.dylibSha256) return { ok: false, reason: `${path} does not match the pinned sqlite-vec build; run sam install` }
+    if (sha256File(path) !== asset.dylibSha256) return { ok: false, reason: `${path} does not match the pinned sqlite-vec build; run kinfold install` }
     db.loadExtension(path)
     const row = db.query<{ v: string }, []>('SELECT vec_version() AS v').get()
     return { ok: true, detail: `sqlite-vec ${row?.v ?? 'unknown'}` }

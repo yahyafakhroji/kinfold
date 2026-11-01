@@ -41,7 +41,7 @@ test('an already-running daemon is reported by pid and nothing is started or wri
   const w = make({ keychainRefs: ['openrouter'] })
   startForeign(w)
   expect(await install(w.env, YES)).toBe(EXIT_BLOCKED)
-  expect(w.out.join('\n')).toContain(`(pid ${process.pid} from daemon.json); sam will not start a second one.`)
+  expect(w.out.join('\n')).toContain(`(pid ${process.pid} from daemon.json); kinfold will not start a second one.`)
   expect(w.out.join('\n')).toContain(`stop it yourself (kill ${process.pid})`)
   expect(w.commands.filter((c) => c.argv[0] === LAUNCHCTL).map((c) => c.argv[1])).toEqual(['print'])
   expect(existsSync(installPaths(w.env).claudeSettings)).toBe(false)
@@ -94,12 +94,12 @@ test('dry run changes nothing in the temp home: same tree, modes and mtimes; onl
   expect(w.securityCalls.every((call) => call.args[0] === 'find-generic-password' && !call.args.includes('-w'))).toBe(true)
   expect(w.checks).toEqual([])
   const plan = w.out.join('\n')
-  for (const part of ['plan (dry run, nothing is changed)', `write ${paths.claudeSettings}: add SAM hooks for SessionStart`, '/bin/launchctl bootstrap gui/501', 'PUT /observer/settings host=opencode provider=openrouter', 'would ask for it (no echo)']) {
+  for (const part of ['plan (dry run, nothing is changed)', `write ${paths.claudeSettings}: add Kinfold hooks for SessionStart`, '/bin/launchctl bootstrap gui/501', 'PUT /observer/settings host=opencode provider=openrouter', 'would ask for it (no echo)']) {
     expect(plan).toContain(part)
   }
 })
 
-test('project-level SAM wiring in the current directory is reported and left untouched', async () => {
+test('project-level Kinfold wiring in the current directory is reported and left untouched', async () => {
   const w = make({ keychainRefs: ['openrouter'] })
   mkdirSync(join(w.cwd, '.claude'), { recursive: true })
   const local = JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { bunPath: BUN, hookScript: '/x/src/cli/hook.ts' })] } })

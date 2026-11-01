@@ -19,7 +19,7 @@ export interface RunnerDeps {
 export type RunnerFactory = (settings: ObserverSettings) => ObserverRunner
 
 function readCredential(credentials: CredentialProvider, ref: string): string {
-  if (isSystemCredentialRef(ref)) throw new ObserverError('credential_error', `${ref} is a key SAM keeps for itself, not an observer credential`)
+  if (isSystemCredentialRef(ref)) throw new ObserverError('credential_error', `${ref} is a key Kinfold keeps for itself, not an observer credential`)
   let value: string | null
   try {
     value = credentials.get(ref)

@@ -66,10 +66,10 @@ export function sha256File(path: string): string {
 /** The library the manifest names, when it exists and matches its hash; else a reason. */
 export function checkLibrary(dataDir: string): { ok: true; path: string; manifest: LibraryManifest } | { ok: false; reason: string } {
   const manifest = readManifest(dataDir)
-  if (manifest === null) return { ok: false, reason: 'sqlite3mc library is not installed; run sam install' }
+  if (manifest === null) return { ok: false, reason: 'sqlite3mc library is not installed; run kinfold install' }
   const path = join(libDir(dataDir), manifest.file)
-  if (!existsSync(path)) return { ok: false, reason: 'sqlite3mc library named by the manifest is missing; run sam install' }
-  if (sha256File(path) !== manifest.sha256) return { ok: false, reason: 'sqlite3mc library does not match its recorded hash; run sam install' }
+  if (!existsSync(path)) return { ok: false, reason: 'sqlite3mc library named by the manifest is missing; run kinfold install' }
+  if (sha256File(path) !== manifest.sha256) return { ok: false, reason: 'sqlite3mc library does not match its recorded hash; run kinfold install' }
   return { ok: true, path, manifest }
 }
 

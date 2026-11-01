@@ -1,5 +1,5 @@
 // Dashboard credentials, held in memory only (a daemon restart logs everyone
-// out). The daemon token never reaches a browser: `sam dashboard` trades it
+// out). The daemon token never reaches a browser: `kinfold dashboard` trades it
 // for a one-time login code (60 s, single use), and the login page trades the
 // code for a session cookie (12 h). Both maps are keyed by the SHA-256 of the
 // secret, so a lookup's timing says nothing about the secret itself, and both

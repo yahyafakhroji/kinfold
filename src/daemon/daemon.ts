@@ -231,7 +231,7 @@ export const DAEMON_CACHE_KIB = 65_536
 
 function warnIfPlaintextBesideKey(path: string, log: (line: string) => void, keys?: DbKeyStore): void {
   try {
-    if (plaintextBesideKey(path, keys)) log('warning: memory.db is plaintext but the keychain holds db-key; the file was replaced or a conversion failed (see sam status)')
+    if (plaintextBesideKey(path, keys)) log('warning: memory.db is plaintext but the keychain holds db-key; the file was replaced or a conversion failed (see kinfold status)')
   } catch (error: unknown) {
     log(`database key check failed (${error instanceof Error ? error.name : 'error'})`)
   }

@@ -1,5 +1,5 @@
 // The HMAC key hierarchy (P1-J). A random 32-byte master lives in the macOS
-// Keychain (account hmac-master); only `sam install` creates it and only the
+// Keychain (account hmac-master); only `kinfold install` creates it and only the
 // daemon reads it, once at start. Everything else derives from it:
 //   marker sub-key for an epoch  = HMAC(master, "marker-ref/v1/" + epoch)
 //   credential fingerprint key   = HMAC(master, "credential-fingerprint/v1")

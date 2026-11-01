@@ -1,5 +1,5 @@
 // The pinned SQLite3 Multiple Ciphers source (P2-E). The user chose local
-// builds for now: `sam install` compiles this amalgamation on the machine, so
+// builds for now: `kinfold install` compiles this amalgamation on the machine, so
 // the pin covers the source, and the built library's own hash is recorded
 // next to it (docs/reference/sqlite3mc-build.md).
 

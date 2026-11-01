@@ -65,7 +65,7 @@ export function getFinding(db: Database, id: number): Finding | null {
   return db.query<Finding, { id: number }>(`SELECT ${COLUMNS} FROM redaction_findings WHERE id = $id`).get({ id })
 }
 
-/** Pending counts per rule, for the dashboard badge and `sam findings`. */
+/** Pending counts per rule, for the dashboard badge and `kinfold findings`. */
 export function pendingByRule(db: Database): Record<string, number> {
   const rows = db.query<{ rule: string; n: number }, []>(
     "SELECT rule, count(*) AS n FROM redaction_findings WHERE action = 'pending' GROUP BY rule ORDER BY rule",

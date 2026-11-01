@@ -52,7 +52,7 @@ test('the route takes the token only, and rejects a bad body with 400', async ()
 
 test('without sqlite-vec the answer is unavailable with the loader reason; the query is never logged', async () => {
   const response = await post({ query: 'SECRET-QUERY-TEXT', project: PROJECT, k: 3 })
-  expect(await response.json()).toEqual({ status: 'unavailable', reason: expect.stringContaining('vec0.dylib is missing; run sam install') })
+  expect(await response.json()).toEqual({ status: 'unavailable', reason: expect.stringContaining('vec0.dylib is missing; run kinfold install') })
   expect(logs).toContain('semantic search status=unavailable')
   expect(logs.join('\n')).not.toContain('SECRET-QUERY-TEXT')
 })

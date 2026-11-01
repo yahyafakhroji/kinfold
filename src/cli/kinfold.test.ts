@@ -1,8 +1,10 @@
 import { afterEach, expect, test } from 'bun:test'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { parseArgs } from '../install/args'
 import { EXIT_USAGE } from '../install/install'
 import { type FakeWorld, createWorld } from '../install/test-support'
-import { runSam } from './sam'
+import { runKinfold } from './kinfold'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -39,19 +41,28 @@ test('bad flags are usage errors that name the problem', () => {
   expect(error(['status', '--dry-run'])).toBe('--dry-run does not apply to status')
   expect(error(['uninstall', '--yes'])).toBe('--yes does not apply to uninstall')
   expect(error(['install', '--force'])).toStartWith('unknown argument "--force"')
-  expect(error([])).toStartWith('usage: bun src/cli/sam.ts')
+  expect(error([])).toStartWith('usage: kinfold ')
 })
 
-test('runSam exits 2 on a usage error and dispatches status', async () => {
+test('runKinfold exits 2 on a usage error and dispatches status', async () => {
   world = createWorld()
-  expect(await runSam(['frobnicate'], world.env)).toBe(EXIT_USAGE)
+  expect(await runKinfold(['frobnicate'], world.env)).toBe(EXIT_USAGE)
   expect(world.out[0]).toStartWith('usage:')
-  expect(await runSam(['status'], world.env)).toBe(0)
+  expect(await runKinfold(['status'], world.env)).toBe(0)
   expect(world.out).toContain('hosts:')
 })
 
-test('a failed check under --yes makes `sam install` exit non-zero', async () => {
+test('a failed check under --yes makes `kinfold install` exit non-zero', async () => {
   world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', runner: () => ({ run: async () => Promise.reject(new Error('boom')) }) })
-  expect(await runSam(['install', '--yes'], world.env)).toBe(1)
+  expect(await runKinfold(['install', '--yes'], world.env)).toBe(1)
   expect(world.out.at(-1)).toBe('install failed: observer check for claude-code failed: internal')
+})
+
+test('no non-test source file still tells the user to run `sam <command>`', () => {
+  const stale = /\bsam (install|uninstall|status|encrypt|decrypt|rekey|key|size|retention|scan|findings|purge|dashboard)\b/
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory() ? walk(join(dir, entry.name)) : entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [join(dir, entry.name)] : [])
+  const hits = walk(join(import.meta.dir, '..')).filter((file) => stale.test(readFileSync(file, 'utf8')))
+  expect(hits).toEqual([])
 })

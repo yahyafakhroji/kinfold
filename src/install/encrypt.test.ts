@@ -52,7 +52,7 @@ const rows = (db: ReturnType<typeof openPlain>): number => {
   }
 }
 
-test('sam encrypt shows a code, waits for its last group, then encrypts with the key it put in the Keychain', async () => {
+test('kinfold encrypt shows a code, waits for its last group, then encrypts with the key it put in the Keychain', async () => {
   const { w, env, path } = world(null)
   expect(await runKeyCommand(env, 'encrypt')).toBe(EXIT_OK)
   const key = w.keychainValues.get(DB_KEY_REF)!
@@ -72,7 +72,7 @@ test('the wrong last group, or no terminal, changes nothing', async () => {
   expect(await runKeyCommand(typo.env, 'encrypt')).toBe(EXIT_FAILED)
   expect(fileState(typo.path)).toBe('plain')
   expect(typo.w.keychain.has(DB_KEY_REF)).toBe(false)
-  expect(typo.w.out.at(-1)).toBe('sam encrypt: those were not the last two groups; nothing changed')
+  expect(typo.w.out.at(-1)).toBe('kinfold encrypt: those were not the last two groups; nothing changed')
   const pipe = world(null)
   expect(await runKeyCommand({ ...pipe.env, io: { ...pipe.env.io, interactive: false } }, 'encrypt')).toBe(EXIT_FAILED)
   expect(pipe.w.out.at(-1)).toContain('needs a terminal')
@@ -94,7 +94,7 @@ test('another process holding the store makes encrypt refuse, the store stays pl
   expect(existsSync(maintenancePath(path))).toBe(false)
 })
 
-test('sam rekey moves the store to a new key and a new code; the old key stops working and db-key-next goes', async () => {
+test('kinfold rekey moves the store to a new key and a new code; the old key stops working and db-key-next goes', async () => {
   const old = newDbKey()
   const { w, env, path } = world(old)
   expect(await runKeyCommand(env, 'rekey')).toBe(EXIT_OK)
@@ -122,7 +122,7 @@ test('if moving the new key into db-key fails after a good rekey, nothing is del
   expect(rows(openEncrypted(path, next))).toBe(10)
 })
 
-test('sam decrypt asks for the word, stores plaintext again and deletes the key', async () => {
+test('kinfold decrypt asks for the word, stores plaintext again and deletes the key', async () => {
   const key = newDbKey()
   const { w, env, path } = world(key, () => 'decrypt')
   expect(await runKeyCommand(env, 'decrypt')).toBe(EXIT_OK)
@@ -149,7 +149,7 @@ test('key recover puts the key back from a code on stdin, only when the code ope
   w.keychainValues.delete(DB_KEY_REF)
   const piped = (code: string): InstallEnv => ({ ...env, io: { ...env.io, interactive: false, readStdin: async () => `${code}\n` } })
   expect(await runKeyCommand(piped(encodeRecoveryCode(newDbKey())), 'recover')).toBe(EXIT_FAILED)
-  expect(w.out.at(-1)).toBe('sam recover: that recovery code does not open memory.db; nothing changed')
+  expect(w.out.at(-1)).toBe('kinfold recover: that recovery code does not open memory.db; nothing changed')
   expect(await runKeyCommand(piped('not a code'), 'recover')).toBe(EXIT_FAILED)
   expect(w.keychain.has(DB_KEY_REF)).toBe(false)
   expect(await runKeyCommand(piped(encodeRecoveryCode(key).toLowerCase()), 'recover')).toBe(EXIT_OK)
@@ -159,10 +159,10 @@ test('key recover puts the key back from a code on stdin, only when the code ope
 test('each command refuses the wrong state', async () => {
   const plain = world(null)
   expect(await runKeyCommand(plain.env, 'rekey')).toBe(EXIT_FAILED)
-  expect(plain.w.out.at(-1)).toBe('sam rekey: memory.db is not encrypted; sam encrypt converts it')
+  expect(plain.w.out.at(-1)).toBe('kinfold rekey: memory.db is not encrypted; kinfold encrypt converts it')
   const encrypted = world(newDbKey())
   expect(await runKeyCommand(encrypted.env, 'encrypt')).toBe(EXIT_FAILED)
-  expect(encrypted.w.out.at(-1)).toBe('sam encrypt: memory.db is already encrypted')
+  expect(encrypted.w.out.at(-1)).toBe('kinfold encrypt: memory.db is already encrypted')
   expect(await runKeyCommand({ ...encrypted.env, platform: 'linux' }, 'encrypt')).toBe(EXIT_FAILED)
 })
 
@@ -178,7 +178,7 @@ test('encrypt waits for an agent session to let go of the store, then converts',
   expect(fileState(path)).toBe('encrypted')
 })
 
-// ---- Runs that were cut short, and sam key resume --------------------------
+// ---- Runs that were cut short, and kinfold key resume --------------------------
 
 /** A pid no process has, so the journal reads as a run that died. */
 const DEAD_PID = 2 ** 22 - 7
@@ -255,7 +255,7 @@ test('while a run is cut short, the other commands refuse and point at resume; a
   const { w, env, path } = world(null)
   journal(path, { op: 'encrypt', source: null, target: DB_KEY_REF })
   expect(await runKeyCommand(env, 'encrypt')).toBe(EXIT_FAILED)
-  expect(w.out.at(-1)).toBe('sam encrypt: a sam encrypt was cut short; run sam key resume first')
+  expect(w.out.at(-1)).toBe('kinfold encrypt: a kinfold encrypt was cut short; run kinfold key resume first')
   writeFileSync(backupPath(path), Buffer.alloc(4096, 0x11))
   expect(await runKeyCommand(env, 'resume')).toBe(EXIT_FAILED)
   expect(w.out.at(-1)).toContain('does not open with the old key; nothing was changed')
@@ -267,7 +267,7 @@ test('a run that is still alive is left alone', async () => {
   const { w, env, path } = world(null)
   writeFileSync(maintenancePath(path), JSON.stringify({ op: 'encrypt', source: null, target: DB_KEY_REF, pid: process.ppid, startedAt: 0 }))
   expect(await runKeyCommand(env, 'resume')).toBe(EXIT_FAILED)
-  expect(w.out.at(-1)).toBe(`sam resume: a sam encrypt is still running (pid ${process.ppid}); wait for it`)
+  expect(w.out.at(-1)).toBe(`kinfold resume: a kinfold encrypt is still running (pid ${process.ppid}); wait for it`)
   expect(await runKeyCommand(env, 'resume')).toBe(EXIT_FAILED)
 })
 
@@ -276,7 +276,7 @@ test('encrypt asks before replacing an existing db-key, and keeps it unless told
   w.keychain.add(DB_KEY_REF)
   w.keychainValues.set(DB_KEY_REF, 'a'.repeat(64))
   expect(await runKeyCommand(env, 'encrypt')).toBe(EXIT_FAILED)
-  expect(w.out.at(-1)).toBe(`sam encrypt: nothing changed; ${DB_KEY_REF} is kept`)
+  expect(w.out.at(-1)).toBe(`kinfold encrypt: nothing changed; ${DB_KEY_REF} is kept`)
   expect(w.keychainValues.get(DB_KEY_REF)).toBe('a'.repeat(64))
   expect(fileState(path)).toBe('plain')
 })

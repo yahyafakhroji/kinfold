@@ -75,7 +75,7 @@ export function sqlite3(path: string): Sqlite3 {
   try {
     symbols = dlopen(path, SYMBOLS).symbols
   } catch {
-    throw new SqliteError('the SQLite library is not a sqlite3mc build; run sam install', 'SQLITE_CANTOPEN', 14, 'library')
+    throw new SqliteError('the SQLite library is not a sqlite3mc build; run kinfold install', 'SQLITE_CANTOPEN', 14, 'library')
   }
   loaded = { path, symbols }
   return symbols

@@ -1,4 +1,4 @@
-// `sam install`: detect the hosts, choose and check each observer, then build
+// `kinfold install`: detect the hosts, choose and check each observer, then build
 // one plan (data dir modes, the HMAC key migration (P1-J), the pinned
 // sqlite-vec build (P2-A), keychain, Claude Code hooks, the OpenCode shim,
 // the LaunchAgent, settings through the daemon)
@@ -60,9 +60,9 @@ export async function daemonSituation(env: InstallEnv): Promise<DaemonSituation>
 export function foreignDaemonMessage(situation: DaemonSituation): string[] {
   const pid = situation.pid !== null ? ` (pid ${situation.pid} from daemon.json)` : ''
   return [
-    `a daemon not started by the LaunchAgent already answers on 127.0.0.1:${situation.port}${pid}; sam will not start a second one.`,
+    `a daemon not started by the LaunchAgent already answers on 127.0.0.1:${situation.port}${pid}; kinfold will not start a second one.`,
     `stop it yourself (${stopCommand(situation.pid, situation.port)}) and run install again,`,
-    'or pass --takeover to have install wait while you stop it. sam never kills it.',
+    'or pass --takeover to have install wait while you stop it. kinfold never kills it.',
   ]
 }
 
@@ -99,8 +99,8 @@ function claudeActions(env: InstallEnv): Action[] {
   }
   const backup = plannedBackup(paths.claudeSettings, env.now())
   const parts = [
-    merge.added.length > 0 ? `add SAM hooks for ${merge.added.join(', ')}` : '',
-    merge.replaced.length > 0 ? `replace SAM hooks for ${merge.replaced.join(', ')}` : '',
+    merge.added.length > 0 ? `add Kinfold hooks for ${merge.added.join(', ')}` : '',
+    merge.replaced.length > 0 ? `replace Kinfold hooks for ${merge.replaced.join(', ')}` : '',
     'every other key and hook kept',
   ].filter((part) => part !== '')
   return [
@@ -114,7 +114,7 @@ function opencodeActions(env: InstallEnv): Action[] {
   const paths = installPaths(env)
   const before = readTextOrNull(paths.opencodePlugin)
   const state = inspectShim(before, paths.pluginEntry)
-  if (state === 'foreign') throw new Error(`${paths.opencodePlugin} exists and is not a SAM plugin shim; move it away first`)
+  if (state === 'foreign') throw new Error(`${paths.opencodePlugin} exists and is not a Kinfold plugin shim; move it away first`)
   if (state === 'yes') {
     env.out(`opencode: plugin shim already in ${paths.opencodePlugin}`)
     return []
@@ -209,7 +209,7 @@ export async function install(env: InstallEnv, options: InstallOptions): Promise
       env.out('a real install would stop here, before step 1.')
       return EXIT_BLOCKED
     }
-    if (!options.dryRun) env.out('installed. Check it with: bun src/cli/sam.ts status')
+    if (!options.dryRun) env.out('installed. Check it with: bun src/cli/kinfold.ts status')
     return EXIT_OK
   } catch (error: unknown) {
     env.out(`install failed: ${error instanceof ChoiceError ? error.message : errorMessage(error)}`)

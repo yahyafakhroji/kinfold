@@ -170,7 +170,7 @@ function guardedFetch(allowed: Set<number>, fetches: string[]): InstallEnv['fetc
   }
 }
 
-/** A stand-in build and the manifest naming it, from the pinned source, with the modes sam install gives them. */
+/** A stand-in build and the manifest naming it, from the pinned source, with the modes kinfold install gives them. */
 export function placeBuiltLibrary(dataDir: string, platform: NodeJS.Platform): void {
   const sha256 = createHash('sha256').update('sqlite3mc stand-in').digest('hex')
   const file = libraryFileName(sha256, platform)!

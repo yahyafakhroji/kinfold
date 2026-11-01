@@ -98,9 +98,9 @@ test('parseSettingsPut accepts the default row and drops a ref for claude-cli', 
   expect(parseSettingsPut([])).toEqual({ ok: false, error: 'body must be a JSON object' })
 })
 
-test('a setting may not name a key SAM keeps for itself, so the observer never sends one to a provider', () => {
+test('a setting may not name a key Kinfold keeps for itself, so the observer never sends one to a provider', () => {
   for (const credentialRef of ['db-key', 'hmac-master', 'hmac-legacy']) {
     expect(parseSettingsPut({ host: '*', provider: 'openrouter', model: 'openrouter/auto', credentialRef, enabled: true }))
-      .toEqual({ ok: false, error: 'credentialRef names a key SAM keeps for itself' })
+      .toEqual({ ok: false, error: 'credentialRef names a key Kinfold keeps for itself' })
   }
 })

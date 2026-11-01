@@ -142,7 +142,7 @@ async function readCredentialValue(env: InstallEnv, ref: string, options: Choice
 async function resolveCredential(env: InstallEnv, input: ObserverSettingsInput, options: ChoiceOptions, session: CredentialSession): Promise<CredentialState> {
   const ref = credentialRefFor(asSettings(input))
   if (ref === null) return { kind: 'none' }
-  if (isSystemCredentialRef(ref)) throw new ChoiceError(`${ref} is a key SAM keeps for itself; choose another credential ref`)
+  if (isSystemCredentialRef(ref)) throw new ChoiceError(`${ref} is a key Kinfold keeps for itself; choose another credential ref`)
   const known = session.entered.get(ref)
   if (known !== undefined) return { kind: 'entered', value: known }
   const writer = credentialWriterFor(env.platform, env.security)

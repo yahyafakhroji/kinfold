@@ -1,4 +1,4 @@
-// `sam install` puts the pinned sqlite-vec build in <dataDir>/lib (P2-A; the
+// `kinfold install` puts the pinned sqlite-vec build in <dataDir>/lib (P2-A; the
 // user chose an installer download over an npm dependency). The tarball is
 // fetched from the GitHub release, its sha256 checked against the hash in
 // src/vectors/vec0-release.ts, unpacked in process (gunzip, then a ustar
@@ -85,17 +85,17 @@ function hasSqlite3mc(env: InstallEnv): boolean {
   return hasBuiltLibrary(env.dataDir)
 }
 
-/** `sam status`: what the daemon reports, else what is missing. Read-only: a hash of the file, no load. */
+/** `kinfold status`: what the daemon reports, else what is missing. Read-only: a hash of the file, no load. */
 export function vectorStatusLine(env: InstallEnv, health: Health): string {
   const asset = vec0AssetFor(env.platform, env.arch ?? process.arch)
   if (asset === null) return `semantic search: off (no pinned sqlite-vec build for ${env.platform}-${env.arch ?? process.arch})`
   const missing = [
-    ...(hasSqlite3mc(env) ? [] : ['the sqlite3mc library (sam install)']),
-    ...(hasPinnedDylib(vec0Path(env.dataDir), asset) ? [] : [`sqlite-vec ${VEC0_VERSION} (sam install)`]),
+    ...(hasSqlite3mc(env) ? [] : ['the sqlite3mc library (kinfold install)']),
+    ...(hasPinnedDylib(vec0Path(env.dataDir), asset) ? [] : [`sqlite-vec ${VEC0_VERSION} (kinfold install)`]),
   ]
   if (health.up && health.vectorSearch === 'on') return 'semantic search: on'
   if (missing.length > 0) return `semantic search: off; missing ${missing.join(' and ')}`
-  return health.up ? 'semantic search: off in the running daemon; restart it (sam install restarts it)' : 'semantic search: ready; the daemon is down'
+  return health.up ? 'semantic search: off in the running daemon; restart it (kinfold install restarts it)' : 'semantic search: ready; the daemon is down'
 }
 
 /** The install step, plus notes on what search still needs. */

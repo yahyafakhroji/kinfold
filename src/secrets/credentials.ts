@@ -12,13 +12,13 @@ export interface CredentialProvider {
 export { KEYCHAIN_SERVICE }
 /** The database key (P2-E): 32 random bytes as hex, read by every process that opens memory.db. */
 export const DB_KEY_REF = 'db-key'
-/** The new key while `sam rekey` runs; it replaces db-key once the store is checked. */
+/** The new key while `kinfold rekey` runs; it replaces db-key once the store is checked. */
 export const DB_KEY_NEXT_REF = 'db-key-next'
 
 /**
- * Entries SAM keeps for itself. An observer setting may never name one: the
+ * Entries Kinfold keeps for itself. An observer setting may never name one: the
  * observer would send the value to its provider as an API key, and
- * `sam uninstall --remove-credentials` would delete it with the observer keys.
+ * `kinfold uninstall --remove-credentials` would delete it with the observer keys.
  */
 export const SYSTEM_CREDENTIAL_REFS: readonly string[] = ['hmac-master', 'hmac-legacy', DB_KEY_REF, DB_KEY_NEXT_REF]
 

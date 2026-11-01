@@ -20,7 +20,7 @@ test('only darwin-arm64 has a pinned build', () => {
 test('vec0 does not load without a pinned build for the arch, without the file, or when the file is not the pinned build', () => {
   const db = temp.store.db
   expect(loadVec0(db, temp.dataDir, 'darwin', 'x64')).toMatchObject({ ok: false, reason: expect.stringContaining('darwin-x64') })
-  expect(loadVec0(db, temp.dataDir, 'darwin', 'arm64')).toMatchObject({ ok: false, reason: expect.stringContaining('is missing; run sam install') })
+  expect(loadVec0(db, temp.dataDir, 'darwin', 'arm64')).toMatchObject({ ok: false, reason: expect.stringContaining('is missing; run kinfold install') })
   mkdirSync(join(temp.dataDir, 'lib'), { recursive: true })
   writeFileSync(vec0Path(temp.dataDir), 'not the release')
   expect(loadVec0(db, temp.dataDir, 'darwin', 'arm64')).toMatchObject({ ok: false, reason: expect.stringContaining('does not match the pinned') })

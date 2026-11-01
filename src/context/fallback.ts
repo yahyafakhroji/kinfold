@@ -36,7 +36,7 @@ function immutableUri(path: string): string {
 
 /**
  * Why the store could not be opened, safe to log: our own library message,
- * which says to run sam install, or the SQLite code alone, since SQLite's
+ * which says to run kinfold install, or the SQLite code alone, since SQLite's
  * text can quote SQL.
  */
 export function openFailure(error: unknown): string {

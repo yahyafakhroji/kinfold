@@ -1,4 +1,4 @@
-// `sam status`: read-only. Hosts found and wired (yes/no/stale/partial), the
+// `kinfold status`: read-only. Hosts found and wired (yes/no/stale/partial), the
 // LaunchAgent, daemon health, each host's observer and where it came from,
 // keychain entries (metadata lookups only, never -w), the HMAC keys (P1-J:
 // master and legacy entries, sub-key epochs, leftover plain-text keys), data dir modes, and
