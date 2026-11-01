@@ -85,7 +85,7 @@ test('unrelated keys and hooks survive, the backup is written once, and a re-run
   const parsed = JSON.parse(first)
   expect(parsed.theme).toBe('dark')
   expect(parsed.hooks.PreToolUse).toEqual([{ matcher: 'Bash', hooks: [{ type: 'command', command: 'guard' }] }])
-  const backups = readdirSync(paths.claudeDir).filter((name) => name.includes('.sam-backup-'))
+  const backups = readdirSync(paths.claudeDir).filter((name) => name.includes('.kinfold-backup-'))
   expect(backups).toHaveLength(1)
   expect(readFileSync(join(paths.claudeDir, backups[0]!), 'utf8')).toBe(original)
   expect(statSync(join(paths.claudeDir, backups[0]!)).mode & 0o777).toBe(0o600)
@@ -95,7 +95,7 @@ test('unrelated keys and hooks survive, the backup is written once, and a re-run
   expect(await install(w.env, YES)).toBe(EXIT_OK)
   expect(readFileSync(paths.claudeSettings, 'utf8')).toBe(first)
   expect([paths.claudeSettings, paths.opencodePlugin, paths.launchAgentPlist].map((path) => statSync(path).mtimeMs)).toEqual(mtimes)
-  expect(readdirSync(paths.claudeDir).filter((name) => name.includes('.sam-backup-'))).toHaveLength(1)
+  expect(readdirSync(paths.claudeDir).filter((name) => name.includes('.kinfold-backup-'))).toHaveLength(1)
   expect(launchctlCalls(w).map((argv) => argv[1])).toEqual(['print'])
 })
 

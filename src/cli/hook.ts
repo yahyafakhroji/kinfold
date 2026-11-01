@@ -70,7 +70,7 @@ async function capture(input: string, dataDir: string, host: HookHost, stderr: E
   try {
     payload = JSON.parse(input)
   } catch {
-    stderr('sam-hook: stdin is not a JSON hook payload; nothing captured')
+    stderr('kinfold-hook: stdin is not a JSON hook payload; nothing captured')
     return null
   }
   let event: NormalizedEvent | null = null
@@ -78,9 +78,9 @@ async function capture(input: string, dataDir: string, host: HookHost, stderr: E
     event = HOOK_HOSTS[host].normalize(payload, defaultAdapterContext(recordedHostVersion(dataDir, host)))
     if (event === null) return null
     const { nudge } = await recordEvent(event, dataDir)
-    if (!nudge.ok) stderr(`sam-hook: event ${event.eventId} spooled, nudge skipped: ${nudge.reason}`)
+    if (!nudge.ok) stderr(`kinfold-hook: event ${event.eventId} spooled, nudge skipped: ${nudge.reason}`)
   } catch (error: unknown) {
-    stderr(`sam-hook: nothing captured: ${errorMessage(error)}`)
+    stderr(`kinfold-hook: nothing captured: ${errorMessage(error)}`)
   }
   return event
 }
@@ -101,7 +101,7 @@ async function contextOutput(event: NormalizedEvent, dataDir: string, host: Hook
   const fetched = await fetchContext(
     dataDir,
     { host: event.host, cwd: event.cwd, hostSessionId: event.hostSessionId, channel: wanted.channel, ...(prompt.trim() !== '' ? { prompt } : {}) },
-    { ...inject, log: (line) => stderr(`sam-hook: ${line}`) },
+    { ...inject, log: (line) => stderr(`kinfold-hook: ${line}`) },
   )
   if (fetched.result === null || fetched.result.text === '') return null
   return wanted.render(fetched.result.text)
@@ -126,7 +126,7 @@ export async function runHook(
   try {
     return await contextOutput(event, dataDir, host, stderr, inject)
   } catch (error: unknown) {
-    stderr(`sam-hook: no context injected: ${errorMessage(error)}`)
+    stderr(`kinfold-hook: no context injected: ${errorMessage(error)}`)
     return null
   }
 }
@@ -139,13 +139,13 @@ async function main(): Promise<void> {
   try {
     const host = hostFromArgs(process.argv.slice(2))
     if (host === null) {
-      stderr('sam-hook: unknown --host; nothing captured')
+      stderr('kinfold-hook: unknown --host; nothing captured')
     } else {
       const output = await runHook(await Bun.stdin.text(), resolveDataDir(), stderr, process.env, {}, host)
       if (output !== null) process.stdout.write(`${output}\n`)
     }
   } catch (error: unknown) {
-    stderr(`sam-hook: ${errorMessage(error)}`)
+    stderr(`kinfold-hook: ${errorMessage(error)}`)
   }
   process.exit(0)
 }

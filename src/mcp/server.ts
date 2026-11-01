@@ -127,7 +127,7 @@ export async function runStdio(server: McpServer, input: ReadableStream<Uint8Arr
 }
 
 async function main(): Promise<void> {
-  const log = (line: string) => process.stderr.write(`sam-mcp: ${line}\n`)
+  const log = (line: string) => process.stderr.write(`kinfold-mcp: ${line}\n`)
   const dataDir = resolveDataDir()
   const host = hostFromEnv(process.env)
   const reporter = createReadReporter({ dataDir, host })
@@ -146,7 +146,7 @@ async function main(): Promise<void> {
 
 if (import.meta.main) {
   main().catch((error: unknown) => {
-    process.stderr.write(`sam-mcp: fatal ${error instanceof Error ? error.name : typeof error}\n`)
+    process.stderr.write(`kinfold-mcp: fatal ${error instanceof Error ? error.name : typeof error}\n`)
     process.exit(1)
   })
 }

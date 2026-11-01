@@ -58,7 +58,7 @@ test.each([['not json at all'], [''], ['{"hook_event_name":"PostToolUse"}'], ['[
   async (stdin) => {
     const run = await runHook(stdin)
     expect(run).toMatchObject({ exitCode: 0, stdout: '' })
-    expect(run.stderr).toStartWith('sam-hook:')
+    expect(run.stderr).toStartWith('kinfold-hook:')
     expect(spooled()).toEqual([])
   },
 )

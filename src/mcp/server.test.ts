@@ -85,7 +85,7 @@ test('end to end over real stdio: initialize, list, search, fetch; read-only and
   expect((run.replies[4]!.error as { code: number }).code).toBe(-32601)
   expect(run.stdout).not.toContain(PAYLOAD_MARKER)
   expect(run.stderr).not.toContain('stdio search')
-  expect(run.stderr).toContain('sam-mcp: tool=search status=ok rows=1')
+  expect(run.stderr).toContain('kinfold-mcp: tool=search status=ok rows=1')
   expect(hashes()).toEqual(before)
 })
 

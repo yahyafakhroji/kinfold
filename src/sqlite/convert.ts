@@ -65,11 +65,21 @@ export function rowCounts(db: Database): Map<string, number> {
 }
 
 export function backupPath(path: string): string {
+  return `${path}.kinfold-convert-backup`
+}
+
+/** The backup the pre-rename version left; found by readers, never written. */
+function legacyBackupPath(path: string): string {
   return `${path}.sam-convert-backup`
 }
 
+/** The backup on disk, in either name, else the path a new run would write. */
+export function foundBackupPath(path: string): string {
+  return [backupPath(path), legacyBackupPath(path)].find((candidate) => existsSync(candidate)) ?? backupPath(path)
+}
+
 /** Puts the backup back over memory.db. The rename is atomic, so at every moment one of the two names holds an intact copy. */
-export function restoreBackup(path: string, backup: string = backupPath(path)): void {
+export function restoreBackup(path: string, backup: string = foundBackupPath(path)): void {
   for (const suffix of SIDE_FILES) rmSync(`${path}${suffix}`, { force: true })
   renameSync(backup, path)
 }
@@ -108,7 +118,7 @@ export function convertStore(input: ConvertInput): ConvertResult {
   const size = statSync(path).size + (existsSync(`${path}-wal`) ? statSync(`${path}-wal`).size : 0)
   const free = (input.freeBytes ?? freeBytesOf)(dirname(path))
   if (free < size * 2) throw new ConvertError('check', `not enough free space: ${size * 2} bytes needed, ${free} free`)
-  const backup = backupPath(path)
+  const backup = foundBackupPath(path)
   if (existsSync(backup)) throw new ConvertError('check', `${backup} exists from an earlier run; check it, then remove it`)
 
   const db = open(input, input.from)

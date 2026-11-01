@@ -8,7 +8,9 @@ import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, openSync, re
 import { basename, dirname, join } from 'node:path'
 import { isRecord } from '../contract/event'
 
-export const BACKUP_INFIX = '.sam-backup-'
+export const BACKUP_INFIX = '.kinfold-backup-'
+/** What the pre-rename version wrote; still found and cleaned, never written. */
+const LEGACY_BACKUP_INFIX = '.sam-backup-'
 const BACKUP_MODE = 0o600
 
 export type JsonFile =
@@ -41,7 +43,7 @@ export function readTextOrNull(path: string): string | null {
 
 /** Temp file next to the target, fsync, then rename: readers see the old or the new file, never a mix. */
 export function writeFileAtomic(path: string, content: string | Uint8Array, mode: number): void {
-  const temp = join(dirname(path), `.${basename(path)}.sam-tmp-${process.pid}`)
+  const temp = join(dirname(path), `.${basename(path)}.kinfold-tmp-${process.pid}`)
   const fd = openSync(temp, 'w', mode)
   try {
     if (typeof content === 'string') writeSync(fd, content)
@@ -67,8 +69,8 @@ export function backupStamp(now: number): string {
 export function existingBackups(path: string): string[] {
   const dir = dirname(path)
   if (!existsSync(dir)) return []
-  const prefix = `${basename(path)}${BACKUP_INFIX}`
-  return readdirSync(dir).filter((name) => name.startsWith(prefix)).map((name) => join(dir, name))
+  const prefixes = [BACKUP_INFIX, LEGACY_BACKUP_INFIX].map((infix) => `${basename(path)}${infix}`)
+  return readdirSync(dir).filter((name) => prefixes.some((prefix) => name.startsWith(prefix))).map((name) => join(dir, name))
 }
 
 /** The backup path the first change would write, or null when a backup already exists or there is no original. */

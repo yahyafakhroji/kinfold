@@ -13,7 +13,7 @@ import { uninstall } from './uninstall'
 
 const LEGACY = '4e'.repeat(32)
 const OTHER = '7a'.repeat(32)
-const OLD_BACKUP = 'hmac.key.sam-backup-20260901T000000Z'
+const OLD_BACKUP = 'hmac.key.kinfold-backup-20260901T000000Z'
 let world: FakeWorld | null = null
 afterEach(async () => {
   await world?.cleanup()
@@ -106,7 +106,7 @@ test('dry run shows the removal of this run\'s and older backups, and changes no
   const removals = w.out.filter((line) => line.endsWith(': plain-text backup of epoch 0; the value is in keychain entry hmac-legacy'))
   expect(removals).toHaveLength(2)
   expect(removals[0]).toContain(OLD_BACKUP)
-  expect(removals[1]).toMatch(/remove .*hmac\.key\.sam-backup-\d{8}T\d{6}Z: /)
+  expect(removals[1]).toMatch(/remove .*hmac\.key\.kinfold-backup-\d{8}T\d{6}Z: /)
   expect(w.securityCalls.filter((call) => call.args.includes('-w') || call.args[0] === '-i')).toEqual([])
 })
 
@@ -192,7 +192,7 @@ test('--remove-hmac-keys refuses while a hand-started daemon still answers /heal
 test('--remove-hmac-keys removes a kept backup equal to the restored hmac.key and keeps one that differs', async () => {
   const w = await migrated()
   const same = join(w.dataDir, OLD_BACKUP)
-  const differs = join(w.dataDir, 'hmac.key.sam-backup-20260902T000000Z')
+  const differs = join(w.dataDir, 'hmac.key.kinfold-backup-20260902T000000Z')
   writeFileSync(same, LEGACY, { mode: 0o600 })
   writeFileSync(differs, OTHER, { mode: 0o600 })
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: false, removeHmacKeys: true })).toBe(EXIT_OK)

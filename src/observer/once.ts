@@ -34,7 +34,7 @@ export async function observeSessionOnce(dataDir: string, sessionId: number, log
 
 async function main(): Promise<void> {
   const log = (line: string): void => {
-    process.stderr.write(`sam-observe: ${line}\n`)
+    process.stderr.write(`kinfold-observe: ${line}\n`)
   }
   const dataDir = readEnv(process.env, 'DATA_DIR')
   const sessionId = Number(process.argv[2])

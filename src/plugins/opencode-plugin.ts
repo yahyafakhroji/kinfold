@@ -164,21 +164,21 @@ export function createOpenCodePlugin(options: OpenCodePluginOptions = {}): OpenC
       if (event === null) return
       recordEvent(event, dataDir).then(
         ({ nudge }) => {
-          if (!nudge.ok) log(`sam-opencode: event ${event.eventId} spooled, nudge skipped: ${nudge.reason}`)
+          if (!nudge.ok) log(`kinfold-opencode: event ${event.eventId} spooled, nudge skipped: ${nudge.reason}`)
         },
-        (error: unknown) => log(`sam-opencode: event ${event.eventId} not captured: ${errorMessage(error)}`),
+        (error: unknown) => log(`kinfold-opencode: event ${event.eventId} not captured: ${errorMessage(error)}`),
       )
     }
     const guarded = (map: (input: unknown) => NormalizedEvent | null): Handler => (input) => {
       try {
         record(map(input))
       } catch (error: unknown) {
-        log(`sam-opencode: event skipped: ${errorMessage(error)}`)
+        log(`kinfold-opencode: event skipped: ${errorMessage(error)}`)
       }
     }
 
     const fetcher: ContextFetcher = options.fetchContext
-      ?? (async (request) => (await fetchContext(dataDir, request, { log: (line) => log(`sam-opencode: ${line}`) })).result)
+      ?? (async (request) => (await fetchContext(dataDir, request, { log: (line) => log(`kinfold-opencode: ${line}`) })).result)
     const injector = createContextInjector({ host: OPENCODE_HOST, cwd: ctx.location.directory, fetch: fetcher, log })
 
     ctx.tool.hook('execute.after', guarded((input) => normalizeOpenCodeToolAfter(input, context)))
@@ -202,7 +202,7 @@ export function createOpenCodePlugin(options: OpenCodePluginOptions = {}): OpenC
     }
     const subscription = ctx.event.subscribe(onBus)
     if (isAsyncIterable(subscription)) {
-      drainStream(subscription, onBus).catch((error: unknown) => log(`sam-opencode: event stream ended: ${errorMessage(error)}`))
+      drainStream(subscription, onBus).catch((error: unknown) => log(`kinfold-opencode: event stream ended: ${errorMessage(error)}`))
     }
   }
 

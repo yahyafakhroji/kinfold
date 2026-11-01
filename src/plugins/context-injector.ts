@@ -81,11 +81,11 @@ export function createContextInjector(options: ContextInjectorOptions): ContextI
     const request: ContextRequest = { host: options.host, cwd: options.cwd, hostSessionId: sessionId, channel, ...(prompt !== undefined ? { prompt } : {}) }
     return options.fetch(request).then(
       (result) => {
-        options.log(`sam-opencode: ${kind} session=${sessionId} ids=${result?.observationIds.length ?? 0} tokens=${result?.tokens ?? 0} ms=${Date.now() - startedAt}`)
+        options.log(`kinfold-opencode: ${kind} session=${sessionId} ids=${result?.observationIds.length ?? 0} tokens=${result?.tokens ?? 0} ms=${Date.now() - startedAt}`)
         return result
       },
       (error: unknown) => {
-        options.log(`sam-opencode: ${kind} session=${sessionId} failed: ${errorName(error)}`)
+        options.log(`kinfold-opencode: ${kind} session=${sessionId} failed: ${errorName(error)}`)
         return null
       },
     )
@@ -153,7 +153,7 @@ export function createContextInjector(options: ContextInjectorOptions): ContextI
 
   const onCompaction = (event: unknown): void => {
     const sessionId = sessionOf(event)
-    if (sessionId !== null && cache.delete(sessionId)) options.log(`sam-opencode: context cache dropped session=${sessionId} (compaction)`)
+    if (sessionId !== null && cache.delete(sessionId)) options.log(`kinfold-opencode: context cache dropped session=${sessionId} (compaction)`)
   }
 
   return { onContext, onPrompt, onCompaction, cachedSessions: () => [...cache.keys()] }

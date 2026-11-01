@@ -127,7 +127,7 @@ test('a malformed event is logged and skipped, never thrown into OpenCode', () =
 
   expect(() => handlers.get('tool.execute.after')!({ nope: true })).not.toThrow()
   expect(logs).toHaveLength(1)
-  expect(logs[0]).toStartWith('sam-opencode: event skipped:')
+  expect(logs[0]).toStartWith('kinfold-opencode: event skipped:')
   expect(spooledEvents()).toEqual([])
 })
 
@@ -220,7 +220,7 @@ test('compaction drops the session cache, so the next request fetches again', as
   await handlers.get('session.compaction')!({ sessionID: 'ses_fixture0011' })
   await handlers.get('session.context')!(contextEvent())
   expect(requests).toHaveLength(2)
-  expect(logs).toContain('sam-opencode: context cache dropped session=ses_fixture0011 (compaction)')
+  expect(logs).toContain('kinfold-opencode: context cache dropped session=ses_fixture0011 (compaction)')
 })
 
 test('an empty pack, a failed fetch or a malformed event adds nothing and never throws', async () => {
@@ -233,7 +233,7 @@ test('an empty pack, a failed fetch or a malformed event adds nothing and never 
     await handlers.get('session.context')!({ nope: true })
     await handlers.get('session.context')!({ sessionID: 'x', system: 'not a list' })
   }
-  expect(logs).toContain('sam-opencode: context session=ses_fixture0011 failed: Error')
+  expect(logs).toContain('kinfold-opencode: context session=ses_fixture0011 failed: Error')
   expect(logs.join('\n')).not.toContain('kinfold>')
 })
 

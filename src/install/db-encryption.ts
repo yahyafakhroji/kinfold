@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { DB_KEY_NEXT_REF, DB_KEY_REF, KEYCHAIN_SERVICE } from '../secrets/credentials'
 import { credentialWriterFor } from '../secrets/keychain-writer'
 import { newDbKey } from '../sqlite/keys'
-import { backupPath } from '../sqlite/convert'
+import { foundBackupPath } from '../sqlite/convert'
 import { fileState, maintenancePath } from '../sqlite/open'
 import { DB_FILE } from '../store/data-dir'
 import { type InstallEnv, errorMessage } from './env'
@@ -98,8 +98,8 @@ export async function dbStatusLines(env: InstallEnv): Promise<string[]> {
   if (existsSync(maintenancePath(path))) {
     lines.push(`warning: ${maintenancePath(path)} is there: a kinfold encrypt, decrypt or rekey is running or was cut short; nothing opens memory.db until it goes. If none is running, run kinfold key resume`)
   }
-  if (existsSync(backupPath(path))) {
-    lines.push(`warning: ${backupPath(path)} is left from a conversion that was cut short; it is the original store; run kinfold key resume`)
+  if (existsSync(foundBackupPath(path))) {
+    lines.push(`warning: ${foundBackupPath(path)} is left from a conversion that was cut short; it is the original store; run kinfold key resume`)
   }
   const writer = credentialWriterFor(env.platform, env.security)
   try {

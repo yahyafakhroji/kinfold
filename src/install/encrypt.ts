@@ -21,7 +21,7 @@ import { join } from 'node:path'
 import { type CredentialProvider, DB_KEY_NEXT_REF, DB_KEY_REF } from '../secrets/credentials'
 import { createKeychainProvider } from '../secrets/keychain'
 import { type CredentialWriter, credentialWriterFor } from '../secrets/keychain-writer'
-import { ConvertError, backupPath, checkedCounts, convertStore, restoreBackup, sameCounts } from '../sqlite/convert'
+import { ConvertError, checkedCounts, convertStore, foundBackupPath, restoreBackup, sameCounts } from '../sqlite/convert'
 import { type DbKeyStore, credentialDbKeyStore, newDbKey } from '../sqlite/keys'
 import { fileState, maintenancePath, openEncrypted } from '../sqlite/open'
 import { RECOVERY_GROUP, RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../sqlite/recovery'
@@ -258,7 +258,7 @@ function requireNoRun(ctx: Context): void {
 
 function requireState(ctx: Context, want: 'plain' | 'encrypted'): void {
   requireNoRun(ctx)
-  if (existsSync(backupPath(ctx.path))) throw new Refusal(`${backupPath(ctx.path)} is left from a run that was cut short; run kinfold key resume first`)
+  if (existsSync(foundBackupPath(ctx.path))) throw new Refusal(`${foundBackupPath(ctx.path)} is left from a run that was cut short; run kinfold key resume first`)
   const state = fileState(ctx.path)
   if (state === want) return
   if (state === 'new') throw new Refusal(`${ctx.path} does not exist yet`)
@@ -347,7 +347,7 @@ async function recover(ctx: Context): Promise<void> {
  */
 async function resume(ctx: Context): Promise<void> {
   const marker = maintenancePath(ctx.path)
-  const backup = backupPath(ctx.path)
+  const backup = foundBackupPath(ctx.path)
   if (!existsSync(marker) && !existsSync(backup)) {
     ctx.log('nothing to resume: no kinfold encrypt, decrypt or rekey was cut short')
     return
