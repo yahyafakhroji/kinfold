@@ -17,7 +17,7 @@ import {
   upsertPack,
 } from '../store/context-store'
 import { computeDelta } from './delta'
-import { buildPack } from './pack'
+import { FRAME_OPEN, buildPack } from './pack'
 import { type ContextRequest, type ContextResult, EMPTY_CONTEXT, HOST_PROFILES, type HostProfile, PACK_BUDGETS, hostProfileFor } from './types'
 
 /** Candidates read per build; budgets fit about 80 lines, so this leaves room for merges. */
@@ -63,8 +63,10 @@ export function rebuildProjectPacks(db: Database, projectKey: string, now: numbe
   return db.transaction(() => HOST_PROFILES.filter((profile) => rebuildPack(db, projectKey, profile, now) !== null).length)()
 }
 
+/** A pack stored under an older frame tag is stale, so the first use after a rename rebuilds it. */
 export function isFresh(pack: PackRow, maxId: number, now: number): boolean {
-  return pack.builtFromMaxId === maxId && now - pack.builtAt < PACK_MAX_AGE_MS
+  const frameCurrent = pack.body === '' || pack.body.startsWith(FRAME_OPEN)
+  return frameCurrent && pack.builtFromMaxId === maxId && now - pack.builtAt < PACK_MAX_AGE_MS
 }
 
 /** The stored pack when fresh, else a rebuilt one. */

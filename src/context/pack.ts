@@ -10,8 +10,8 @@ import { type PackItem, mergeNearDuplicates } from './merge'
 import { nameTokens } from './similarity'
 import { CHARS_PER_TOKEN, type ContextResult, EMPTY_CONTEXT, type PackObservation, contradictionLabel, estimateTokens } from './types'
 
-export const FRAME_OPEN = '<shared-agent-memory>'
-export const FRAME_CLOSE = '</shared-agent-memory>'
+export const FRAME_OPEN = '<kinfold>'
+export const FRAME_CLOSE = '</kinfold>'
 export const MAX_TITLE_CHARS = 200
 export const MAX_NEXT_STEPS_CHARS = 600
 
@@ -44,7 +44,7 @@ export function formatAge(ms: number): string {
 
 /** One line of stored text: no newlines, no frame tags that could close the block early, capped. */
 export function oneLine(text: string, maxChars: number): string {
-  const flat = text.replace(/<\/?shared-agent-memory[^>]*>/gi, ' ').replace(/\s+/g, ' ').trim()
+  const flat = text.replace(/<\/?(?:kinfold|shared-agent-memory)[^>]*>/gi, ' ').replace(/\s+/g, ' ').trim()
   return flat.length <= maxChars ? flat : `${flat.slice(0, maxChars - 1)}…`
 }
 

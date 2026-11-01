@@ -149,7 +149,7 @@ test('SessionStart prints exactly one SessionStart JSON object carrying the pack
   const output = JSON.parse(run.stdout) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } }
   expect(Object.keys(output)).toEqual(['hookSpecificOutput'])
   expect(output.hookSpecificOutput.hookEventName).toBe('SessionStart')
-  expect(output.hookSpecificOutput.additionalContext).toStartWith('<shared-agent-memory>')
+  expect(output.hookSpecificOutput.additionalContext).toStartWith('<kinfold>')
   expect(output.hookSpecificOutput.additionalContext).toContain('[opencode · 1m · tool-verified] Hook injects the shared pack (#1)')
 
   const reader = openStore(dataDir)

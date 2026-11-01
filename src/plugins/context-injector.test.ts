@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test'
 import { type ContextRequest, type ContextResult, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
 import { DELTA_INTERVAL_MS, MAX_DELTAS_PER_SESSION, createContextInjector } from './context-injector'
 
-const PACK: ContextResult = { text: '<shared-agent-memory>pack</shared-agent-memory>', observationIds: [1], tokens: 10 }
-const delta = (n: number): ContextResult => ({ text: `<shared-agent-memory>delta ${n}</shared-agent-memory>`, observationIds: [100 + n], tokens: 8 })
+const PACK: ContextResult = { text: '<kinfold>pack</kinfold>', observationIds: [1], tokens: 10 }
+const delta = (n: number): ContextResult => ({ text: `<kinfold>delta ${n}</kinfold>`, observationIds: [100 + n], tokens: 8 })
 
 interface Rig {
   requests: ContextRequest[]

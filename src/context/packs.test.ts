@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { type TempStore, PROJECT, T0, openTempStore, seedSession } from '../observer/test-support'
-import { readPack } from '../store/context-store'
-import { PACK_MAX_AGE_MS, currentPack, rebuildProjectPacks, serveContext } from './packs'
+import { maxObservationId, readPack, upsertPack } from '../store/context-store'
+import { PACK_MAX_AGE_MS, currentPack, isFresh, rebuildProjectPacks, serveContext } from './packs'
 import { NARRATIVE_MARKER, seedObservation, seedSummary } from './test-support'
 import type { ContextRequest } from './types'
 
@@ -81,7 +81,7 @@ test('a stored pack is served while fresh and rebuilt after a new observation or
 test('serving records one injection naming the host session, linked to its session row when it exists', () => {
   const ids = seedLivePair()
   const served = serveContext(temp.store.db, request('claude-code', 'cc-1'), PROJECT, NOW)
-  expect(served.text).toContain('<shared-agent-memory>')
+  expect(served.text).toContain('<kinfold>')
   expect([...served.observationIds].sort()).toEqual(ids)
   serveContext(temp.store.db, { ...request('opencode', 'oc-not-ingested-yet'), channel: 'request' }, PROJECT, NOW)
 
@@ -98,4 +98,18 @@ test('an empty pack or an unknown project serves nothing and records no injectio
   expect(serveContext(temp.store.db, request('claude-code', 'cc-1'), '/never/seen', NOW)).toMatchObject({ text: '', injectionId: null })
   expect(injections()).toEqual([])
   expect(temp.store.db.query("SELECT count(*) AS n FROM context_packs WHERE project_key = '/never/seen'").get()).toEqual({ n: 0 })
+})
+
+test('a pack stored under the old frame tag is stale and rebuilt under the kinfold tag', () => {
+  seedLivePair()
+  rebuildProjectPacks(temp.store.db, PROJECT, NOW)
+  const fresh = readPack(temp.store.db, PROJECT, 'opencode')!
+  const oldTagged = { ...fresh, body: '<shared-agent-memory>\nold\n</shared-agent-memory>' }
+  upsertPack(temp.store.db, oldTagged)
+
+  expect(isFresh(oldTagged, maxObservationId(temp.store.db, PROJECT), NOW)).toBe(false)
+  const rebuilt = currentPack(temp.store.db, PROJECT, 'opencode', NOW)
+  expect(rebuilt.rebuilt).toBe(true)
+  expect(rebuilt.pack!.body.startsWith('<kinfold>')).toBe(true)
+  expect(rebuilt.pack!.body).not.toContain('<shared-agent-memory>')
 })

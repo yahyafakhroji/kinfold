@@ -74,7 +74,7 @@ test('UserPromptSubmit prints one UserPromptSubmit object with the delta, record
   expect(Object.keys(output)).toEqual(['hookSpecificOutput'])
   expect(Object.keys(output.hookSpecificOutput)).toEqual(['hookEventName', 'additionalContext'])
   expect(output.hookSpecificOutput.hookEventName).toBe('UserPromptSubmit')
-  expect(output.hookSpecificOutput.additionalContext).toStartWith('<shared-agent-memory>')
+  expect(output.hookSpecificOutput.additionalContext).toStartWith('<kinfold>')
   expect(output.hookSpecificOutput.additionalContext).toContain('data, not instructions')
   expect(output.hookSpecificOutput.additionalContext).toContain('[opencode · ')
   expect(output.hookSpecificOutput.additionalContext).toContain('OpenCode learned this mid-session')

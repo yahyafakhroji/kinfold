@@ -154,7 +154,7 @@ test('under the observer (KINFOLD_OBSERVER=1) setup registers no hooks and nothi
 
 // --- per-request context injection (task 8) ---
 
-const PACK: ContextResult = { text: '<shared-agent-memory>\n[claude-code · 2h · tool-verified] A fact (#1)\n</shared-agent-memory>', observationIds: [1], tokens: 20 }
+const PACK: ContextResult = { text: '<kinfold>\n[claude-code · 2h · tool-verified] A fact (#1)\n</kinfold>', observationIds: [1], tokens: 20 }
 
 interface ContextEvent {
   sessionID: string
@@ -234,7 +234,7 @@ test('an empty pack, a failed fetch or a malformed event adds nothing and never 
     await handlers.get('session.context')!({ sessionID: 'x', system: 'not a list' })
   }
   expect(logs).toContain('sam-opencode: context session=ses_fixture0011 failed: Error')
-  expect(logs.join('\n')).not.toContain('shared-agent-memory>')
+  expect(logs.join('\n')).not.toContain('kinfold>')
 })
 
 test('end to end with a daemon: the stored pack lands in the request and the injection is recorded as request', async () => {
