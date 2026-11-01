@@ -57,7 +57,7 @@ export type Action =
   /** Rename migration: bootout dev.shared-agent-memory.daemon when launchd has it loaded. */
   | { kind: 'stop-legacy-agent'; uid: number }
   /** Rename migration: stops here while any daemon answers /health; it would keep writing to the store being moved. */
-  | { kind: 'migration-daemon-down'; port: number }
+  | { kind: 'migration-daemon-down'; port: number; waitMs: number }
   /** Rename migration: the old service's value created under kinfold (never replacing one) and read back equal; a different kinfold value throws. */
   | { kind: 'copy-keychain-entry'; ref: string }
   /** Rename migration: one renameSync, then a symlink at `from` pointing to `to`; linkOnly when the rename ran already. */
@@ -102,7 +102,7 @@ export function describeAction(action: Action): string {
     case 'install-sqlite3mc': return describeSqlite3mcInstall(action.path)
     case 'create-db-key': return describeCreateDbKey(action.path)
     case 'stop-legacy-agent': return `${legacyBootoutArgv(action.uid).join(' ')} (if loaded): stop the daemon installed under the old name`
-    case 'migration-daemon-down': return `check that no daemon answers /health on port ${action.port} (one still running must be stopped first; nothing is moved while it runs)`
+    case 'migration-daemon-down': return `check that no daemon answers /health on port ${action.port}, waiting up to ${action.waitMs / 1000} s (one still running must be stopped first; nothing is moved while it runs)`
     case 'copy-keychain-entry': return describeCopyKeychainEntry(action.ref)
     case 'move-data-dir': return describeMoveDataDir(action.from, action.to, action.linkOnly === true)
     case 'remove-legacy-keychain-entry': return describeRemoveLegacyEntry(action.ref)
@@ -171,15 +171,18 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'install-sqlite3mc': return installSqlite3mc(env, action.path)
     case 'create-db-key': return createDbKey(env, action.path)
     case 'stop-legacy-agent': return stopLegacyAgent(env)
-    case 'migration-daemon-down': return checkDaemonDown(env, action.port)
+    case 'migration-daemon-down': return checkDaemonDown(env, action.port, action.waitMs)
     case 'copy-keychain-entry': return copyKeychainEntry(env, action.ref)
     case 'move-data-dir': return moveDataDir(env, action.from, action.to)
     case 'remove-legacy-keychain-entry': return removeLegacyEntry(env, action.ref)
   }
 }
 
-/** Prints the plan; unless dry, applies it step by step and stops at the first failure, naming the step. */
-export async function runPlan(env: InstallEnv, actions: readonly Action[], dryRun: boolean): Promise<void> {
+/**
+ * Prints the plan; unless dry, applies it step by step and stops at the first failure, naming the step.
+ * failureNote adds what the failure leaves behind (the rename migration says which daemon still runs).
+ */
+export async function runPlan(env: InstallEnv, actions: readonly Action[], dryRun: boolean, failureNote?: (index: number) => string | null): Promise<void> {
   if (actions.length === 0) {
     env.out(dryRun ? 'plan: nothing to change' : 'nothing to change')
     return
@@ -198,7 +201,8 @@ export async function runPlan(env: InstallEnv, actions: readonly Action[], dryRu
       if (kept !== null) env.out(`     ${kept}`)
     } catch (error: unknown) {
       env.out(`${line}  [failed]`)
-      throw new Error(`step ${index + 1} failed: ${error instanceof Error ? error.message : String(error)}`)
+      const note = failureNote?.(index) ?? null
+      throw new Error(`step ${index + 1} failed: ${error instanceof Error ? error.message : String(error)}${note === null ? '' : `; ${note}`}`)
     }
   }
 }

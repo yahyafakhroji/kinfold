@@ -8,7 +8,8 @@
 import { join } from 'node:path'
 import type { InstallEnv } from './env'
 import { plannedBackup, readJsonObject, serializeJson } from './files'
-import { MCP_SERVER_NAME, type McpEntryState, type McpTarget, claudeMcpEntry, inspectMcpEntry, mergeMcpEntry, removeMcpEntry } from './mcp-config'
+import { LEGACY_MCP_SERVER_NAME } from '../names'
+import { MCP_SERVER_NAME, type McpEntryState, type McpTarget, claudeMcpEntry, hasOurMcpEntryNamed, inspectMcpEntry, mergeMcpEntry, removeMcpEntry, removeMcpEntryNamed } from './mcp-config'
 import type { Action } from './plan'
 
 /** Same modes install.ts gives the files it creates in a host's config dir. */
@@ -75,11 +76,18 @@ export function claudeMcpInstallActions(env: InstallEnv): Action[] {
   return state === 'stale' ? [claudeRemove, claudeAdd(mcpTarget(env))] : [claudeAdd(mcpTarget(env))]
 }
 
+/**
+ * Our `mcp` entry in opencode.json, in one write that also drops our entry
+ * under the pre-rename name, so the file never lacks a memory server and is
+ * never written twice by one plan. A foreign kinfold entry leaves the old one too.
+ */
 export function opencodeMcpInstallActions(env: InstallEnv): Action[] {
   const paths = mcpPaths(env)
   const file = readJsonObject(paths.opencodeConfig)
-  const state = file.exists ? inspectMcpEntry(file.value, 'opencode', mcpTarget(env)) : 'no'
-  if (state === 'yes') {
+  const config = file.exists ? file.value : {}
+  const state = file.exists ? inspectMcpEntry(config, 'opencode', mcpTarget(env)) : 'no'
+  const legacy = hasOurMcpEntryNamed(config, 'opencode', LEGACY_MCP_SERVER_NAME)
+  if (state === 'yes' && !legacy) {
     env.out(`opencode: MCP server already in ${paths.opencodeConfig}`)
     return []
   }
@@ -87,8 +95,13 @@ export function opencodeMcpInstallActions(env: InstallEnv): Action[] {
     env.out(`opencode: an MCP server named ${MCP_SERVER_NAME} that is not ours is in ${paths.opencodeConfig}; left alone`)
     return []
   }
-  const merged = mergeMcpEntry(file.exists ? file.value : {}, 'opencode', mcpTarget(env))
+  const merged = mergeMcpEntry(legacy ? removeMcpEntryNamed(config, 'opencode', LEGACY_MCP_SERVER_NAME).config : config, 'opencode', mcpTarget(env))
   const backup = file.exists ? plannedBackup(paths.opencodeConfig, env.now()) : null
+  const parts = [
+    state === 'yes' ? '' : `${state === 'stale' ? 'replace the stale' : 'add the'} Kinfold MCP server under "mcp"`,
+    legacy ? `remove the one under its old name ${LEGACY_MCP_SERVER_NAME}` : '',
+    'every other key kept',
+  ].filter((part) => part !== '')
   return [
     ...(file.exists ? [] : [{ kind: 'mkdir', path: paths.opencodeDir, mode: DIR_MODE } as const]),
     ...(backup !== null ? [{ kind: 'backup', from: paths.opencodeConfig, to: backup } as const] : []),
@@ -97,7 +110,7 @@ export function opencodeMcpInstallActions(env: InstallEnv): Action[] {
       path: paths.opencodeConfig,
       content: serializeJson(merged.config, file.exists ? file.text : null),
       mode: file.exists ? file.mode : FILE_MODE,
-      summary: `${state === 'stale' ? 'replace the stale' : 'add the'} Kinfold MCP server under "mcp"; every other key kept`,
+      summary: parts.join('; '),
     },
   ]
 }

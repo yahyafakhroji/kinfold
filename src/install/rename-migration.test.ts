@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import { randomBytes } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RunningDaemon } from '../daemon/daemon'
 import { LEGACY_LAUNCH_AGENT_LABEL, LEGACY_MCP_SERVER_NAME, MCP_SERVER_NAME } from '../names'
@@ -10,6 +10,8 @@ import { openStore } from '../store/db'
 import { checkHealth, readDaemonInfo } from './daemon-client'
 import { installPaths } from './env'
 import { EXIT_FAILED, EXIT_OK, install } from './install'
+import { TAKEOVER_WAIT_MS } from './plan'
+import { ObserverError } from '../observer/types'
 import { LAUNCHCTL } from './launch-agent'
 import { claudeMcpEntry, openCodeMcpEntry, removeMcpEntryNamed } from './mcp-config'
 import { isOwnShim, shimContent } from './opencode-shim'
@@ -26,6 +28,7 @@ const VALUES: Readonly<Record<string, string>> = {
   'hmac-master': hex(),
   'hmac-legacy': hex(),
   'db-key': newDbKey(),
+  'db-key-next': newDbKey(),
 }
 const REFS = Object.keys(VALUES)
 
@@ -128,7 +131,7 @@ test('a legacy install moves: entries copied and read back before any delete, da
   const launchctl = w.commands.filter((c) => c.argv[0] === LAUNCHCTL).map((c) => c.argv.slice(1, 3).join(' '))
   expect(launchctl.indexOf(`bootout gui/${UID}/${LEGACY_LAUNCH_AGENT_LABEL}`)).toBeLessThan(launchctl.indexOf(`bootstrap gui/${UID}`))
   const claude = w.commands.filter((c) => c.argv[0] === 'claude' && c.argv[1] === 'mcp').map((c) => c.argv.slice(2, 6).join(' '))
-  expect(claude).toEqual([`remove --scope user ${LEGACY_MCP_SERVER_NAME}`, `add-json --scope user ${MCP_SERVER_NAME}`])
+  expect(claude).toEqual([`add-json --scope user ${MCP_SERVER_NAME}`, `remove --scope user ${LEGACY_MCP_SERVER_NAME}`])
   const opencode = JSON.parse(readFileSync(mcpPaths(w.env).opencodeConfig, 'utf8'))
   expect(Object.keys(opencode.mcp)).toEqual([MCP_SERVER_NAME])
   expect(opencode.theme).toBe('dark')
@@ -249,10 +252,15 @@ test('the dry run lists every step and shows no Keychain value', async () => {
     `move ${paths.legacyDataDir} -> ${w.dataDir}`,
     `remove ${paths.legacyLaunchAgentPlist}`,
     ...REFS.map((ref) => `delete-generic-password -s shared-agent-memory -a ${ref}`),
+    'then, among the install steps, the agent wiring',
     `claude mcp remove --scope user ${LEGACY_MCP_SERVER_NAME}`,
-    `write ${mcpPaths(w.env).opencodeConfig}`,
+    `write ${mcpPaths(w.env).opencodeConfig}: add the Kinfold MCP server under "mcp"; remove the one under its old name ${LEGACY_MCP_SERVER_NAME}`,
     `remove ${paths.legacyOpencodePlugin}`,
   ]) expect(out).toContain(part)
+  // Each old entry is listed after the kinfold one that replaces it.
+  expect(out.indexOf(`claude mcp add-json --scope user ${MCP_SERVER_NAME}`)).toBeLessThan(out.indexOf(`claude mcp remove --scope user ${LEGACY_MCP_SERVER_NAME}`))
+  expect(out.indexOf(`write ${paths.opencodePlugin}`)).toBeLessThan(out.indexOf(`remove ${paths.legacyOpencodePlugin}`))
+  expect(out.indexOf(`write ${mcpPaths(w.env).opencodeConfig}`)).toBe(out.lastIndexOf(`write ${mcpPaths(w.env).opencodeConfig}`))
   expect(snapshotTree(join(w.home, 'Library'))).toEqual(before)
   expect(readFileSync(mcpPaths(w.env).opencodeConfig, 'utf8')).toBe(opencodeBefore)
   expect(w.launchd.legacyLoaded).toBe(true)
@@ -278,7 +286,7 @@ test('a foreign file under the old shim name stays, and the rest still migrates'
   writeFileSync(paths.legacyOpencodePlugin, 'export const mine = true\n')
   expect(await install(w.env, YES)).toBe(EXIT_OK)
   expect(readFileSync(paths.legacyOpencodePlugin, 'utf8')).toBe('export const mine = true\n')
-  expect(w.out).toContain(`migration: ${paths.legacyOpencodePlugin} is not a plugin shim we wrote; left alone`)
+  expect(w.out).toContain(`opencode: ${paths.legacyOpencodePlugin} is not a plugin shim we wrote; left alone`)
   expect(lstatSync(paths.legacyDataDir).isSymbolicLink()).toBe(true)
 })
 
@@ -289,4 +297,84 @@ test('removeMcpEntryNamed takes only our entry under that name', () => {
   const foreign = { mcp: { [LEGACY_MCP_SERVER_NAME]: { type: 'local', command: ['node', 'x.js'] } } }
   expect(removeMcpEntryNamed(foreign, 'opencode', LEGACY_MCP_SERVER_NAME)).toEqual({ config: foreign, removed: false })
   expect(removeMcpEntryNamed({ mcp: { [LEGACY_MCP_SERVER_NAME]: openCodeMcpEntry(target) } }, 'opencode', LEGACY_MCP_SERVER_NAME)).toEqual({ config: {}, removed: true })
+})
+
+function expectLegacyWiringKept(w: FakeWorld): void {
+  const paths = installPaths(w.env)
+  expect(existsSync(paths.legacyOpencodePlugin)).toBe(true)
+  expect(Object.keys(JSON.parse(readFileSync(mcpPaths(w.env).opencodeConfig, 'utf8')).mcp)).toContain(LEGACY_MCP_SERVER_NAME)
+  expect(w.commands.some((c) => c.argv[0] === 'claude' && c.argv[2] === 'remove' && c.argv.includes(LEGACY_MCP_SERVER_NAME))).toBe(false)
+}
+
+test('a failed install step after the migration leaves the old MCP entries and shim in place', async () => {
+  const w = legacyWorld({ running: true })
+  const realRun = w.env.run
+  w.env.run = async (request) => (request.argv[0] === 'claude' && request.argv[2] === 'add-json' ? { exitCode: 1, stdout: '' } : realRun(request))
+  expect(await install(w.env, YES)).toBe(EXIT_FAILED)
+  expect(w.out.at(-1)).toContain('claude mcp failed')
+  // The migration itself finished: the store and keys moved.
+  expect(lstatSync(installPaths(w.env).legacyDataDir).isSymbolicLink()).toBe(true)
+  expect(w.legacyKeychain.size).toBe(0)
+  expectLegacyWiringKept(w)
+})
+
+test('an observer check that fails after the migration leaves the old MCP entries and shim in place', async () => {
+  const w = legacyWorld({ running: true })
+  w.env.runnerFor = () => ({ run: async () => { throw new ObserverError('exit_nonzero', 'test failure') } })
+  expect(await install(w.env, YES)).toBe(EXIT_FAILED)
+  expect(w.out.at(-1)).toContain('observer check for claude-code failed')
+  expect(lstatSync(installPaths(w.env).legacyDataDir).isSymbolicLink()).toBe(true)
+  expectLegacyWiringKept(w)
+})
+
+test('a data dir moved without its link gets only the link, and the rest migrates', async () => {
+  const w = legacyWorld()
+  const paths = installPaths(w.env)
+  renameSync(paths.legacyDataDir, w.dataDir)
+  expect(renameMigrationActions(w.env).find((action) => action.kind === 'move-data-dir')).toEqual({ kind: 'move-data-dir', from: paths.legacyDataDir, to: w.dataDir, linkOnly: true })
+  w.env.renameDir = () => {
+    throw new Error('no second rename')
+  }
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(readlinkSync(paths.legacyDataDir)).toBe(w.dataDir)
+  expect(w.legacyKeychain.size).toBe(0)
+  for (const ref of REFS) expect(w.keychainValues.get(ref)).toBe(VALUES[ref])
+})
+
+test('installing only Claude Code removes only its old entry; the OpenCode ones stay', async () => {
+  const w = legacyWorld()
+  const opencodeBefore = readFileSync(mcpPaths(w.env).opencodeConfig, 'utf8')
+  expect(await install(w.env, { ...YES, hosts: ['claude-code'] })).toBe(EXIT_OK)
+  expect(w.commands.filter((c) => c.argv[0] === 'claude' && c.argv[1] === 'mcp').map((c) => c.argv.slice(2, 6).join(' ')))
+    .toEqual([`add-json --scope user ${MCP_SERVER_NAME}`, `remove --scope user ${LEGACY_MCP_SERVER_NAME}`])
+  expect(readFileSync(mcpPaths(w.env).opencodeConfig, 'utf8')).toBe(opencodeBefore)
+  expect(existsSync(installPaths(w.env).legacyOpencodePlugin)).toBe(true)
+  expect(existsSync(installPaths(w.env).opencodePlugin)).toBe(false)
+  expect(lstatSync(installPaths(w.env).legacyDataDir).isSymbolicLink()).toBe(true)
+})
+
+test('--takeover waits as long for the old daemon as the install waits for a foreign one', () => {
+  const w = legacyWorld()
+  const wait = (takeover: boolean) => renameMigrationActions(w.env, { takeover }).find((action) => action.kind === 'migration-daemon-down')
+  expect(wait(true)).toMatchObject({ waitMs: TAKEOVER_WAIT_MS })
+  expect(wait(false)).toMatchObject({ waitMs: 15_000 })
+})
+
+test('a failure after the bootout says the old daemon stays stopped and that a rerun finishes the migration', async () => {
+  const w = legacyWorld({ running: true })
+  w.keychain.add('db-key')
+  w.keychainValues.set('db-key', newDbKey())
+  expect(await install(w.env, YES)).toBe(EXIT_FAILED)
+  expect(w.out.at(-1)).toContain('the old daemon stays stopped until you next log in')
+  expect(w.out.at(-1)).toContain('rerun kinfold install to finish the migration')
+})
+
+test('a cross-volume rename says how to fix it', async () => {
+  const w = legacyWorld()
+  w.env.renameDir = () => {
+    throw Object.assign(new Error('EXDEV: cross-device link not permitted'), { code: 'EXDEV' })
+  }
+  expect(await install(w.env, YES)).toBe(EXIT_FAILED)
+  expect(w.out.at(-1)).toContain('move ')
+  expect(w.out.at(-1)).toContain('or unset KINFOLD_DATA_DIR')
 })

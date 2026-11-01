@@ -21,11 +21,11 @@ import { bootoutArgv, bootstrapArgv, isAgentLoaded, legacyPrintArgv, plistConten
 import { ChoiceError, type ChoiceOptions, type ObserverChoice, chooseObservers, describeInput } from './observer-choice'
 import { hmacMigrationActions } from './hmac-migration'
 import { hostHookInstallActions, hostVersionActions } from './host-wiring'
-import { claudeMcpInstallActions, opencodeMcpInstallActions } from './mcp-wiring'
+import { claudeMcpInstallActions, claudeMcpState, opencodeMcpInstallActions } from './mcp-wiring'
 import { inspectShim, shimContent } from './opencode-shim'
 import { scanDataDirModes } from './permissions'
 import { type Action, runPlan, stopCommand } from './plan'
-import { renameMigrationActions } from './rename-migration'
+import { legacyClaudeMcpRemoval, legacyShimRemoval, migrationFailureNote, renameMigrationActions } from './rename-migration'
 import { sqlite3mcInstallActions } from './sqlite3mc-install'
 import { vec0InstallActions } from './vec0-install'
 
@@ -151,6 +151,22 @@ function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeove
   return [...mkdirIfMissing(paths.launchAgentsDir, DIR_MODE), ...write, ...wait, ...load, { kind: 'wait-health' }]
 }
 
+/**
+ * Claude Code and OpenCode wiring. Each entry or shim under the pre-rename
+ * name goes only after the kinfold one is written (the old opencode.json key
+ * inside that same write), and only for the hosts being installed, so a
+ * failed step never leaves an agent without a memory server. Reads host
+ * config files only, never the data dir or the Keychain.
+ */
+function agentWiringActions(env: InstallEnv, hosts: readonly InstallHost[]): Action[] {
+  const claudeState = hosts.includes('claude-code') ? claudeMcpState(env) : null
+  const claudeLegacy = claudeState === 'yes' || claudeState === 'no' || claudeState === 'stale' ? legacyClaudeMcpRemoval(env) : []
+  return [
+    ...(hosts.includes('claude-code') ? [...claudeActions(env), ...claudeMcpInstallActions(env), ...claudeLegacy] : []),
+    ...(hosts.includes('opencode') ? [...opencodeActions(env), ...opencodeMcpInstallActions(env), ...legacyShimRemoval(env)] : []),
+  ]
+}
+
 function reportDetections(env: InstallEnv, detections: readonly HostDetection[]): void {
   for (const detection of detections) {
     const version = detection.version !== null ? ` ${detection.version}` : ''
@@ -177,8 +193,7 @@ function buildPlan(env: InstallEnv, prepared: Prepared, choices: readonly Observ
     ...vec0.actions,
     ...hostVersionActions(env, detections),
     ...credentialActions(choices),
-    ...(hosts.includes('claude-code') ? [...claudeActions(env), ...claudeMcpInstallActions(env)] : []),
-    ...(hosts.includes('opencode') ? [...opencodeActions(env), ...opencodeMcpInstallActions(env)] : []),
+    ...agentWiringActions(env, hosts),
     ...(hosts.includes('codex') ? hostHookInstallActions(env, 'codex') : []),
     ...(hosts.includes('cursor') ? hostHookInstallActions(env, 'cursor') : []),
     ...launchAgentActions(env, situation, takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon),
@@ -209,16 +224,20 @@ async function prepare(env: InstallEnv, options: InstallOptions): Promise<Prepar
  * The rename migration runs as its own plan before the install plan is built,
  * so every later step plans against the moved data dir and the kinfold
  * Keychain entries (planned before, the HMAC step would mint a new master
- * over the copied one). A dry run therefore stops after listing it.
+ * over the copied one). A dry run therefore lists it and the agent wiring
+ * (which reads host config files only), then stops.
  * Returns the situation to plan with, or null when a dry run stopped here.
  */
-async function migrate(env: InstallEnv, prepared: Prepared, dryRun: boolean): Promise<Prepared | null> {
-  const actions = renameMigrationActions(env, prepared.hosts)
+async function migrate(env: InstallEnv, prepared: Prepared, options: InstallOptions): Promise<Prepared | null> {
+  const actions = renameMigrationActions(env, { takeover: options.takeover })
   if (actions.length === 0) return prepared
-  env.out(`migration: an install under the old name Shared Agent Memory was found; it moves to the Kinfold names first`)
-  await runPlan(env, actions, dryRun)
-  if (dryRun) {
-    env.out(`the install steps are planned once the migration has run, against ${env.dataDir}; run kinfold install --dry-run again then to see them`)
+  env.out('migration: an install under the old name Shared Agent Memory was found; it moves to the Kinfold names first')
+  await runPlan(env, actions, options.dryRun, (index) => migrationFailureNote(actions, index))
+  if (options.dryRun) {
+    // The wiring steps read host config files only, which the migration leaves alone, so this part of the install plan is exact now.
+    env.out('then, among the install steps, the agent wiring (old entries go only after the kinfold ones are written):')
+    await runPlan(env, agentWiringActions(env, prepared.hosts), true)
+    env.out(`the other install steps are planned once the migration has run, against ${env.dataDir}; run kinfold install --dry-run again then to see them`)
     return null
   }
   env.out('migration: done')
@@ -229,7 +248,7 @@ export async function install(env: InstallEnv, options: InstallOptions): Promise
   try {
     const found = await prepare(env, options)
     if (typeof found === 'number') return found
-    const prepared = await migrate(env, found, options.dryRun)
+    const prepared = await migrate(env, found, options)
     if (prepared === null) {
       if (!found.situation.foreign || options.takeover) return EXIT_OK
       for (const line of foreignDaemonMessage(found.situation)) env.out(line)
