@@ -8,7 +8,7 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { isRecord } from '../../contract/event'
 import { DATA_DIR_MODE } from '../../store/data-dir'
-import { OBSERVER_ENV_FLAG } from '../env'
+import { LEGACY_OBSERVER_ENV_FLAG, OBSERVER_ENV_FLAG } from '../env'
 import { ObserverError, type ObserverPrompt, type ObserverRunner, type RunnerResult } from '../types'
 
 export interface SpawnRequest {
@@ -49,7 +49,8 @@ export function observerEnv(parent: Readonly<Record<string, string | undefined>>
     const value = parent[key]
     if (value !== undefined && value !== '') env[key] = value
   }
-  return { ...env, [OBSERVER_ENV_FLAG]: '1' }
+  // The legacy name is for old hook code during the migration; it goes when the SAM_* fallback goes.
+  return { ...env, [OBSERVER_ENV_FLAG]: '1', [LEGACY_OBSERVER_ENV_FLAG]: '1' }
 }
 
 export function claudeCliArgs(binary: string, model: string, systemPrompt: string): string[] {

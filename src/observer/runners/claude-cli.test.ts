@@ -54,10 +54,10 @@ test('spawns claude in print mode with haiku, no tools, no settings, no MCP and 
   expect(requests[0]!.stdin).toBe('EVENTS')
 })
 
-test('the child gets a minimal env with KINFOLD_OBSERVER=1 and no API keys', async () => {
+test('the child gets a minimal env with KINFOLD_OBSERVER=1 (and SAM_OBSERVER=1 for old hook code) and no API keys', async () => {
   const { spawn, requests } = capture()
   await runner(spawn).run(PROMPT)
-  expect(requests[0]!.env).toEqual({ PATH: '/usr/bin:/bin', HOME: '/Users/dev', USER: 'dev', TMPDIR: '/tmp/x', KINFOLD_OBSERVER: '1' })
+  expect(requests[0]!.env).toEqual({ PATH: '/usr/bin:/bin', HOME: '/Users/dev', USER: 'dev', TMPDIR: '/tmp/x', KINFOLD_OBSERVER: '1', SAM_OBSERVER: '1' })
 })
 
 test('the child runs in <dataDir>/observer, created 0700, never a project folder', async () => {

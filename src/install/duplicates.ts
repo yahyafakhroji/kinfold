@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path'
 import { samScriptsIn } from './claude-hooks'
 import { readJsonObject } from './files'
 import { shimTarget } from './opencode-shim'
+import { CLI_NAME, PRODUCT } from '../names'
 
 const PROJECT_SETTINGS = [join('.claude', 'settings.local.json'), join('.claude', 'settings.json')]
 const PROJECT_PLUGINS_DIR = join('.opencode', 'plugins')
@@ -41,8 +42,8 @@ export function findDuplicateWiring(cwd: string, userFiles: readonly string[]): 
 export function duplicateWarning(files: readonly string[]): string[] {
   if (files.length === 0) return []
   return [
-    'warning: this directory also wires shared-agent-memory, so its events would be captured twice:',
+    `warning: this directory also wires ${PRODUCT}, so its events would be captured twice:`,
     ...files.map((file) => `  ${file}`),
-    '  remove those entries (or files) yourself; kinfold never edits project files.',
+    `  remove those entries (or files) yourself; ${CLI_NAME} never edits project files.`,
   ]
 }

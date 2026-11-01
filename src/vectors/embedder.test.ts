@@ -24,6 +24,7 @@ test('one POST with the model, the inputs, 512 dims and float encoding; the key 
   expect(requests[0]!.url).toBe(OPENROUTER_EMBEDDINGS_ENDPOINT)
   expect(JSON.parse(String(requests[0]!.init.body))).toEqual({ model: DEFAULT_EMBED_MODEL, input: ['first text', 'second text'], dimensions: 512, encoding_format: 'float' })
   expect((requests[0]!.init.headers as Record<string, string>).authorization).toBe(`Bearer ${KEY}`)
+  expect((requests[0]!.init.headers as Record<string, string>)['x-title']).toBe('kinfold')
   expect(String(requests[0]!.init.body)).not.toContain(KEY)
 })
 

@@ -8,6 +8,7 @@
 // key replaced in the keychain takes effect without a daemon restart.
 
 import { isRecord } from '../contract/event'
+import { CLI_NAME } from '../names'
 
 export const OPENROUTER_EMBEDDINGS_ENDPOINT = 'https://openrouter.ai/api/v1/embeddings'
 export const DEFAULT_EMBED_MODEL = 'openai/text-embedding-3-small'
@@ -97,7 +98,7 @@ export function createOpenRouterEmbedder(options: OpenRouterEmbedderOptions): Em
     try {
       return await fetchFn(OPENROUTER_EMBEDDINGS_ENDPOINT, {
         method: 'POST',
-        headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', 'x-title': 'shared-agent-memory' },
+        headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', 'x-title': CLI_NAME },
         body: JSON.stringify({ model, input: texts, dimensions: dims, encoding_format: 'float' }),
         signal,
       })

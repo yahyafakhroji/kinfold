@@ -20,7 +20,7 @@ export function envName(key: EnvKey): string {
   return `KINFOLD_${key}`
 }
 
-function legacyName(key: EnvKey): string {
+export function legacyName(key: EnvKey): string {
   return `SAM_${key}`
 }
 

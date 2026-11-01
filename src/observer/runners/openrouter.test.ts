@@ -35,6 +35,7 @@ test('posts model openrouter/auto with the Bearer key to the chat completions en
   expect(calls[0]!.url).toBe(OPENROUTER_ENDPOINT)
   expect(calls[0]!.init.method).toBe('POST')
   expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe(`Bearer ${KEY}`)
+  expect((calls[0]!.init.headers as Record<string, string>)['x-title']).toBe('kinfold')
   const body = JSON.parse(calls[0]!.init.body as string)
   expect(body.model).toBe('openrouter/auto')
   expect(body.messages).toEqual([{ role: 'system', content: 'SYSTEM RULES' }, { role: 'user', content: 'EVENTS' }])

@@ -4,6 +4,7 @@
 // header; errors carry an HTTP status or an error name, never the body.
 
 import { isRecord } from '../../contract/event'
+import { CLI_NAME } from '../../names'
 import { ObserverError, type ObserverPrompt, type ObserverRunner, type RunnerResult } from '../types'
 
 export const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
@@ -64,7 +65,7 @@ export function createOpenRouterRunner(options: OpenRouterOptions): ObserverRunn
       headers: {
         authorization: `Bearer ${options.apiKey}`,
         'content-type': 'application/json',
-        'x-title': 'shared-agent-memory',
+        'x-title': CLI_NAME,
       },
       body: requestBody(options.model, prompt),
       signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS),
