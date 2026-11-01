@@ -2,7 +2,7 @@
 // The child runs in print mode with every built-in tool off, no settings files
 // (so no hooks or plugins), no MCP servers and no saved session, from a private
 // directory under the data dir rather than any project. Its env is minimal and
-// carries SAM_OBSERVER=1, so our own hooks capture nothing if they run anyway.
+// carries KINFOLD_OBSERVER=1, so our own hooks capture nothing if they run anyway.
 
 import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'

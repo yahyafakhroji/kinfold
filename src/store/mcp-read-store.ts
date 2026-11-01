@@ -16,7 +16,7 @@ export interface McpRead {
   tool: McpTool
   /** The scope the tool read: a project key, or '*' for every project. */
   projectKey: string
-  /** From SAM_MCP_HOST in the server's environment; null when the entry does not set it. */
+  /** From KINFOLD_MCP_HOST in the server's environment; null when the entry does not set it. */
   host: string | null
   returnedIds: readonly number[]
   rows: number

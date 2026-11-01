@@ -33,9 +33,10 @@ function serverWith(reporter?: ReturnType<typeof createReadReporter>, logs: stri
 }
 
 test('hostFromEnv takes a short lowercase name and nothing else', async () => {
+  expect(hostFromEnv({ KINFOLD_MCP_HOST: 'opencode' })).toBe('opencode')
   expect(hostFromEnv({ SAM_MCP_HOST: 'opencode' })).toBe('opencode')
   expect(hostFromEnv({})).toBeNull()
-  expect(hostFromEnv({ SAM_MCP_HOST: 'Claude Code; rm -rf' })).toBeNull()
+  expect(hostFromEnv({ KINFOLD_MCP_HOST: 'Claude Code; rm -rf' })).toBeNull()
 })
 
 test('fire and forget: the reply comes back before the post starts and is the same with or without a reporter', async () => {

@@ -30,7 +30,7 @@ async function runHook(stdin: string, args: string[]): Promise<{ exitCode: numbe
     stdin: new TextEncoder().encode(stdin),
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { PATH: process.env.PATH ?? '', HOME: root, SAM_DATA_DIR: dataDir, [SQLITE3MC_LIB_ENV]: process.env[SQLITE3MC_LIB_ENV] ?? '', SAM_DB_KEYSTORE: 'none' },
+    env: { PATH: process.env.PATH ?? '', HOME: root, KINFOLD_DATA_DIR: dataDir, [SQLITE3MC_LIB_ENV]: process.env[SQLITE3MC_LIB_ENV] ?? '', KINFOLD_DB_KEYSTORE: 'none' },
   })
   const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
   return { exitCode, stdout, stderr }

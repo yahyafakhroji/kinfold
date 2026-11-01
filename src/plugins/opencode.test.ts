@@ -143,9 +143,9 @@ test('a subscribe() that hands back a stream is consumed too', async () => {
   expect(spooledEvents().map((event) => event.kind)).toEqual(['session_start'])
 })
 
-test('under the observer (SAM_OBSERVER=1) setup registers no hooks and nothing reaches the spool', async () => {
+test('under the observer (KINFOLD_OBSERVER=1) setup registers no hooks and nothing reaches the spool', async () => {
   const { ctx, handlers } = fakeHost()
-  createOpenCodePlugin({ dataDir: () => root, log: (line) => logs.push(line), sessionOwners: new Map(), env: { SAM_OBSERVER: '1' } }).setup(ctx)
+  createOpenCodePlugin({ dataDir: () => root, log: (line) => logs.push(line), sessionOwners: new Map(), env: { KINFOLD_OBSERVER: '1' } }).setup(ctx)
   expect([...handlers.keys()]).toEqual([])
   await flush()
   expect(spooledEvents()).toEqual([])

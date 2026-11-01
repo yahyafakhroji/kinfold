@@ -1,6 +1,7 @@
 // Daemon entry: `bun src/daemon/main.ts`. The umask goes first so the
 // database, WAL, SHM and spool files are born owner-only, before any open.
 
+import { deprecationLines, readEnv } from '../env-names'
 import { runnerFactory } from '../observer/runners'
 import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
 import type { CredentialProvider } from '../secrets/credentials'
@@ -34,21 +35,22 @@ function fail(message: string): never {
 
 function main(): void {
   process.umask(OWNER_ONLY_UMASK)
+  for (const line of deprecationLines(process.env)) process.stderr.write(logLine(line))
   let daemon: ReturnType<typeof startDaemon>
   try {
     const dataDir = resolveDataDir()
     const credentials = platformCredentialProvider()
     daemon = startDaemon({
       dataDir,
-      port: parsePort(process.env.SAM_PORT),
+      port: parsePort(readEnv(process.env, 'PORT')),
       keychain: credentials,
       vectors: { embedder: embedderFrom(credentials) },
       observer: {
         runnerFor: runnerFactory({ dataDir, credentials }),
         credentials,
         schedule: {
-          sessionIdleMs: parseIdleMs(process.env.SAM_SESSION_IDLE_MS),
-          maxWaitMs: parseMaxWaitMs(process.env.SAM_OBSERVER_MAX_WAIT_MS),
+          sessionIdleMs: parseIdleMs(readEnv(process.env, 'SESSION_IDLE_MS')),
+          maxWaitMs: parseMaxWaitMs(readEnv(process.env, 'OBSERVER_MAX_WAIT_MS')),
         },
       },
     })

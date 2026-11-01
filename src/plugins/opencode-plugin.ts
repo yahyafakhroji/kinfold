@@ -11,7 +11,7 @@
 // it with the pack (context-injector.ts, P1-H). A new prompt asks at once and
 // carries its text, for prompt-time related memory (P2-B).
 // Kept apart from opencode.ts because that file may export only { id, setup }.
-// Under the observer (SAM_OBSERVER=1) setup registers nothing, so an observer
+// Under the observer (KINFOLD_OBSERVER=1) setup registers nothing, so an observer
 // process can never feed events back into the store.
 
 import type { NormalizedEvent } from '../contract/event'

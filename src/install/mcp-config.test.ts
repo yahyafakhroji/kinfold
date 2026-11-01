@@ -10,9 +10,9 @@ const claudeConfig = () => ({ numStartups: 4, projects: { '/a': { allowedTools: 
 const openCodeConfig = () => ({ $schema: 'https://opencode.ai/config.json', theme: 'tokyonight', mcp: { 'claude-mem': FOREIGN_OPENCODE } })
 
 test('entries have each host\'s shape with absolute paths', () => {
-  expect(claudeMcpEntry(TARGET)).toEqual({ type: 'stdio', command: TARGET.bunPath, args: [TARGET.serverScript], env: { SAM_MCP_HOST: 'claude-code' } })
+  expect(claudeMcpEntry(TARGET)).toEqual({ type: 'stdio', command: TARGET.bunPath, args: [TARGET.serverScript], env: { KINFOLD_MCP_HOST: 'claude-code' } })
   expect(openCodeMcpEntry(TARGET)).toEqual({
-    type: 'local', command: [TARGET.bunPath, TARGET.serverScript], enabled: true, environment: { SAM_MCP_HOST: 'opencode' },
+    type: 'local', command: [TARGET.bunPath, TARGET.serverScript], enabled: true, environment: { KINFOLD_MCP_HOST: 'opencode' },
   })
   expect(mcpServerScript(claudeMcpEntry(TARGET))).toBe(TARGET.serverScript)
   expect(mcpServerScript(openCodeMcpEntry(TARGET))).toBe(TARGET.serverScript)
@@ -67,7 +67,7 @@ test('a malformed section is refused rather than overwritten', () => {
   expect(() => removeMcpEntry({ mcp: 'x' }, 'opencode')).toThrow('fix it by hand')
 })
 
-test('an entry written before SAM_MCP_HOST is ours but stale in both hosts, and a merge adds the host env', () => {
+test('an entry written before KINFOLD_MCP_HOST is ours but stale in both hosts, and a merge adds the host env', () => {
   const claudeOld = { mcpServers: { [MCP_SERVER_NAME]: { type: 'stdio', command: TARGET.bunPath, args: [TARGET.serverScript] } } }
   const openCodeOld = { mcp: { [MCP_SERVER_NAME]: { type: 'local', command: [TARGET.bunPath, TARGET.serverScript], enabled: true } } }
   expect(inspectMcpEntry(claudeOld, 'claude-code', TARGET)).toBe('stale')

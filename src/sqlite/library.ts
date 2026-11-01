@@ -5,16 +5,17 @@
 // build or the new one, never a library with a hash that does not match. The
 // hash check catches a truncated or swapped file; it is no defence against
 // someone who can write the data dir, since that person can write the
-// manifest too. SAM_SQLITE3MC_LIB points tests and development at another
+// manifest too. KINFOLD_SQLITE3MC_LIB points tests and development at another
 // build, unchecked.
 
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { envName, readEnv } from '../env-names'
 import { sqlite3mcLibraryExtension } from './release'
 import { SqliteError } from './types'
 
-export const SQLITE3MC_LIB_ENV = 'SAM_SQLITE3MC_LIB'
+export const SQLITE3MC_LIB_ENV = envName('SQLITE3MC_LIB')
 export const LIB_DIR = 'lib'
 export const MANIFEST_FILE = 'sqlite3mc.json'
 
@@ -76,7 +77,7 @@ const checked = new Map<string, string>()
 
 /** The library for a DB file inside a data dir: the env override, or the manifest's build, checked once per process. */
 export function libraryFor(dbPath: string, env: Readonly<Record<string, string | undefined>> = process.env): string {
-  const override = env[SQLITE3MC_LIB_ENV]
+  const override = readEnv(env, 'SQLITE3MC_LIB')
   if (override !== undefined && override !== '') {
     if (!existsSync(override)) throw new SqliteError(`${SQLITE3MC_LIB_ENV} names a missing file`, 'SQLITE_CANTOPEN', 14, 'library')
     return override

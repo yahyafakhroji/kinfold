@@ -42,7 +42,7 @@ export interface McpRemove {
 const SECTION: Readonly<Record<McpHost, string>> = { 'claude-code': 'mcpServers', opencode: 'mcp' }
 
 /**
- * Each entry names its host in SAM_MCP_HOST, so the server's read reports
+ * Each entry names its host in KINFOLD_MCP_HOST, so the server's read reports
  * (P1-H) say which host fetched. Claude Code calls the map `env`, OpenCode
  * `environment`. An entry written before this has no map, compares unequal,
  * reads as stale, and the next `sam install` replaces it.

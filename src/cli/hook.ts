@@ -9,7 +9,7 @@
 // (P1-H: memory written since the session last received it) the same way, as
 // UserPromptSubmit additionalContext. Any failure or an empty answer prints
 // nothing. Errors go to stderr
-// without the payload. Under the observer (SAM_OBSERVER=1) it captures and
+// without the payload. Under the observer (KINFOLD_OBSERVER=1) it captures and
 // injects nothing. host_version comes from the payload when the host sends
 // one (Cursor), otherwise from the installer's record (adapters/host-version.ts):
 // one file read and one stat, never a `--version` spawn.

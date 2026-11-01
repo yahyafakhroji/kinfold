@@ -61,7 +61,7 @@ test('a foreign server under our name is left alone in both hosts', async () => 
   expect(w.out.some((line) => line.includes('not ours'))).toBe(true)
 })
 
-test('re-running install replaces entries written before SAM_MCP_HOST: remove then add for Claude, a rewrite for OpenCode', async () => {
+test('re-running install replaces entries written before KINFOLD_MCP_HOST: remove then add for Claude, a rewrite for OpenCode', async () => {
   const w = both()
   const paths = mcpPaths(w.env)
   const target = mcpTarget(w.env)
@@ -76,5 +76,5 @@ test('re-running install replaces entries written before SAM_MCP_HOST: remove th
     ['claude', 'mcp', 'add-json', '--scope', 'user', MCP_SERVER_NAME, JSON.stringify(claudeMcpEntry(target))],
   ])
   expect(JSON.parse(readFileSync(paths.opencodeConfig, 'utf8')).mcp[MCP_SERVER_NAME]).toEqual(openCodeMcpEntry(target))
-  expect(JSON.parse(mcpCommands(w)[1]!.at(-1)!).env).toEqual({ SAM_MCP_HOST: 'claude-code' })
+  expect(JSON.parse(mcpCommands(w)[1]!.at(-1)!).env).toEqual({ KINFOLD_MCP_HOST: 'claude-code' })
 })

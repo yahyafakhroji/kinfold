@@ -6,6 +6,7 @@ import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, st
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
+import { envName, readEnv } from '../env-names'
 import { DATA_DIR_NAME } from '../names'
 
 export const DATA_DIR_MODE = 0o700
@@ -25,9 +26,9 @@ const SECRET_BYTES = 32
 const SECRET_PATTERN = /^[0-9a-f]{64}$/
 
 export function resolveDataDir(env: Readonly<Record<string, string | undefined>> = process.env): string {
-  const configured = env.SAM_DATA_DIR
+  const configured = readEnv(env, 'DATA_DIR')
   if (configured === undefined || configured === '') return join(homedir(), DEFAULT_DATA_DIR_NAME)
-  if (!isAbsolute(configured)) throw new Error('SAM_DATA_DIR must be an absolute path')
+  if (!isAbsolute(configured)) throw new Error(`${envName('DATA_DIR')} must be an absolute path`)
   return configured
 }
 

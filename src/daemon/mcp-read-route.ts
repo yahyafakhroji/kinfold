@@ -28,7 +28,7 @@ function idsOf(value: unknown): number[] | null {
   return value.every((id) => Number.isSafeInteger(id) && id > 0) ? (value as number[]) : null
 }
 
-/** Exactly the report's keys; host may be null (an entry without SAM_MCP_HOST). */
+/** Exactly the report's keys; host may be null (an entry without KINFOLD_MCP_HOST). */
 export function parseMcpRead(body: unknown): Parsed<McpRead> {
   if (!isRecord(body)) return { ok: false, error: 'body must be a JSON object' }
   const keys = Object.keys(body).sort()

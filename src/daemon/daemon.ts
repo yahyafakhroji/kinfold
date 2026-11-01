@@ -20,6 +20,7 @@
 
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { envName } from '../env-names'
 import type { DbKeyStore } from '../sqlite/keys'
 import { plaintextBesideKey } from '../sqlite/open'
 import type { Database } from '../sqlite/types'
@@ -138,7 +139,7 @@ export interface RunningDaemon {
 export function parsePort(value: string | undefined): number {
   if (value === undefined || value === '') return DEFAULT_PORT
   const port = Number(value)
-  if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error('SAM_PORT must be an integer from 0 to 65535')
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error(`${envName('PORT')} must be an integer from 0 to 65535`)
   return port
 }
 

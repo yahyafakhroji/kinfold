@@ -6,6 +6,7 @@
 // entries so the claude-cli observer finds `claude`.
 
 import { delimiter, dirname, isAbsolute } from 'node:path'
+import { envName } from '../env-names'
 import { type InstallEnv, LAUNCH_AGENT_LABEL, installPaths } from './env'
 
 /** 0o077 as launchd's decimal Umask key. */
@@ -58,7 +59,7 @@ export function plistContent(env: Pick<InstallEnv, 'bunPath' | 'pathEnv' | 'home
     '  <key>ProcessType</key><string>Background</string>',
     '  <key>EnvironmentVariables</key>',
     '  <dict>',
-    `    <key>SAM_DATA_DIR</key>${str(env.dataDir)}`,
+    `    <key>${envName('DATA_DIR')}</key>${str(env.dataDir)}`,
     `    <key>PATH</key>${str(launchdPath(env))}`,
     `    <key>HOME</key>${str(env.homeDir)}`,
     '  </dict>',

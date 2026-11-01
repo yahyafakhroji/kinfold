@@ -41,7 +41,7 @@ async function runHook(stdin: string, extraEnv: Record<string, string> = {}): Pr
     stdin: new TextEncoder().encode(stdin),
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { PATH: process.env.PATH ?? '', HOME: root, SAM_DATA_DIR: dataDir, [SQLITE3MC_LIB_ENV]: process.env[SQLITE3MC_LIB_ENV] ?? '', SAM_DB_KEYSTORE: 'none', ...extraEnv },
+    env: { PATH: process.env.PATH ?? '', HOME: root, KINFOLD_DATA_DIR: dataDir, [SQLITE3MC_LIB_ENV]: process.env[SQLITE3MC_LIB_ENV] ?? '', KINFOLD_DB_KEYSTORE: 'none', ...extraEnv },
   })
   const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
   return { exitCode, stdout, stderr }
@@ -100,9 +100,9 @@ test('with the daemon up the nudge lands the event in the store', async () => {
   expect(spooled()).toEqual([])
 })
 
-test('under the observer (SAM_OBSERVER=1) the hook captures nothing, even with the daemon up', async () => {
+test('under the observer (KINFOLD_OBSERVER=1) the hook captures nothing, even with the daemon up', async () => {
   daemon = startDaemon({ dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
-  const run = await runHook(fixture('post-tool-use.bash.json'), { SAM_OBSERVER: '1' })
+  const run = await runHook(fixture('post-tool-use.bash.json'), { KINFOLD_OBSERVER: '1' })
   expect(run).toEqual({ exitCode: 0, stdout: '', stderr: '' })
   await daemon.scheduler.whenIdle()
   expect(spooled()).toEqual([])
@@ -116,7 +116,7 @@ test('under the observer (SAM_OBSERVER=1) the hook captures nothing, even with t
 
 test('runHook itself returns early under the observer env', async () => {
   const errors: string[] = []
-  await runHookInProcess(fixture('post-tool-use.bash.json'), dataDir, (line) => errors.push(line), { SAM_OBSERVER: '1' })
+  await runHookInProcess(fixture('post-tool-use.bash.json'), dataDir, (line) => errors.push(line), { KINFOLD_OBSERVER: '1' })
   expect(errors).toEqual([])
   expect(existsSync(join(dataDir, 'spool'))).toBe(false)
 })
@@ -207,7 +207,7 @@ test('a daemon that never answers costs at most the 300 ms budget, prints nothin
 test('runHook returns null for SessionStart under the observer, and the output line otherwise', async () => {
   seedProjectPack('In-process pack')
   daemon = startDaemon({ dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
-  expect(await runHookInProcess(inRoot('session-start.json'), dataDir, () => {}, { SAM_OBSERVER: '1' })).toBeNull()
+  expect(await runHookInProcess(inRoot('session-start.json'), dataDir, () => {}, { KINFOLD_OBSERVER: '1' })).toBeNull()
   const line = await runHookInProcess(inRoot('session-start.json'), dataDir, () => {}, {})
   expect(JSON.parse(line!).hookSpecificOutput.additionalContext).toContain('In-process pack')
 })

@@ -1,11 +1,12 @@
-// Manual one-shot observer: `SAM_DATA_DIR=<dir> bun src/observer/once.ts <session-id>`.
+// Manual one-shot observer: `KINFOLD_DATA_DIR=<dir> bun src/observer/once.ts <session-id>`.
 // Runs batches for one session until nothing is retryable or a batch fails,
 // with the runner its host's settings name. The daemon is the only writer
 // (D3), so this refuses a data dir that a daemon has claimed, and it needs
-// SAM_DATA_DIR spelled out so it never touches the default store by accident.
+// KINFOLD_DATA_DIR spelled out so it never touches the default store by accident.
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { readEnv } from '../env-names'
 import { platformCredentialProvider } from '../secrets/keychain'
 import { DAEMON_INFO_FILE } from '../store/data-dir'
 import { openStore } from '../store/db'
@@ -35,10 +36,10 @@ async function main(): Promise<void> {
   const log = (line: string): void => {
     process.stderr.write(`sam-observe: ${line}\n`)
   }
-  const dataDir = process.env.SAM_DATA_DIR
+  const dataDir = readEnv(process.env, 'DATA_DIR')
   const sessionId = Number(process.argv[2])
   if (dataDir === undefined || dataDir === '' || !Number.isSafeInteger(sessionId)) {
-    log('usage: SAM_DATA_DIR=<dir> bun src/observer/once.ts <session-id>')
+    log('usage: KINFOLD_DATA_DIR=<dir> bun src/observer/once.ts <session-id>')
     process.exit(2)
   }
   try {

@@ -3,8 +3,10 @@
 // observer call would create new events to observe. The runner sets this
 // flag in the child's env and every capture entry point checks it first.
 
-export const OBSERVER_ENV_FLAG = 'SAM_OBSERVER'
+import { envName, readEnv } from '../env-names'
+
+export const OBSERVER_ENV_FLAG = envName('OBSERVER')
 
 export function isObserverProcess(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
-  return env[OBSERVER_ENV_FLAG] === '1'
+  return readEnv(env, 'OBSERVER') === '1'
 }

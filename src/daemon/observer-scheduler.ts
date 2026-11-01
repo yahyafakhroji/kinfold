@@ -2,7 +2,7 @@
 // one call in flight per session, at most two overall, so three busy tools
 // never fan out into a burst of model calls. A session is due when its turn
 // ended (turn_end or session_end waiting), when enough events piled up, when
-// it went quiet, or when it ended. A session silent for SAM_SESSION_IDLE_MS
+// it went quiet, or when it ended. A session silent for KINFOLD_SESSION_IDLE_MS
 // with no ended_at is ended here, because OpenCode never says so on quit.
 // P1-E: a long turn's early events used to wait for the whole turn (or for 8
 // more events). Now a session is also due once its oldest pending event has
@@ -11,6 +11,7 @@
 // An ended session that gets new events is live again: the old rule made each
 // of those events its own run (replay: 257 of 511 runs).
 
+import { envName } from '../env-names'
 import type { BatchOutcome } from '../observer/process'
 import type { Database } from '../sqlite/types'
 import { type QueueStats, endIdleSessions, queueStats } from '../store/observer-store'
@@ -102,12 +103,12 @@ function parsePositiveMs(name: string, value: string | undefined, fallback: numb
 }
 
 export function parseIdleMs(value: string | undefined): number {
-  return parsePositiveMs('SAM_SESSION_IDLE_MS', value, DEFAULT_SCHEDULE.sessionIdleMs)
+  return parsePositiveMs(envName('SESSION_IDLE_MS'), value, DEFAULT_SCHEDULE.sessionIdleMs)
 }
 
-/** SAM_OBSERVER_MAX_WAIT_MS: how long a pending event may wait mid-turn before its session is due. */
+/** KINFOLD_OBSERVER_MAX_WAIT_MS: how long a pending event may wait mid-turn before its session is due. */
 export function parseMaxWaitMs(value: string | undefined): number {
-  return parsePositiveMs('SAM_OBSERVER_MAX_WAIT_MS', value, DEFAULT_SCHEDULE.maxWaitMs)
+  return parsePositiveMs(envName('OBSERVER_MAX_WAIT_MS'), value, DEFAULT_SCHEDULE.maxWaitMs)
 }
 
 function errorName(error: unknown): string {

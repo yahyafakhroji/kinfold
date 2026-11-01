@@ -40,7 +40,7 @@ export interface SearchHit {
 }
 
 export interface McpReadGroup {
-  /** 'unknown' when the MCP entry did not set SAM_MCP_HOST. */
+  /** 'unknown' when the MCP entry did not set KINFOLD_MCP_HOST. */
   host: string
   tool: string
   calls: number

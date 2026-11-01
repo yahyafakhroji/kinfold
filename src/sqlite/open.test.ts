@@ -115,7 +115,7 @@ test.skipIf(!existsSync(STOCK))('a stock SQLite, which would ignore the key and 
   const path = join(dataDir, 'stock.db')
   const script = `import { openEncrypted } from '${join(import.meta.dir, 'open.ts')}'
 try { openEncrypted(${JSON.stringify(path)}, '${KEY}'); console.log('OPENED') } catch (e) { console.log(e.kind, e.message) }`
-  const run = Bun.spawnSync([process.execPath, '-e', script], { env: { ...process.env, SAM_SQLITE3MC_LIB: STOCK }, stdout: 'pipe', stderr: 'pipe' })
+  const run = Bun.spawnSync([process.execPath, '-e', script], { env: { ...process.env, KINFOLD_SQLITE3MC_LIB: STOCK }, stdout: 'pipe', stderr: 'pipe' })
   expect(run.stdout.toString().trim()).toBe('library the SQLite library is not a sqlite3mc build; run sam install')
   expect(existsSync(path)).toBe(false)
 })

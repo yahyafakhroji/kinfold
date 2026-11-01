@@ -1,5 +1,5 @@
 // Run by src/vectors/sqlite-vec.integration.test.ts in its own process, the
-// way the daemon loads vec0: through sqlite3mc (SAM_SQLITE3MC_LIB, inherited
+// way the daemon loads vec0: through sqlite3mc (KINFOLD_SQLITE3MC_LIB, inherited
 // from the test run). Args: a scratch data dir and a vec0.dylib (the pinned
 // release). Prints one JSON line: the loader's answer and the
 // nearest-observation results the test checks.

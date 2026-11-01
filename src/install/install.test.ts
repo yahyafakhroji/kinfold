@@ -61,7 +61,7 @@ test('the plist names the absolute bun and main.ts, keeps the daemon alive and l
   expect(plist).toContain('<key>KeepAlive</key><true/>')
   expect(plist).toContain(`<key>StandardOutPath</key><string>${join(w.dataDir, 'logs/daemon.log')}</string>`)
   expect(plist).toContain(`<key>StandardErrorPath</key><string>${join(w.dataDir, 'logs/daemon.log')}</string>`)
-  expect(plist).toContain(`<key>SAM_DATA_DIR</key><string>${w.dataDir}</string>`)
+  expect(plist).toContain(`<key>KINFOLD_DATA_DIR</key><string>${w.dataDir}</string>`)
   expect(plist).toContain('<key>PATH</key><string>/opt/fake/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>')
 })
 

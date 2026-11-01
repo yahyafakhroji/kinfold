@@ -108,13 +108,13 @@ test('a crashed batch is logged by error name and frees its slot', async () => {
   expect(logs).toEqual(['observer session=1 crashed error=RangeError'])
 })
 
-test('shouldObserve and SAM_SESSION_IDLE_MS parsing', () => {
+test('shouldObserve and KINFOLD_SESSION_IDLE_MS parsing', () => {
   const base = { sessionId: 1, retryable: 1, hasBoundary: false, lastEventAt: T0, endedAt: null }
   expect(shouldObserve(base, T0, DEFAULT_SCHEDULE)).toBe(false)
   expect(shouldObserve({ ...base, endedAt: T0 }, T0, DEFAULT_SCHEDULE)).toBe(true)
   expect(parseIdleMs(undefined)).toBe(30 * 60_000)
   expect(parseIdleMs('1000')).toBe(1_000)
-  expect(() => parseIdleMs('-5')).toThrow('SAM_SESSION_IDLE_MS')
+  expect(() => parseIdleMs('-5')).toThrow('KINFOLD_SESSION_IDLE_MS')
 })
 
 /** A session whose tool results keep trickling in every 10 s, so it is never quiet and never reaches 8 pending. */
@@ -177,7 +177,7 @@ test('an ended session that gets new events is live again; the legacy rule ran e
   expect(started).toEqual([])
 })
 
-test('due reasons keep their order, and SAM_OBSERVER_MAX_WAIT_MS parses like SAM_SESSION_IDLE_MS', () => {
+test('due reasons keep their order, and KINFOLD_OBSERVER_MAX_WAIT_MS parses like KINFOLD_SESSION_IDLE_MS', () => {
   const base = { sessionId: 1, retryable: 8, hasBoundary: true, lastEventAt: T0, endedAt: null, oldestPendingAt: T0 }
   expect(dueReason(base, T0, DEFAULT_SCHEDULE)).toBe('boundary')
   expect(dueReason({ ...base, hasBoundary: false }, T0, DEFAULT_SCHEDULE)).toBe('count')
@@ -187,5 +187,5 @@ test('due reasons keep their order, and SAM_OBSERVER_MAX_WAIT_MS parses like SAM
   expect(dueReason({ ...base, hasBoundary: false, retryable: 1, lastEventAt: T0 + 75_000, oldestPendingAt: null }, T0 + 75_000, DEFAULT_SCHEDULE)).toBeNull()
   expect(parseMaxWaitMs(undefined)).toBe(75_000)
   expect(parseMaxWaitMs('30000')).toBe(30_000)
-  expect(() => parseMaxWaitMs('soon')).toThrow('SAM_OBSERVER_MAX_WAIT_MS')
+  expect(() => parseMaxWaitMs('soon')).toThrow('KINFOLD_OBSERVER_MAX_WAIT_MS')
 })
