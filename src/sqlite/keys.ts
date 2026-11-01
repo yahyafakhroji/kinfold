@@ -1,17 +1,18 @@
 // The database key (P2-E): 32 random bytes as hex, kept by the OS. Every
 // process that opens an encrypted memory.db reads it here; nothing else ever
 // sees it, and no error carries it. macOS keeps it in the login Keychain as
-// shared-agent-memory/db-key (docs/reference/encryption-keys.md). Linux and
-// Windows stores arrive with P2-E slice E4; until then those platforms have
+// kinfold/db-key, or shared-agent-memory/db-key until migrated
+// (docs/reference/encryption-keys.md). Linux and Windows stores arrive with P2-E slice E4; until then those platforms have
 // no key, so new stores there stay plaintext. KINFOLD_DB_KEYSTORE=none turns the
 // store off under `bun test` only (NODE_ENV=test), so no test reads the real
 // Keychain and no production environment can switch encryption off.
 
 import { randomBytes } from 'node:crypto'
 import { envName, readEnv } from '../env-names'
+import { LEGACY_KEYCHAIN_SERVICE } from '../names'
 import { type CredentialProvider, DB_KEY_REF } from '../secrets/credentials'
 import { isHexKey } from '../secrets/hmac-keys'
-import { ITEM_NOT_FOUND_EXIT, createKeychainProvider, runSecurity } from '../secrets/keychain'
+import { ITEM_NOT_FOUND_EXIT, type SecurityResult, createKeychainProvider, runSecurity } from '../secrets/keychain'
 import { existsArgs } from '../secrets/keychain-writer'
 import { SqliteError } from './types'
 
@@ -46,16 +47,17 @@ export function credentialDbKeyStore(name: string, credentials: CredentialProvid
   }
 }
 
+function keychainHasEntry(result: SecurityResult): boolean {
+  if (result.exitCode === 0) return true
+  if (result.exitCode === ITEM_NOT_FOUND_EXIT) return false
+  throw new SqliteError(`keychain lookup failed (exit ${result.exitCode})`, 'SQLITE_AUTH', 23, 'no_key')
+}
+
 /** The store for this platform: the Keychain on macOS, none elsewhere until E4, none when KINFOLD_DB_KEYSTORE=none. */
 export function platformDbKeyStore(env: Readonly<Record<string, string | undefined>> = process.env, platform: string = process.platform): DbKeyStore {
   if (readEnv(env, 'DB_KEYSTORE') === 'none' && env.NODE_ENV === 'test') return NO_DB_KEYS
   if (platform !== 'darwin') return NO_DB_KEYS
-  return credentialDbKeyStore('keychain', createKeychainProvider(), () => {
-    const result = runSecurity(existsArgs(DB_KEY_REF))
-    if (result.exitCode === 0) return true
-    if (result.exitCode === ITEM_NOT_FOUND_EXIT) return false
-    throw new SqliteError(`keychain lookup failed (exit ${result.exitCode})`, 'SQLITE_AUTH', 23, 'no_key')
-  })
+  return credentialDbKeyStore('keychain', createKeychainProvider(), () => keychainHasEntry(runSecurity(existsArgs(DB_KEY_REF))) || keychainHasEntry(runSecurity(existsArgs(DB_KEY_REF, LEGACY_KEYCHAIN_SERVICE))))
 }
 
 export function newDbKey(): string {

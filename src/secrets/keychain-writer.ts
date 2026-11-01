@@ -7,7 +7,8 @@
 // so they read item metadata and never the secret.
 
 import { KEYCHAIN_SERVICE, assertCredentialRef } from './credentials'
-import { ITEM_NOT_FOUND_EXIT, type SecurityResult } from './keychain'
+import { LEGACY_KEYCHAIN_SERVICE } from '../names'
+import { ITEM_NOT_FOUND_EXIT, type SecurityResult, readKeychainValue } from './keychain'
 
 export const SECURITY_BINARY = '/usr/bin/security'
 const SECURITY_TIMEOUT_MS = 10_000
@@ -33,6 +34,14 @@ export interface CredentialWriter {
   create(ref: string, value: string): boolean
   /** True when an entry was deleted, false when there was none. */
   remove(ref: string): boolean
+  /** The pre-rename service (shared-agent-memory), for the migration that copies entries to kinfold and deletes these. */
+  legacy: {
+    exists(ref: string): boolean
+    /** The value, or null when there is none. Throws with an exit code only. */
+    read(ref: string): string | null
+    /** True when an entry was deleted, false when there was none. */
+    remove(ref: string): boolean
+  }
 }
 
 /** The real `security` child: a fixed PATH and the given HOME, stderr ignored. */
@@ -57,18 +66,18 @@ export function assertStorableValue(value: string): void {
 }
 
 /** The one line `security -i` reads from stdin. `update` false never replaces an existing entry (the add fails instead). */
-export function addCommandLine(ref: string, value: string, update = true): string {
+export function addCommandLine(ref: string, value: string, update = true, service: string = KEYCHAIN_SERVICE): string {
   assertCredentialRef(ref)
   assertStorableValue(value)
-  return `add-generic-password${update ? ' -U' : ''} -s ${KEYCHAIN_SERVICE} -a ${ref} -w ${value}\n`
+  return `add-generic-password${update ? ' -U' : ''} -s ${service} -a ${ref} -w ${value}\n`
 }
 
-export function existsArgs(ref: string): string[] {
-  return ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', ref]
+export function existsArgs(ref: string, service: string = KEYCHAIN_SERVICE): string[] {
+  return ['find-generic-password', '-s', service, '-a', ref]
 }
 
-export function deleteArgs(ref: string): string[] {
-  return ['delete-generic-password', '-s', KEYCHAIN_SERVICE, '-a', ref]
+export function deleteArgs(ref: string, service: string = KEYCHAIN_SERVICE): string[] {
+  return ['delete-generic-password', '-s', service, '-a', ref]
 }
 
 function presence(result: SecurityResult, action: string): boolean {
@@ -82,8 +91,23 @@ export function createKeychainWriter(run: SecurityRunner): CredentialWriter {
     assertCredentialRef(ref)
     return presence(run({ args: existsArgs(ref) }), 'lookup')
   }
+  const legacy: CredentialWriter['legacy'] = {
+    exists: (ref) => {
+      assertCredentialRef(ref)
+      return presence(run({ args: existsArgs(ref, LEGACY_KEYCHAIN_SERVICE) }), 'lookup')
+    },
+    read: (ref) => {
+      assertCredentialRef(ref)
+      return readKeychainValue((args) => run({ args }), ref, LEGACY_KEYCHAIN_SERVICE)
+    },
+    remove: (ref) => {
+      assertCredentialRef(ref)
+      return presence(run({ args: deleteArgs(ref, LEGACY_KEYCHAIN_SERVICE) }), 'delete')
+    },
+  }
   return {
     exists,
+    legacy,
     put: (ref, value) => {
       const result = run({ args: ['-i'], stdin: addCommandLine(ref, value) })
       if (result.exitCode !== 0) throw new Error(`keychain write failed (exit ${result.exitCode})`)

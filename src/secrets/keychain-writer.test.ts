@@ -81,3 +81,38 @@ test('no writer off macOS', () => {
   expect(credentialWriterFor('linux', fakeKeychain().run)).toBeNull()
   expect(credentialWriterFor('darwin', fakeKeychain().run)).not.toBeNull()
 })
+
+test('legacy reads, checks and removes under the shared-agent-memory service; the value stays out of argv', () => {
+  const calls: SecurityInvocation[] = []
+  const run: SecurityRunner = (invocation) => {
+    calls.push(invocation)
+    return invocation.args.includes('-w') ? { exitCode: 0, stdout: `${VALUE}\n` } : { exitCode: 0, stdout: '' }
+  }
+  const { legacy } = createKeychainWriter(run)
+  expect(legacy.exists('db-key')).toBe(true)
+  expect(legacy.read('db-key')).toBe(VALUE)
+  expect(legacy.remove('db-key')).toBe(true)
+  expect(calls.map((call) => call.args)).toEqual([
+    ['find-generic-password', '-s', 'shared-agent-memory', '-a', 'db-key'],
+    ['find-generic-password', '-s', 'shared-agent-memory', '-a', 'db-key', '-w'],
+    ['delete-generic-password', '-s', 'shared-agent-memory', '-a', 'db-key'],
+  ])
+  for (const call of calls) expect(call.args.join(' ')).not.toContain(VALUE)
+})
+
+test('legacy.read maps 44 to null and other failures to an exit-code-only error', () => {
+  expect(createKeychainWriter(() => ({ exitCode: ITEM_NOT_FOUND_EXIT, stdout: '' })).legacy.read('db-key')).toBeNull()
+  try {
+    createKeychainWriter(() => ({ exitCode: 51, stdout: VALUE })).legacy.read('db-key')
+    throw new Error('expected a failure')
+  } catch (error: unknown) {
+    expect((error as Error).message).toBe('keychain lookup failed (exit 51)')
+  }
+})
+
+test('the service argument reaches the add line, and put never writes to the legacy service', () => {
+  expect(addCommandLine('db-key', VALUE, true, 'shared-agent-memory')).toBe(`add-generic-password -U -s shared-agent-memory -a db-key -w ${VALUE}\n`)
+  const keychain = fakeKeychain()
+  createKeychainWriter(keychain.run).put('db-key', VALUE)
+  expect(keychain.calls.filter((call) => call.stdin !== undefined).every((call) => call.stdin?.includes('-s kinfold '))).toBe(true)
+})

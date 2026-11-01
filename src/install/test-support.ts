@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { type RunningDaemon, startDaemon } from '../daemon/daemon'
 import { wantedEpochs } from '../daemon/hmac-rotation'
+import { LEGACY_KEYCHAIN_SERVICE } from '../names'
 import { DB_KEY_REF } from '../secrets/credentials'
 import { epochAt, previousEpoch } from '../secrets/hmac-keys'
 import { ITEM_NOT_FOUND_EXIT, type SecurityCommand, createKeychainProvider } from '../secrets/keychain'
@@ -39,6 +40,8 @@ export interface WorldOptions {
   stdin?: string
   interactive?: boolean
   keychainRefs?: string[]
+  /** Refs held under the pre-rename service shared-agent-memory. */
+  legacyKeychainRefs?: string[]
   /** A built sqlite3mc already in <dataDir>/lib, so install plans no GitHub download (sqlite3mc-install.test.ts covers that step). Default true. */
   withLibrary?: boolean
 }
@@ -56,6 +59,9 @@ export interface FakeWorld {
   keychain: Set<string>
   /** Values stored through `security -i`, by ref. */
   keychainValues: Map<string, string>
+  /** Refs and values under the pre-rename service shared-agent-memory (`keychain` and `keychainValues` are the kinfold service). */
+  legacyKeychain: Set<string>
+  legacyKeychainValues: Map<string, string>
   checks: ObserverSettings[]
   /** busyAfterBootout: how many bootstraps after a bootout get exit 5, as launchd does mid-teardown. */
   launchd: { loaded: boolean; daemon: RunningDaemon | null; busyAfterBootout: number; busy: number }
@@ -70,25 +76,35 @@ export const UID = 501
 
 const okRunner: ObserverRunner = { run: async () => ({ text: 'OK', model: 'fake' }) }
 
-function fakeSecurity(keychain: Set<string>, values: Map<string, string>, calls: SecurityInvocation[]): SecurityRunner {
+interface FakeKeychain {
+  refs: Set<string>
+  values: Map<string, string>
+}
+
+/** Entries are keyed by (service, account): kinfold is the world's own sets, shared-agent-memory the legacy ones. */
+function fakeSecurity(kinfold: FakeKeychain, legacy: FakeKeychain, calls: SecurityInvocation[]): SecurityRunner {
+  const store = (service: string | undefined): FakeKeychain => (service === LEGACY_KEYCHAIN_SERVICE ? legacy : kinfold)
   return (invocation) => {
     calls.push(invocation)
     const [verb] = invocation.args
     if (verb === '-i') {
-      const match = /-a (\S+) -w (\S+)/.exec(invocation.stdin ?? '')
+      const line = invocation.stdin ?? ''
+      const match = /-a (\S+) -w (\S+)/.exec(line)
+      const { refs, values } = store(/-s (\S+)/.exec(line)?.[1])
       // Like the real Keychain: an add without -U leaves an existing entry alone (`security -i` still exits 0).
-      if (match?.[1] !== undefined && keychain.has(match[1]) && !(invocation.stdin ?? '').includes(' -U ')) return { exitCode: 0, stdout: '' }
-      if (match?.[1] !== undefined) keychain.add(match[1])
+      if (match?.[1] !== undefined && refs.has(match[1]) && !line.includes(' -U ')) return { exitCode: 0, stdout: '' }
+      if (match?.[1] !== undefined) refs.add(match[1])
       if (match?.[1] !== undefined && match[2] !== undefined) values.set(match[1], match[2])
       return { exitCode: 0, stdout: '' }
     }
     const ref = invocation.args[invocation.args.indexOf('-a') + 1] ?? ''
+    const { refs, values } = store(invocation.args[invocation.args.indexOf('-s') + 1])
     if (verb === 'delete-generic-password') {
       values.delete(ref)
-      return { exitCode: keychain.delete(ref) ? 0 : ITEM_NOT_FOUND_EXIT, stdout: '' }
+      return { exitCode: refs.delete(ref) ? 0 : ITEM_NOT_FOUND_EXIT, stdout: '' }
     }
-    if (invocation.args.includes('-w')) return { exitCode: keychain.has(ref) ? 0 : ITEM_NOT_FOUND_EXIT, stdout: `${values.get(ref) ?? 'stored-test-key'}\n` }
-    return { exitCode: keychain.has(ref) ? 0 : ITEM_NOT_FOUND_EXIT, stdout: 'attributes only' }
+    if (invocation.args.includes('-w')) return { exitCode: refs.has(ref) ? 0 : ITEM_NOT_FOUND_EXIT, stdout: `${values.get(ref) ?? 'stored-test-key'}\n` }
+    return { exitCode: refs.has(ref) ? 0 : ITEM_NOT_FOUND_EXIT, stdout: 'attributes only' }
   }
 }
 
@@ -109,7 +125,7 @@ async function launchctl(world: FakeWorld, argv: readonly string[]): Promise<Com
     world.launchd.loaded = true
     const keychain = createKeychainProvider(securityCommand(world))
     // The world's own Keychain, as the real daemon reads the real one: a db-key install created encrypts the new store.
-    const dbKeys = credentialDbKeyStore('keychain', keychain, () => world.keychain.has(DB_KEY_REF))
+    const dbKeys = credentialDbKeyStore('keychain', keychain, () => world.keychain.has(DB_KEY_REF) || world.legacyKeychain.has(DB_KEY_REF))
     const daemon = startDaemon({ dataDir: world.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, keychain, dbKeys })
     world.launchd.daemon = daemon
     world.allowedPorts.add(daemon.port)
@@ -188,13 +204,14 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
   let clock = WORLD_CLOCK_START
   const world = {
     root, home, cwd, dataDir: join(home, '.shared-agent-memory'), projectRoot: join(root, 'checkout'),
-    out: [], commands: [], securityCalls: [], keychain: new Set(options.keychainRefs ?? []), keychainValues: new Map<string, string>(), checks: [],
+    out: [], commands: [], securityCalls: [], keychain: new Set(options.keychainRefs ?? []), keychainValues: new Map<string, string>(),
+    legacyKeychain: new Set(options.legacyKeychainRefs ?? []), legacyKeychainValues: new Map<string, string>(), checks: [],
     launchd: { loaded: false, daemon: null, busyAfterBootout: 0, busy: 0 }, allowedPorts: new Set<number>(), fetches: [],
   } as unknown as FakeWorld
   world.env = {
     // An arch with no pinned sqlite-vec build: a fake world never plans the real GitHub download (vec0-install.test.ts covers that step).
     homeDir: home, dataDir: world.dataDir, platform: options.platform ?? 'darwin', arch: 'test-arch', bunPath: BUN, projectRoot: world.projectRoot, cwd, uid: UID,
-    pathEnv: '/opt/fake/bin:relative/bin:/usr/bin', run: fakeRun(world, options), security: fakeSecurity(world.keychain, world.keychainValues, world.securityCalls),
+    pathEnv: '/opt/fake/bin:relative/bin:/usr/bin', run: fakeRun(world, options), security: fakeSecurity({ refs: world.keychain, values: world.keychainValues }, { refs: world.legacyKeychain, values: world.legacyKeychainValues }, world.securityCalls),
     now: () => (clock += 100), sleep: async () => {}, fetch: guardedFetch(world.allowedPorts, world.fetches), out: (line) => world.out.push(line),
     io: {
       interactive: options.interactive ?? false,
