@@ -73,6 +73,8 @@ export interface InstallEnv {
   renameDir?: (from: string, to: string) => void
   /** Where Codex.app and Cursor.app are looked for; default /Applications and ~/Applications. */
   applicationsDirs?: readonly string[]
+  /** The installer's own environment variables, for the SAM_* deprecation checks; default none. Never printed. */
+  envVars?: Readonly<Record<string, string | undefined>>
 }
 
 export { LAUNCH_AGENT_LABEL, PLUGIN_FILE_NAME }

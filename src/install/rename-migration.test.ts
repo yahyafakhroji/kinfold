@@ -378,3 +378,48 @@ test('a cross-volume rename says how to fix it', async () => {
   expect(w.out.at(-1)).toContain('move ')
   expect(w.out.at(-1)).toContain('or unset KINFOLD_DATA_DIR')
 })
+
+test('install prints the SAM_* deprecation lines to the terminal, dry run included, with names only', async () => {
+  const w = legacyWorld()
+  w.env.envVars = { SAM_PORT: '41234', SAM_SESSION_IDLE_MS: '9000' }
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  expect(w.out).toContain('deprecated: SAM_PORT is read as KINFOLD_PORT; rename it')
+  expect(w.out).toContain('deprecated: SAM_SESSION_IDLE_MS is read as KINFOLD_SESSION_IDLE_MS; rename it')
+  expect(w.out.join('\n')).not.toContain('41234')
+})
+
+test('SAM_DATA_DIR at the old data dir stops the install before anything changes, dry run included', async () => {
+  for (const dryRun of [true, false]) {
+    const w = legacyWorld()
+    const legacy = installPaths(w.env).legacyDataDir
+    w.env.dataDir = legacy
+    w.env.envVars = { SAM_DATA_DIR: legacy }
+    const before = snapshotTree(w.home)
+    expect(await install(w.env, { ...YES, dryRun })).toBe(EXIT_FAILED)
+    expect(w.out).toContain('deprecated: SAM_DATA_DIR is read as KINFOLD_DATA_DIR; rename it')
+    expect(w.out.at(-1)).toContain(`SAM_DATA_DIR points at ${legacy}`)
+    expect(w.out.at(-1)).toContain('unset SAM_DATA_DIR and rerun')
+    expect(snapshotTree(w.home)).toEqual(before)
+    expect(adds(w)).toBe(0)
+    expect(deletes(w)).toEqual([])
+    await w.cleanup()
+    world = null
+  }
+})
+
+test('KINFOLD_DATA_DIR set to the old path is an explicit choice and is not refused', async () => {
+  const w = legacyWorld()
+  const legacy = installPaths(w.env).legacyDataDir
+  w.env.dataDir = legacy
+  w.env.envVars = { KINFOLD_DATA_DIR: legacy, SAM_DATA_DIR: legacy }
+  await install(w.env, { ...YES, dryRun: true })
+  expect(w.out.join('\n')).not.toContain('unset SAM_DATA_DIR')
+})
+
+test('the daemon line names the old LaunchAgent when that is the one loaded', async () => {
+  const w = legacyWorld({ running: true })
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  const line = w.out.find((l) => l.startsWith('daemon: '))
+  expect(line).toContain(`LaunchAgent ${LEGACY_LAUNCH_AGENT_LABEL} (the old name) loaded; the migration stops it`)
+  expect(line).not.toContain('not loaded')
+})

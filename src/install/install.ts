@@ -8,7 +8,9 @@
 // --takeover the install waits for the user to stop it and never kills it.
 
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { deprecationLines, envName, legacyName, readEnv } from '../env-names'
+import { LEGACY_LAUNCH_AGENT_LABEL } from '../names'
 import { DAEMON_INFO_FILE, DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
 import { mergeSamHooks } from './claude-hooks'
 import { type Health, checkHealth, readDaemonInfo } from './daemon-client'
@@ -48,6 +50,8 @@ export interface DaemonSituation {
   loaded: boolean
   pid: number | null
   port: number
+  /** The pre-rename LaunchAgent is loaded (and ours is not); the migration stops it. */
+  legacyLoaded: boolean
   /** Up, but not ours: neither our LaunchAgent nor the pre-rename one is loaded. */
   foreign: boolean
 }
@@ -63,8 +67,8 @@ export async function daemonSituation(env: InstallEnv): Promise<DaemonSituation>
   const health = await checkHealth(env, info.port)
   const loaded = await isAgentLoaded(env)
   // The pre-rename agent's daemon is ours too: the migration stops it, so it is never a second writer.
-  const legacyLoaded = health.up && !loaded && existsSync(installPaths(env).legacyLaunchAgentPlist) && (await isAgentLoaded(env, legacyPrintArgv(env.uid)))
-  return { health, loaded, pid: info.pid, port: info.port, foreign: health.up && !loaded && !legacyLoaded }
+  const legacyLoaded = !loaded && existsSync(installPaths(env).legacyLaunchAgentPlist) && (await isAgentLoaded(env, legacyPrintArgv(env.uid)))
+  return { health, loaded, legacyLoaded, pid: info.pid, port: info.port, foreign: health.up && !loaded && !legacyLoaded }
 }
 
 export function foreignDaemonMessage(situation: DaemonSituation): string[] {
@@ -202,6 +206,29 @@ function buildPlan(env: InstallEnv, prepared: Prepared, choices: readonly Observ
   ]
 }
 
+function agentState(situation: DaemonSituation): string {
+  if (situation.loaded) return 'LaunchAgent loaded'
+  if (situation.legacyLoaded) return `LaunchAgent ${LEGACY_LAUNCH_AGENT_LABEL} (the old name) loaded; the migration stops it`
+  return 'LaunchAgent not loaded'
+}
+
+/**
+ * Prints each SAM_* variable the installer itself was started with (names
+ * only), and refuses when SAM_DATA_DIR points at the old data dir: the data
+ * dir would then be the old one, the move would be skipped, and the new
+ * LaunchAgent would keep the old path. Returns the refusal, or null.
+ */
+function legacyEnvProblem(env: InstallEnv): string | null {
+  const vars = env.envVars ?? {}
+  for (const line of deprecationLines(vars)) env.out(line)
+  const current = vars[envName('DATA_DIR')]
+  if (current !== undefined && current !== '') return null
+  const legacy = installPaths(env).legacyDataDir
+  if (resolve(env.dataDir) !== resolve(legacy)) return null
+  const name = readEnv(vars, 'DATA_DIR') !== undefined ? legacyName('DATA_DIR') : 'the data dir'
+  return `${name} points at ${legacy}, so the move to the Kinfold data dir would be skipped; unset ${legacyName('DATA_DIR')} and rerun. Nothing was changed`
+}
+
 async function prepare(env: InstallEnv, options: InstallOptions): Promise<Prepared | number> {
   const detections = await detectHosts(env, options.hosts)
   reportDetections(env, detections)
@@ -212,7 +239,7 @@ async function prepare(env: InstallEnv, options: InstallOptions): Promise<Prepar
   }
   for (const line of duplicateWarning(findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings]))) env.out(line)
   const situation = await daemonSituation(env)
-  env.out(`daemon: ${situation.health.up ? `answers on port ${situation.port}` : 'not running'}; LaunchAgent ${situation.loaded ? 'loaded' : 'not loaded'}`)
+  env.out(`daemon: ${situation.health.up ? `answers on port ${situation.port}` : 'not running'}; ${agentState(situation)}`)
   if (situation.foreign && !options.takeover && !options.dryRun) {
     for (const line of foreignDaemonMessage(situation)) env.out(line)
     return EXIT_BLOCKED
@@ -246,6 +273,11 @@ async function migrate(env: InstallEnv, prepared: Prepared, options: InstallOpti
 
 export async function install(env: InstallEnv, options: InstallOptions): Promise<number> {
   try {
+    const envProblem = legacyEnvProblem(env)
+    if (envProblem !== null) {
+      env.out(`install failed: ${envProblem}`)
+      return EXIT_FAILED
+    }
     const found = await prepare(env, options)
     if (typeof found === 'number') return found
     const prepared = await migrate(env, found, options)

@@ -1,10 +1,11 @@
 import { afterEach, expect, test } from 'bun:test'
-import { readdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from '../install/args'
 import { EXIT_USAGE } from '../install/install'
 import { type FakeWorld, createWorld } from '../install/test-support'
-import { runKinfold } from './kinfold'
+import { dataDirFor, runKinfold } from './kinfold'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -66,4 +67,17 @@ test('no non-test source file still tells the user to run `sam <command>`', () =
   const stderrPrefix = /`sam: /
   const hits = walk(join(import.meta.dir, '..')).filter((file) => stale.test(readFileSync(file, 'utf8')) || stderrPrefix.test(readFileSync(file, 'utf8')))
   expect(hits).toEqual([])
+})
+
+test('with only the old data dir, install targets ~/.kinfold and every other command keeps the old dir', () => {
+  const home = mkdtempSync(join(tmpdir(), 'kinfold-cli-'))
+  try {
+    mkdirSync(join(home, '.shared-agent-memory'))
+    expect(dataDirFor(['install', '--dry-run'], {}, home)).toBe(join(home, '.kinfold'))
+    for (const command of ['status', 'uninstall', 'dashboard', 'size']) {
+      expect(dataDirFor([command], {}, home)).toBe(join(home, '.shared-agent-memory'))
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
 })

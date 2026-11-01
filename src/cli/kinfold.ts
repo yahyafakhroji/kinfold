@@ -11,7 +11,7 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { createRunner } from '../observer/runners'
 import { createSecurityRunner } from '../secrets/keychain-writer'
-import { resolveDataDir } from '../store/data-dir'
+import { resolveDataDir, resolveInstallDataDir } from '../store/data-dir'
 import { runDataCommand } from '../data-control/cli'
 import { runDashboard } from '../dashboard/cli'
 import { parseArgs, parseDashboardArgs, parseDataArgs, parseKeyArgs } from '../install/args'
@@ -61,9 +61,14 @@ export async function runKinfold(argv: readonly string[], env: InstallEnv): Prom
   })
 }
 
-function systemEnv(): InstallEnv {
+/** `install` (and the migration it runs) targets ~/.kinfold; every other command finds a store not yet migrated. */
+export function dataDirFor(argv: readonly string[], env: Readonly<Record<string, string | undefined>>, home: string): string {
+  return argv[0] === 'install' ? resolveInstallDataDir(env, home) : resolveDataDir(env, home)
+}
+
+function systemEnv(argv: readonly string[]): InstallEnv {
   const homeDir = homedir()
-  const dataDir = resolveDataDir(process.env)
+  const dataDir = dataDirFor(argv, process.env, homeDir)
   const pathEnv = process.env.PATH ?? '/usr/bin:/bin'
   return {
     homeDir,
@@ -84,12 +89,14 @@ function systemEnv(): InstallEnv {
     io: createPromptIO(),
     out: (line) => process.stdout.write(`${line}\n`),
     runnerFor: (settings, credentials) => createRunner(settings, { dataDir, credentials, parentEnv: process.env }),
+    envVars: process.env,
   }
 }
 
 async function main(): Promise<void> {
   try {
-    process.exit(await runKinfold(process.argv.slice(2), systemEnv()))
+    const argv = process.argv.slice(2)
+    process.exit(await runKinfold(argv, systemEnv(argv)))
   } catch (error: unknown) {
     process.stderr.write(`kinfold: ${error instanceof Error ? error.message : String(error)}\n`)
     process.exit(EXIT_FAILED)

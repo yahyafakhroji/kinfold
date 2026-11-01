@@ -2,12 +2,12 @@
 // directory holds the database, the spool and the local secrets, so it is 0700
 // and every file in it 0600, whatever the caller's umask says.
 
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, writeSync } from 'node:fs'
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, statSync, writeSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { envName, readEnv } from '../env-names'
-import { DATA_DIR_NAME } from '../names'
+import { DATA_DIR_NAME, LEGACY_DATA_DIR_NAME } from '../names'
 
 export const DATA_DIR_MODE = 0o700
 export const DATA_FILE_MODE = 0o600
@@ -25,11 +25,51 @@ export const HMAC_SUBKEY_DIR = 'hmac.d'
 const SECRET_BYTES = 32
 const SECRET_PATTERN = /^[0-9a-f]{64}$/
 
-export function resolveDataDir(env: Readonly<Record<string, string | undefined>> = process.env): string {
+type Env = Readonly<Record<string, string | undefined>>
+
+/**
+ * The data dir `kinfold install` and the rename migration target: the
+ * configured one, else ~/.kinfold. It never falls back to the old name, so
+ * the migration always moves the old dir here.
+ */
+export function resolveInstallDataDir(env: Env = process.env, home: string = homedir()): string {
   const configured = readEnv(env, 'DATA_DIR')
-  if (configured === undefined || configured === '') return join(homedir(), DEFAULT_DATA_DIR_NAME)
+  if (configured === undefined || configured === '') return join(home, DEFAULT_DATA_DIR_NAME)
   if (!isAbsolute(configured)) throw new Error(`${envName('DATA_DIR')} must be an absolute path`)
   return configured
+}
+
+function isRealDir(path: string): boolean {
+  try {
+    const stat = lstatSync(path)
+    return stat.isDirectory() && !stat.isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The data dir for every other process: the daemon, hooks, MCP, dashboard and
+ * status. Until the migration runs, ~/.kinfold does not exist and the store is
+ * still the real directory ~/.shared-agent-memory, so that one is used; new
+ * code then never creates a second store (with its own hmac.key) beside it.
+ * After the migration the old path is a symlink and ~/.kinfold is used.
+ */
+export function resolveDataDir(env: Env = process.env, home: string = homedir()): string {
+  const target = resolveInstallDataDir(env, home)
+  const configured = readEnv(env, 'DATA_DIR')
+  if (configured !== undefined && configured !== '') return target
+  const legacy = join(home, LEGACY_DATA_DIR_NAME)
+  return !pathExists(target) && isRealDir(legacy) ? legacy : target
 }
 
 export function ensureDataDir(dir: string): string {
