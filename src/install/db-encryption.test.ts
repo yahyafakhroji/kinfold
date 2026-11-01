@@ -38,7 +38,7 @@ test('a new data dir plans a db-key, made only when the step runs: on stdin, nev
   const adds = w.securityCalls.filter((call) => call.stdin !== undefined)
   expect(adds).toHaveLength(1)
   expect(adds[0]!.args).toEqual(['-i'])
-  expect(adds[0]!.stdin).toMatch(new RegExp(`^add-generic-password -s shared-agent-memory -a ${DB_KEY_REF} -w [0-9a-f]{64}\\n$`))
+  expect(adds[0]!.stdin).toMatch(new RegExp(`^add-generic-password -s kinfold -a ${DB_KEY_REF} -w [0-9a-f]{64}\\n$`))
   const value = adds[0]!.stdin!.trim().split(' ').at(-1)!
   expect(w.securityCalls.some((call) => call.args.join(' ').includes(value))).toBe(false)
   expect(w.out.join('\n')).not.toContain(value)

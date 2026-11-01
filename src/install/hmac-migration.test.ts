@@ -36,8 +36,8 @@ test('dry run: the migration shows in the plan, values hidden, and nothing chang
   expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
   expect(snapshotTree(w.home)).toEqual(before)
   const plan = w.out.join('\n')
-  expect(plan).toContain(`keychain: /usr/bin/security -i <<< "add-generic-password -U -s shared-agent-memory -a ${HMAC_LEGACY_REF} -w <hidden>"`)
-  expect(plan).toContain(`keychain: /usr/bin/security -i <<< "add-generic-password -U -s shared-agent-memory -a ${HMAC_MASTER_REF} -w <hidden>"`)
+  expect(plan).toContain(`keychain: /usr/bin/security -i <<< "add-generic-password -U -s kinfold -a ${HMAC_LEGACY_REF} -w <hidden>"`)
+  expect(plan).toContain(`keychain: /usr/bin/security -i <<< "add-generic-password -U -s kinfold -a ${HMAC_MASTER_REF} -w <hidden>"`)
   expect(plan).toContain(`mkdir ${subKeyDir(w.dataDir)} (mode 0700)`)
   expect(plan).toMatch(/write .*hmac\.d\/2026\d\d\.key: marker sub-key for epoch 2026\d\d, derived from the new master/)
   expect(plan).toMatch(new RegExp(`back up ${legacyPath(w)} -> ${legacyPath(w)}\\.sam-backup-\\d{8}T\\d{6}Z \\(mode 0600\\)`))
@@ -107,8 +107,8 @@ test('uninstall keeps the HMAC entries, even with --remove-credentials, and says
   w.out.length = 0
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: true })).toBe(EXIT_OK)
   expect(w.keychain.has(HMAC_MASTER_REF) && w.keychain.has(HMAC_LEGACY_REF)).toBe(true)
-  expect(w.out).toContain('kept keychain entry hmac-master (marker refs in the data dir need it); remove it with: security delete-generic-password -s shared-agent-memory -a hmac-master  (or rerun with --remove-hmac-keys)')
-  expect(w.out).toContain('kept keychain entry hmac-legacy (marker refs in the data dir need it); remove it with: security delete-generic-password -s shared-agent-memory -a hmac-legacy  (or rerun with --remove-hmac-keys)')
+  expect(w.out).toContain('kept keychain entry hmac-master (marker refs in the data dir need it); remove it with: security delete-generic-password -s kinfold -a hmac-master  (or rerun with --remove-hmac-keys)')
+  expect(w.out).toContain('kept keychain entry hmac-legacy (marker refs in the data dir need it); remove it with: security delete-generic-password -s kinfold -a hmac-legacy  (or rerun with --remove-hmac-keys)')
 })
 
 test('without a keychain (linux) nothing migrates and hmac.key stays', async () => {

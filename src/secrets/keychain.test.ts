@@ -6,10 +6,10 @@ function fake(exitCode: number, stdout = ''): { run: SecurityCommand; calls: (re
   return { calls, run: (args) => (calls.push(args), { exitCode, stdout }) }
 }
 
-test('looks up service shared-agent-memory with the ref as the account and -w', () => {
+test('looks up service kinfold with the ref as the account and -w', () => {
   const { run, calls } = fake(0, 'sk-or-value\n')
   expect(createKeychainProvider(run).get('openrouter')).toBe('sk-or-value')
-  expect(calls).toEqual([['find-generic-password', '-s', 'shared-agent-memory', '-a', 'openrouter', '-w']])
+  expect(calls).toEqual([['find-generic-password', '-s', 'kinfold', '-a', 'openrouter', '-w']])
   expect(keychainArgs('openrouter')).toEqual(calls[0] as string[])
 })
 

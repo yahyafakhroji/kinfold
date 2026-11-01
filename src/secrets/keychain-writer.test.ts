@@ -28,8 +28,8 @@ function fakeKeychain(exitFor: (invocation: SecurityInvocation) => number | null
 test('put sends the add command on stdin to security -i; argv never holds the value', () => {
   const keychain = fakeKeychain()
   createKeychainWriter(keychain.run).put('openrouter', VALUE)
-  expect(keychain.calls[0]).toEqual({ args: ['-i'], stdin: `add-generic-password -U -s shared-agent-memory -a openrouter -w ${VALUE}\n` })
-  expect(keychain.calls[1]).toEqual({ args: ['find-generic-password', '-s', 'shared-agent-memory', '-a', 'openrouter'] })
+  expect(keychain.calls[0]).toEqual({ args: ['-i'], stdin: `add-generic-password -U -s kinfold -a openrouter -w ${VALUE}\n` })
+  expect(keychain.calls[1]).toEqual({ args: ['find-generic-password', '-s', 'kinfold', '-a', 'openrouter'] })
   for (const call of keychain.calls) expect(call.args.join(' ')).not.toContain(VALUE)
   expect(keychain.calls.slice(1).every((call) => call.stdin === undefined)).toBe(true)
 })
@@ -74,7 +74,7 @@ test('remove deletes our entry by service and account, and reports a missing one
   writer.put('openrouter', VALUE)
   expect(writer.remove('openrouter')).toBe(true)
   expect(writer.remove('openrouter')).toBe(false)
-  expect(keychain.calls.at(-1)?.args).toEqual(['delete-generic-password', '-s', 'shared-agent-memory', '-a', 'openrouter'])
+  expect(keychain.calls.at(-1)?.args).toEqual(['delete-generic-password', '-s', 'kinfold', '-a', 'openrouter'])
 })
 
 test('no writer off macOS', () => {

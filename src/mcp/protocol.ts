@@ -8,13 +8,14 @@
 // daemon, after the fact and without waiting (read-reporter.ts, P1-H).
 
 import { isRecord } from '../contract/event'
+import { MCP_SERVER_NAME } from '../names'
 import { MCP_READ_STATUSES, MCP_TOOLS, type McpReadStatus, type McpTool } from '../store/mcp-read-store'
 import type { ReadReporter } from './read-reporter'
 import { TOOL_DEFINITIONS, type ToolContext, type ToolOutcome, callTool } from './tools'
 
 /** Newest first; an unknown requested version gets the newest. */
 export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as const
-export const SERVER_NAME = 'shared-agent-memory'
+export const SERVER_NAME = MCP_SERVER_NAME
 export const SERVER_VERSION = '0.0.1'
 export const MAX_LINE_CHARS = 1_000_000
 

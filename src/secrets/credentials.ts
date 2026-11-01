@@ -2,12 +2,14 @@
 // the OS keychain and are read at call time; a value goes back to the caller
 // only, never into the database, settings, logs or an error message.
 
+import { KEYCHAIN_SERVICE } from '../names'
+
 export interface CredentialProvider {
   /** The secret for `ref`, or null when no such entry exists. Throws only on a lookup failure. */
   get(ref: string): string | null
 }
 
-export const KEYCHAIN_SERVICE = 'shared-agent-memory'
+export { KEYCHAIN_SERVICE }
 /** The database key (P2-E): 32 random bytes as hex, read by every process that opens memory.db. */
 export const DB_KEY_REF = 'db-key'
 /** The new key while `sam rekey` runs; it replaces db-key once the store is checked. */

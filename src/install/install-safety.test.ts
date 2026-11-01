@@ -72,7 +72,7 @@ test('a missing key read from --credential-stdin goes to security -i on stdin on
   expect(await install(w.env, { ...YES, credentialStdin: true })).toBe(EXIT_OK)
   expect(seen === KEY).toBe(true)
   const writes = w.securityCalls.filter((call) => call.args[0] === '-i' && call.stdin?.includes(' -a openrouter ') === true)
-  expect(writes).toEqual([{ args: ['-i'], stdin: `add-generic-password -U -s shared-agent-memory -a openrouter -w ${KEY}\n` }])
+  expect(writes).toEqual([{ args: ['-i'], stdin: `add-generic-password -U -s kinfold -a openrouter -w ${KEY}\n` }])
   const snapshot = JSON.stringify({ commands: w.commands, security: w.securityCalls.map((call) => call.args), out: w.out, fetches: w.fetches })
   expect(snapshot).not.toContain(KEY)
   expect(w.out.some((line) => line.includes('-a openrouter -w <hidden>'))).toBe(true)

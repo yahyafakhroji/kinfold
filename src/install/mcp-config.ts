@@ -11,9 +11,10 @@
 
 import { isRecord } from '../contract/event'
 import { MCP_HOST_ENV } from '../mcp/read-reporter'
+import { MCP_SERVER_NAME } from '../names'
 import type { Settings } from './claude-hooks'
 
-export const MCP_SERVER_NAME = 'shared-agent-memory'
+export { MCP_SERVER_NAME }
 const SERVER_SCRIPT_SUFFIX = '/src/mcp/server.ts'
 const BUN_COMMAND = /(^|\/)bun$/
 

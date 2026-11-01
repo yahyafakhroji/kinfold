@@ -6,6 +6,7 @@
 
 import { join } from 'node:path'
 import { HOST_VERSIONS_FILE } from '../adapters/host-version'
+import { LAUNCH_AGENT_LABEL, LEGACY_DATA_DIR_NAME, LEGACY_LAUNCH_AGENT_LABEL, LEGACY_PLUGIN_FILE_NAME, PLUGIN_FILE_NAME } from '../names'
 import { resolveCodexHome } from './codex-home'
 import type { CredentialProvider } from '../secrets/credentials'
 import type { SecurityRunner } from '../secrets/keychain-writer'
@@ -72,16 +73,18 @@ export interface InstallEnv {
   applicationsDirs?: readonly string[]
 }
 
-export const LAUNCH_AGENT_LABEL = 'dev.shared-agent-memory.daemon'
-export const PLUGIN_FILE_NAME = 'shared-agent-memory.js'
+export { LAUNCH_AGENT_LABEL, PLUGIN_FILE_NAME }
 
 export interface InstallPaths {
   claudeDir: string
   claudeSettings: string
   opencodePluginsDir: string
   opencodePlugin: string
+  legacyOpencodePlugin: string
   launchAgentsDir: string
   launchAgentPlist: string
+  /** The plist an install under the old name left behind; migration removes it. */
+  legacyLaunchAgentPlist: string
   hookScript: string
   pluginEntry: string
   daemonMain: string
@@ -94,6 +97,8 @@ export interface InstallPaths {
   cursorHooks: string
   /** What `sam install` recorded about each host's version (adapters/host-version.ts). */
   hostVersionsFile: string
+  /** The data dir under the old name; migration moves it. */
+  legacyDataDir: string
 }
 
 /** Why Codex cannot be wired with the CODEX_HOME in effect; null when it can. */
@@ -113,8 +118,10 @@ export function installPaths(env: Pick<InstallEnv, 'homeDir' | 'dataDir' | 'proj
     claudeSettings: join(env.homeDir, '.claude', 'settings.json'),
     opencodePluginsDir,
     opencodePlugin: join(opencodePluginsDir, PLUGIN_FILE_NAME),
+    legacyOpencodePlugin: join(opencodePluginsDir, LEGACY_PLUGIN_FILE_NAME),
     launchAgentsDir,
     launchAgentPlist: join(launchAgentsDir, `${LAUNCH_AGENT_LABEL}.plist`),
+    legacyLaunchAgentPlist: join(launchAgentsDir, `${LEGACY_LAUNCH_AGENT_LABEL}.plist`),
     hookScript: join(env.projectRoot, 'src', 'cli', 'hook.ts'),
     pluginEntry: join(env.projectRoot, 'src', 'plugins', 'opencode.ts'),
     daemonMain: join(env.projectRoot, 'src', 'daemon', 'main.ts'),
@@ -125,6 +132,7 @@ export function installPaths(env: Pick<InstallEnv, 'homeDir' | 'dataDir' | 'proj
     cursorDir: join(env.homeDir, '.cursor'),
     cursorHooks: join(env.homeDir, '.cursor', 'hooks.json'),
     hostVersionsFile: join(env.dataDir, HOST_VERSIONS_FILE),
+    legacyDataDir: join(env.homeDir, LEGACY_DATA_DIR_NAME),
   }
 }
 

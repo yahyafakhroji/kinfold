@@ -127,8 +127,8 @@ test('uninstall --remove-hmac-keys --dry-run shows restore, both deletes with th
   expect(w.securityCalls.filter((call) => call.args.includes('-w') || call.args[0] !== 'find-generic-password')).toEqual([])
   const plan = w.out.join('\n')
   expect(plan).toContain(`write ${legacyPath(w)} from keychain entry hmac-legacy (mode 0600), so a later install still verifies epoch-0 refs`)
-  expect(plan).toContain('delete-generic-password -s shared-agent-memory -a hmac-master: the HMAC master; stored refs can no longer be checked, and a later install starts a new master')
-  expect(plan).toContain(`delete-generic-password -s shared-agent-memory -a hmac-legacy: epoch 0's key; its value stays in ${legacyPath(w)}`)
+  expect(plan).toContain('delete-generic-password -s kinfold -a hmac-master: the HMAC master; stored refs can no longer be checked, and a later install starts a new master')
+  expect(plan).toContain(`delete-generic-password -s kinfold -a hmac-legacy: epoch 0's key; its value stays in ${legacyPath(w)}`)
   const files = worldSubKeyEpochs().length
   expect(plan).toContain(`remove ${subKeyDir(w.dataDir)}/: the marker sub-keys (${files} file${files === 1 ? '' : 's'}); stored refs can no longer be checked`)
   expect(plan).toContain(`a real run writes ${legacyPath(w)} from keychain entry hmac-legacy`)

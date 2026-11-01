@@ -30,7 +30,7 @@ test('the server resolves its project once from the cwd', async () => {
 
 test('initialize echoes a supported protocol version and offers tools', async () => {
   const reply = await send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '1' } } })
-  expect(reply).toMatchObject({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'shared-agent-memory' } } })
+  expect(reply).toMatchObject({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'kinfold' } } })
   const unknown = await send({ jsonrpc: '2.0', id: 2, method: 'initialize', params: { protocolVersion: '1999-01-01' } })
   expect((unknown.result as { protocolVersion: string }).protocolVersion).toBe(PROTOCOL_VERSIONS[0])
 })

@@ -38,8 +38,8 @@ test('a fresh install wires both hosts, starts the LaunchAgent and saves both ob
   for (const event of CLAUDE_HOOK_EVENTS) expect(settings.hooks[event]).toEqual([samHookGroup(event, { bunPath: BUN, hookScript: paths.hookScript })])
   expect(readFileSync(paths.opencodePlugin, 'utf8')).toContain(`export { default } from ${JSON.stringify(join(w.projectRoot, 'src/plugins/opencode.ts'))};`)
   expect(launchctlCalls(w)).toEqual([
-    [LAUNCHCTL, 'print', `gui/${UID}/dev.shared-agent-memory.daemon`],
-    [LAUNCHCTL, 'bootstrap', `gui/${UID}`, join(w.home, 'Library/LaunchAgents/dev.shared-agent-memory.daemon.plist')],
+    [LAUNCHCTL, 'print', `gui/${UID}/dev.kinfold.daemon`],
+    [LAUNCHCTL, 'bootstrap', `gui/${UID}`, join(w.home, 'Library/LaunchAgents/dev.kinfold.daemon.plist')],
   ])
   expect(await savedRows(w)).toEqual([
     { host: 'claude-code', provider: 'claude-cli', model: 'haiku', credentialRef: null },

@@ -38,12 +38,12 @@ test('uninstall removes only our hooks, the shim and the LaunchAgent; the data d
   expect(existsSync(join(paths.opencodePluginsDir, 'other-plugin.js'))).toBe(true)
   expect(existsSync(paths.launchAgentPlist)).toBe(false)
   expect(w.commands.filter((c) => c.argv[0] === LAUNCHCTL).map((c) => [...c.argv])).toEqual([
-    [LAUNCHCTL, 'print', 'gui/501/dev.shared-agent-memory.daemon'],
-    [LAUNCHCTL, 'bootout', 'gui/501/dev.shared-agent-memory.daemon'],
+    [LAUNCHCTL, 'print', 'gui/501/dev.kinfold.daemon'],
+    [LAUNCHCTL, 'bootout', 'gui/501/dev.kinfold.daemon'],
   ])
   expect(existsSync(w.dataDir)).toBe(true)
   expect(w.keychain.has('openrouter')).toBe(true)
-  expect(w.out).toContain('kept keychain entry openrouter; remove it with: security delete-generic-password -s shared-agent-memory -a openrouter  (or rerun with --remove-credentials)')
+  expect(w.out).toContain('kept keychain entry openrouter; remove it with: security delete-generic-password -s kinfold -a openrouter  (or rerun with --remove-credentials)')
   expect(w.out.some((line) => line.startsWith(`kept the data dir ${w.dataDir}`))).toBe(true)
 })
 
@@ -64,10 +64,10 @@ test('uninstall --dry-run prints the plan and changes nothing', async () => {
   expect(w.keychain.has('openrouter')).toBe(true)
   expect(w.fetches).toEqual([])
   const plan = w.out.join('\n')
-  expect(plan).toContain('/bin/launchctl bootout gui/501/dev.shared-agent-memory.daemon')
+  expect(plan).toContain('/bin/launchctl bootout gui/501/dev.kinfold.daemon')
   expect(plan).toContain(`remove ${installPaths(w.env).opencodePlugin}: the SAM plugin shim`)
   expect(plan).toContain('remove 6 SAM hook entries; every other key and hook kept')
-  expect(plan).toContain('keychain: /usr/bin/security delete-generic-password -s shared-agent-memory -a openrouter')
+  expect(plan).toContain('keychain: /usr/bin/security delete-generic-password -s kinfold -a openrouter')
 })
 
 test('a second uninstall has nothing to do, and a foreign file by our plugin name is left alone', async () => {

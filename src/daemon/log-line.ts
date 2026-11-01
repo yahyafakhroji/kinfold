@@ -3,6 +3,8 @@
 // matched against sleep or load. The message is the caller's: ids, counts and
 // timings, never text.
 
+import { LOG_PREFIX } from '../names'
+
 export function logLine(message: string, at: Date = new Date()): string {
-  return `${at.toISOString()} sam-daemon: ${message}\n`
+  return `${at.toISOString()} ${LOG_PREFIX}: ${message}\n`
 }

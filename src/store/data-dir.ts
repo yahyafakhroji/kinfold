@@ -6,10 +6,11 @@ import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, st
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
+import { DATA_DIR_NAME } from '../names'
 
 export const DATA_DIR_MODE = 0o700
 export const DATA_FILE_MODE = 0o600
-export const DEFAULT_DATA_DIR_NAME = '.shared-agent-memory'
+export const DEFAULT_DATA_DIR_NAME = DATA_DIR_NAME
 
 export const DB_FILE = 'memory.db'
 export const SPOOL_DIR = 'spool'
