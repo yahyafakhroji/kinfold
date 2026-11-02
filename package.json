@@ -4,7 +4,7 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
-  "description": "One local memory store shared by Claude Code, OpenCode and other AI coding agents.",
+  "description": "A local memory your coding agents share: Claude Code, OpenCode, Codex and Cursor.",
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
