@@ -1,9 +1,9 @@
 // Replaces secrets with typed markers. The marker's ref is an HMAC of the value
 // under a local key: the same secret always gets the same ref, so the observer
 // can tell two mentions apart or together without ever seeing the value.
-// P1-J: the key changes every epoch (a UTC month), so a ref names its epoch:
+// The key changes every epoch (a UTC month), so a ref names its epoch:
 // `e202610.1a2b3c4d`. Untagged refs (`1a2b3c4d`, everything written before
-// P1-J, and still what epoch 0 writes) belong to epoch 0. `x.1a2b3c4d` came
+// key rotation, and still what epoch 0 writes) belong to epoch 0. `x.1a2b3c4d` came
 // from a throwaway key because capture found no key on disk; it groups
 // mentions within one event and can never be verified.
 

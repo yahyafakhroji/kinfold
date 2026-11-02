@@ -1,5 +1,5 @@
-// Picks the runner the settings name, and nothing else (plan "No silent
-// fallback"): a missing credential or a lookup failure is an ObserverError the
+// Picks the runner the settings name, and nothing else (no silent
+// fallback): a missing credential or a lookup failure is an ObserverError the
 // caller records, never a reason to try another provider.
 
 import { type CredentialProvider, isSystemCredentialRef } from '../../secrets/credentials'

@@ -4,7 +4,7 @@ import { PROJECT, T0, type TempStore, openTempStore, seedSession } from '../obse
 import { type BrowseFilters, browseObservations, observationDetail } from './memory-reads'
 import { insertLinks, settleContradictions } from './observation-links'
 
-// The memory browser's list rows carry confirmedBy (P1-L), counted the way
+// The memory browser's list rows carry confirmedBy, counted the way
 // the MCP reader counts it: current confirmers of the same project only.
 
 let temp: TempStore

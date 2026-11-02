@@ -1,4 +1,4 @@
-// Store side of MCP read reporting (P1-H). The MCP server is read-only (D3),
+// Store side of MCP read reporting. The MCP server is read-only,
 // so after each tool call it reports what it returned to the daemon, which
 // writes one mcp_reads row here. A row names the tool, the project scope, the
 // observation ids returned, counts and timing; never query text or arguments.

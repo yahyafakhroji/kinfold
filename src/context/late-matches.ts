@@ -1,5 +1,5 @@
-// Vector matches that finished after a prompt's deadline (P2-B, "late
-// delivery", the user's choice on 2026-10-26). A remote embed takes longer
+// Vector matches that finished after a prompt's deadline ("late
+// delivery"). A remote embed takes longer
 // than the prompt hook may wait, so it keeps running; its hits are parked
 // here per host session and offered with that session's next prompt, gated
 // and filtered against what was sent by then. Memory only: a restart loses

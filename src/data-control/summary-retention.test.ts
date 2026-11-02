@@ -7,7 +7,7 @@ import { insertPrompt, upsertProject, upsertSession } from '../store/writes'
 import { purge } from './purge'
 import { DAY_MS, applyRetention, previewRetention } from './retention'
 
-// Summaries age from their last use (P1-L): coalesce(last_seen_at,
+// Summaries age from their last use: coalesce(last_seen_at,
 // occurred_at). A shared summary first written long ago but repeated lately
 // stays; the preview counts what a run deletes; a date-range purge still
 // means "written in that range".

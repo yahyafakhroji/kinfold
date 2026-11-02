@@ -18,7 +18,7 @@ export const DEFAULT_SCAN_BATCH = 100
 
 export interface ScanOptions {
   hmacKey: string
-  /** The marker key's epoch (P1-J); 0 when left out. */
+  /** The marker key's epoch; 0 when left out. */
   epoch?: number
   now: () => number
   batchSize?: number

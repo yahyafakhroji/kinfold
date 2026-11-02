@@ -1,4 +1,4 @@
-// `kinfold install` puts the pinned sqlite-vec build in <dataDir>/lib (P2-A; the
+// `kinfold install` puts the pinned sqlite-vec build in <dataDir>/lib (the
 // user chose an installer download over an npm dependency). The tarball is
 // fetched from the GitHub release, its sha256 checked against the hash in
 // src/vectors/vec0-release.ts, unpacked in process (gunzip, then a ustar

@@ -1,7 +1,7 @@
 // Manual one-shot observer: `KINFOLD_DATA_DIR=<dir> bun src/observer/once.ts <session-id>`.
 // Runs batches for one session until nothing is retryable or a batch fails,
-// with the runner its host's settings name. The daemon is the only writer
-// (D3), so this refuses a data dir that a daemon has claimed, and it needs
+// with the runner its host's settings name. The daemon is the only writer,
+// so this refuses a data dir that a daemon has claimed, and it needs
 // KINFOLD_DATA_DIR spelled out so it never touches the default store by accident.
 
 import { existsSync } from 'node:fs'

@@ -2,7 +2,7 @@
 // tell that a key changed (and retry events that failed on the old one)
 // without storing, logging or comparing the key itself. Without that key a
 // fingerprint says nothing about the value; the ref is mixed in so one value
-// under two refs gives two fingerprints. Before P1-J the key was hmac.key
+// under two refs gives two fingerprints. Before key rotation the key was hmac.key
 // (scheme hmac-sha256); with a Keychain master it is the master's
 // fingerprint purpose key (scheme hmac-sha256-m1), which stays the same
 // across marker epochs. The scheme prefix lets the reset check tell "the key

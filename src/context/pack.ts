@@ -1,6 +1,6 @@
-// Builds the text a host reads at session start or per request (plan
-// "Provenance and evidence" specimen). Pure: rows in, text out. Observations
-// from every host are used (decision D1), near-duplicates become one line
+// Builds the text a host reads at session start or per request (a
+// provenance-and-evidence specimen). Pure: rows in, text out. Observations
+// from every host are used, near-duplicates become one line
 // that names the other hosts, a contradicted observation appears only right
 // after the observation that contradicts it, and lines fill strongest-first
 // until the host profile's token budget would be passed. The frame tells the
@@ -21,7 +21,7 @@ export interface PackInput {
   observations: readonly PackObservation[]
   /** next_steps of the project's latest summary, if any. */
   nextSteps: string | null
-  /** Prompts sharing that summary (P1-I); shown as "×N" when above 1. */
+  /** Prompts sharing that summary; shown as "×N" when above 1. */
   nextStepsRepeats?: number
   budgetTokens: number
   now: number

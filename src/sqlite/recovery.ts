@@ -1,9 +1,8 @@
-// The recovery code (P2-E, decision 6): the database key itself, written for
+// The recovery code: the database key itself, written for
 // a person to copy. 32 key bytes plus 2 checksum bytes (the start of the key's
 // sha256), Crockford base32, 55 characters in 11 groups of 5. Decoding ignores
 // case, dashes and spaces, reads I and L as 1 and O as 0, and the checksum
-// catches a mistyped group before the code touches the database
-// (docs/reference/encryption-keys.md).
+// catches a mistyped group before the code touches the database.
 
 import { createHash } from 'node:crypto'
 

@@ -6,7 +6,7 @@
 // event, it prints exactly one JSON object carrying the project's context pack
 // (daemon first, read-only fallback second, 300 ms for both) in the shape that
 // host reads. On a Claude Code user prompt it prints the prompt-time delta
-// (P1-H: memory written since the session last received it) the same way, as
+// (memory written since the session last received it) the same way, as
 // UserPromptSubmit additionalContext. Any failure or an empty answer prints
 // nothing. Errors go to stderr
 // without the payload. Under the observer (KINFOLD_OBSERVER=1) it captures and
@@ -43,7 +43,7 @@ const hookSpecific = (text: string): string => JSON.stringify({ hookSpecificOutp
 
 export const HOOK_HOSTS: Readonly<Record<HookHost, HookHostSpec>> = {
   'claude-code': { normalize: normalizeClaudeCode, sessionContext: hookSpecific, promptContext: userPromptContextOutput },
-  // Codex documents the same UserPromptSubmit hookSpecificOutput shape as Claude Code (docs/p1f-report.md).
+  // Codex documents the same UserPromptSubmit hookSpecificOutput shape as Claude Code.
   codex: { normalize: normalizeCodex, sessionContext: hookSpecific, promptContext: userPromptContextOutput },
   cursor: { normalize: normalizeCursor, sessionContext: (text) => JSON.stringify({ additional_context: text }) },
 }

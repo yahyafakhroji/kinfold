@@ -12,7 +12,7 @@ import { rebuildProjectPacks } from './packs'
 import { seedObservation } from './test-support'
 import type { PackObservation } from './types'
 
-// Confirmation boost (P1-I): +0.3 per current confirmer, capped at 3 (0.9),
+// Confirmation boost: +0.3 per current confirmer, capped at 3 (0.9),
 // added to the evidence tier (tool-verified 3, user-stated 2, interpretation 1).
 
 let temp: TempStore

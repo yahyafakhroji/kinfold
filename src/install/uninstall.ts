@@ -3,8 +3,8 @@
 // stays. The data dir and the keychain entries stay too, because they hold the
 // user's memory and keys; the command prints how to remove them, and
 // --remove-credentials deletes our credential entries. The HMAC master and
-// legacy key (P1-J) stay with the data dir, since stored refs need them,
-// unless --remove-hmac-keys (P1-K): that writes hmac.key back from
+// legacy key stay with the data dir, since stored refs need them,
+// unless --remove-hmac-keys: that writes hmac.key back from
 // hmac-legacy, then deletes both entries and hmac.d/ (hmac-cleanup.ts).
 
 import { existsSync } from 'node:fs'

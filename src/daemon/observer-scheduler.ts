@@ -4,7 +4,7 @@
 // ended (turn_end or session_end waiting), when enough events piled up, when
 // it went quiet, or when it ended. A session silent for KINFOLD_SESSION_IDLE_MS
 // with no ended_at is ended here, because OpenCode never says so on quit.
-// P1-E: a long turn's early events used to wait for the whole turn (or for 8
+// A long turn's early events used to wait for the whole turn (or for 8
 // more events). Now a session is also due once its oldest pending event has
 // waited maxWaitMs, but at most maxEarlyRunsPerTurn times between two turn
 // boundaries, so a long turn costs a bounded number of extra observer runs.
@@ -26,7 +26,7 @@ export interface ObserverScheduleConfig {
   maxWaitMs: number
   /** 'waited' starts allowed per session between two turn-closing starts. */
   maxEarlyRunsPerTurn: number
-  /** Events after ended_at make a session live again. false is the pre-P1-E rule, kept for the replay's baseline. */
+  /** Events after ended_at make a session live again. false is the pre-mid-turn rule, kept for the replay's baseline. */
   resumeAfterEnd: boolean
 }
 
@@ -35,14 +35,14 @@ export const DEFAULT_SCHEDULE: ObserverScheduleConfig = {
   batchAtEvents: 8,
   quietMs: 60_000,
   sessionIdleMs: 30 * 60_000,
-  // Chosen on a replay of the live timeline (docs/p1e-report.md): shorter
+  // Chosen on a replay of the live session timeline: shorter
   // waits put a run in flight when the turn ends and raise turn-end p95.
   maxWaitMs: 75_000,
   maxEarlyRunsPerTurn: 2,
   resumeAfterEnd: true,
 }
 
-/** The scheduler before P1-E: no mid-turn wait rule, and any ended_at made a session due. */
+/** The earlier scheduler: no mid-turn wait rule, and any ended_at made a session due. */
 export const LEGACY_SCHEDULE: ObserverScheduleConfig = { ...DEFAULT_SCHEDULE, maxEarlyRunsPerTurn: 0, resumeAfterEnd: false }
 
 /** Why a session is due, in the order checked. Only 'count' and 'waited' happen mid-turn. */

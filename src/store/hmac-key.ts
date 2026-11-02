@@ -1,13 +1,13 @@
 // The keys behind redaction marker refs, as files in the 0700 data directory.
-// Before P1-J one 0600 file, hmac.key, held the only key. Now the daemon
+// Before key rotation one 0600 file, hmac.key, held the only key. Now the daemon
 // derives a sub-key per epoch from a Keychain master and writes it to
 // hmac.d/<YYYYMM>.key (0600, atomic), so the capture hook (record.ts, which
 // the OpenCode plugin also uses) does one small file read: no spawn, no IPC,
 // no Keychain. A Keychain lookup measured p50 22 ms / p95 81 ms against the
-// hook's 50 ms budget (docs/p1g-report.md). The order loadMarkerKey follows:
+// hook's 50 ms budget. The order loadMarkerKey follows:
 //   1. the sub-key of the current epoch, else the newest one before it, else the newest;
 //   2. hmac.key, epoch 0 (not migrated, or rolled back);
-//   3. no hmac.d at all: never migrated, so create hmac.key as before P1-J;
+//   3. no hmac.d at all: never migrated, so create hmac.key as before key rotation;
 //   4. hmac.d exists but holds nothing: a throwaway key with `x.` refs. Creating
 //      hmac.key here would silently start a second epoch 0.
 
@@ -20,7 +20,7 @@ import { DATA_DIR_MODE, HMAC_KEY_FILE, HMAC_SUBKEY_DIR, ensureDataDir, readOrCre
 
 const SUBKEY_NAME = /^([0-9]{6})\.key$/
 
-/** Epoch 0's file key, created on first use: the pre-P1-J behaviour. */
+/** Epoch 0's file key, created on first use: the pre-rotation behaviour. */
 export function loadHmacKey(dataDir: string): string {
   return readOrCreateSecret(join(ensureDataDir(dataDir), HMAC_KEY_FILE))
 }

@@ -3,11 +3,11 @@
 // stdout carries the protocol only; logs go to stderr. The project key is
 // resolved once from the cwd the host started us in, and the database is
 // opened read-only on first use and kept, so it works with the daemon up or
-// down and never writes (D3). A missing database is asked for again on each
+// down and never writes. A missing database is asked for again on each
 // call, so memory recorded after start is picked up. Each answered tool call
 // is reported to the daemon after the reply (src/mcp/read-reporter.ts), which
 // writes the mcp_reads row; the host comes from KINFOLD_MCP_HOST. Search asks the
-// daemon for semantic matches too (P2-A, src/mcp/semantic-client.ts) and falls
+// daemon for semantic matches too (src/mcp/semantic-client.ts) and falls
 // back to keyword-only when the daemon is down or slow.
 
 import { resolveDataDir } from '../store/data-dir'
@@ -24,9 +24,9 @@ export interface McpServerOptions {
   log?: (line: string) => void
   now?: () => number
   clock?: () => number
-  /** Read reports to the daemon (P1-H); main() builds one from KINFOLD_MCP_HOST, tests may leave it out. */
+  /** Read reports to the daemon; main() builds one from KINFOLD_MCP_HOST, tests may leave it out. */
   reporter?: ReadReporter
-  /** Vector search through the daemon (P2-A); main() builds one, tests may leave it out for keyword-only search. */
+  /** Vector search through the daemon; main() builds one, tests may leave it out for keyword-only search. */
   semantic?: SemanticClient
 }
 

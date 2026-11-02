@@ -121,7 +121,7 @@ test('runHook itself returns early under the observer env', async () => {
   expect(existsSync(join(dataDir, 'spool'))).toBe(false)
 })
 
-// --- SessionStart context injection (task 8) ---
+// --- SessionStart context injection ---
 
 const PROJECT_NAME = 'hook-repo'
 

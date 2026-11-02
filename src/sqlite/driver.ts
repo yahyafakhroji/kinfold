@@ -1,4 +1,4 @@
-// Database and Statement over sqlite3mc (P2-E). The behaviour follows
+// Database and Statement over sqlite3mc. The behaviour follows
 // bun:sqlite with strict binding, and src/sqlite/contract.test.ts holds both to
 // it. Text and blobs bind with SQLITE_TRANSIENT, so SQLite copies them and no
 // JS buffer outlives a call. A statement the cache drops may still be held by

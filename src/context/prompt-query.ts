@@ -1,4 +1,4 @@
-// What a prompt becomes before it is matched against memory (P2-B). Terms:
+// What a prompt becomes before it is matched against memory. Terms:
 // lowercase words of three or more characters, minus common English and
 // request words, each once, at most MAX_QUERY_TERMS; FTS5 then matches any
 // of them. The guard decides whether the prompt may leave the machine to be

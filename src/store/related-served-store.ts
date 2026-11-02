@@ -1,4 +1,4 @@
-// Related lines served at prompt time (P2-B labels, schema v9): one row per
+// Related lines served at prompt time: one row per
 // line, with the distance and matched-term count that earned it a place. Ids
 // and numbers only, no text. Joined with MCP get_observations reads, they say
 // which distances led to a line the agent went on to fetch

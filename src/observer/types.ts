@@ -30,7 +30,7 @@ export interface ObserverPrompt {
   eventIds: readonly string[]
 }
 
-/** How a new observation bears on one the session was shown as memory (D2). */
+/** How a new observation bears on one the session was shown as memory. */
 export const RELATION_KINDS = ['confirms', 'updates', 'contradicts'] as const
 export type RelationKind = (typeof RELATION_KINDS)[number]
 

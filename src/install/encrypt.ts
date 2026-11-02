@@ -1,5 +1,5 @@
 // `kinfold encrypt | decrypt | rekey | key show-recovery | key recover | key resume`
-// (P2-E slice E3). The database part is src/sqlite/convert.ts; this file
+// The database part is src/sqlite/convert.ts; this file
 // orders the rest so no step can strand the store without its key:
 //   - a new key goes into the Keychain, and is read back, before the store
 //     changes (rekey writes db-key-next, and moves it to db-key only once the

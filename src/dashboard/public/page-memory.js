@@ -169,7 +169,7 @@ export function linkItem(link, state) {
 /**
  * How many current observations confirm this one: incoming confirms links
  * whose source is not contradicted (the count packs and MCP rank by). A
- * detail from before P1-I has no `current` and counts every confirmer.
+ * detail from a store that predates confirmation counts has no `current` and counts every confirmer.
  * @param {import('../../store/observation-links').LinkedObservation[]} links
  */
 export function confirmedByCount(links) {

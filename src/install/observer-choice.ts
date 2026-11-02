@@ -1,4 +1,4 @@
-// The per-host observer choice (D7): keep the built-in default or name a
+// The per-host observer choice: keep the built-in default or name a
 // provider and model, from --observer, --yes or a prompt. A choice is saved
 // only after one tiny call through that provider's real runner answers, so a
 // broken choice is caught at install time, not at the first batch. There is

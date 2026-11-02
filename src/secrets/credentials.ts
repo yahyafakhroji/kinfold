@@ -10,7 +10,7 @@ export interface CredentialProvider {
 }
 
 export { KEYCHAIN_SERVICE }
-/** The database key (P2-E): 32 random bytes as hex, read by every process that opens memory.db. */
+/** The database key: 32 random bytes as hex, read by every process that opens memory.db. */
 export const DB_KEY_REF = 'db-key'
 /** The new key while `kinfold rekey` runs; it replaces db-key once the store is checked. */
 export const DB_KEY_NEXT_REF = 'db-key-next'

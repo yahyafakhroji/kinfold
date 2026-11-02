@@ -2,7 +2,7 @@
 // runner its host's settings name, validate the reply, store the result. Any
 // failure (bad settings, missing credential, missing CLI, non-zero exit, bad
 // JSON) is recorded on the run and the events become failed-and-retryable;
-// nothing switches to another provider (plan "No silent fallback").
+// nothing switches to another provider (no silent fallback).
 // Logs carry ids, counts, durations, provider/model and error class only.
 
 import type { Database } from '../sqlite/types'

@@ -1,4 +1,4 @@
-// Opening memory.db through sqlite3mc (P2-E). The file's first 16 bytes say
+// Opening memory.db through sqlite3mc. The file's first 16 bytes say
 // how: the SQLite header means plaintext, anything else means encrypted, and
 // an encrypted file needs the key. A store that does not exist yet is created
 // encrypted when the key store has a key, and plaintext otherwise, so an

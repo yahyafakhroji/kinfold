@@ -6,7 +6,7 @@ import { type MemoryReader, openMemoryReader } from './reader'
 import { type McpFixture, NOW, PROJECT_A, T0, openMcpFixture, seedMcpObservation, seedMcpSession } from './test-support'
 import { type ToolResult, callTool } from './tools'
 
-// P1-I in MCP answers: search ranks a confirmed match higher and says
+// Shared summaries in MCP answers: search ranks a confirmed match higher and says
 // "confirmed by N"; a shared summary appears once with its repeat count.
 
 let fixture: McpFixture

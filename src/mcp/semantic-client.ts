@@ -1,5 +1,5 @@
-// The MCP server's way to the vector half of hybrid search (P2-A). The
-// server stays read-only and extension-free (D3): it posts the query to the
+// The MCP server's way to the vector half of hybrid search. The
+// server stays read-only and extension-free: it posts the query to the
 // daemon's POST /search/semantic with the data-dir token, under a deadline,
 // and merges what comes back with its own FTS results. A daemon that is
 // down, slow or refusing gives an "unavailable" or "timeout" answer and the

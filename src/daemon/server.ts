@@ -30,9 +30,9 @@ export interface ServerDeps {
   token: string
   version: string
   schemaVersion: number
-  /** The HMAC key mode, live (P1-K): /health reports it so `kinfold install` knows the daemon reads the master. Never key bytes. */
+  /** The HMAC key mode, live: /health reports it so `kinfold install` knows the daemon reads the master. Never key bytes. */
   hmacMode?: () => HmacMode
-  /** Whether sqlite-vec loaded (P2-A); /health reports it so `kinfold status` can say why search is keyword-only. */
+  /** Whether sqlite-vec loaded; /health reports it so `kinfold status` can say why search is keyword-only. */
   vectorSearch?: 'on' | 'off'
   /** POST /search/semantic (token only): nearest observations to a query. Absent: answers unavailable. */
   semanticSearch?: (request: SemanticRequest) => Promise<SemanticAnswer>
@@ -42,9 +42,9 @@ export interface ServerDeps {
   context: (request: ContextRequest) => ContextResult | Promise<ContextResult>
   /** POST /observer/retry: failed events back to pending; returns how many. */
   retryFailed: (target: RetryTarget) => number
-  /** GET and PUT /observer/settings: one row per host, written only here (D3). */
+  /** GET and PUT /observer/settings: one row per host, written only here. */
   observerSettings: ObserverSettingsHandlers
-  /** /data/size, /data/retention, /data/scan, /data/findings, /data/findings/:id/resolve, /data/purge (P1 data control). */
+  /** /data/size, /data/retention, /data/scan, /data/findings, /data/findings/:id/resolve, /data/purge. */
   data: DataHandlers
   /** GET /memory/observations, /memory/observations/:id, /memory/facets (the dashboard's memory browser). */
   memory: MemoryHandlers

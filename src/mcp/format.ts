@@ -40,7 +40,7 @@ export function age(occurredAt: number, now: number): string {
 /**
  * `#id · host · type · evidence · age · title`, plus the "contradicted by" or
  * "updated by" note when there is one; otherwise "confirmed by N" when current
- * observations confirm it. The contradiction note always wins (D2).
+ * observations confirm it. The contradiction note always wins.
  */
 export function indexLine(row: IndexRow, now: number): string {
   const head = [`#${row.id}`, row.host, row.type, row.evidence, age(row.occurredAt, now), oneLine(row.title, MAX_TITLE_CHARS)].join(' · ')

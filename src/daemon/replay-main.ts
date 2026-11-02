@@ -1,5 +1,5 @@
 // `bun src/daemon/replay-main.ts <copy of memory.db>`: replays the stored
-// event timeline through the scheduler twice, with the pre-P1-E rules and
+// event timeline through the scheduler twice, with the pre-mid-turn rules and
 // with today's defaults, and prints runs per turn and both lag definitions as
 // JSON (counts and ms only). Point it at a .backup copy, never the live
 // database; it opens the file read-only either way.

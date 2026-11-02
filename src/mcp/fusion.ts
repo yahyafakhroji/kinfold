@@ -1,5 +1,5 @@
-// Hybrid ranking for the MCP search tool (P2-A; plan: "FTS5 BM25 and vector
-// search in parallel, merged with reciprocal rank fusion"). RRF uses ranks
+// Hybrid ranking for the MCP search tool (FTS5 BM25 and vector
+// search run in parallel and merge with reciprocal rank fusion). RRF uses ranks
 // only, so bm25 (unbounded, lower is better, already scaled by the confirms
 // boost) and cosine distance (0 to 2) never need a common scale; a row in
 // both lists outranks a row at the top of one. Vector search always returns

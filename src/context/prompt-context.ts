@@ -1,4 +1,4 @@
-// The prompt channel's answer in the daemon (P2-B): the delta (new memory
+// The prompt channel's answer in the daemon: the delta (new memory
 // from other sessions), then earlier memory related to the prompt. Keyword
 // matches are local and take milliseconds. The prompt's embedding is a round
 // trip to OpenRouter, slower than the hook may wait, so it races a deadline:

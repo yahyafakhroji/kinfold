@@ -1,6 +1,6 @@
 // `kinfold install`: detect the hosts, choose and check each observer, then build
-// one plan (data dir modes, the HMAC key migration (P1-J), the pinned
-// sqlite-vec build (P2-A), keychain, Claude Code hooks, the OpenCode shim,
+// one plan (data dir modes, the HMAC key migration, the pinned
+// sqlite-vec build, keychain, Claude Code hooks, the OpenCode shim,
 // the LaunchAgent, settings through the daemon)
 // and print or apply it. A daemon
 // that answers /health but was not started by our LaunchAgent stops the

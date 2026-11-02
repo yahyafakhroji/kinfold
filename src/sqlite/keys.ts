@@ -1,8 +1,8 @@
-// The database key (P2-E): 32 random bytes as hex, kept by the OS. Every
+// The database key: 32 random bytes as hex, kept by the OS. Every
 // process that opens an encrypted memory.db reads it here; nothing else ever
 // sees it, and no error carries it. macOS keeps it in the login Keychain as
-// kinfold/db-key, or shared-agent-memory/db-key until migrated
-// (docs/reference/encryption-keys.md). Linux and Windows stores arrive with P2-E slice E4; until then those platforms have
+// kinfold/db-key, or shared-agent-memory/db-key until migrated.
+// Linux and Windows stores are not built yet; until then those platforms have
 // no key, so new stores there stay plaintext. KINFOLD_DB_KEYSTORE=none turns the
 // store off under `bun test` only (NODE_ENV=test), so no test reads the real
 // Keychain and no production environment can switch encryption off.

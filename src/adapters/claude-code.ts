@@ -64,7 +64,7 @@ function failedTool(payload: Payload): ToolCall {
   }
 }
 
-/** Returns null for hook events P0 does not capture (SubagentStop, PreCompact, and the rest). */
+/** Returns null for hook events Kinfold does not capture (SubagentStop, PreCompact, and the rest). */
 export function normalizeClaudeCode(payload: unknown, context: AdapterContext): NormalizedEvent | null {
   if (!isRecord(payload)) throw new AdapterInputError('hook payload must be a JSON object')
   const sessionId = str(payload.session_id)
@@ -111,7 +111,7 @@ export function normalizeClaudeCode(payload: unknown, context: AdapterContext): 
 /**
  * The stdout line for a UserPromptSubmit hook that adds context to the turn:
  * Claude Code's documented hookSpecificOutput shape for that event. Used for
- * the prompt-time memory delta (P1-H).
+ * the prompt-time memory delta.
  */
 export function userPromptContextOutput(text: string): string {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } })

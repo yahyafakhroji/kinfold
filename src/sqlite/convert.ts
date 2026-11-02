@@ -1,4 +1,4 @@
-// Converting memory.db in place (P2-E slice E3): plaintext to encrypted, back,
+// Converting memory.db in place: plaintext to encrypted, back,
 // or to a new key. The caller stops the daemon and writes the maintenance
 // marker first; this file does the database part and checks its own work:
 //   1. refuse unless the free space holds a full copy, twice over;

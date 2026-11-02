@@ -5,7 +5,7 @@
 // way every pending finding of that row is settled, since both act on the
 // row, not on one rule. The old text is overwritten (secure_delete) and the
 // WAL emptied afterwards, as for a purge. A rewrite keeps every marker already
-// there, old or new form, and new markers carry the current epoch (P1-J).
+// there, old or new form, and new markers carry the current epoch.
 
 import { rebuildProjectPacks } from '../context/packs'
 import { RULES_VERSION } from '../redaction/rules'
@@ -21,7 +21,7 @@ export type ResolveAction = (typeof RESOLVE_ACTIONS)[number]
 
 export interface ResolveDeps {
   hmacKey: string
-  /** The marker key's epoch (P1-J); 0 when left out. */
+  /** The marker key's epoch; 0 when left out. */
   epoch?: number
   now: () => number
 }

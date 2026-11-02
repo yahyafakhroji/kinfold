@@ -1,4 +1,4 @@
-// Read-only queries behind the latency part of GET /metrics/summary (P1-E).
+// Read-only queries behind the latency part of GET /metrics/summary.
 // Capture-to-searchable lag is split into the stages the stored timestamps
 // can tell apart, for every event an observation cites:
 //   ingest    events.ingested_at - events.occurred_at (spool and drain)

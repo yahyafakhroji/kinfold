@@ -1,10 +1,10 @@
-// The HMAC key hierarchy (P1-J). A random 32-byte master lives in the macOS
+// The HMAC key hierarchy. A random 32-byte master lives in the macOS
 // Keychain (account hmac-master); only `kinfold install` creates it and only the
 // daemon reads it, once at start. Everything else derives from it:
 //   marker sub-key for an epoch  = HMAC(master, "marker-ref/v1/" + epoch)
 //   credential fingerprint key   = HMAC(master, "credential-fingerprint/v1")
 // An epoch is a UTC calendar month written YYYYMM, so a ref says when its key
-// was current. Epoch 0 is the pre-P1-J key (the old hmac.key file), kept in
+// was current. Epoch 0 is the pre-rotation key (the old hmac.key file), kept in
 // the Keychain as hmac-legacy. Values here are 64-hex strings, used as
 // HMAC keys exactly the way the old hmac.key value was. Pure functions only:
 // no Keychain, no files.
@@ -14,7 +14,7 @@ import type { CredentialProvider } from './credentials'
 
 export const HMAC_MASTER_REF = 'hmac-master'
 export const HMAC_LEGACY_REF = 'hmac-legacy'
-/** The pre-P1-J key: untagged refs belong to it. */
+/** The pre-rotation key: untagged refs belong to it. */
 export const LEGACY_EPOCH = 0
 const KEY_PATTERN = /^[0-9a-f]{64}$/
 const MARKER_LABEL = 'marker-ref/v1/'

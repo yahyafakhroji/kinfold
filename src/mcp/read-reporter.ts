@@ -1,5 +1,5 @@
-// Reports each answered MCP tool call to the daemon (P1-H), so hit rate can
-// count what agents fetched. The MCP server stays read-only (D3): it never
+// Reports each answered MCP tool call to the daemon, so hit rate can
+// count what agents fetched. The MCP server stays read-only: it never
 // opens the database for writing; it posts POST /metrics/mcp-read with the
 // daemon token from the data dir and the daemon writes the row. Fire and
 // forget: report() schedules the post after the reply has been written and

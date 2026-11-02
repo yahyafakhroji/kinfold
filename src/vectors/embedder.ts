@@ -1,4 +1,4 @@
-// Embeddings through OpenRouter's OpenAI-compatible API (P2-A; the user chose
+// Embeddings through OpenRouter's OpenAI-compatible API (the user chose
 // openai/text-embedding-3-small). The observer already sends this text to
 // OpenRouter, so no new party sees it. 512 dimensions instead of 1536: the
 // text-embedding-3 models are trained to be shortened, and a row is 2 KB

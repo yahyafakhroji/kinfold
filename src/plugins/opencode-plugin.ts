@@ -1,4 +1,4 @@
-// OpenCode V2 plugin body (decision D8: 2.x only). Capture handlers read
+// OpenCode V2 plugin body (2.x only). Capture handlers read
 // OpenCode's events, write the spool, and hand nothing back, so OpenCode's own
 // events and results are never changed. The nudge is not awaited; the spool
 // write finishes before a handler returns.
@@ -8,8 +8,8 @@
 // (daemon first, read-only fallback second, 300 ms for both) and cached until
 // the session compacts; a failure or an empty pack appends nothing. At most
 // once per 30 s per session it also asks for the prompt-time delta and keeps
-// it with the pack (context-injector.ts, P1-H). A new prompt asks at once and
-// carries its text, for prompt-time related memory (P2-B).
+// it with the pack (context-injector.ts). A new prompt asks at once and
+// carries its text, for prompt-time related memory.
 // Kept apart from opencode.ts because that file may export only { id, setup }.
 // Under the observer (KINFOLD_OBSERVER=1) setup registers nothing, so an observer
 // process can never feed events back into the store.

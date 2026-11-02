@@ -5,12 +5,12 @@
 // removed; if the same text is already there, nothing is added, so a reused
 // list never holds it twice. Compaction drops the session's cache, so the
 // next request fetches a pack that reflects what was learned meanwhile.
-// Mid-session updates (P1-H): a request may also ask for the prompt-time
+// Mid-session updates: a request may also ask for the prompt-time
 // delta (memory written since this session last received it), at most once
 // per request and at most once per DELTA_INTERVAL_MS per session. Each
 // non-empty delta joins the session's cache and is appended after the pack
 // on every later request, up to MAX_DELTAS_PER_SESSION (the oldest goes).
-// Prompt-time related memory (P2-B): the prompt hook leaves the session's
+// Prompt-time related memory: the prompt hook leaves the session's
 // latest prompt here (memory only, cut to MAX_CONTEXT_PROMPT_CHARS); the next
 // request asks for the delta at once, interval or not, and sends the prompt
 // with it, once. The daemon does the leak check before anything is embedded.

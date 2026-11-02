@@ -1,10 +1,10 @@
-// Gives stuck observer events another chance when their cause may be fixed
-// (user decision, task 8): for every host with failed events, compare its
+// Gives stuck observer events another chance when their cause may be fixed:
+// for every host with failed events, compare its
 // resolved observer settings and its provider's credential fingerprint with
 // the last ones seen. The first sight records a baseline; a later difference
 // resets that host's exhausted events to pending. The credential is read only
 // to fingerprint it (HMAC under the data dir key) and is never stored or
-// logged. Logs carry host, reason and counts only. P1-J: the fingerprint key
+// logged. Logs carry host, reason and counts only. The fingerprint key
 // comes from the daemon's key state. While it is unknown (Keychain locked at
 // start), hosts that need a credential are skipped, so nothing resets by
 // mistake; and a stored fingerprint under the other key scheme (hmac.key

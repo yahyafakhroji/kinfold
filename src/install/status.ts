@@ -1,7 +1,6 @@
 // `kinfold status`: read-only. Hosts found and wired (yes/no/stale/partial), the
 // LaunchAgent, daemon health, each host's observer and where it came from,
-// keychain entries (metadata lookups only, never -w), the HMAC keys (P1-J:
-// master and legacy entries, sub-key epochs, leftover plain-text keys), data dir modes, and
+// keychain entries (metadata lookups only, never -w), the HMAC keys (master and legacy entries, sub-key epochs, leftover plain-text keys), data dir modes, and
 // duplicate project wiring. It creates nothing, not even the data dir.
 
 import { existsSync } from 'node:fs'

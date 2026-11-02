@@ -1,4 +1,4 @@
-// The edge pipeline (decision D6): every event passes through here before the
+// The edge pipeline: every event passes through here before the
 // spool write. The spool is a file on disk, so a secret that reaches it has
 // already leaked once.
 

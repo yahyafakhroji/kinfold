@@ -1,4 +1,4 @@
-// Opens the one SQLite file the daemon owns (decision D3). Pragma order
+// Opens the one SQLite file the daemon owns. Pragma order
 // matters: auto_vacuum only takes effect before the first table exists, so it
 // goes first; secure_delete makes purges overwrite freed pages on disk.
 

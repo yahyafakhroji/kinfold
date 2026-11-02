@@ -1,5 +1,5 @@
-// Serves the stored pack when the daemon is unreachable (plan "Reads survive a
-// daemon restart"). Decision D3 keeps every write in the daemon, so this path
+// Serves the stored pack when the daemon is unreachable (reads survive a
+// daemon restart). The daemon is the only writer, so this path
 // opens the database read-only, runs no migrations and records no injection;
 // it says so in its log line. A plain read-only open of a WAL database creates
 // -wal and -shm when they are missing, so it is tried only when both exist (a
@@ -19,7 +19,7 @@ import { GIT_TIMEOUT_MS, type GitRunner, GitTimeoutError, gitRunnerWithTimeout, 
 import { computeDelta } from './delta'
 import { type ContextRequest, type ContextResult, hostProfileFor } from './types'
 
-/** host and cwd pick the pack; a prompt channel with its host session asks for the delta instead (P1-H). */
+/** host and cwd pick the pack; a prompt channel with its host session asks for the delta instead. */
 export type StoredContextRequest = Pick<ContextRequest, 'host' | 'cwd'> & Partial<Pick<ContextRequest, 'hostSessionId' | 'channel'>>
 
 export interface FallbackOptions {

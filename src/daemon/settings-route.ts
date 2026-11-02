@@ -1,4 +1,4 @@
-// GET and PUT /observer/settings (decision D7, through the single writer D3).
+// GET and PUT /observer/settings (the daemon is the single writer).
 // The installer saves each host's observer choice here, and the dashboard will
 // reuse the same routes. PUT checks everything resolveObserverSettings would
 // later refuse, so a stored row never fails a batch as config_invalid. Errors

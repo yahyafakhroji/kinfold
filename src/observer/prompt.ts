@@ -1,6 +1,6 @@
 // Builds the one prompt an observer call sees for a batch of a session's events.
 // Only stored payloads go in, and they were redacted at the edge and again by
-// the daemon (D6). Each event becomes one JSON line labelled with its event_id:
+// the daemon. Each event becomes one JSON line labelled with its event_id:
 // JSON escaping means text inside a payload cannot close the data block or
 // forge another event, whatever it contains.
 
@@ -125,7 +125,7 @@ function knownBlock(known: readonly KnownObservation[]): string[] {
 
 /**
  * Prompt numbers whose text repeats, word for word, a prompt of this project
- * that already has a summary (P1-I). The daemon reuses that summary whatever
+ * that already has a summary. The daemon reuses that summary whatever
  * the reply says, so the observer can save the tokens. Numbers only: the
  * line carries no prompt text.
  */

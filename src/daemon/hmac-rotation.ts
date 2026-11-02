@@ -1,4 +1,4 @@
-// The daemon's HMAC keys (P1-J). At start it reads the Keychain master once
+// The daemon's HMAC keys. At start it reads the Keychain master once
 // and holds it for its lifetime. From it, the daemon derives the current
 // epoch's marker sub-key, writes it to hmac.d/<epoch>.key before capture
 // needs it, and rotates monthly. It keeps the previous epoch's file for
@@ -6,7 +6,7 @@
 // days of a month (so a capture whose clock runs ahead still finds a file),
 // and deletes the rest. Three modes:
 //   master:   the Keychain gave the master; every epoch can be rebuilt.
-//   legacy:   no master (install not re-run): hmac.key, epoch 0, as before P1-J.
+//   legacy:   no master (install not re-run): hmac.key, epoch 0, as before key rotation.
 //   degraded: a master may exist but could not be read (locked, denied): serve
 //             on the newest sub-key file, never mint a master, never create
 //             hmac.key, pause credential fingerprints, retry on each rotation tick.

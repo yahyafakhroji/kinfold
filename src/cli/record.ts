@@ -1,7 +1,7 @@
 // The shared tail of every capture path: edge redaction into the spool, then a
 // best-effort nudge. The spool write is what matters; a dead or slow daemon
 // only delays ingest, because its fallback interval drains the spool anyway.
-// The marker key is the daemon's newest per-epoch sub-key file (P1-J): one
+// The marker key is the daemon's newest per-epoch sub-key file: one
 // small read, never a Keychain lookup on the hook path.
 
 import { existsSync, readFileSync } from 'node:fs'

@@ -27,7 +27,7 @@ export interface ContextRequest {
   cwd: string
   hostSessionId: string
   channel: ContextChannel
-  /** The user's prompt, on the prompt channel only (P2-B): matched to earlier memory, never stored or logged. */
+  /** The user's prompt, on the prompt channel only: matched to earlier memory, never stored or logged. */
   prompt?: string
 }
 
@@ -50,7 +50,7 @@ export interface PackObservation {
   /** The link kind behind contradictedBy; null when there is none or it predates links (v5). */
   contradictionKind: 'updates' | 'contradicts' | null
   occurredAt: number
-  /** Current observations that confirm this one (P1-I); 0 on a store from before v5. */
+  /** Current observations that confirm this one; 0 on a store from before v5. */
   confirmedBy: number
 }
 

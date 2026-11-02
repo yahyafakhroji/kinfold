@@ -1,6 +1,6 @@
-// Loading sqlite-vec into the daemon (P2-A). Every process opens the store
-// through sqlite3mc (src/sqlite/, P2-E), which allows extension loading, so
-// the Homebrew SQLite swap P2-A needed on macOS is gone. vec0.dylib from the
+// Loading sqlite-vec into the daemon. Every process opens the store
+// through sqlite3mc (src/sqlite/), which allows extension loading, so
+// the Homebrew SQLite swap vector search once needed on macOS is gone. vec0.dylib from the
 // data dir is hashed against the pinned release and loaded into the daemon's
 // connection only. Every failure is a reason string, never a throw: search
 // falls back to FTS without it.

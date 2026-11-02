@@ -1,7 +1,7 @@
-// The /data routes (P1 data control), behind the same token and Host rules as
+// The /data routes, behind the same token and Host rules as
 // every other route (server.ts checks both before it gets here). The
 // dashboard and `kinfold size|retention|scan|findings|purge` call them; the
-// daemon stays the only writer (D3). Answers carry ids, counts, rule names,
+// daemon stays the only writer. Answers carry ids, counts, rule names,
 // sizes and project keys; never stored text. Logs drop project keys too.
 
 import type { Parsed } from '../context/types'

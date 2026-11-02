@@ -1,7 +1,7 @@
 // Spool -> SQLite. One transaction per batch, and spool files are removed only
 // after it commits: a crash or a failed insert leaves the files for the next
 // drain, and event_id makes the retry a no-op for rows that did land.
-// No observer work here: rows wait with observer_state 'pending' (task 7).
+// No observer work here: rows wait with observer_state 'pending'.
 
 import { createHash } from 'node:crypto'
 import { DEFAULT_MAX_FIELD_CHARS, type PrepareOptions, type RedactedEvent, prepareForSpool } from '../capture/prepare'
@@ -44,7 +44,7 @@ const SECOND_PASS_SLACK = 256
 const WITHHELD_MARKER = /^<withheld reason="[a-z_]+" lines="\d+" chars="\d+"\/>$/
 
 /**
- * The daemon's redaction pass (decision D6), in case the rules changed since
+ * The daemon's redaction pass, in case the rules changed since
  * capture. Redaction markers survive a re-run unchanged; the withheld marker
  * would not (it would describe itself), so an intact one is kept, and the
  * edge's redaction notes are kept alongside any new ones.

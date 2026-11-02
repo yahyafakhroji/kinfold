@@ -11,7 +11,7 @@
 // so cleanup deletes it by id, or by the run's unique title when no id came
 // back. Plugins in OpenCode's system dir load whatever OPENCODE_CONFIG_DIR
 // says, so a run is refused (config_invalid) while that dir holds any plugin.
-// Facts follow docs/reference/observer-cli/opencode.md (opencode 2.1.4).
+// Flags and event names were checked against opencode 2.1.4 docs and source.
 
 import { chmodSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'

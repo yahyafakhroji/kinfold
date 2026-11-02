@@ -156,7 +156,7 @@ CREATE TABLE redaction_findings (
 );
 `
 
-// v2: the observer (task 7). An event moves pending -> processing -> done, or
+// v2: the observer. An event moves pending -> processing -> done, or
 // to failed with an attempt count and a retry time; observer_runs records every
 // call, including the failed ones the dashboard has to show (no silent fallback).
 const V2_OBSERVER = `
@@ -181,7 +181,7 @@ CREATE INDEX observer_runs_by_session ON observer_runs(session_id, started_at DE
 CREATE INDEX observations_by_hash ON observations(project_key, content_hash);
 `
 
-// v3: context delivery (task 8). A pack keeps the ids it injects so the
+// v3: context delivery. A pack keeps the ids it injects so the
 // read-only fallback can report them. injections is rebuilt because a CHECK
 // cannot be altered in place: channels become the two delivery moments
 // ('start' rows map to 'session_start'), and a row can name the host session
@@ -217,7 +217,7 @@ CREATE TABLE observer_fingerprints (
 );
 `
 
-// v4: data control (P1-A). rules_version is the redaction rules version a
+// v4: data control. rules_version is the redaction rules version a
 // row's text went through when it was written; scanned_version is the newest
 // version the leak scanner checked it under. Rows stored before v4 never
 // recorded one, so they read as version 1 and the scanner re-checks them.
@@ -266,7 +266,7 @@ INSERT INTO data_settings (key, value, updated_at) VALUES
   ('size.warn_bytes', 268435456, 0);
 `
 
-// v5: observation links (P1-D). The observer may say a new observation
+// v5: observation links. The observer may say a new observation
 // confirms, updates or contradicts one the session was shown; every accepted
 // link is kept here, and updates/contradicts also set the older row's
 // contradicted_by when the evidence rule allows (src/store/observation-links.ts).
@@ -284,10 +284,10 @@ CREATE TABLE observation_links (
 CREATE INDEX observation_links_by_to ON observation_links(to_id);
 `
 
-// v6: usage metrics (P1-H). injections.duration_ms is the daemon's time to
+// v6: usage metrics. injections.duration_ms is the daemon's time to
 // build or match what it served (null for rows written before v6; the
 // read-only fallback writes nothing). mcp_reads gets one row per MCP tool
-// call, reported by the read-only MCP server to the daemon (D3): which tool,
+// call, reported by the read-only MCP server to the daemon: which tool,
 // which project scope ('*' for all), the observation ids it returned, counts
 // and timing. It never holds query text or arguments. project_key has no
 // foreign key: a read may name a key the store has never seen. The
@@ -312,7 +312,7 @@ CREATE INDEX mcp_reads_by_time ON mcp_reads(occurred_at);
 CREATE INDEX mcp_reads_by_project ON mcp_reads(project_key, occurred_at);
 `
 
-// v7: shared summaries (P1-I, src/store/summary-share.ts). prompts.text_hash
+// v7: shared summaries (src/store/summary-share.ts). prompts.text_hash
 // is a sha256 of the trimmed, whitespace-collapsed stored text; a prompt
 // identical to a summarized one in the same project points at that summary
 // through prompts.summary_id instead of adding a row. repeat_count and
@@ -328,7 +328,7 @@ CREATE INDEX prompts_by_text_hash ON prompts(text_hash) WHERE text_hash IS NOT N
 CREATE INDEX prompts_by_summary ON prompts(summary_id) WHERE summary_id IS NOT NULL;
 `
 
-// v8: embeddings for semantic search (P2-A, src/vectors/). A plain table, not
+// v8: embeddings for semantic search (src/vectors/). A plain table, not
 // a sqlite-vec vec0 virtual table: without the extension loaded SQLite cannot
 // even delete from a vec0 table, and an embedding can leak the text it came
 // from, so purge, retention and secure_delete must never depend on it. The
@@ -347,7 +347,7 @@ CREATE TABLE observation_vectors (
 CREATE INDEX observation_vectors_by_model ON observation_vectors(model);
 `
 
-/** v9 (P2-B labels): one row per related line served at prompt time, with the distance and terms that earned it. Ids and numbers only. */
+/** v9: one row per related line served at prompt time, with the distance and terms that earned it. Ids and numbers only. */
 const V9_RELATED_SERVED = `
 CREATE TABLE related_served (
   id INTEGER PRIMARY KEY,

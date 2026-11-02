@@ -1,4 +1,4 @@
-// Data control over the P1-A /data routes: size by table and project with
+// Data control over the /data routes: size by table and project with
 // the warning threshold, per-table retention (editable), the leak findings
 // list (rule, table, row, age; never a value) with redact or purge, and a
 // purge by session, project, host or date range whose confirm button only

@@ -1,4 +1,4 @@
-// Shared summaries for identical prompts (P1-I). A prompt whose stored text
+// Shared summaries for identical prompts. A prompt whose stored text
 // (already redacted) matches, after trimming and collapsing whitespace, a
 // prompt of the same project that already has a summary points at that
 // summary instead of adding a row. Identity is a sha256 of the normalized

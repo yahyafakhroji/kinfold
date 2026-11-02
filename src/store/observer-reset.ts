@@ -1,4 +1,4 @@
-// Sends failed observer events back to pending (user decision, task 8). An
+// Sends failed observer events back to pending. An
 // event that failed MAX_OBSERVER_ATTEMPTS times stays failed until something
 // that could fix it changes: the host's observer settings, or the credential
 // its provider reads (compared by fingerprint), or an explicit retry request.

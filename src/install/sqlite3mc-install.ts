@@ -1,4 +1,4 @@
-// `kinfold install` builds the pinned sqlite3mc on this machine (P2-E; the user
+// `kinfold install` builds the pinned sqlite3mc on this machine (the user
 // chose local builds for now). The zip is fetched from the GitHub release and
 // its sha256 checked before anything is read from it; the amalgamation is
 // compiled with the system C compiler in an empty directory inside lib/. The

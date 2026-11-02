@@ -1,5 +1,5 @@
 // Rows of observer_settings, one per host ('*' is the user default). The
-// daemon is the only writer (D3): the installer and the dashboard change a row
+// daemon is the only writer: the installer and the dashboard change a row
 // through PUT /observer/settings, and the observer reads it on its next batch.
 // A credential_ref names a keychain entry; no secret is ever stored here.
 

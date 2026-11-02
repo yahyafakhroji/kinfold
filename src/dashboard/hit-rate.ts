@@ -1,4 +1,4 @@
-// Two proxies for "is injected memory used?" (P1-H), pure over stored rows.
+// Two proxies for "is injected memory used?", pure over stored rows.
 // Neither proves use: an agent can act on an injected line without fetching
 // it, and can fetch an id it found by search rather than from the injection.
 // The page and the report say so.
@@ -12,7 +12,7 @@
 // search-hit: of the MCP search calls in the window that ran (status ok),
 // the share that returned at least one row.
 //
-// related-by-distance (P2-B labels): of the related lines served at prompt
+// related-by-distance: of the related lines served at prompt
 // time, by the distance that earned them, the share an MCP get_observations
 // call in the project returned within FETCH_HORIZON_MS. The same proxy, kept
 // per distance band, so the gate's cutoffs can be checked against use.

@@ -1,4 +1,4 @@
-// The TypeScript half of migration v7 (P1-I). SQLite has no hash function,
+// The TypeScript half of migration v7. SQLite has no hash function,
 // so the hash backfill and the collapse of existing duplicate summaries run
 // here, inside the same transaction as the v7 SQL (src/store/db.ts): a throw
 // rolls both back and user_version stays at 6. Deterministic: prompts are

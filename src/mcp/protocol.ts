@@ -5,7 +5,7 @@
 // running answers with isError, as MCP asks, never with a crash. The log line
 // carries the tool name, status, row count, ms and the read reporter's drop
 // count; never arguments or text. Each answered call is also reported to the
-// daemon, after the fact and without waiting (read-reporter.ts, P1-H).
+// daemon, after the fact and without waiting (read-reporter.ts).
 
 import { isRecord } from '../contract/event'
 import { MCP_SERVER_NAME } from '../names'
@@ -31,7 +31,7 @@ export interface ProtocolDeps {
   log: (line: string) => void
   /** Monotonic ms for the log's timing. */
   clock: () => number
-  /** Fire-and-forget read reports to the daemon (P1-H); absent in tests that do not care. */
+  /** Fire-and-forget read reports to the daemon; absent in tests that do not care. */
   reporter?: ReadReporter
 }
 

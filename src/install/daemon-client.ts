@@ -1,6 +1,6 @@
 // The installer's view of the daemon: is something answering /health on the
 // port daemon.json names (or the default port), and the authenticated GET and
-// PUT on /observer/settings. The installer never opens the database (D3); a
+// PUT on /observer/settings. The installer never opens the database; a
 // settings change goes through the daemon like the dashboard's will.
 
 import { existsSync, readFileSync } from 'node:fs'
@@ -23,8 +23,8 @@ export interface DaemonInfoFile {
 }
 
 /**
- * hmacMode: master, legacy or degraded (P1-K); null from a daemon too old to report it.
- * vectorSearch: whether sqlite-vec loaded (P2-A); absent from a daemon before P2-A.
+ * hmacMode: master, legacy or degraded; null from a daemon too old to report it.
+ * vectorSearch: whether sqlite-vec loaded; absent from a daemon before vector search.
  */
 export type Health = { up: true; version: string; schemaVersion: number; hmacMode: string | null; vectorSearch?: 'on' | 'off' } | { up: false; reason: string }
 

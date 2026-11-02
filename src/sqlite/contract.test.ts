@@ -1,6 +1,6 @@
 // One suite, two drivers: every case runs on bun:sqlite and on sqlite3mc, each
 // on its own temp file, and the results must match. A difference is a driver
-// bug unless docs/reference/sqlite-driver.md names it.
+// bug: sqlite3mc has to behave like bun:sqlite with strict binding.
 
 import { Database as BunDatabase } from 'bun:sqlite'
 import { afterAll, describe, expect, test } from 'bun:test'

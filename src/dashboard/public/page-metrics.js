@@ -2,7 +2,7 @@
 // observer runs per host and provider, injections per host and channel,
 // capture-to-searchable lag, latency stages with lag from event and from turn
 // end over a window (#metrics?window=24h|7d), injection latency per host and
-// channel, two hit-rate proxies (P1-H), and the event queue by observer state.
+// channel, two hit-rate proxies, and the event queue by observer state.
 // Bars are <meter> elements so no inline style is needed (the CSP forbids it).
 
 import { api } from './api.js'

@@ -1,4 +1,4 @@
-// Prompt-time related memory (P2-B): observations from earlier in the
+// Prompt-time related memory: observations from earlier in the
 // project that match what the user just asked. Keyword matches (FTS5 BM25)
 // and vector hits are gated one by one (isRelated), fused by reciprocal rank
 // (the MCP search's fuseRanks), and rendered after the delta in the same
@@ -29,7 +29,7 @@ export type RelatedGate = (candidate: RelatedCandidate) => boolean
 // Strict on purpose. Tuned 2026-11-01 on the live store, against the
 // unrelated baseline from stored vectors: random pairs in one project sit at
 // p0.5 0.35, p5 0.52, p50 0.675; observer-linked pairs at p50 0.30. Over 255
-// real prompts the closest hit sat at p50 0.33 and p90 0.47 (docs/p2b-report.md).
+// real prompts the closest hit sat at p50 0.33 and p90 0.47.
 /** This close is related on meaning alone: about 1 unrelated pair in 200 gets here. */
 export const STRONG_DISTANCE = 0.35
 /** This close is related when the row also shares a prompt term: below the unrelated p5. */

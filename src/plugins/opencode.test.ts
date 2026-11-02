@@ -152,7 +152,7 @@ test('under the observer (KINFOLD_OBSERVER=1) setup registers no hooks and nothi
   expect(logs).toEqual([])
 })
 
-// --- per-request context injection (task 8) ---
+// --- per-request context injection ---
 
 const PACK: ContextResult = { text: '<kinfold>\n[claude-code · 2h · tool-verified] A fact (#1)\n</kinfold>', observationIds: [1], tokens: 20 }
 

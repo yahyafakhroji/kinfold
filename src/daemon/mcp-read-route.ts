@@ -1,5 +1,5 @@
 // POST /metrics/mcp-read: the MCP server's after-the-fact report of one tool
-// call (P1-H). The MCP server never writes the database (D3); it posts here
+// call. The MCP server never writes the database; it posts here
 // and the daemon writes one mcp_reads row. The body is checked strictly: an
 // exact key set, so a body that carries query text or any other field is
 // refused, ids are positive integers (at most 100), and the tool and status

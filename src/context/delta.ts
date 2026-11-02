@@ -1,4 +1,4 @@
-// The prompt-time delta (P1-H): mid-session memory updates. A session sees
+// The prompt-time delta: mid-session memory updates. A session sees
 // the pack once (Claude Code at SessionStart, OpenCode per session until
 // compaction), so what another agent learns afterwards would not reach it.
 // The `prompt` channel answers with only what is new to this session:
@@ -7,7 +7,7 @@
 // this session has carried yet. Every delivered id is excluded next time, so
 // overflow past the token cap arrives on a later prompt instead of being
 // lost. Same frame and line format as the pack (data, not instructions; each
-// line names its host and age, D1). An empty delta is empty text.
+// line names its host and age). An empty delta is empty text.
 
 import type { Database } from '../sqlite/types'
 import { deltaCandidates, projectDisplayName, sessionDeliveries, sessionStartFor } from '../store/context-store'

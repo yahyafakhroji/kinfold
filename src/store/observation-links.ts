@@ -1,5 +1,5 @@
-// Links between observations (D2: "later observations can mark earlier ones
-// as contradicted"). The observer proposes a link from a new observation to
+// Links between observations (a later observation can mark an earlier one
+// as contradicted). The observer proposes a link from a new observation to
 // one the session was shown; every accepted link is stored, and an `updates`
 // or `contradicts` link also hides the older row by setting its
 // contradicted_by, which packs and MCP already skip.
@@ -71,7 +71,7 @@ export function contradictionKindColumn(alias: string): string {
     AND l.kind IN ('updates', 'contradicts') ORDER BY l.kind = 'contradicts' DESC LIMIT 1) AS contradictionKind`
 }
 
-// --- Confirmation ranking (P1-I). Read helpers only; confirms never hides. ---
+// --- Confirmation ranking. Read helpers only; confirms never hides. ---
 
 /** Each current confirmer adds this to a row's rank, up to CONFIRM_BOOST_CAP of them. */
 export const CONFIRM_BOOST_STEP = 0.3

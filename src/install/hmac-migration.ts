@@ -1,4 +1,4 @@
-// The HMAC key migration (P1-J), run by `kinfold install` only: the user runs it,
+// The HMAC key migration, run by `kinfold install` only: the user runs it,
 // so it is the one place a Keychain entry gets created. It
 //   1. copies hmac.key into the Keychain as hmac-legacy (epoch 0, so every
 //      ref stored so far still verifies);
@@ -10,7 +10,7 @@
 //      before the daemon first rotates;
 //   4. backs hmac.key up (0600, like every file the installer replaces) and
 //      removes it; then the daemon restarts so it reads the master;
-//   5. (P1-K) at the very end, removes that backup and any older one, each
+//   5. at the very end, removes that backup and any older one, each
 //      only after a Keychain read-back and a master-mode /health
 //      (hmac-cleanup.ts); a backup that fails a check stays, with the reason.
 // A dry run shows the same steps; values print as <hidden> and file

@@ -1,5 +1,5 @@
-// Background embedding (P2-A; plan: "capture to searchable ≤ 30 s, embeddings
-// run in the background, batched"). The daemon ticks it on an interval and
+// Background embedding (capture to searchable ≤ 30 s, embeddings
+// run in the background, batched). The daemon ticks it on an interval and
 // after every observer write. A tick embeds up to maxBatchesPerTick batches,
 // newest observations first, one call in flight at a time. A failed call
 // backs off (30 s doubling to 10 min) so a bad key or an outage costs one

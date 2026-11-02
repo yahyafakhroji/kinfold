@@ -3,8 +3,10 @@ node_modules/
 *.db-wal
 *.db-shm
 .data/
-# Live-capture wiring for this folder only; the installer (task 9) replaces it.
+# Local agent wiring for working on this repo.
 .claude/settings.local.json
 .opencode/
 
 .cache/
+docs/
+.superpowers/

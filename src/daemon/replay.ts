@@ -1,4 +1,4 @@
-// Scheduler replay (P1-E): feeds a stored event timeline through the real
+// Scheduler replay: feeds a stored event timeline through the real
 // observer scheduler on a virtual clock, with a fake runner that takes the
 // stored run durations of the same host in order. No model is called and no
 // payload is read. A temp store with the real schema holds the events, so

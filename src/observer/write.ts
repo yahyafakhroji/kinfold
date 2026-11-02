@@ -26,7 +26,7 @@ export interface WriteCounts {
   inserted: number
   downgraded: number
   summary: boolean
-  /** The summary is one an identical earlier prompt of the project wrote (P1-I). */
+  /** The summary is one an identical earlier prompt of the project wrote. */
   summaryShared?: boolean
   /** Links stored by this batch, and rows those links hid. */
   links: number

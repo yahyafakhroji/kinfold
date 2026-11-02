@@ -82,7 +82,7 @@ export function maxObservationId(db: Database, projectKey: string): number {
   return row?.id ?? 0
 }
 
-/** All hosts (decision D1), newest first. Titles only: narratives reach a host through MCP on demand. */
+/** All hosts, newest first. Titles only: narratives reach a host through MCP on demand. */
 export function packObservations(db: Database, projectKey: string, limit: number): PackObservation[] {
   return db.query<PackObservation, { projectKey: string; limit: number }>(
     `SELECT o.id, o.host, o.title, o.evidence, o.contradicted_by AS contradictedBy, ${contradictionKindColumn('o')}, o.occurred_at AS occurredAt,
@@ -126,7 +126,7 @@ export function recordInjection(db: Database, injection: InjectionRow): number {
   return row.id
 }
 
-// --- Prompt-time deltas (P1-H). Plain SELECTs, so the read-only fallback shares them. ---
+// --- Prompt-time deltas. Plain SELECTs, so the read-only fallback shares them. ---
 
 /** What a host session has been handed so far, from its injections rows. */
 export interface SessionDeliveries {

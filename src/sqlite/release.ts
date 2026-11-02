@@ -1,7 +1,7 @@
-// The pinned SQLite3 Multiple Ciphers source (P2-E). The user chose local
+// The pinned SQLite3 Multiple Ciphers source. The user chose local
 // builds for now: `kinfold install` compiles this amalgamation on the machine, so
 // the pin covers the source, and the built library's own hash is recorded
-// next to it (docs/reference/sqlite3mc-build.md).
+// next to it.
 
 export const SQLITE3MC_VERSION = '2.6.1'
 export const SQLITE3MC_SQLITE_VERSION = '3.54.0'
@@ -26,7 +26,7 @@ export const SQLITE3MC_DEFINES = [
   '-DSQLITE_USE_URI=1',
 ] as const
 
-/** The shared-library extension on this platform, or null where P2-E has no build yet. */
+/** The shared-library extension on this platform, or null where there is no build yet. */
 export function sqlite3mcLibraryExtension(platform: string): string | null {
   if (platform === 'darwin') return 'dylib'
   if (platform === 'linux') return 'so'

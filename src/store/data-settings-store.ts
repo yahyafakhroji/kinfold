@@ -1,5 +1,5 @@
 // Rows of data_settings (schema v4): retention days per table and the size
-// warning threshold. The daemon is the only writer (D3); the CLI and the
+// warning threshold. The daemon is the only writer; the CLI and the
 // dashboard change a value through PUT /data/retention. A NULL value means
 // "keep forever". Shipped defaults are seeded by the migration with
 // updated_at 0, and the same defaults apply if a row is ever missing.

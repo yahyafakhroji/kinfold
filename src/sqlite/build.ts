@@ -1,4 +1,4 @@
-// Local build of sqlite3mc (P2-E, decision 4). The zip's sha256 is checked
+// Local build of sqlite3mc. The zip's sha256 is checked
 // before anything is read from it; then only the amalgamation members are
 // inflated in process (no unzip subprocess, and no member name ever becomes a
 // path), written into an empty directory, and compiled with the system C

@@ -1,4 +1,4 @@
-// Store side of prompt-time matching (P2-B): the project's current
+// Store side of prompt-time matching: the project's current
 // observations that match a prompt's terms (FTS5 BM25, any term), how many of
 // those terms each one holds, and rows by id for vector hits. Current only: a
 // contradicted or updated observation never comes back as related memory.

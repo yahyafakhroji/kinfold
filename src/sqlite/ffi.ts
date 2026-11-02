@@ -1,4 +1,4 @@
-// The sqlite3mc C API through bun:ffi (P2-E). This is the only file that
+// The sqlite3mc C API through bun:ffi. This is the only file that
 // imports bun:ffi; driver.ts builds the Database on top. The library is opened
 // once per process: a second path in the same process is refused, since two
 // SQLite copies in one process do not share lock state. sqlite3mc_version is

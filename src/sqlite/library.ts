@@ -1,4 +1,4 @@
-// Where the sqlite3mc library lives (P2-E): <dataDir>/lib, next to vec0. Each
+// Where the sqlite3mc library lives: <dataDir>/lib, next to vec0. Each
 // build is a file named by its own hash, and lib/sqlite3mc.json names the
 // current one with its sha256 and the source zip's. The installer writes the
 // library first and replaces the manifest atomically, so a reader sees the old
@@ -38,7 +38,7 @@ export function manifestPath(dataDir: string): string {
   return join(libDir(dataDir), MANIFEST_FILE)
 }
 
-/** The file name for a build with this hash on this platform, or null where P2-E has no build. */
+/** The file name for a build with this hash on this platform, or null where there is no build. */
 export function libraryFileName(sha256: string, platform: string = process.platform): string | null {
   const extension = sqlite3mcLibraryExtension(platform)
   return extension === null ? null : `libsqlite3mc-${sha256.slice(0, 16)}.${extension}`

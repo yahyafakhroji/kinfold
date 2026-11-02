@@ -1,4 +1,4 @@
-// Project identity (decision D4): the git remote slug (host included) when
+// Project identity: the git remote slug (host included) when
 // there is one, then the repo root, then the path. Two tools opened in different subdirectories or
 // worktrees of one repo land on the same project.
 

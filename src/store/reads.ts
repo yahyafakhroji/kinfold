@@ -1,5 +1,5 @@
-// Read queries the daemon serves. P0 only needs the verification listing;
-// the context-pack and search reads arrive with task 8.
+// Read queries the daemon serves. Only the verification listing lives here;
+// context-pack reads are in context-store.ts.
 
 import type { Database } from '../sqlite/types'
 

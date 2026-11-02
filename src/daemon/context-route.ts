@@ -3,9 +3,8 @@
 // one injections row with how long that took (duration_ms, schema v6). The
 // timer covers project resolution and the build or match, and stops before
 // the injection write, so the number is what a host waits on, not our audit.
-// A prompt that carries its text also gets related memory (P2-B,
-// prompt-context.ts), so the timer includes its wait on the embedding. Such
-// an answer that took longer than the hook waits (PROMPT_SERVE_BUDGET_MS) is
+// A prompt that carries its text also gets related memory (prompt-context.ts), so
+// the timer includes its wait on the embedding. Such an answer that took longer than the hook waits (PROMPT_SERVE_BUDGET_MS) is
 // not recorded: the hook gave up, and a row marked sent but never shown would
 // be lost to the session. Showing it again later is the cheaper mistake.
 // Logs carry ids, counts and durations; never the text, the prompt or the cwd.

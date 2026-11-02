@@ -1,4 +1,4 @@
-// Cleanup for the HMAC keys (P1-K), in two places:
+// Cleanup for the HMAC keys, in two places:
 //   install:   the plain-text backup of hmac.key that the migration leaves
 //              undoes epoch 0's protection while it exists, so install removes
 //              it, this run's and any left by earlier runs. It removes a backup
@@ -93,7 +93,7 @@ export function removeRedundantBackup(path: string, legacyPath: string): StepNot
   return undefined
 }
 
-/** Epoch 0's key back on disk as the pre-P1-J file (hex, no newline, 0600). Throws, so no later step runs. */
+/** Epoch 0's key back on disk as the pre-rotation file (hex, no newline, 0600). Throws, so no later step runs. */
 export function restoreLegacyKey(env: InstallEnv, path: string): void {
   const value = legacyFromKeychain(env)
   if (value === null || !isHexKey(value)) throw new Error(`keychain entry ${HMAC_LEGACY_REF} is missing or not a key; nothing was deleted`)

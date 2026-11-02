@@ -5,7 +5,7 @@
 // untrusted session text goes on stdin only. The read-only sandbox still lets
 // the model read files, which is why the shell tool must be off and why any
 // tool-shaped event in the output rejects the run.
-// Event names follow docs/reference/observer-cli/codex.md (codex 0.166).
+// Flags and event names were checked against codex 0.166 docs and source.
 
 import { isRecord } from '../../contract/event'
 import { ObserverError, type RunnerUsage } from '../types'

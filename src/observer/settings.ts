@@ -1,4 +1,4 @@
-// Which observer a session gets (decision D7): the observer_settings row for
+// Which observer a session gets: the observer_settings row for
 // its host, then the '*' row, then the built-in default for that host. Read on
 // every batch, so a dashboard change applies to the next batch without a restart.
 // A row naming an unknown provider is an error, never a reason to pick another.

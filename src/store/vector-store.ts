@@ -1,8 +1,8 @@
-// Rows of observation_vectors (v8, P2-A). Writes and the queue are plain SQL,
+// Rows of observation_vectors (v8). Writes and the queue are plain SQL,
 // so they work on any connection; only nearestObservations calls sqlite-vec's
 // vec_distance_cosine and needs the extension loaded (src/vectors/extension.ts).
-// The search filters by project before it measures distance (plan: "project
-// filter first"), so its cost grows with one project's rows, not the store's.
+// The search filters by project before it measures distance (project
+// filter first), so its cost grows with one project's rows, not the store's.
 // Nothing here logs or returns observation text except embeddingInputs, whose
 // caller sends it to the embedder and nowhere else.
 
@@ -129,7 +129,7 @@ export const MAX_DISTANCE_IDS = 50
 /**
  * The query's distance to the named rows in the project (the current model
  * only), whether or not they made the top k: so a keyword match outside the
- * nearest k still has a distance the gate can veto on (P2-B review item #9).
+ * nearest k still has a distance the gate can veto on.
  */
 export function distancesFor(db: Database, query: { model: string; vector: Float32Array; project: string | null; ids: readonly number[] }): VectorHit[] {
   const ids = query.ids.slice(0, MAX_DISTANCE_IDS)

@@ -1,4 +1,4 @@
-// The three read tools (plan "Inject: on demand"): search returns an index,
+// The three read tools (memory is read on demand): search returns an index,
 // timeline shows what surrounds one observation or one session, and
 // get_observations returns full text by id. Every answer is compact text
 // inside the recalled-memory frame plus the same data as structured JSON.
@@ -28,7 +28,7 @@ export interface ToolContext {
   /** Null when the server's cwd could not be resolved (git timed out). */
   projectKey: string | null
   now: () => number
-  /** The daemon's vector search (P2-A); absent, search is keyword-only and reads as before. */
+  /** The daemon's vector search; absent, search is keyword-only and reads as before. */
   semantic?: SemanticClient
 }
 
@@ -42,7 +42,7 @@ export interface ToolOutcome {
   result: ToolResult
   /** Rows returned, for the log line. */
   count: number
-  /** Observation ids the answer carried, for the read report (P1-H); absent when it carried none. */
+  /** Observation ids the answer carried, for the read report; absent when it carried none. */
   ids?: number[]
   /** The scope read: a project key or '*'; absent when the call never got a scope. */
   scope?: string
@@ -123,7 +123,7 @@ interface Ranked {
 export const HYBRID_FTS_POOL = 200
 
 /**
- * Without a semantic client: FTS pages itself, as before P2-A. With one: the
+ * Without a semantic client: FTS pages itself, as before vector search. With one: the
  * top HYBRID_FTS_POOL keyword rows and the top MAX_K vector hits (filtered in
  * the daemon, before the cut) are fused once and paged. The pools do not grow
  * with the offset: RRF scores depend on what each list holds, so a pool sized

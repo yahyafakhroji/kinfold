@@ -1,6 +1,6 @@
 // The MCP server's view of the store: observations, summaries and the
 // sessions row that scopes them, never the events table (payloads stay out
-// of every MCP answer). Decision D3 keeps writes in the daemon, so the
+// of every MCP answer). The daemon is the only writer, so the
 // database is opened read-only once, the same way the context fallback opens
 // it, and every query is prepared up front so a search is one bound call.
 // A null project means "all projects" (the tools' `project: "*"`).
@@ -23,7 +23,7 @@ export interface IndexRow {
   /** The link kind behind contradictedBy; null without one (or on a pre-v5 store). */
   contradictionKind: 'updates' | 'contradicts' | null
   occurredAt: number
-  /** Current observations that confirm this one (P1-I); 0 on a pre-v5 store. */
+  /** Current observations that confirm this one; 0 on a pre-v5 store. */
   confirmedBy: number
 }
 
@@ -85,7 +85,7 @@ export interface SessionItems {
 
 export interface MemoryReader {
   search(match: string, filters: SearchFilters): IndexRow[]
-  /** The rows among ids that pass the search filters (the vector half of hybrid search, P2-A); any order. */
+  /** The rows among ids that pass the search filters (the vector half of hybrid search); any order. */
   indexRows(ids: readonly number[], filters: Omit<SearchFilters, 'limit' | 'offset'>): IndexRow[]
   observation(id: number, project: string | null): IndexRow | null
   around(anchor: IndexRow, project: string | null, before: number, after: number): Around

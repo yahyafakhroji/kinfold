@@ -40,19 +40,19 @@ export type Action =
   | { kind: 'settings-put'; input: ObserverSettingsInput }
   | { kind: 'keychain-put'; ref: string; value: string }
   | { kind: 'keychain-delete'; ref: string; summary?: string }
-  /** Removed only after a Keychain read-back and a master-mode /health; else kept with the reason (P1-K). */
+  /** Removed only after a Keychain read-back and a master-mode /health; else kept with the reason. */
   | { kind: 'remove-hmac-backup'; path: string }
-  /** hmac.key written back from Keychain hmac-legacy before the HMAC entries go (P1-K). */
+  /** hmac.key written back from Keychain hmac-legacy before the HMAC entries go. */
   | { kind: 'restore-hmac-legacy'; path: string }
   /** --remove-hmac-keys stops here while any daemon answers /health; a hand-started one would write a new sub-key afterwards. */
   | { kind: 'hmac-daemon-down'; pid: number | null; port: number }
   /** A kept install backup, removed only when it equals hmac.key on disk (restored by then); else kept. */
   | { kind: 'remove-redundant-hmac-backup'; path: string; legacyPath: string }
-  /** The pinned sqlite-vec build, downloaded and hash-checked twice before it is written (P2-A). */
+  /** The pinned sqlite-vec build, downloaded and hash-checked twice before it is written. */
   | { kind: 'install-vec0'; path: string; asset: Vec0Asset }
-  /** sqlite3mc built here from the pinned amalgamation; every process opens the store through it (P2-E). */
+  /** sqlite3mc built here from the pinned amalgamation; every process opens the store through it. */
   | { kind: 'install-sqlite3mc'; path: string }
-  /** db-key for a store the daemon has yet to create, made at run time and added without replacing any entry (P2-E). */
+  /** db-key for a store the daemon has yet to create, made at run time and added without replacing any entry. */
   | { kind: 'create-db-key'; path: string }
   /** Rename migration: bootout dev.shared-agent-memory.daemon when launchd has it loaded. */
   | { kind: 'stop-legacy-agent'; uid: number }

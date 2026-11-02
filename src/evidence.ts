@@ -1,4 +1,4 @@
-// Evidence strength for observations (architecture decision D2).
+// Evidence strength for observations.
 // The observer proposes a strength and cites source event ids; the daemon
 // calls resolveEvidenceStrength before storing, so the label stored is the
 // daemon's verdict, not the model's claim.

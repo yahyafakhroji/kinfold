@@ -1,6 +1,6 @@
 // Which hosts live on this machine. Claude Code counts when `claude --version`
 // answers or ~/.claude exists. OpenCode counts only when `opencode --version`
-// reports 2.x or later (D8: the plugin targets the V2 plugin contract), so a
+// reports 2.x or later (the plugin targets the V2 plugin contract), so a
 // 1.x OpenCode is refused with a reason while the others still install.
 // Codex counts when `codex --version` answers or Codex.app is installed;
 // Cursor when `cursor-agent --version` or `cursor --version` answers or

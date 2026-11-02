@@ -1,4 +1,4 @@
-// Database encryption in `kinfold install` and `kinfold status` (P2-E slice E2). On a
+// Database encryption in `kinfold install` and `kinfold status`. On a
 // data dir with no memory.db yet, install puts a new random key in the
 // Keychain (db-key), so the daemon creates the store encrypted
 // (src/sqlite/open.ts). An existing store is never touched here: `kinfold

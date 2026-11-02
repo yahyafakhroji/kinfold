@@ -3,7 +3,7 @@
 // pending findings settle as 'expired', since the text they named is gone.
 // Observations and summaries past their days are deleted through the purge
 // path, so FTS, injections, findings and packs follow. MCP read reports
-// (mcp_reads, P1-H) follow the events setting and are deleted. Every step
+// (mcp_reads) follow the events setting and are deleted. Every step
 // skips rows it already handled, so running it twice changes nothing the
 // second time.
 

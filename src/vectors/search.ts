@@ -1,4 +1,4 @@
-// The vector half of hybrid search (P2-A), served by the daemon on
+// The vector half of hybrid search, served by the daemon on
 // POST /search/semantic: embed the query, then the nearest observations of
 // the project. The embed is the slow part (a round trip to OpenRouter), so
 // it runs under the caller's deadline and recent query vectors stay in an

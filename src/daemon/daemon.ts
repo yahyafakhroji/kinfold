@@ -1,20 +1,20 @@
-// Wires the store, the drain and the HTTP server into one process (decision D3:
-// the only writer). Drains on start, on every nudge, and on a fallback interval
+// Wires the store, the drain and the HTTP server into one process (the only
+// writer). Drains on start, on every nudge, and on a fallback interval
 // so an event whose nudge was lost still lands within a couple of seconds.
-// With observer options it also runs the observer scheduler (task 7), rebuilds
+// With observer options it also runs the observer scheduler, rebuilds
 // a project's context packs after each observer write, and checks whether
-// failed events can be retried (task 8). It serves packs on POST /context,
-// and observer settings on GET/PUT /observer/settings (task 9, the installer
-// and later the dashboard). Data control (P1-A) adds the /data routes and two
-// background ticks: the leak scanner and retention. The web dashboard (P1-C)
+// failed events can be retried. It serves packs on POST /context,
+// and observer settings on GET/PUT /observer/settings (the installer
+// and later the dashboard). Data control adds the /data routes and two
+// background ticks: the leak scanner and retention. The web dashboard
 // is served by the same server: login codes and sessions live in memory,
 // and it reads through /memory, /metrics/summary and POST /observer/test,
-// which uses the observer's own RunnerFactory. P1-H times every injection
+// which uses the observer's own RunnerFactory. It times every injection
 // (context-route.ts) and takes the MCP server's read reports on
 // POST /metrics/mcp-read (mcp-read-route.ts), so hit rate can be measured.
-// P1-J: marker and fingerprint keys come from hmac-rotation.ts (Keychain
+// Marker and fingerprint keys come from hmac-rotation.ts (Keychain
 // master read once at start, per-epoch sub-key files rotated on a tick).
-// P2-A: with vector options it loads sqlite-vec into its connection, embeds
+// With vector options it loads sqlite-vec into its connection, embeds
 // observations in the background (after each observer write and on a tick)
 // and answers POST /search/semantic for the MCP server's hybrid search.
 
@@ -74,13 +74,13 @@ export interface DaemonOptions {
   observer?: DaemonObserverOptions
   /** Leak-scan and retention tick intervals; the /data routes are always on. */
   dataControl?: { scanTickMs?: number; retentionTickMs?: number }
-  /** Where the HMAC master is read from, once at start; main.ts passes the macOS Keychain. Default none: hmac.key as before P1-J. */
+  /** Where the HMAC master is read from, once at start; main.ts passes the macOS Keychain. Default none: hmac.key as before key rotation. */
   keychain?: CredentialProvider
   /** The database key store; default this platform's (src/sqlite/keys.ts). */
   dbKeys?: DbKeyStore
   /** Rotation tick and clock, for tests. */
   hmac?: { rotationTickMs?: number; now?: () => number }
-  /** Semantic search (P2-A). Without it there is no embedding and /search/semantic answers unavailable. */
+  /** Semantic search. Without it there is no embedding and /search/semantic answers unavailable. */
   vectors?: DaemonVectorOptions
 }
 
@@ -251,7 +251,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const dataDir = ensureDataDir(options.dataDir)
   const log = options.log ?? ((line: string) => process.stderr.write(logLine(line)))
   const store = openStore(dataDir, { keys: options.dbKeys })
-  // Decrypted pages stay here between requests; with SQLite's 2 MB default every prompt decrypted its pages again (P2-E).
+  // Decrypted pages stay here between requests; with SQLite's 2 MB default every prompt decrypted its pages again.
   store.db.run(`PRAGMA cache_size = -${DAEMON_CACHE_KIB}`)
   warnIfPlaintextBesideKey(store.path, log, options.dbKeys)
   const token = readOrCreateSecret(join(dataDir, TOKEN_FILE))

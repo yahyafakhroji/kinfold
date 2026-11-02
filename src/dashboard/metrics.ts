@@ -4,11 +4,11 @@
 // A run's stored error is "<class>: <detail>"; only a known class leaves this
 // module, anything else counts as "other", so no free text reaches the page.
 
-// P1-E adds `latency`: capture-to-searchable split into stages and the two
+// It also reports `latency`: capture-to-searchable split into stages and the two
 // lag definitions, over a window of 24 h or 7 d (?window=), overall and per
 // host and provider.
 
-// P1-H adds, over the same window: `injectionLatency` (duration_ms per host and
+// Over the same window it reports `injectionLatency` (duration_ms per host and
 // channel, p50/p95) and `hitRate`, two proxies for whether injected memory is
 // used (src/dashboard/hit-rate.ts says what each one does and does not show).
 

@@ -1,6 +1,6 @@
 // One read the observer scheduler needs beyond queueStats: when each
 // session's oldest pending event was ingested, so a long turn's early events
-// can start a batch once they have waited long enough (P1-E). Pending only:
+// can start a batch once they have waited long enough. Pending only:
 // a failed event waits for its own retry time, not for this rule.
 
 import type { Database } from '../sqlite/types'

@@ -1,5 +1,5 @@
 // `kinfold size|retention|scan|findings|purge`: thin clients of the daemon's /data
-// routes. The CLI never opens the database (D3); it reads daemon.json and
+// routes. The CLI never opens the database; it reads daemon.json and
 // daemon.token like the installer does, sends one request, and prints the
 // answer as counts, sizes, ids and rule names. A daemon that is down or
 // answers non-200 is exit 1 with the daemon's field message.

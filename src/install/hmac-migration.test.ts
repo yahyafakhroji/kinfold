@@ -17,7 +17,7 @@ afterEach(async () => {
   world = null
 })
 
-/** A user from before P1-J: data dir with a plain-text hmac.key, nothing in the Keychain for it. */
+/** A user from before key rotation: data dir with a plain-text hmac.key, nothing in the Keychain for it. */
 function oldUser(platform: NodeJS.Platform = 'darwin', key = LEGACY): FakeWorld {
   world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', platform })
   mkdirSync(world.dataDir, { recursive: true, mode: 0o700 })

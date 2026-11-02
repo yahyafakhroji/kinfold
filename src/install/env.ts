@@ -70,7 +70,7 @@ export interface InstallEnv {
   cliRunnerFor: (settings: ObserverSettings) => CliObserverRunner
   /** The CODEX_HOME the installer runs with; unset or empty means ~/.codex (codex-home.ts). */
   codexHomeEnv?: string
-  /** process.arch; picks the pinned sqlite-vec build (P2-A). Default: this process's. */
+  /** process.arch; picks the pinned sqlite-vec build. Default: this process's. */
   arch?: string
   /** Test seam for the sqlite3mc compile (about 10 s); default src/sqlite/build.ts. */
   buildSqlite3mc?: (input: BuildInput) => string
