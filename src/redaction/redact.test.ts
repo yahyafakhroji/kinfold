@@ -99,7 +99,7 @@ describe('redactJson', () => {
   })
 })
 
-describe('epoch-tagged refs (P1-J)', () => {
+describe('epoch-tagged refs', () => {
   const tagged = { hmacKey: 'test-hmac-key', epoch: 202610 }
 
   test('refs name their epoch; epoch 0 writes the old untagged form', () => {

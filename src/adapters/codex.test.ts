@@ -95,7 +95,7 @@ describe('helpers', () => {
   })
 })
 
-describe('edge redaction on Codex events (D6)', () => {
+describe('edge redaction on Codex events', () => {
   test('no fake secret from tool output, prompt or reply reaches the spooled form', () => {
     const tool = normalize('leaky tool', { ...fixture('post-tool-use.bash'), tool_response: `${leakyOutput()}\nProcess exited with code 0` })
     const prompt = normalize('leaky prompt', { ...fixture('user-prompt-submit'), prompt: `use ${FAKE_SECRETS.openrouter} and ${FAKE_SECRETS.github}` })

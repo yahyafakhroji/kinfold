@@ -109,7 +109,7 @@ test('clock skew across a boundary: refs from both epochs and from epoch 0 verif
   expect(provider.reads).toEqual([HMAC_MASTER_REF, HMAC_LEGACY_REF])
 })
 
-test('no master in the Keychain: legacy mode on hmac.key, exactly as before P1-J', () => {
+test('no master in the Keychain: legacy mode on hmac.key, exactly as before key rotation', () => {
   const state = keys(keychain({}))
   expect(state.mode()).toBe('legacy')
   const marker = state.marker()

@@ -49,7 +49,7 @@ test('capture reads the current epoch\'s file, and the newest earlier one when t
   expect(existsSync(join(dir, 'hmac.key'))).toBe(false)
 })
 
-test('never migrated (no hmac.d): hmac.key is created and used as epoch 0, as before P1-J', () => {
+test('never migrated (no hmac.d): hmac.key is created and used as epoch 0, as before key rotation', () => {
   const first = loadMarkerKey(dir, OCT)
   expect(first.epoch).toBe(0)
   expect(statSync(join(dir, 'hmac.key')).mode & 0o777).toBe(0o600)

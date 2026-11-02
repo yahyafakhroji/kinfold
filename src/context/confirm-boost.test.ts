@@ -68,7 +68,7 @@ test('a purged or contradicted confirmer no longer counts', () => {
   expect(counts()[target]).toBe(0)
 })
 
-test('D2 holds: a confirmed but contradicted row keeps its label and sits under its contradictor; confirms hides nothing', () => {
+test('a confirmed but contradicted row keeps its label and sits under its contradictor; confirms hides nothing', () => {
   const target = seed('Parser drops quoted strings', 'interpretation', T0)
   const confirmer = seed('Quoted strings vanish in parser output', 'tool-verified', T0 + 1_000)
   confirm(confirmer, target)

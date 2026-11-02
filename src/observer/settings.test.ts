@@ -23,7 +23,7 @@ test('built-in defaults: claude-code and unknown hosts get Haiku via the CLI, op
   expect(resolveObserverSettings(db, 'zed')).toMatchObject({ provider: 'claude-cli', model: 'haiku', source: 'built-in' })
 })
 
-test('built-in defaults: codex and cursor get OpenRouter Auto like opencode (P1-F)', () => {
+test('built-in defaults: codex and cursor get OpenRouter Auto like opencode', () => {
   const db = temp.store.db
   for (const host of ['codex', 'cursor']) {
     expect(resolveObserverSettings(db, host)).toEqual({ provider: 'openrouter', model: 'openrouter/auto', credentialRef: 'openrouter', enabled: true, source: 'built-in' })

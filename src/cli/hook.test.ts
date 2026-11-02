@@ -63,7 +63,7 @@ test.each([['not json at all'], [''], ['{"hook_event_name":"PostToolUse"}'], ['[
   },
 )
 
-test('a hook event P0 does not capture is ignored silently', async () => {
+test('a hook event Kinfold does not capture is ignored silently', async () => {
   expect(await runHook(fixture('subagent-stop.json'))).toEqual({ exitCode: 0, stdout: '', stderr: '' })
 })
 

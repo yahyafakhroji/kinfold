@@ -181,7 +181,7 @@ test('a batch with only session_start / session_end is marked done without a mod
   expect(stateCounts(temp.store, session)).toEqual({ done: 2 })
 })
 
-test('a repeated prompt gets the repeat hint, may return summary null, and shares the first summary (P1-I)', async () => {
+test('a repeated prompt gets the repeat hint, may return summary null, and shares the first summary', async () => {
   const first = seedSession(temp.store, 'claude-code', 'r1')
   const second = seedSession(temp.store, 'opencode', 'r2')
   for (const sessionId of [first, second]) {

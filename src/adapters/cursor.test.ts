@@ -101,7 +101,7 @@ describe('flattenCursorOutput', () => {
   })
 })
 
-describe('edge redaction on Cursor events (D6)', () => {
+describe('edge redaction on Cursor events', () => {
   test('no fake secret from tool output, prompt or reply reaches the spooled form', () => {
     const tool = normalize('leaky tool', { ...fixture('post-tool-use.shell'), tool_output: JSON.stringify({ output: leakyOutput(), exitCode: 0 }) })
     const prompt = normalize('leaky prompt', { ...fixture('before-submit-prompt'), prompt: `use ${FAKE_SECRETS.openrouter} and ${FAKE_SECRETS.aws}` })

@@ -45,7 +45,7 @@ test('search ranks a confirmed match above an equal one and labels it; a contrad
   expect(ids(await call('search', { query: 'widget' }))).toEqual([newer, older])
 })
 
-test('the contradiction label wins over "confirmed by" (D2)', async () => {
+test('the contradiction label wins over "confirmed by"', async () => {
   const target = fixture.ids.oldParser!
   insertLinks(fixture.store.db, fixture.ids.tests!, [{ kind: 'confirms', observationId: target }], NOW)
   const line = text(await call('search', { query: 'never drops' })).split('\n').find((entry) => entry.startsWith(`#${target}`))
