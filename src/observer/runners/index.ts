@@ -8,6 +8,7 @@ import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, ObserverError, type Observe
 import { type SpawnFn, createClaudeCliRunner } from './claude-cli'
 import { type CliAdapter, type CliObserverRunner, createCliObserverRunner } from './cli-core'
 import { codexAdapter } from './codex-cli'
+import { opencodeAdapter } from './opencode-cli'
 import { type FetchFn, createOpenRouterRunner } from './openrouter'
 
 export interface RunnerDeps {
@@ -34,8 +35,8 @@ function readCredential(credentials: CredentialProvider, ref: string): string {
   return value
 }
 
-/** The CLI login adapters built so far. opencode-cli joins in Task 4. */
-const CLI_ADAPTERS: Partial<Record<CliLoginProvider, CliAdapter>> = { 'codex-cli': codexAdapter }
+/** One adapter per CLI login provider. */
+const CLI_ADAPTERS: Record<CliLoginProvider, CliAdapter> = { 'codex-cli': codexAdapter, 'opencode-cli': opencodeAdapter }
 
 function isCliLoginProvider(provider: ObserverProvider): provider is CliLoginProvider {
   return (CLI_LOGIN_PROVIDERS as readonly string[]).includes(provider)
@@ -43,13 +44,11 @@ function isCliLoginProvider(provider: ObserverProvider): provider is CliLoginPro
 
 /**
  * The one way to build a CLI login runner (run, probe, listModels). Throws
- * config_invalid for any provider without a built adapter.
+ * config_invalid for a provider that is not a CLI login observer.
  */
 export function createCliRunner(settings: ObserverSettings, deps: RunnerDeps): CliObserverRunner {
   if (!isCliLoginProvider(settings.provider)) throw new ObserverError('config_invalid', `${settings.provider} is not a CLI login observer`)
-  const adapter = CLI_ADAPTERS[settings.provider]
-  if (adapter === undefined) throw new ObserverError('config_invalid', `${settings.provider} observer is not built yet`)
-  return createCliObserverRunner(adapter, {
+  return createCliObserverRunner(CLI_ADAPTERS[settings.provider], {
     dataDir: deps.dataDir,
     model: settings.model,
     ...(deps.spawn !== undefined ? { spawn: deps.spawn } : {}),
@@ -68,10 +67,7 @@ export function createRunner(settings: ObserverSettings, deps: RunnerDeps): Obse
       ...(deps.parentEnv !== undefined ? { parentEnv: deps.parentEnv } : {}),
     })
   }
-  if (settings.provider === 'codex-cli') return createCliRunner(settings, deps)
-  if (settings.provider !== 'openrouter') {
-    throw new ObserverError('config_invalid', `${settings.provider} observer is not built yet`)
-  }
+  if (isCliLoginProvider(settings.provider)) return createCliRunner(settings, deps)
   const apiKey = readCredential(deps.credentials, settings.credentialRef ?? OPENROUTER_CREDENTIAL_REF)
   return createOpenRouterRunner({ apiKey, model: settings.model, ...(deps.fetch !== undefined ? { fetch: deps.fetch } : {}) })
 }

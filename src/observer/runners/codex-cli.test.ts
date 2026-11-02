@@ -326,18 +326,15 @@ test('createCliRunner builds the codex-cli runner with the deps spawn, env and d
   expect(spawn.requests[1]!.env.CODEX_HOME).toBe('/c')
 })
 
-test('createCliRunner refuses every provider but codex-cli with config_invalid', () => {
-  for (const provider of ['claude-cli', 'openrouter', 'opencode-cli'] as const) {
+test('createCliRunner refuses providers that are not CLI login observers with config_invalid', () => {
+  for (const provider of ['claude-cli', 'openrouter'] as const) {
     const error = caught(() => createCliRunner(settings(provider), { dataDir: temp.dataDir, credentials: NO_CREDENTIALS }))
     expect(error.errorClass).toBe('config_invalid')
   }
 })
 
-test('createRunner routes codex-cli through createCliRunner and still refuses opencode-cli', async () => {
+test('createRunner routes codex-cli through createCliRunner', async () => {
   const spawn = recordingSpawn([{ stdout: 'codex-cli 0.166.0\n' }, { stdout: OK_RUN }])
   const runner = createRunner(settings('codex-cli'), { dataDir: temp.dataDir, credentials: NO_CREDENTIALS, spawn, parentEnv: { PATH: fakeCodexOnPath() } })
   expect((await runner.run(PROMPT)).text).toBe('{"observations":[]}')
-  const error = caught(() => createRunner(settings('opencode-cli'), { dataDir: temp.dataDir, credentials: NO_CREDENTIALS }))
-  expect(error.errorClass).toBe('config_invalid')
-  expect(error.detail).toContain('not built yet')
 })
