@@ -4,6 +4,7 @@
 // its provider reads (compared by fingerprint), or an explicit retry request.
 // observer_fingerprints keeps the last seen pair per host.
 
+import type { CliLoginProvider } from '../observer/types'
 import type { Database } from '../sqlite/types'
 import { MAX_OBSERVER_ATTEMPTS } from './observer-store'
 
@@ -51,4 +52,23 @@ export function resetFailedEvents(db: Database, target: RetryTarget): number {
       .run({ sessionId: target.sessionId }).changes
   }
   return db.run(`UPDATE events SET ${TO_PENDING} WHERE observer_state = 'failed'`).changes
+}
+
+/** The error classes a new safety pass clears (the run's error starts with `<class>:`). */
+const SAFETY_FAILURE_CLASSES = "('tool_attempt', 'safety_check_failed')"
+
+/**
+ * After a new safety pass: failed events go back to pending, attempts reset,
+ * in sessions whose latest finished run used `provider` and failed with
+ * tool_attempt or safety_check_failed. Returns the count.
+ */
+export function resetSafetyFailedEvents(db: Database, provider: CliLoginProvider): number {
+  return db.query(
+    `UPDATE events SET ${TO_PENDING}
+     WHERE observer_state = 'failed' AND session_id IN (
+       SELECT r.session_id FROM observer_runs r
+       WHERE r.provider = $provider AND r.status = 'failed'
+         AND (r.error IN ${SAFETY_FAILURE_CLASSES} OR substr(r.error, 1, instr(r.error, ':') - 1) IN ${SAFETY_FAILURE_CLASSES})
+         AND r.id = (SELECT max(latest.id) FROM observer_runs latest WHERE latest.session_id = r.session_id AND latest.status <> 'running'))`,
+  ).run({ provider }).changes
 }

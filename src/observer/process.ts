@@ -21,6 +21,7 @@ import { dropEchoes, injectedObservations, linkableIds } from './injected'
 import { parseObserverOutput } from './parse'
 import { DEFAULT_PROMPT_LIMITS, type PromptLimits, buildObserverPrompt } from './prompt'
 import type { RunnerFactory } from './runners'
+import type { SafetyGate } from './safety-gate'
 import { resolveObserverSettings } from './settings'
 import { toSourceEvent } from './sources'
 import { ObserverError, type ObserverEvent, type ObserverSettings, toObserverError } from './types'
@@ -34,11 +35,15 @@ export interface ProcessDeps {
   now?: () => number
   log?: (line: string) => void
   limits?: PromptLimits
+  /** The daemon's safety gate for CLI login observers. Without it, no batch is gated. */
+  safety?: SafetyGate
 }
 
 export type BatchOutcome =
   | { status: 'idle' }
   | { status: 'disabled' }
+  /** The safety gate stopped this observer: no run, events untouched. */
+  | { status: 'blocked'; errorClass: string }
   | { status: 'skipped'; events: number }
   | ({ status: 'succeeded'; runId: number; events: number; echoes: number; droppedRelations: number } & WriteCounts)
   | { status: 'failed'; runId: number; events: number; errorClass: string }
@@ -90,19 +95,41 @@ function describe(session: ObserverSession, choice: SettingsChoice, outcome: Bat
   return `${head} status=${outcome.status}`
 }
 
-export async function processSessionBatch(deps: ProcessDeps, sessionId: number): Promise<BatchOutcome> {
-  const now = deps.now ?? Date.now
-  const log = deps.log ?? (() => {})
-  const session = getObserverSession(deps.db, sessionId)
-  const candidates = session === null ? [] : retryableEvents(deps.db, sessionId, now(), MAX_BATCH_EVENTS)
+interface PendingBatch {
+  session: ObserverSession
+  candidates: ObserverEvent[]
+}
+
+/** The session and its retryable events, or the outcome when there is nothing to observe. */
+function pendingBatch(db: Database, sessionId: number, now: number): PendingBatch | BatchOutcome {
+  const session = getObserverSession(db, sessionId)
+  const candidates = session === null ? [] : retryableEvents(db, sessionId, now, MAX_BATCH_EVENTS)
   if (session === null || candidates.length === 0) return { status: 'idle' }
   // Only session_start / session_end: nothing could be cited, so no model call.
   if (candidates.every((event) => toSourceEvent(event) === null)) {
-    markDone(deps.db, candidates.map((event) => event.eventId))
+    markDone(db, candidates.map((event) => event.eventId))
     return { status: 'skipped', events: candidates.length }
   }
-  const choice = chooseSettings(deps.db, session.host)
+  return { session, candidates }
+}
+
+export async function processSessionBatch(deps: ProcessDeps, sessionId: number): Promise<BatchOutcome> {
+  const now = deps.now ?? Date.now
+  const log = deps.log ?? (() => {})
+  const first = pendingBatch(deps.db, sessionId, now())
+  if ('status' in first) return first
+  const choice = chooseSettings(deps.db, first.session.host)
   if (choice.ok && !choice.settings.enabled) return { status: 'disabled' }
+  let pending = first
+  if (choice.ok && deps.safety !== undefined) {
+    const gate = await deps.safety.check(choice.settings)
+    if (!gate.ok) return { status: 'blocked', errorClass: gate.errorClass }
+    // The gate may have run a planted check for minutes: read the batch again.
+    const again = pendingBatch(deps.db, sessionId, now())
+    if ('status' in again) return again
+    pending = again
+  }
+  const { session, candidates } = pending
 
   const known = injectedObservations(deps.db, sessionId)
   const repeats = repeatedPromptNumbers(deps.db, session.id, session.projectKey, candidates)
@@ -125,6 +152,8 @@ export async function processSessionBatch(deps: ProcessDeps, sessionId: number):
     const failure = toObserverError(error)
     recordFailure(deps.db, runId, batch, failure, now())
     outcome = { status: 'failed', runId, events: batch.length, errorClass: failure.errorClass }
+    // A tool ran during a normal batch: record it on the gate, which stops this observer.
+    if (failure.errorClass === 'tool_attempt' && choice.ok && deps.safety !== undefined) await deps.safety.reportToolAttempt(choice.settings)
   }
   log(describe(session, choice, outcome, now() - startedAt))
   return outcome

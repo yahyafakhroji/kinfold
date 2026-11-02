@@ -31,6 +31,7 @@ import { listRecentSessions } from '../store/reads'
 import { rebuildProjectPacks } from '../context/packs'
 import { type BatchOutcome, processSessionBatch } from '../observer/process'
 import type { RunnerFactory } from '../observer/runners'
+import type { SafetyGate } from '../observer/safety-gate'
 import { type CredentialProvider, NO_CREDENTIALS } from '../secrets/credentials'
 import { getObserverSession, recoverInterrupted } from '../store/observer-store'
 import { type RetryTarget, resetFailedEvents } from '../store/observer-reset'
@@ -108,6 +109,8 @@ function startVectors(db: Database, dataDir: string, options: DaemonVectorOption
 
 export interface DaemonObserverOptions {
   runnerFor: RunnerFactory
+  /** Builds the safety gate for CLI login observers on the daemon's own database. */
+  safety?: (db: Database, log: (line: string) => void) => SafetyGate
   tickMs?: number
   schedule?: Partial<ObserverScheduleConfig>
   /** Read only to fingerprint provider keys for the failed-event reset; defaults to none. */
@@ -185,10 +188,11 @@ function resetCheck(db: Database, options: DaemonObserverOptions, keys: HmacKeyS
 function startObserver(db: Database, options: DaemonObserverOptions, keys: HmacKeyState, afterWrite: () => void, log: (line: string) => void): Observing {
   const recovered = recoverInterrupted(db, Date.now())
   if (recovered.events > 0 || recovered.runs > 0) log(`observer recovered events=${recovered.events} runs=${recovered.runs}`)
+  const safety = options.safety?.(db, log)
   const observer = createObserverScheduler({
     db,
     processSession: async (sessionId) => {
-      const outcome = await processSessionBatch({ db, runnerFor: options.runnerFor, log }, sessionId)
+      const outcome = await processSessionBatch({ db, runnerFor: options.runnerFor, log, ...(safety !== undefined ? { safety } : {}) }, sessionId)
       rebuildAfterWrite(db, sessionId, outcome, log)
       if (outcome.status === 'succeeded' && outcome.inserted > 0) afterWrite()
       return outcome

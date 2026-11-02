@@ -2,7 +2,8 @@
 // database, WAL, SHM and spool files are born owner-only, before any open.
 
 import { deprecationLines, readEnv } from '../env-names'
-import { runnerFactory } from '../observer/runners'
+import { type RunnerDeps, createCliRunner, runnerFactory } from '../observer/runners'
+import { createSafetyGate } from '../observer/safety-gate'
 import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
 import type { CredentialProvider } from '../secrets/credentials'
 import { platformCredentialProvider } from '../secrets/keychain'
@@ -40,13 +41,15 @@ function main(): void {
   try {
     const dataDir = resolveDataDir()
     const credentials = platformCredentialProvider()
+    const runnerDeps: RunnerDeps = { dataDir, credentials }
     daemon = startDaemon({
       dataDir,
       port: parsePort(readEnv(process.env, 'PORT')),
       keychain: credentials,
       vectors: { embedder: embedderFrom(credentials) },
       observer: {
-        runnerFor: runnerFactory({ dataDir, credentials }),
+        runnerFor: runnerFactory(runnerDeps),
+        safety: (db, log) => createSafetyGate({ db, cliRunnerFor: (settings) => createCliRunner(settings, runnerDeps), log }),
         credentials,
         schedule: {
           sessionIdleMs: parseIdleMs(readEnv(process.env, 'SESSION_IDLE_MS')),

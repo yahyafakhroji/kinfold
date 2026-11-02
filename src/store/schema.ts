@@ -362,9 +362,25 @@ CREATE INDEX related_served_by_time ON related_served(occurred_at);
 CREATE INDEX related_served_by_observation ON related_served(observation_id);
 `
 
+// v10: the daemon's safety gate (src/observer/safety-gate.ts). One row per
+// (provider, CLI version, resolved binary path) that ran the planted-instruction
+// test, passed or failed with its error class. The model is not part of the key.
+const V10_OBSERVER_SAFETY = `
+CREATE TABLE observer_safety (
+  provider TEXT NOT NULL,
+  cli_version TEXT NOT NULL,
+  binary_path TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('passed','failed')),
+  error_class TEXT,
+  checked_at INTEGER NOT NULL,
+  PRIMARY KEY (provider, cli_version, binary_path)
+);
+`
+
 /** Index i holds the migration that takes user_version from i to i + 1. */
 export const MIGRATIONS: readonly string[] = [
   V1_CORE + V1_MEMORY + V1_DELIVERY, V2_OBSERVER, V3_CONTEXT, V4_DATA_CONTROL, V5_LINKS, V6_USAGE, V7_SHARED_SUMMARIES, V8_VECTORS, V9_RELATED_SERVED,
+  V10_OBSERVER_SAFETY,
 ]
 
 /**

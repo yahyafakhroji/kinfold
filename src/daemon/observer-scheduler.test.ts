@@ -189,3 +189,23 @@ test('due reasons keep their order, and KINFOLD_OBSERVER_MAX_WAIT_MS parses like
   expect(parseMaxWaitMs('30000')).toBe(30_000)
   expect(() => parseMaxWaitMs('soon')).toThrow('KINFOLD_OBSERVER_MAX_WAIT_MS')
 })
+
+test('a blocked batch waits for the next tick like a disabled one: no immediate re-tick', async () => {
+  const session = busySession('blocked', 1, 'turn_end')
+  const calls: number[] = []
+  const s = createObserverScheduler({
+    db: temp.store.db,
+    processSession: async (sessionId) => {
+      calls.push(sessionId)
+      return { status: 'blocked', errorClass: 'safety_check_failed' }
+    },
+    now: () => clock,
+  })
+  s.tick()
+  await s.whenIdle()
+  await flush()
+  expect(calls).toEqual([session])
+  s.tick()
+  await s.whenIdle()
+  expect(calls).toEqual([session, session])
+})

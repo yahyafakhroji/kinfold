@@ -7,7 +7,8 @@ import { createRunner } from './runners'
 import type { SpawnFn } from './runners/claude-cli'
 import type { FetchFn } from './runners/openrouter'
 import { type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession, stateCounts } from './test-support'
-import { ObserverError, type ObserverPrompt, type ObserverRunner } from './types'
+import type { GateResult, SafetyGate } from './safety-gate'
+import { ObserverError, type ObserverPrompt, type ObserverRunner, type ObserverSettings } from './types'
 
 let temp: TempStore
 let logs: string[]
@@ -195,4 +196,65 @@ test('a repeated prompt gets the repeat hint, may return summary null, and share
   expect(outcome).toMatchObject({ status: 'succeeded', summary: true, summaryShared: true })
   expect(summaries().map((row) => [row.request, row.repeat_count])).toEqual([['run the tests', 2]])
   expect(logs.join('\n')).not.toContain(SECRETISH)
+})
+
+/** A gate stub that answers `verdict` and records what it saw. */
+function stubGate(verdict: GateResult) {
+  const seen = { checks: [] as ObserverSettings[], toolAttempts: [] as ObserverSettings[] }
+  const gate: SafetyGate = {
+    check: async (settings) => { seen.checks.push(settings); return verdict },
+    reportToolAttempt: async (settings) => { seen.toolAttempts.push(settings) },
+  }
+  return { gate, seen }
+}
+
+const CODEX_ROW = "INSERT INTO observer_settings (host, provider, model, enabled, updated_at) VALUES ('codex', 'codex-cli', 'gpt-5-mini', 1, 1)"
+
+test('a gate that says not-ok blocks the batch: no run, no runner, events stay pending', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedTurn(session)
+  temp.store.db.run(CODEX_ROW)
+  const { gate, seen } = stubGate({ ok: false, errorClass: 'safety_check_failed' })
+  let built = 0
+  const runnerFor = () => { built += 1; return fakeRunner(['{}']) }
+  const outcome = await processSessionBatch({ db: temp.store.db, runnerFor, safety: gate, now: () => clock, log: (line) => logs.push(line) }, session)
+
+  expect(outcome).toEqual({ status: 'blocked', errorClass: 'safety_check_failed' })
+  expect(seen.checks.map((s) => s.provider)).toEqual(['codex-cli'])
+  expect(built).toBe(0)
+  expect(runs()).toEqual([])
+  expect(stateCounts(temp.store, session)).toEqual({ pending: 4 })
+  expect(temp.store.db.query('SELECT DISTINCT observer_attempts AS n, observer_retry_at AS at FROM events').all()).toEqual([{ n: 0, at: null }])
+})
+
+test('a gate that says ok lets the batch run as before', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedTurn(session)
+  temp.store.db.run(CODEX_ROW)
+  const { gate } = stubGate({ ok: true })
+  const outcome = await processSessionBatch({ db: temp.store.db, runnerFor: () => fakeRunner([citingReply()]), safety: gate, now: () => clock }, session)
+  expect(outcome).toMatchObject({ status: 'succeeded', events: 4 })
+})
+
+test('a run that throws tool_attempt fails the batch as today and reports the tool attempt to the gate', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedTurn(session)
+  temp.store.db.run(CODEX_ROW)
+  const { gate, seen } = stubGate({ ok: true })
+  const runner = fakeRunner([new ObserverError('tool_attempt', 'a tool ran')])
+  const outcome = await processSessionBatch({ db: temp.store.db, runnerFor: () => runner, safety: gate, now: () => clock }, session)
+
+  expect(outcome).toMatchObject({ status: 'failed', errorClass: 'tool_attempt' })
+  expect(stateCounts(temp.store, session)).toEqual({ failed: 4 })
+  expect(runs()).toEqual([expect.objectContaining({ status: 'failed', provider: 'codex-cli', error: 'tool_attempt: a tool ran' })])
+  expect(seen.toolAttempts.map((s) => s.provider)).toEqual(['codex-cli'])
+})
+
+test('other failures do not report a tool attempt', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedTurn(session)
+  temp.store.db.run(CODEX_ROW)
+  const { gate, seen } = stubGate({ ok: true })
+  await processSessionBatch({ db: temp.store.db, runnerFor: () => fakeRunner([new ObserverError('timeout', 't')]), safety: gate, now: () => clock }, session)
+  expect(seen.toolAttempts).toEqual([])
 })

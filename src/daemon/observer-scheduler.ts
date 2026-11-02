@@ -159,7 +159,10 @@ export function createObserverScheduler(options: ObserverSchedulerOptions): Obse
     )
   }
 
-  /** Only a success re-ticks at once: a failed batch waits for its retry time, a disabled host for the next tick. */
+  /**
+   * Only a success re-ticks at once: a failed batch waits for its retry time, and a
+   * disabled host or a blocked observer (safety gate) waits for the next tick.
+   */
   const finish = (sessionId: number, again: boolean): void => {
     running.delete(sessionId)
     if (again && !stopped) tick()
