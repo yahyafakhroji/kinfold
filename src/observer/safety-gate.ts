@@ -4,7 +4,9 @@
 // planted-instruction test once and records the result. A failed row stops
 // the observer: the batch is blocked, with no test and no model call, until
 // the version or binary changes or the row is cleared. A probe failure is
-// not remembered, so a missing CLI is never stored as a safety failure.
+// not remembered in the database, so a missing CLI is never stored as a
+// safety failure; the gate keeps the last probe failure per provider in memory
+// (probeFailures) so GET /observer/settings can show why nothing runs.
 // Log lines carry provider, version, status and error class only: never the
 // binary path, prompt text, model output or env values.
 
@@ -17,9 +19,17 @@ import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, type ObserverErrorClass, ty
 
 export type GateResult = { ok: true } | { ok: false; errorClass: 'safety_check_failed' | 'tool_attempt' | ObserverErrorClass }
 
+/** A provider whose last CLI probe failed, as the dashboard sees it: no path, no detail. */
+export interface ProbeFailure {
+  provider: CliLoginProvider
+  errorClass: ObserverErrorClass
+}
+
 export interface SafetyGate {
   check(settings: ObserverSettings): Promise<GateResult>
   reportToolAttempt(settings: ObserverSettings): Promise<void>
+  /** The last probe failure per provider; an entry goes once a probe of that provider succeeds. */
+  probeFailures(): ProbeFailure[]
 }
 
 export interface SafetyGateDeps {
@@ -118,5 +128,7 @@ export function createSafetyGate(deps: SafetyGateDeps): SafetyGate {
     }
   }
 
-  return { check, reportToolAttempt }
+  const listProbeFailures = (): ProbeFailure[] => [...probeFailures].map(([provider, errorClass]) => ({ provider, errorClass }))
+
+  return { check, reportToolAttempt, probeFailures: listProbeFailures }
 }

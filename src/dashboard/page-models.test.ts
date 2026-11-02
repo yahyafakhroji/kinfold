@@ -81,3 +81,47 @@ test('two forms on one provider share one /observer/models fetch, and Re-check r
   await Bun.sleep(10)
   expect(textOf(page).match(/Stopped:/g)).toHaveLength(1)
 })
+
+/** The nearest element at or above `node` whose attribute matches, or null. */
+function ancestorWith(node: FakeElement, name: string, test: (value: string) => boolean): FakeElement | null {
+  for (let at: FakeElement | null = node; at !== null; at = at.parentNode as FakeElement | null) {
+    const value = name === 'class' ? at.className : at.getAttribute?.(name)
+    if (typeof value === 'string' && test(value)) return at
+  }
+  return null
+}
+
+test('after Re-check the ok notice is a success notice, not inside an error box or alert', async () => {
+  const page = await (await load()).renderModels()
+  const button = elements(page).find((element) => element.getAttribute('data-recheck') === '1')!
+  button.listeners.get('click')![0]!({})
+  await Bun.sleep(10)
+  const okText = textNodes(page).find((node) => node.textContent.includes('within a minute'))!
+  const holder = okText.parentNode as FakeElement
+  expect(holder.className).toContain('notice-ok')
+  expect(ancestorWith(holder, 'role', (role) => role === 'alert')).toBeNull()
+  expect(ancestorWith(holder, 'class', (cls) => cls.split(' ').includes('notice-error'))).toBeNull()
+})
+
+test('the Stopped copy names a non-safety class, says to fix the cause and press Re-check, and does not claim the safety test failed', async () => {
+  const { stoppedNotice } = (await load()) as unknown as { stoppedNotice(provider: string, errorClass: string): FakeElement }
+  const timeout = textOf(stoppedNotice('codex-cli', 'timeout'))
+  expect(timeout).toContain('Stopped: timeout')
+  expect(timeout).toContain('timeout')
+  expect(timeout).toContain('log in to the CLI')
+  expect(timeout).toContain('press Re-check')
+  expect(timeout).not.toContain('safety test failed')
+  const failed = textOf(stoppedNotice('codex-cli', 'safety_check_failed'))
+  expect(failed).toContain('safety test failed')
+  expect(failed).toContain('Re-check')
+})
+
+test('a host whose provider has a probe failure shows "Not running: <class>" as text', async () => {
+  const { hostForms } = (await load()) as unknown as { hostForms(view: unknown): FakeElement[] }
+  const view = { ...VIEW, safety: [], probe: [{ provider: 'codex-cli', errorClass: HOSTILE }] }
+  const shown = hostForms(view).map(textOf).join('|')
+  expect(shown).toContain(`Not running: ${HOSTILE}`)
+  expect(shown.match(/Not running:/g)).toHaveLength(2)
+  expect(hostForms({ ...view, probe: [] }).map(textOf).join('|')).not.toContain('Not running:')
+  expect(hostForms({ ...view, probe: undefined }).map(textOf).join('|')).not.toContain('Not running:')
+})

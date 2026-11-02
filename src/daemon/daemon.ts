@@ -126,6 +126,7 @@ export interface DaemonObserverOptions {
 interface Observing {
   observer: ObserverScheduler
   timers: Timer[]
+  safety: SafetyGate | undefined
 }
 
 export interface DaemonInfo {
@@ -212,7 +213,7 @@ function startObserver(db: Database, options: DaemonObserverOptions, keys: HmacK
   ]
   check()
   observer.tick()
-  return { observer, timers }
+  return { observer, timers, safety }
 }
 
 /** In-flight calls are not awaited: a claude run can take minutes; recoverInterrupted resets them on the next start. */
@@ -281,7 +282,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     listSessions: (projectKey) => listRecentSessions(store.db, projectKey),
     context: contextHandler({ db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null }),
     retryFailed: (target) => retryFailed(store.db, target, observer, log),
-    observerSettings: settingsHandlers(store.db, Date.now, log),
+    // Read at request time: `observing` starts after the server, and no request is served before then.
+    observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? []),
     data: dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log }),
     memory: memoryHandlers(store.db, log),
     metrics: (window) => metricsRoute(store.db, window),

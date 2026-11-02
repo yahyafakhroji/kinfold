@@ -5,6 +5,7 @@
 // name the field, never echo its value.
 
 import type { Parsed } from '../context/types'
+import type { ProbeFailure } from '../observer/safety-gate'
 import { KNOWN_HOSTS, isRecord } from '../contract/event'
 import { providerTakesKey, resolveObserverSettings } from '../observer/settings'
 import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
@@ -29,6 +30,8 @@ export type SafetyView = Omit<SafetyRow, 'binaryPath'>
 export interface ObserverSettingsView {
   rows: ObserverSettingsRow[]
   safety: SafetyView[]
+  /** The safety gate's last probe failure per CLI provider; kept in memory only, never a row. */
+  probe: ProbeFailure[]
   effective: EffectiveSettings[]
 }
 
@@ -87,17 +90,17 @@ function effectiveFor(db: Database, host: string): EffectiveSettings {
   }
 }
 
-export function observerSettingsView(db: Database): ObserverSettingsView {
+export function observerSettingsView(db: Database, probe: readonly ProbeFailure[] = []): ObserverSettingsView {
   const rows = listObserverSettings(db)
   const hosts = [...new Set([...REPORTED_HOSTS, ...rows.map((row) => row.host).filter((host) => host !== '*')])]
   const safety = listSafety(db).map(({ binaryPath: _binaryPath, ...rest }) => rest)
-  return { rows, safety, effective: hosts.map((host) => effectiveFor(db, host)) }
+  return { rows, safety, probe: probe.map(({ provider, errorClass }) => ({ provider, errorClass })), effective: hosts.map((host) => effectiveFor(db, host)) }
 }
 
-/** Logs the host and provider only. */
-export function settingsHandlers(db: Database, now: () => number, log: (line: string) => void): ObserverSettingsHandlers {
+/** Logs the host and provider only. `probeFailures` is the safety gate's in-memory list, when the daemon observes. */
+export function settingsHandlers(db: Database, now: () => number, log: (line: string) => void, probeFailures: () => readonly ProbeFailure[] = () => []): ObserverSettingsHandlers {
   return {
-    list: () => observerSettingsView(db),
+    list: () => observerSettingsView(db, probeFailures()),
     put: (input) => {
       const row = upsertObserverSettings(db, input, now())
       // Saving a CLI choice is the user's answer to a stopped observer, even when the row is unchanged.

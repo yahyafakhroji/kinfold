@@ -41,24 +41,62 @@ export function stoppedClass(safety, provider) {
 }
 
 /**
+ * The error class of the gate's last failed probe for this provider, or null.
+ * A probe failure (CLI missing, not runnable) records no row; the daemon keeps
+ * it in memory and clears it once a probe succeeds.
+ * @param {{ provider: string, errorClass: string }[]} probe
+ * @param {string} provider
+ */
+export function probeClass(probe, provider) {
+  const failed = probe.find((entry) => entry.provider === provider)
+  return failed === undefined ? null : failed.errorClass ?? 'unknown'
+}
+
+/**
+ * What the user is told about a stopped provider. Only safety_check_failed
+ * means the model followed the planted instruction; any other class is a
+ * cause to fix first.
+ * @param {string} errorClass
+ */
+function stoppedCopy(errorClass) {
+  return errorClass === 'safety_check_failed'
+    ? ' The safety test failed, so this observer is not running. Change the CLI or model, then press Re-check.'
+    : ` This observer is not running: its safety test ended with ${errorClass}. Fix the cause (for example, log in to the CLI), then press Re-check.`
+}
+
+/**
  * A "Stopped: <class>" line with a Re-check button. The class comes from the
- * daemon and is shown as text only.
+ * daemon and is shown as text only. The outer box is a plain holder, so the
+ * success notice that replaces the error never sits inside an alert.
  * @param {string} provider
  * @param {string} errorClass
  */
-function stoppedNotice(provider, errorClass) {
-  const box = h('div', { class: 'notice notice-error stopped', role: 'alert' })
+export function stoppedNotice(provider, errorClass) {
+  const holder = h('div', { class: 'stopped' })
+  const box = h('div', { class: 'notice notice-error', role: 'alert' })
   const status = h('span', { 'aria-live': 'polite' })
   const button = h('button', { type: 'button', class: 'quiet', 'data-recheck': '1' }, 'Re-check')
   button.addEventListener('click', () => {
     button.setAttribute('disabled', '')
     replaceContent(status, notice('Re-checking…'))
     api('POST', '/observer/recheck', { provider }).then(
-      () => replaceContent(box, notice('Re-check queued; the next batch tests it again (within a minute).', 'ok')),
+      () => replaceContent(holder, notice('Re-check queued; the next batch tests it again (within a minute).', 'ok')),
       (error) => { button.removeAttribute('disabled'); replaceContent(status, notice(errorText(error), 'error')) })
   })
-  replaceContent(box, h('span', { class: 'badge run-failed' }, `Stopped: ${errorClass}`), ' The safety test failed, so this observer is not running. ', button, status)
-  return box
+  replaceContent(box, h('span', { class: 'badge run-failed' }, `Stopped: ${errorClass}`), stoppedCopy(errorClass), button, status)
+  replaceContent(holder, box)
+  return holder
+}
+
+/**
+ * A "Not running: <class>" line for a provider whose CLI probe failed. The
+ * daemon retries on its own, so there is nothing to press.
+ * @param {string} errorClass
+ */
+function notRunningNotice(errorClass) {
+  return h('div', { class: 'notice notice-error not-running', role: 'alert' },
+    h('span', { class: 'badge run-failed' }, `Not running: ${errorClass}`),
+    ' The daemon could not start this CLI. Fix the cause (for example, install it, log in, or re-run the installer so the daemon\'s PATH finds it); the daemon tries again on its own.')
 }
 
 /** One in-flight /observer/models request per provider, shared by every form. @type {Map<string, Promise<any>>} */
@@ -94,18 +132,21 @@ function loadModelNames(list, provider) {
  * @param {Choice | null} choice null for a "*" row that does not exist yet
  * @param {string | null} problem the effective setting's error class, if it could not be resolved
  * @param {{ provider: string, status: string, errorClass: string | null }[]} [safety]
+ * @param {{ provider: string, errorClass: string }[]} [probe]
  */
-function hostForm(host, choice, problem, safety = []) {
+function hostForm(host, choice, problem, safety = [], probe = []) {
   const id = (name) => `${name}-${host === '*' ? 'default' : host}`
   const status = h('div', { class: 'test-status', 'aria-live': 'polite' })
   const current = choice ?? { provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: true }
   const stopped = stoppedClass(safety, current.provider)
+  const unprobed = probeClass(probe, current.provider)
   const models = h('datalist', { id: id('models') })
   const form = h('form', { class: 'host-form' },
     h('header', { class: 'host-head' },
       h('h2', {}, host === '*' ? 'Default (*)' : host),
       h('p', { class: 'hint' }, choice === null ? 'No default row: hosts without their own row use the built-in default.' : SOURCES[choice.source ?? 'host'] ?? '')),
     problem === null ? null : notice(`This host's setting cannot be used: ${problem}`, 'error'),
+    unprobed === null ? null : notRunningNotice(unprobed),
     stopped === null ? null : stoppedNotice(current.provider, stopped),
     h('div', { class: 'form-grid' },
       h('label', { class: 'field', for: id('provider') }, h('span', { class: 'field-label' }, 'Provider'),
@@ -156,7 +197,11 @@ function runTest(host, form, status, button) {
 }
 
 /**
- * @param {{ rows: { host: string, provider: string, model: string, credentialRef: string | null, enabled: boolean }[], effective: ({ host: string, settings: Choice } | { host: string, error: string })[], safety?: { provider: string, status: string, errorClass: string | null }[] }} view
+ * @typedef {{ rows: { host: string, provider: string, model: string, credentialRef: string | null, enabled: boolean }[], effective: ({ host: string, settings: Choice } | { host: string, error: string })[], safety?: { provider: string, status: string, errorClass: string | null }[], probe?: { provider: string, errorClass: string }[] }} SettingsView
+ */
+
+/**
+ * @param {SettingsView} view
  */
 export function hostEntries(view) {
   const star = view.rows.find((row) => row.host === '*') ?? null
@@ -166,10 +211,20 @@ export function hostEntries(view) {
   return [...hosts, { host: '*', choice: star === null ? null : { ...star, source: 'host' }, problem: null }]
 }
 
+/**
+ * One form per host entry.
+ * @param {SettingsView} view
+ */
+export function hostForms(view) {
+  const safety = Array.isArray(view.safety) ? view.safety : []
+  const probe = Array.isArray(view.probe) ? view.probe : []
+  return hostEntries(view).map((entry) => hostForm(entry.host, entry.choice, entry.problem, safety, probe))
+}
+
 export async function renderModels() {
   const view = await api('GET', '/observer/settings')
   return h('section', { class: 'page', 'aria-labelledby': 'page-title' },
     h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '01'), h('h1', { id: 'page-title' }, 'Model settings'),
       h('p', { class: 'lede' }, 'Which observer model turns each host\'s events into memory. There is no silent fallback: a failing model keeps events queued.')),
-    h('div', { class: 'host-forms' }, hostEntries(view).map((entry) => hostForm(entry.host, entry.choice, entry.problem, view.safety ?? []))))
+    h('div', { class: 'host-forms' }, hostForms(view)))
 }

@@ -204,6 +204,7 @@ function stubGate(verdict: GateResult) {
   const gate: SafetyGate = {
     check: async (settings) => { seen.checks.push(settings); return verdict },
     reportToolAttempt: async (settings) => { seen.toolAttempts.push(settings) },
+    probeFailures: () => [],
   }
   return { gate, seen }
 }
@@ -269,6 +270,7 @@ test('settings that change during the gate check are read again: a host disabled
       return { ok: true }
     },
     reportToolAttempt: async () => {},
+    probeFailures: () => [],
   }
   let built = 0
   const runnerFor = () => { built += 1; return fakeRunner([citingReply()]) }
@@ -290,6 +292,7 @@ test('a provider changed during the gate check goes through the gate again with 
       return settings.provider === 'codex-cli' ? { ok: true } : { ok: false, errorClass: 'cli_missing' }
     },
     reportToolAttempt: async () => {},
+    probeFailures: () => [],
   }
   expect(await processSessionBatch({ db: temp.store.db, runnerFor: () => fakeRunner(['{}']), safety: gate, now: () => clock }, session)).toEqual({ status: 'blocked', errorClass: 'cli_missing' })
   expect(checked).toEqual(['codex-cli', 'opencode-cli'])

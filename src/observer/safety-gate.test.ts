@@ -162,3 +162,18 @@ test('log lines carry provider, version, status and class, never the binary path
   expect(logs[0]).toContain('status=failed')
   expect(logs[0]).toContain('error=tool_attempt')
 })
+
+test('probeFailures lists the last probe failure per provider and drops it once a probe succeeds', async () => {
+  let failing = true
+  const { gate } = harness(() => {
+    if (failing) throw new ObserverError('cli_missing', 'not found')
+    return probeOk()
+  }, () => ({ ok: true }))
+  expect(gate.probeFailures()).toEqual([])
+  await gate.check(settings('codex-cli'))
+  expect(gate.probeFailures()).toEqual([{ provider: 'codex-cli', errorClass: 'cli_missing' }])
+  expect(listSafety(temp.store.db)).toEqual([])
+  failing = false
+  expect(await gate.check(settings('codex-cli'))).toEqual({ ok: true })
+  expect(gate.probeFailures()).toEqual([])
+})

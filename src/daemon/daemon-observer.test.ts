@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { openStore } from '../store/db'
 import { type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from '../observer/test-support'
 import type { SafetyGate } from '../observer/safety-gate'
@@ -50,7 +52,7 @@ test('startDaemon passes the safety gate through: a blocked CLI observer is bloc
   const gateDbs: unknown[] = []
   const safety = (db: unknown): SafetyGate => {
     gateDbs.push(db)
-    return { check: async () => ({ ok: false, errorClass: 'safety_check_failed' }), reportToolAttempt: async () => {} }
+    return { check: async () => ({ ok: false, errorClass: 'safety_check_failed' }), reportToolAttempt: async () => {}, probeFailures: () => [] }
   }
   daemon = startDaemon({ dataDir: temp.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, observer: { runnerFor: () => runner, safety, tickMs: 60_000, resetCheckMs: 60_000 } })
   await daemon.observer!.whenIdle()
@@ -64,4 +66,20 @@ test('startDaemon passes the safety gate through: a blocked CLI observer is bloc
   } finally {
     reader.db.close()
   }
+})
+
+test('GET /observer/settings reports the gate\'s probe failures as provider and class only, and an empty list without a gate', async () => {
+  const safety = (): SafetyGate => ({
+    check: async () => ({ ok: true }),
+    reportToolAttempt: async () => {},
+    probeFailures: () => [{ provider: 'opencode-cli', errorClass: 'cli_missing' }],
+  })
+  daemon = startDaemon({ dataDir: temp.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, observer: { runnerFor: () => fakeRunner([]), safety, tickMs: 60_000, resetCheckMs: 60_000 } })
+  const token = readFileSync(join(temp.dataDir, 'daemon.token'), 'utf8').trim()
+  const view = (await (await fetch(`http://127.0.0.1:${daemon.port}/observer/settings`, { headers: { authorization: `Bearer ${token}` } })).json()) as { probe: unknown }
+  expect(view.probe).toEqual([{ provider: 'opencode-cli', errorClass: 'cli_missing' }])
+  await daemon.stop()
+  daemon = startDaemon({ dataDir: temp.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
+  const plain = (await (await fetch(`http://127.0.0.1:${daemon.port}/observer/settings`, { headers: { authorization: `Bearer ${readFileSync(join(temp.dataDir, 'daemon.token'), 'utf8').trim()}` } })).json()) as { probe: unknown }
+  expect(plain.probe).toEqual([])
 })
