@@ -8,20 +8,16 @@
 import { createKeychainProvider } from '../secrets/keychain'
 import { type CredentialProvider, isSystemCredentialRef } from '../secrets/credentials'
 import { assertStorableValue, credentialWriterFor } from '../secrets/keychain-writer'
+import { CHECK_PROMPT } from '../observer/check-prompt'
 import { OPENROUTER_CREDENTIAL_REF, builtInSettings, credentialRefFor, providerTakesKey } from '../observer/settings'
-import { OBSERVER_PROVIDERS, type ObserverPrompt, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
+import { OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import type { InstallHost } from './detect'
 import type { InstallEnv } from './env'
 
 export const MAX_CHOICE_ATTEMPTS = 5
 
-/** Fixed and harmless: no project data, no tools, a one-word answer. */
-export const CHECK_PROMPT: ObserverPrompt = {
-  system: 'This is a connectivity check for a memory tool. Reply with the single word OK.',
-  user: 'Reply with OK.',
-  eventIds: [],
-}
+export { CHECK_PROMPT }
 
 export interface ObserverFlag {
   host: InstallHost
