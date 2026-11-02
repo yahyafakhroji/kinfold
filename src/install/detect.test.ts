@@ -75,3 +75,17 @@ test('Claude Code, Codex and Cursor name the reason too, and an answer keeps its
   expect(answered[0]?.note).toBe('claude --version answered')
   expect(answered[2]?.note).toBe('codex --version answered')
 })
+
+test('a forced OpenCode with no readable version says why, then that --hosts wired it', async () => {
+  world = createWorld({ claudeVersion: '2.1.310 (Claude Code)' })
+  const missing = await detectHosts(world.env, ['opencode'])
+  expect(missing.find((d) => d.host === 'opencode')).toMatchObject({ selected: true, version: null, note: 'not found (no opencode on PATH); wired because --hosts names it' })
+  await world.cleanup()
+  world = createWorld({ opencodeVersion: 'opencode dev build' })
+  const unreadable = await detectHosts(world.env, ['opencode'])
+  expect(unreadable.find((d) => d.host === 'opencode')?.note).toBe('opencode --version printed no version we could read; wired because --hosts names it')
+  await world.cleanup()
+  world = createWorld({ versionResults: { opencode: { exitCode: 3, stdout: 'SECRET-OUTPUT' } } })
+  const exited = await detectHosts(world.env, ['opencode'])
+  expect(exited.find((d) => d.host === 'opencode')?.note).toBe('opencode --version exited 3; wired because --hosts names it')
+})

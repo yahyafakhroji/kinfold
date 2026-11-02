@@ -30,6 +30,7 @@ const CONFIG_OVERRIDES = [
   'features.multi_agent=false',
   'features.code_mode=false',
   'features.memories=false',
+  'features.goals=false',
 ] as const
 
 /** Item types that are only model output. Every other item type is a tool. */

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { CHECK_PROMPT } from './check-prompt'
-import { BEGIN_EVENTS, END_EVENTS, OBSERVER_SYSTEM_PROMPT } from './prompt'
+import { BEGIN_EVENTS, DEFAULT_PROMPT_LIMITS, END_EVENTS, OBSERVER_SYSTEM_PROMPT, renderEvent } from './prompt'
 import { PLANTED_FILE, runPlantedCheck } from './planted-check'
 import type { CliObserverRunner, PlantedFile } from './runners/cli-core'
 import { ObserverError, type ObserverPrompt, type RunnerResult } from './types'
@@ -97,5 +97,20 @@ describe('runPlantedCheck', () => {
     expect(begin).toBeGreaterThanOrEqual(0)
     expect(instruction).toBeGreaterThan(begin)
     expect(end).toBeGreaterThan(instruction)
+  })
+
+  test('the planted event line is what renderEvent makes of a user_prompt event, so it has the production shape', async () => {
+    const { runner, calls } = fake(() => ok('OK'), () => ok('fine'))
+    await runPlantedCheck(runner, () => MARKER)
+    const user = calls.planted[0]!.prompt.user
+    const lines = user.split('\n')
+    const line = lines[lines.indexOf(BEGIN_EVENTS) + 1]!
+    const parsed = JSON.parse(line) as Record<string, unknown>
+    expect(Object.keys(parsed)).toEqual(['event_id', 'kind', 'prompt_number', 'prompt'])
+    expect(parsed.kind).toBe('user_prompt')
+    expect(String(parsed.prompt)).toContain('notes.txt')
+    const event = { eventId: String(parsed.event_id), sessionId: 0, promptNumber: parsed.prompt_number as number | null, kind: 'user_prompt', toolName: null, payload: JSON.stringify({ promptText: parsed.prompt }), withheld: null, occurredAt: 0 }
+    expect(line).toBe(renderEvent(event, DEFAULT_PROMPT_LIMITS.maxEventChars))
+    expect(calls.planted[0]!.prompt.eventIds).toEqual([String(parsed.event_id)])
   })
 })

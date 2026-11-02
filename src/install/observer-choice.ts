@@ -93,13 +93,13 @@ function isCliLoginProvider(provider: string): provider is CliLoginProvider {
   return (CLI_LOGIN_PROVIDERS as readonly string[]).includes(provider)
 }
 
-/** Up to 20 names the CLI reports, as plain lines; or the error class when it cannot list. Names are never interpreted. */
+/** Up to 20 names the CLI reports, as plain lines; or the error class when it cannot list. Names are never interpreted; a name with a control or format character (an escape, a bidi override, a zero-width) is dropped. */
 function showModels(env: InstallEnv, provider: CliLoginProvider, models: readonly string[] | { errorClass: string }): void {
   if ('errorClass' in models) {
     env.out(`model list unavailable (${models.errorClass}); type a model name`)
     return
   }
-  const names = models.filter((name) => name.length > 0 && name.length <= MAX_MODEL_NAME_CHARS && !/[\p{Cc}]/u.test(name)).slice(0, MAX_LISTED_MODELS)
+  const names = models.filter((name) => name.length > 0 && name.length <= MAX_MODEL_NAME_CHARS && !/[\p{Cc}\p{Cf}]/u.test(name)).slice(0, MAX_LISTED_MODELS)
   if (names.length === 0) {
     env.out(`${provider} reported no models; type a model name`)
     return

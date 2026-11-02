@@ -225,7 +225,11 @@ async function inRunDir<T>(
   } catch (error: unknown) {
     // A cleanup failure must never replace the run's result or error. Its
     // message could quote CLI output, so only the class is reported.
-    onBeforeError(toObserverError(error))
+    try {
+      onBeforeError(toObserverError(error))
+    } catch {
+      // A throwing logger must not skip removing the run folder.
+    }
   }
   const removed = removeRunDir(runDir)
   if (!outcome.ok) throw toObserverError(outcome.error)

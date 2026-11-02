@@ -295,6 +295,20 @@ test('a cleanup failure logs one class-only line and leaves the run result and e
   expect(runFolders()).toEqual([])
 })
 
+test('a logger that throws while reporting a cleanup failure still lets the run folder be removed and the result stand', async () => {
+  const { adapter } = harness({
+    cleanup: async () => {
+      throw new Error(SECRET)
+    },
+  })
+  const make = (spawn: SpawnFn) =>
+    createCliObserverRunner(adapter, { dataDir: temp.dataDir, model: 'fake/model', spawn, which: () => '/opt/bin/fakecli', parentEnv: PARENT_ENV, log: () => { throw new Error('logger down') } })
+  expect(await make(recordingSpawn([VERSION_OK, { stdout: OK_OUTPUT }])).run(PROMPT)).toEqual({ text: '{"observations":[]}', model: 'fake/answered' })
+  expect(runFolders()).toEqual([])
+  expect((await failure(make(recordingSpawn([VERSION_OK, { exitCode: 3 }])).run(PROMPT))).errorClass).toBe('exit_nonzero')
+  expect(runFolders()).toEqual([])
+})
+
 test('a non-zero exit whose output shows a tool event throws tool_attempt', async () => {
   const { adapter } = harness()
   const stdout = JSON.stringify({ text: SECRET, tools: 2 })

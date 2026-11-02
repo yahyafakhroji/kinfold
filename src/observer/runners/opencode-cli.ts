@@ -9,9 +9,11 @@
 // The system prompt lives in that inline config; the untrusted session text
 // goes on stdin only. Every run is saved as a session in OpenCode's database,
 // so cleanup deletes it by id, or by the run's unique title when no id came
-// back. Facts follow docs/reference/observer-cli/opencode.md (opencode 2.1.4).
+// back. Plugins in OpenCode's system dir load whatever OPENCODE_CONFIG_DIR
+// says, so a run is refused (config_invalid) while that dir holds any plugin.
+// Facts follow docs/reference/observer-cli/opencode.md (opencode 2.1.4).
 
-import { chmodSync, existsSync, mkdirSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { isRecord } from '../../contract/event'
 import { ObserverError } from '../types'
@@ -25,8 +27,12 @@ const CONFIG_DIR = 'config'
 const CONFIG_DIR_MODE = 0o700
 const COMMAND_TIMEOUT_MS = 30_000
 const VERSION_PATTERN = /\bv?(\d+)\.(\d+)\.(\d+)/
-/** OpenCode substitutes these anywhere in config text. */
-const SUBSTITUTIONS = ['{env:', '{file:'] as const
+/** OpenCode substitutes `{env:…}` and `{file:…}` anywhere in config text; spaces and case are not trusted to matter. */
+const SUBSTITUTION = /\{\s*(env|file)\s*:/i
+/** OpenCode's system-wide dir on macOS. Its plugins escape the OPENCODE_CONFIG_DIR redirect. */
+export const OPENCODE_SYSTEM_DIR = '/Library/Application Support/opencode'
+const SYSTEM_PLUGIN_DIRS = ['plugin', 'plugins'] as const
+const SYSTEM_PLUGINS_DETAIL = 'opencode has system-wide plugins, which would run inside the observer'
 /** An id we pass back on argv: never empty, never flag-shaped. */
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/
 
@@ -90,12 +96,36 @@ function parseVersion(stdout: string): Semver | null {
   return parts.every(Number.isSafeInteger) ? parts : null
 }
 
-function invocation(input: { binaryPath: string; runDir: string; model: string; system: string; title: string; env: Record<string, string> }) {
+/**
+ * Throws config_invalid when `<systemDir>/plugin` or `<systemDir>/plugins`
+ * holds anything, or cannot be read. A missing dir is fine. The detail is
+ * fixed, so the path never reaches a log or the dashboard.
+ */
+function assertNoSystemPlugins(systemDir: string): void {
+  for (const name of SYSTEM_PLUGIN_DIRS) {
+    let entries: string[]
+    try {
+      entries = readdirSync(join(systemDir, name))
+    } catch (error: unknown) {
+      const code = errorCode(error, 'read failed')
+      if (code === 'ENOENT' || code === 'ENOTDIR') continue
+      throw new ObserverError('config_invalid', `opencode system plugin folder could not be read (${code})`)
+    }
+    if (entries.length > 0) throw new ObserverError('config_invalid', SYSTEM_PLUGINS_DETAIL)
+  }
+}
+
+type InvocationInput = { binaryPath: string; runDir: string; model: string; system: string; title: string; env: Record<string, string> }
+
+function invocation(input: InvocationInput, systemDir: string) {
   // A model like `--auto` would be read as a flag. Not quoted: settings text stays out of details.
   if (input.model === '' || input.model.startsWith('-')) throw new ObserverError('config_invalid', 'opencode model must not start with -')
+  // Checked on every run, right before it is built, so a plugin added later still stops it.
+  assertNoSystemPlugins(systemDir)
   const env = envFor(input.runDir, input.env, input.system)
-  // The system prompt is the only caller text in the config; check the whole text anyway.
-  if (SUBSTITUTIONS.some((token) => env.OPENCODE_CONFIG_CONTENT!.includes(token))) {
+  // The system prompt is the only caller text in the config; check it raw (JSON escapes a tab
+  // or newline) and the whole config text too.
+  if (SUBSTITUTION.test(input.system) || SUBSTITUTION.test(env.OPENCODE_CONFIG_CONTENT!)) {
     throw new ObserverError('internal', 'observer system prompt holds an OpenCode config substitution')
   }
   makeConfigDir(input.runDir)
@@ -232,15 +262,25 @@ async function listModels(ctx: Omit<CliRunContext, 'title' | 'sessionId'>): Prom
   return models
 }
 
-export const opencodeAdapter: CliAdapter = {
-  provider: 'opencode-cli',
-  binary: 'opencode',
-  extraEnv: ['XDG_DATA_HOME', 'OPENCODE_DB'],
-  minVersion: OPENCODE_MIN_VERSION,
-  parseVersion,
-  isolatedEnv,
-  invocation,
-  parse,
-  cleanup,
-  listModels,
+export interface OpencodeAdapterOptions {
+  /** OpenCode's system-wide dir; tests point it at a temp dir. */
+  systemDir?: string
 }
+
+export function createOpencodeAdapter(options: OpencodeAdapterOptions = {}): CliAdapter {
+  const systemDir = options.systemDir ?? OPENCODE_SYSTEM_DIR
+  return {
+    provider: 'opencode-cli',
+    binary: 'opencode',
+    extraEnv: ['XDG_DATA_HOME', 'OPENCODE_DB'],
+    minVersion: OPENCODE_MIN_VERSION,
+    parseVersion,
+    isolatedEnv,
+    invocation: (input) => invocation(input, systemDir),
+    parse,
+    cleanup,
+    listModels,
+  }
+}
+
+export const opencodeAdapter: CliAdapter = createOpencodeAdapter()

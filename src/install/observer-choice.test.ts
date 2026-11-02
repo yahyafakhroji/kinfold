@@ -72,6 +72,15 @@ test('the prompt lists at most 20 models for a CLI provider and accepts a typed 
   expect(world.out).not.toContain('  model-21')
 })
 
+test('the model list drops names holding control or format characters (bidi overrides, zero-width)', async () => {
+  const names = ['good-model', 'bad\u001b[31m', 'rtl\u202Eevil', 'zero\u200Bwidth', 'bom\uFEFF', 'also-good']
+  world = createWorld({ interactive: true, answers: ['codex-cli', 'good-model'], cliRunner: () => cli({ listModels: async () => names }) })
+  await chooseObservers(world.env, ['codex'], { ...options, skipCheck: true })
+  const listed = world.out.filter((line) => line.startsWith('  '))
+  expect(listed).toEqual(['  good-model', '  also-good'])
+  expect(world.out).toContain('codex-cli models (first 2):')
+})
+
 test('the prompt says the list is unavailable when listing fails, and still takes a typed name', async () => {
   world = createWorld({ interactive: true, answers: ['opencode-cli', 'typed/name'], cliRunner: () => cli({ listModels: async () => { throw new ObserverError('cli_missing', 'secret path /x') } }) })
   const [choice] = await chooseObservers(world.env, ['opencode'], { ...options, skipCheck: true })

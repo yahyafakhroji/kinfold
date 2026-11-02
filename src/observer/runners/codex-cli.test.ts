@@ -81,6 +81,7 @@ test('invocation builds the exact codex exec argv, ending with - for stdin', () 
     '-c', 'features.multi_agent=false',
     '-c', 'features.code_mode=false',
     '-c', 'features.memories=false',
+    '-c', 'features.goals=false',
     '-c', `model_instructions_file="${RUN_DIR}/instructions.md"`,
     '-',
   ])

@@ -123,9 +123,10 @@ async function detectOpenCode(env: InstallEnv, forced: boolean): Promise<HostDet
     return { host: 'opencode', selected: false, version, note: `OpenCode ${version} is not supported: the plugin needs OpenCode 2.0 or later` }
   }
   if (parsed !== null) return { host: 'opencode', selected: true, version, note: 'opencode --version answered 2.x or later', stampPath: await resolveBinary(env, 'opencode') }
+  const reason = answer.ok ? 'opencode --version printed no version we could read' : answer.reason === 'not-found' ? 'not found (no opencode on PATH)' : reasonNote('opencode', answer)
   return forced
-    ? { host: 'opencode', selected: true, version: null, note: 'version unknown; wired because --hosts names it' }
-    : { host: 'opencode', selected: false, version: null, note: answer.ok ? 'opencode --version printed no version we could read' : answer.reason === 'not-found' ? 'not found (no opencode on PATH)' : reasonNote('opencode', answer) }
+    ? { host: 'opencode', selected: true, version: null, note: `${reason}; wired because --hosts names it` }
+    : { host: 'opencode', selected: false, version: null, note: reason }
 }
 
 interface CliHostSpec {

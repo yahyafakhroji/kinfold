@@ -7,7 +7,7 @@ import { ObserverError, type ObserverPrompt, type ObserverSettings } from '../ty
 import { type CliRunContext, createCliObserverRunner } from './cli-core'
 import type { SpawnFn, SpawnRequest } from './claude-cli'
 import { recordingSpawn } from './cli-test-support'
-import { OBSERVER_AGENT, OPENCODE_MIN_VERSION, opencodeAdapter } from './opencode-cli'
+import { OBSERVER_AGENT, OPENCODE_MIN_VERSION, OPENCODE_SYSTEM_DIR, createOpencodeAdapter, opencodeAdapter } from './opencode-cli'
 import { createCliRunner, createRunner } from '.'
 
 let temp: TempStore
@@ -135,6 +135,48 @@ test('a system prompt holding {env: or {file: throws internal before anything is
     expect(error.errorClass).toBe('internal')
     expect(error.detail).not.toContain('HOME')
     expect(error.detail).not.toContain('ssh')
+  }
+})
+
+test('the substitution guard also catches spaced and upper-case forms', () => {
+  for (const system of ['use { env : HOME } here', 'read {FILE:~/.ssh/id_rsa}', 'x {\tEnv:HOME}']) {
+    const error = caught(() => invocation(system))
+    expect(error.errorClass).toBe('internal')
+    expect(error.detail).not.toContain('HOME')
+    expect(error.detail).not.toContain('ssh')
+  }
+  expect(() => invocation('an {envelope} and a {profile: x}')).not.toThrow()
+})
+
+// --- system plugin dir ---------------------------------------------------
+
+function systemAdapter(systemDir: string) {
+  const adapter = createOpencodeAdapter({ systemDir })
+  return () => adapter.invocation({ binaryPath: BIN, runDir, model: 'anthropic/claude-x', system: SYSTEM, title: TITLE, env: BASE_ENV })
+}
+
+test('the default system dir is OpenCode\'s macOS one', () => {
+  expect(OPENCODE_SYSTEM_DIR).toBe('/Library/Application Support/opencode')
+})
+
+test('a missing system dir, or empty plugin and plugins dirs, let the run be built', () => {
+  expect(() => systemAdapter(join(temp.root, 'no-such-dir'))()).not.toThrow()
+  const systemDir = join(temp.root, 'system')
+  mkdirSync(join(systemDir, 'plugin'), { recursive: true })
+  mkdirSync(join(systemDir, 'plugins'), { recursive: true })
+  expect(() => systemAdapter(systemDir)()).not.toThrow()
+})
+
+test('a file in the system plugin or plugins dir refuses the run as config_invalid, with no path, before the config dir is made', () => {
+  for (const name of ['plugin', 'plugins']) {
+    const systemDir = join(temp.root, `system-${name}`)
+    mkdirSync(join(systemDir, name), { recursive: true })
+    writeFileSync(join(systemDir, name, 'spy.ts'), 'export default {}')
+    const error = caught(systemAdapter(systemDir))
+    expect(error.errorClass).toBe('config_invalid')
+    expect(error.detail).toBe('opencode has system-wide plugins, which would run inside the observer')
+    expect(error.detail).not.toContain(systemDir)
+    expect(existsSync(join(runDir, 'config'))).toBe(false)
   }
 })
 
