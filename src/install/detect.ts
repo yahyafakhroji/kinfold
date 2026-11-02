@@ -17,7 +17,7 @@ import { type InstallEnv, installPaths } from './env'
 export const INSTALL_HOSTS = ['claude-code', 'opencode', 'codex', 'cursor'] as const
 export type InstallHost = (typeof INSTALL_HOSTS)[number]
 
-const VERSION_TIMEOUT_MS = 5_000
+export const VERSION_TIMEOUT_MS = 5_000
 const MIN_OPENCODE_MAJOR = 2
 const WHICH = '/usr/bin/which'
 
@@ -40,12 +40,34 @@ export function parseOpenCodeVersion(output: string): Semver | null {
   return match === null ? null : [Number(match[1]), Number(match[2]), Number(match[3])]
 }
 
-async function versionOf(env: InstallEnv, binary: string): Promise<string | null> {
+export type VersionAnswer =
+  | { ok: true; stdout: string }
+  | { ok: false; reason: 'not-found' | 'exit' | 'timeout' | 'error'; exitCode?: number }
+
+const NOT_FOUND_EXIT = 127
+
+/** What `<binary> --version` did, with the reason when it gave no output to read. */
+export async function versionOf(env: InstallEnv, binary: string): Promise<VersionAnswer> {
   try {
     const result = await env.run({ argv: [binary, '--version'], timeoutMs: VERSION_TIMEOUT_MS })
-    return result.exitCode === 0 ? result.stdout.trim() : null
+    if (result.timedOut === true) return { ok: false, reason: 'timeout' }
+    if (result.exitCode === NOT_FOUND_EXIT) return { ok: false, reason: 'not-found' }
+    if (result.exitCode !== 0) return { ok: false, reason: 'exit', exitCode: result.exitCode }
+    return { ok: true, stdout: result.stdout.trim() }
   } catch {
-    return null
+    return { ok: false, reason: 'error' }
+  }
+}
+
+type Failed = Extract<VersionAnswer, { ok: false }>
+
+/** The one-line reason for a failed `--version`; fixed text and the exit code only, never CLI output. */
+function reasonNote(binary: string, answer: Failed): string {
+  switch (answer.reason) {
+    case 'not-found': return `no ${binary} on PATH`
+    case 'exit': return `${binary} --version exited ${answer.exitCode ?? 'unknown'}`
+    case 'timeout': return `${binary} --version timed out after ${VERSION_TIMEOUT_MS} ms`
+    case 'error': return `${binary} --version could not be run`
   }
 }
 
@@ -84,18 +106,18 @@ export function findApp(env: Pick<InstallEnv, 'homeDir' | 'applicationsDirs'>, b
 }
 
 async function detectClaudeCode(env: InstallEnv, forced: boolean): Promise<HostDetection> {
-  const version = await versionOf(env, 'claude')
+  const answer = await versionOf(env, 'claude')
   const hasDir = existsSync(installPaths(env).claudeDir)
-  if (version !== null) return { host: 'claude-code', selected: true, version, note: 'claude --version answered', stampPath: await resolveBinary(env, 'claude') }
+  if (answer.ok) return { host: 'claude-code', selected: true, version: answer.stdout, note: 'claude --version answered', stampPath: await resolveBinary(env, 'claude') }
   if (hasDir) return { host: 'claude-code', selected: true, version: null, note: '~/.claude exists' }
-  return forced
-    ? { host: 'claude-code', selected: true, version: null, note: 'not found; wired because --hosts names it' }
-    : { host: 'claude-code', selected: false, version: null, note: 'not found (no claude on PATH, no ~/.claude)' }
+  const missing = answer.reason === 'not-found'
+  if (forced) return { host: 'claude-code', selected: true, version: null, note: `${missing ? 'not found' : reasonNote('claude', answer)}; wired because --hosts names it` }
+  return { host: 'claude-code', selected: false, version: null, note: missing ? 'not found (no claude on PATH, no ~/.claude)' : reasonNote('claude', answer) }
 }
 
 async function detectOpenCode(env: InstallEnv, forced: boolean): Promise<HostDetection> {
-  const output = await versionOf(env, 'opencode')
-  const parsed = output === null ? null : parseOpenCodeVersion(output)
+  const answer = await versionOf(env, 'opencode')
+  const parsed = answer.ok ? parseOpenCodeVersion(answer.stdout) : null
   const version = parsed === null ? null : parsed.join('.')
   if (parsed !== null && parsed[0] < MIN_OPENCODE_MAJOR) {
     return { host: 'opencode', selected: false, version, note: `OpenCode ${version} is not supported: the plugin needs OpenCode 2.0 or later` }
@@ -103,7 +125,7 @@ async function detectOpenCode(env: InstallEnv, forced: boolean): Promise<HostDet
   if (parsed !== null) return { host: 'opencode', selected: true, version, note: 'opencode --version answered 2.x or later', stampPath: await resolveBinary(env, 'opencode') }
   return forced
     ? { host: 'opencode', selected: true, version: null, note: 'version unknown; wired because --hosts names it' }
-    : { host: 'opencode', selected: false, version: null, note: output === null ? 'not found (no opencode on PATH)' : 'opencode --version gave no version' }
+    : { host: 'opencode', selected: false, version: null, note: answer.ok ? 'opencode --version printed no version we could read' : answer.reason === 'not-found' ? 'not found (no opencode on PATH)' : reasonNote('opencode', answer) }
 }
 
 interface CliHostSpec {
@@ -117,18 +139,22 @@ const CURSOR_SPEC: CliHostSpec = { host: 'cursor', binaries: ['cursor-agent', 'c
 
 /** Codex and Cursor: the first binary that answers, else the app bundle. */
 async function detectCliHost(env: InstallEnv, spec: CliHostSpec, forced: boolean): Promise<HostDetection> {
+  const failures: string[] = []
   for (const binary of spec.binaries) {
-    const output = await versionOf(env, binary)
-    if (output === null) continue
-    const version = output.split('\n')[0]?.trim() || null
+    const answer = await versionOf(env, binary)
+    if (!answer.ok) {
+      if (answer.reason !== 'not-found') failures.push(reasonNote(binary, answer))
+      continue
+    }
+    const version = answer.stdout.split('\n')[0]?.trim() || null
     return { host: spec.host, selected: true, version, note: `${binary} --version answered`, stampPath: await resolveBinary(env, binary) }
   }
   const app = findApp(env, spec.bundle)
   if (app !== null) return { host: spec.host, selected: true, version: app.version, note: `${app.app} exists`, stampPath: app.plist }
-  const missing = `no ${spec.binaries.join(' or ')} on PATH, no ${spec.bundle}`
+  const missing = failures.length > 0 ? failures.join('; ') : `not found (no ${spec.binaries.join(' or ')} on PATH, no ${spec.bundle})`
   return forced
-    ? { host: spec.host, selected: true, version: null, note: `not found (${missing}); wired because --hosts names it` }
-    : { host: spec.host, selected: false, version: null, note: `not found (${missing})` }
+    ? { host: spec.host, selected: true, version: null, note: `${missing}; wired because --hosts names it` }
+    : { host: spec.host, selected: false, version: null, note: missing }
 }
 
 /** `override` is the --hosts list; null means detect. Order is INSTALL_HOSTS. */

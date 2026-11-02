@@ -11,6 +11,7 @@ import { resolveCodexHome } from './codex-home'
 import type { CredentialProvider } from '../secrets/credentials'
 import type { SecurityRunner } from '../secrets/keychain-writer'
 import type { BuildInput } from '../sqlite/build'
+import type { CliObserverRunner } from '../observer/runners/cli-core'
 import type { ObserverRunner, ObserverSettings } from '../observer/types'
 
 export interface CommandRequest {
@@ -21,6 +22,8 @@ export interface CommandRequest {
 export interface CommandResult {
   exitCode: number
   stdout: string
+  /** True when the runner killed the command at its timeout. */
+  timedOut?: boolean
 }
 
 /** Runs claude, opencode and launchctl. A binary that is not installed resolves with exit 127. */
@@ -63,6 +66,8 @@ export interface InstallEnv {
   io: PromptIO
   out: (line: string) => void
   runnerFor: RunnerBuilder
+  /** The only way the installer builds a codex-cli or opencode-cli runner (createCliRunner). */
+  cliRunnerFor: (settings: ObserverSettings) => CliObserverRunner
   /** The CODEX_HOME the installer runs with; unset or empty means ~/.codex (codex-home.ts). */
   codexHomeEnv?: string
   /** process.arch; picks the pinned sqlite-vec build (P2-A). Default: this process's. */

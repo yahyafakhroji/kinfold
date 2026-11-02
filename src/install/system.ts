@@ -17,10 +17,15 @@ export function createCommandRunner(childEnv: Readonly<Record<string, string>>):
     } catch {
       return { exitCode: NOT_FOUND_EXIT, stdout: '' }
     }
-    const timer = setTimeout(() => child.kill(), timeoutMs ?? DEFAULT_TIMEOUT_MS)
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill()
+    }, timeoutMs ?? DEFAULT_TIMEOUT_MS)
     try {
       const stdout = child.stdout instanceof ReadableStream ? await new Response(child.stdout).text() : ''
-      return { exitCode: await child.exited, stdout }
+      const exitCode = await child.exited
+      return timedOut ? { exitCode, stdout, timedOut } : { exitCode, stdout }
     } finally {
       clearTimeout(timer)
     }

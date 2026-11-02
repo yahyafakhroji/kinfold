@@ -10,12 +10,16 @@ import { type CredentialProvider, isSystemCredentialRef } from '../secrets/crede
 import { assertStorableValue, credentialWriterFor } from '../secrets/keychain-writer'
 import { CHECK_PROMPT } from '../observer/check-prompt'
 import { OPENROUTER_CREDENTIAL_REF, builtInSettings, credentialRefFor, providerTakesKey } from '../observer/settings'
-import { OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
+import { runPlantedCheck } from '../observer/planted-check'
+import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import type { InstallHost } from './detect'
 import type { InstallEnv } from './env'
 
 export const MAX_CHOICE_ATTEMPTS = 5
+
+const MAX_LISTED_MODELS = 20
+const MAX_MODEL_NAME_CHARS = 200
 
 export { CHECK_PROMPT }
 
@@ -85,16 +89,54 @@ interface Candidate {
   origin: ObserverChoice['origin']
 }
 
+function isCliLoginProvider(provider: string): provider is CliLoginProvider {
+  return (CLI_LOGIN_PROVIDERS as readonly string[]).includes(provider)
+}
+
+/** Up to 20 names the CLI reports, as plain lines; or the error class when it cannot list. Names are never interpreted. */
+function showModels(env: InstallEnv, provider: CliLoginProvider, models: readonly string[] | { errorClass: string }): void {
+  if ('errorClass' in models) {
+    env.out(`model list unavailable (${models.errorClass}); type a model name`)
+    return
+  }
+  const names = models.filter((name) => name.length > 0 && name.length <= MAX_MODEL_NAME_CHARS && !/[\p{Cc}]/u.test(name)).slice(0, MAX_LISTED_MODELS)
+  if (names.length === 0) {
+    env.out(`${provider} reported no models; type a model name`)
+    return
+  }
+  env.out(`${provider} models (first ${names.length}):`)
+  for (const name of names) env.out(`  ${name}`)
+}
+
+async function listModelsFor(env: InstallEnv, provider: CliLoginProvider): Promise<string[] | { errorClass: string }> {
+  try {
+    return await env.cliRunnerFor({ provider, model: '-', credentialRef: null, enabled: true, source: 'host' }).listModels()
+  } catch (error: unknown) {
+    return { errorClass: toObserverError(error).errorClass }
+  }
+}
+
+/** The provider was named without a model: show that CLI's models, then ask for the name. */
+async function askModel(env: InstallEnv, host: InstallHost, provider: CliLoginProvider): Promise<string> {
+  showModels(env, provider, await listModelsFor(env, provider))
+  for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
+    const model = (await env.io.ask(`Model for ${provider} on ${host} > `)).trim()
+    if (model !== '') return model
+  }
+  throw new ChoiceError(`no model named for the ${host} observer`)
+}
+
 async function promptCandidate(env: InstallEnv, host: InstallHost): Promise<Candidate> {
   const fallback = defaultInput(host)
   for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
     const answer = (await env.io.ask(
       `Observer for ${host}: default ${describeInput(fallback)}. Providers: ${OBSERVER_PROVIDERS.join(', ')}.\n` +
-        'Press Enter to keep the default, or type provider:model > ',
+        `Press Enter to keep the default, or type provider:model (a bare ${CLI_LOGIN_PROVIDERS.join(' or ')} lists that CLI's models) > `,
     )).trim()
     if (answer === '') return { input: fallback, origin: 'default' }
     const parsed = parseProviderModel(answer)
     if (parsed !== null) return { input: settingsInputFor(host, parsed.provider, parsed.model), origin: 'prompt' }
+    if (isCliLoginProvider(answer)) return { input: settingsInputFor(host, answer, await askModel(env, host, answer)), origin: 'prompt' }
     env.out(`"provider:model" expected, with provider one of ${OBSERVER_PROVIDERS.join(', ')}`)
   }
   throw new ChoiceError(`no valid observer choice for ${host}`)
@@ -165,6 +207,8 @@ function checkCredentials(env: InstallEnv, session: CredentialSession): Credenti
 /** ok, or the ObserverError class; never the reply or the payload. */
 export async function runCheck(env: InstallEnv, input: ObserverSettingsInput, credentials: CredentialProvider): Promise<{ ok: true } | { ok: false; errorClass: string }> {
   try {
+    // A CLI login observer gets the plain check and then the planted-instruction test in one pass.
+    if (isCliLoginProvider(input.provider)) return await runPlantedCheck(env.cliRunnerFor(asSettings(input)))
     await env.runnerFor(asSettings(input), credentials).run(CHECK_PROMPT)
     return { ok: true }
   } catch (error: unknown) {

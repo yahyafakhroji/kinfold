@@ -21,6 +21,7 @@ import type { SecurityInvocation, SecurityRunner } from '../secrets/keychain-wri
 import { credentialDbKeyStore } from '../sqlite/keys'
 import { libDir, libraryFileName, manifestPath } from '../sqlite/library'
 import { SQLITE3MC_ZIP_SHA256 } from '../sqlite/release'
+import type { CliObserverRunner } from '../observer/runners/cli-core'
 import type { ObserverRunner, ObserverSettings } from '../observer/types'
 import type { CommandRequest, CommandResult, InstallEnv } from './env'
 import { LAUNCHCTL } from './launch-agent'
@@ -31,6 +32,10 @@ export interface WorldOptions {
   codexVersion?: string | null
   /** Answers `cursor --version`; `cursor-agent` is never found. */
   cursorVersion?: string | null
+  /** Overrides what `<binary> --version` does: a result, or 'throw' for a runner that rejects. */
+  versionResults?: Record<string, (CommandResult & { timedOut?: boolean }) | 'throw'>
+  /** Builds the CLI login runner for codex-cli and opencode-cli inputs; default answers OK, passes the planted test and lists no models. */
+  cliRunner?: (settings: ObserverSettings) => CliObserverRunner
   /** What `/usr/bin/which <binary>` prints; anything else is not found. */
   whichPaths?: Record<string, string>
   platform?: NodeJS.Platform
@@ -78,6 +83,13 @@ export const BUN = '/opt/fake/bin/bun'
 export const UID = 501
 
 const okRunner: ObserverRunner = { run: async () => ({ text: 'OK', model: 'fake' }) }
+
+const okCliRunner: CliObserverRunner = {
+  run: async () => ({ text: 'OK', model: 'fake' }),
+  runWithFiles: async () => ({ text: 'OK', model: 'fake' }),
+  probe: async () => ({ version: '1.0.0', binaryPath: '/opt/fake/bin/cli' }),
+  listModels: async () => [],
+}
 
 interface FakeKeychain {
   refs: Set<string>
@@ -171,6 +183,9 @@ function fakeRun(world: FakeWorld, options: WorldOptions): (request: CommandRequ
       const path = options.whichPaths?.[request.argv[1] ?? '']
       return path === undefined ? { exitCode: 1, stdout: '' } : { exitCode: 0, stdout: `${path}\n` }
     }
+    const override = binary === undefined ? undefined : options.versionResults?.[binary]
+    if (override === 'throw') throw new Error('spawn failed (test world)')
+    if (override !== undefined) return override
     const versions: Record<string, string | null | undefined> = {
       claude: options.claudeVersion, opencode: options.opencodeVersion, codex: options.codexVersion, cursor: options.cursorVersion,
     }
@@ -240,6 +255,7 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
       readStdin: async () => options.stdin ?? '',
     },
     runnerFor: (settings) => (world.checks.push(settings), (options.runner ?? (() => okRunner))(settings)),
+    cliRunnerFor: (settings) => (world.checks.push(settings), (options.cliRunner ?? (() => okCliRunner))(settings)),
     applicationsDirs: [join(root, 'Applications')],
   }
   if (options.withLibrary ?? true) placeBuiltLibrary(world.dataDir, world.env.platform)

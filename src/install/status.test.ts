@@ -85,3 +85,23 @@ test('stale paths, loose modes and duplicate project wiring are each reported', 
   expect(out).toContain('  memory.db 0644 -> 0600')
   expect(out).toContain(join(w.cwd, '.claude', 'settings.json'))
 })
+
+test('status probes no keychain ref for codex-cli and opencode-cli observers', async () => {
+  const w = make()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  const realFetch = w.env.fetch
+  const settings = (provider: string) => ({ provider, model: 'm', credentialRef: 'stale-ref', enabled: true, source: 'host' })
+  w.env.fetch = async (url, init) => {
+    if (new URL(url).pathname !== '/observer/settings') return realFetch(url, init)
+    const effective = [{ host: 'codex', settings: settings('codex-cli') }, { host: 'opencode', settings: settings('opencode-cli') }]
+    return new Response(JSON.stringify({ rows: [], effective }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  w.out.length = 0
+  w.securityCalls.length = 0
+  await status(w.env)
+  const out = w.out.join('\n')
+  expect(out).toContain('  codex: codex-cli/m; source host')
+  expect(out).not.toContain('stale-ref')
+  expect(out.match(/^keychain /gm)?.length).toBe(1)
+  expect(out).toContain('keychain openrouter: present')
+})

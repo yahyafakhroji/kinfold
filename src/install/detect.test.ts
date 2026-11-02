@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { detectHosts, parseOpenCodeVersion, selectedHosts } from './detect'
-import { type FakeWorld, createWorld } from './test-support'
+import { type FakeWorld, type WorldOptions, createWorld } from './test-support'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -44,4 +44,34 @@ test('--hosts overrides detection: it can add an undetected host or leave one ou
   world = createWorld({ claudeVersion: '2.1.310 (Claude Code)' })
   expect(selectedHosts(await detectHosts(world.env, ['opencode']))).toEqual(['opencode'])
   expect(selectedHosts(await detectHosts(world.env, ['claude-code']))).toEqual(['claude-code'])
+})
+
+test('OpenCode detection names why it was skipped', async () => {
+  const note = async (versionResults: NonNullable<WorldOptions['versionResults']>) => {
+    world = createWorld({ versionResults })
+    return (await detectHosts(world.env, null))[1]?.note
+  }
+  expect(await note({})).toBe('not found (no opencode on PATH)')
+  expect(await note({ opencode: { exitCode: 2, stdout: '' } })).toBe('opencode --version exited 2')
+  await world?.cleanup()
+  expect(await note({ opencode: { exitCode: 143, stdout: '', timedOut: true } })).toBe('opencode --version timed out after 5000 ms')
+  await world?.cleanup()
+  expect(await note({ opencode: { exitCode: 0, stdout: 'opencode dev build\n' } })).toBe('opencode --version printed no version we could read')
+  await world?.cleanup()
+  expect(await note({ opencode: 'throw' })).toBe('opencode --version could not be run')
+})
+
+test('Claude Code, Codex and Cursor name the reason too, and an answer keeps its note', async () => {
+  world = createWorld({
+    versionResults: { claude: { exitCode: 3, stdout: '' }, codex: { exitCode: 143, stdout: '', timedOut: true }, cursor: { exitCode: 1, stdout: '' } },
+  })
+  const [claude, , codex, cursor] = await detectHosts(world.env, null)
+  expect(claude?.note).toBe('claude --version exited 3')
+  expect(codex?.note).toBe('codex --version timed out after 5000 ms')
+  expect(cursor?.note).toBe('cursor --version exited 1')
+  await world.cleanup()
+  world = createWorld({ claudeVersion: '2.1.310', codexVersion: 'codex 1.0.0' })
+  const answered = await detectHosts(world.env, null)
+  expect(answered[0]?.note).toBe('claude --version answered')
+  expect(answered[2]?.note).toBe('codex --version answered')
 })

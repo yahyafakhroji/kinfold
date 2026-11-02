@@ -9,7 +9,8 @@
 
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
-import { createRunner } from '../observer/runners'
+import { createCliRunner, createRunner } from '../observer/runners'
+import { NO_CREDENTIALS } from '../secrets/credentials'
 import { createSecurityRunner } from '../secrets/keychain-writer'
 import { resolveDataDir, resolveInstallDataDir } from '../store/data-dir'
 import { runDataCommand } from '../data-control/cli'
@@ -89,6 +90,7 @@ function systemEnv(argv: readonly string[]): InstallEnv {
     io: createPromptIO(),
     out: (line) => process.stdout.write(`${line}\n`),
     runnerFor: (settings, credentials) => createRunner(settings, { dataDir, credentials, parentEnv: process.env }),
+    cliRunnerFor: (settings) => createCliRunner(settings, { dataDir, credentials: NO_CREDENTIALS, parentEnv: process.env }),
     envVars: process.env,
   }
 }

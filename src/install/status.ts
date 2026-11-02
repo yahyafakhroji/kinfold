@@ -6,7 +6,7 @@
 
 import { existsSync } from 'node:fs'
 import type { EffectiveSettings } from '../daemon/settings-route'
-import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
+import { OPENROUTER_CREDENTIAL_REF, providerTakesKey } from '../observer/settings'
 import { credentialWriterFor } from '../secrets/keychain-writer'
 import { inspectSamHooks } from './claude-hooks'
 import { getObserverSettings } from './daemon-client'
@@ -65,13 +65,13 @@ async function daemonLines(env: InstallEnv): Promise<string[]> {
 function effectiveLine(entry: EffectiveSettings): string {
   if ('error' in entry) return `  ${entry.host}: invalid setting (${entry.error})`
   const { provider, model, credentialRef, enabled, source } = entry.settings
-  return `  ${entry.host}: ${provider}/${model}${credentialRef !== null ? ` key ${credentialRef}` : ''}${enabled ? '' : ' (disabled)'}; source ${source}`
+  return `  ${entry.host}: ${provider}/${model}${credentialRef !== null && providerTakesKey(provider) ? ` key ${credentialRef}` : ''}${enabled ? '' : ' (disabled)'}; source ${source}`
 }
 
 async function observerLines(env: InstallEnv): Promise<{ lines: string[]; refs: string[] }> {
   const read = await getObserverSettings(env)
   if (!read.ok) return { lines: [`observer settings: unknown (${read.reason})`], refs: [OPENROUTER_CREDENTIAL_REF] }
-  const refs = read.view.effective.flatMap((entry) => ('settings' in entry && entry.settings.provider !== 'claude-cli' ? [entry.settings.credentialRef ?? OPENROUTER_CREDENTIAL_REF] : []))
+  const refs = read.view.effective.flatMap((entry) => ('settings' in entry && providerTakesKey(entry.settings.provider) ? [entry.settings.credentialRef ?? OPENROUTER_CREDENTIAL_REF] : []))
   return { lines: ['observer settings:', ...read.view.effective.map(effectiveLine)], refs: [...new Set([OPENROUTER_CREDENTIAL_REF, ...refs])] }
 }
 
