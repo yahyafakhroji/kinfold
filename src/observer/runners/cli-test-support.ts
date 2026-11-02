@@ -38,6 +38,7 @@ export function fakeCliAdapter(overrides: Partial<CliAdapter> = {}): CliAdapter 
       return match === null ? null : [Number(match[1]), Number(match[2]), Number(match[3])]
     },
     invocation: ({ binaryPath, model, env }) => ({ cmd: [binaryPath, 'run', '--model', model], env, files: [] }),
+    isolatedEnv: (_runDir: string, baseEnv: Record<string, string>) => baseEnv,
     parse: parseFakeOutput,
     listModels: async () => ['fake/model'],
     ...overrides,

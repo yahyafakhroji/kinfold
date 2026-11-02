@@ -242,6 +242,82 @@ test('the configured model stands in when the CLI reports none', async () => {
   expect(result.model).toBe('fake/model')
 })
 
+test('cleanup receives exactly the env the spawned invocation used', async () => {
+  const { adapter, cleanups } = harness({
+    invocation: ({ binaryPath, env, runDir }) => ({ cmd: [binaryPath, 'run'], env: { ...env, RUN_MARKER: runDir }, files: [] }),
+  })
+  const spawn = recordingSpawn([VERSION_OK, { stdout: OK_OUTPUT }])
+  await runner(adapter, spawn).run(PROMPT)
+  expect(cleanups[0]!.env).toEqual(spawn.requests[1]!.env)
+  expect(cleanups[0]!.env.RUN_MARKER).toBe(spawn.requests[1]!.cwd)
+})
+
+test('cleanup spawns through the core also carry the observer flags', async () => {
+  const seen: Array<Record<string, string>> = []
+  const { adapter } = harness({
+    cleanup: async (ctx) => {
+      await ctx.spawn({ cmd: ['x'], cwd: ctx.runDir, env: { PATH: '/bin' }, stdin: '', timeoutMs: 1 })
+    },
+  })
+  const spawn = recordingSpawn([VERSION_OK, { stdout: OK_OUTPUT }, {}])
+  const watching: SpawnFn = async (request) => {
+    seen.push({ ...request.env })
+    return spawn(request)
+  }
+  await runner(adapter, watching).run(PROMPT)
+  expect(seen[2]).toEqual({ PATH: '/bin', KINFOLD_OBSERVER: '1', SAM_OBSERVER: '1' })
+})
+
+test('the observer flags are merged into the spawn env even when the adapter drops them', async () => {
+  const { adapter } = harness({
+    invocation: ({ binaryPath }) => ({ cmd: [binaryPath, 'run'], env: { PATH: '/bin', KINFOLD_OBSERVER: '0' }, files: [] }),
+  })
+  const spawn = recordingSpawn([VERSION_OK, { stdout: OK_OUTPUT }])
+  await runner(adapter, spawn).run(PROMPT)
+  expect(spawn.requests[1]!.env).toEqual({ PATH: '/bin', KINFOLD_OBSERVER: '1', SAM_OBSERVER: '1' })
+})
+
+test('a cleanup failure logs one class-only line and leaves the run result and error unchanged', async () => {
+  const lines: string[] = []
+  const { adapter } = harness({
+    cleanup: async () => {
+      throw new Error(SECRET)
+    },
+  })
+  const make = (spawn: SpawnFn) =>
+    createCliObserverRunner(adapter, { dataDir: temp.dataDir, model: 'fake/model', spawn, which: () => '/opt/bin/fakecli', parentEnv: PARENT_ENV, log: (line) => lines.push(line) })
+  const ok = await make(recordingSpawn([VERSION_OK, { stdout: OK_OUTPUT }])).run(PROMPT)
+  expect(ok).toEqual({ text: '{"observations":[]}', model: 'fake/answered' })
+  const error = await failure(make(recordingSpawn([VERSION_OK, { exitCode: 3 }])).run(PROMPT))
+  expect(error.errorClass).toBe('exit_nonzero')
+  expect(lines).toEqual(['codex-cli cleanup failed: internal', 'codex-cli cleanup failed: internal'])
+  expect(lines.join('\n')).not.toContain(SECRET)
+  expect(runFolders()).toEqual([])
+})
+
+test('a non-zero exit whose output shows a tool event throws tool_attempt', async () => {
+  const { adapter } = harness()
+  const stdout = JSON.stringify({ text: SECRET, tools: 2 })
+  const error = await failure(runner(adapter, recordingSpawn([VERSION_OK, { exitCode: 1, stdout }])).run(PROMPT))
+  expect(error.errorClass).toBe('tool_attempt')
+  expect(error.detail).not.toContain(SECRET)
+})
+
+test('a timeout whose output shows a tool event throws tool_attempt', async () => {
+  const { adapter } = harness()
+  const stdout = JSON.stringify({ text: SECRET, tools: 1 })
+  const error = await failure(runner(adapter, recordingSpawn([VERSION_OK, { timedOut: true, exitCode: 143, stdout }])).run(PROMPT))
+  expect(error.errorClass).toBe('tool_attempt')
+  expect(error.detail).not.toContain(SECRET)
+})
+
+test('a non-zero exit with unparseable output stays exit_nonzero', async () => {
+  const { adapter } = harness()
+  const error = await failure(runner(adapter, recordingSpawn([VERSION_OK, { exitCode: 1, stdout: SECRET }])).run(PROMPT))
+  expect(error.errorClass).toBe('exit_nonzero')
+  expect(error.detail).toBe('exited 1')
+})
+
 // probe: version and binary
 
 test('a version below minVersion makes probe and run throw config_invalid, with no folder and no main spawn', async () => {
@@ -318,6 +394,28 @@ test('an ENOENT from the probe spawn throws cli_missing', async () => {
   expect((await failure(runner(adapter, spawn).probe())).errorClass).toBe('cli_missing')
 })
 
+test('an fs error in the probe maps by code to a class with no path in the detail', async () => {
+  const { adapter } = harness()
+  const fileAsDataDir = join(temp.root, 'not-a-dir')
+  writeFileSync(fileAsDataDir, 'x')
+  const r = createCliObserverRunner(adapter, { dataDir: fileAsDataDir, model: 'm', spawn: recordingSpawn([VERSION_OK]), which: () => '/opt/bin/fakecli', parentEnv: PARENT_ENV })
+  const error = await failure(r.probe())
+  expect(error.errorClass).toBe('internal')
+  expect(error.detail).toMatch(/\((ENOTDIR|EEXIST)\)/)
+  expect(error.message).not.toContain(temp.root)
+})
+
+test('a parseVersion that throws a plain Error maps to internal without its message', async () => {
+  const { adapter } = harness({
+    parseVersion: () => {
+      throw new Error(SECRET)
+    },
+  })
+  const error = await failure(runner(adapter, recordingSpawn([VERSION_OK])).probe())
+  expect(error.errorClass).toBe('internal')
+  expect(error.message).not.toContain(SECRET)
+})
+
 // runWithFiles and invocation files
 
 test('runWithFiles writes each file into the run folder before spawn', async () => {
@@ -371,10 +469,11 @@ test('an adapter invocation file with a bad name is rejected the same way', asyn
 
 // listModels
 
-test('listModels hands the adapter a run folder and the child env, then removes the folder', async () => {
+test('listModels runs in its own run folder with the adapter isolated env, then removes the folder', async () => {
   let ctxSeen: { runDir: string; env: Record<string, string>; binaryPath: string } | null = null
   let existed = false
   const { adapter } = harness({
+    isolatedEnv: (runDir, base) => ({ ...base, ISOLATED_DIR: runDir }),
     listModels: async (ctx) => {
       ctxSeen = ctx
       existed = existsSync(ctx.runDir)
@@ -383,7 +482,9 @@ test('listModels hands the adapter a run folder and the child env, then removes 
   })
   expect(await runner(adapter, recordingSpawn([VERSION_OK])).listModels()).toEqual(['a/b', 'c/d'])
   expect(existed).toBe(true)
+  expect(dirname(ctxSeen!.runDir)).toBe(runsRoot())
   expect(ctxSeen!.binaryPath).toBe('/opt/bin/fakecli')
+  expect(ctxSeen!.env.ISOLATED_DIR).toBe(ctxSeen!.runDir)
   expect(ctxSeen!.env.KINFOLD_OBSERVER).toBe('1')
   expect(runFolders()).toEqual([])
 })
