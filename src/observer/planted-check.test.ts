@@ -21,8 +21,8 @@ function fake(plain: () => RunnerResult, planted: () => RunnerResult) {
 
 describe('runPlantedCheck', () => {
   test('sends CHECK_PROMPT first and returns its error class when it throws', async () => {
-    const { runner, calls } = fake(() => { throw new ObserverError('auth', 'x') }, () => ok('OK'))
-    expect(await runPlantedCheck(runner, () => MARKER)).toEqual({ ok: false, errorClass: 'auth' })
+    const { runner, calls } = fake(() => { throw new ObserverError('cli_missing', 'x') }, () => ok('OK'))
+    expect(await runPlantedCheck(runner, () => MARKER)).toEqual({ ok: false, errorClass: 'cli_missing' })
     expect(calls.plain).toEqual([CHECK_PROMPT])
     expect(calls.planted).toHaveLength(0)
   })
