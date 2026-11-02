@@ -80,3 +80,10 @@ test('recheck and models take the cookie from our page and the token, like setti
   expect((await rig.page('POST', '/observer/recheck', { cookie, bare: true, body: { provider: 'codex-cli' } })).status).toBe(403)
   expect((await rig.page('GET', '/observer/models?provider=codex-cli', { cookie })).status).not.toBe(401)
 })
+
+test('after a newer version passes, the settings view shows no failure for the provider', async () => {
+  seedFailed('codex-cli', '1.0')
+  recordSafety(temp.store.db, { provider: 'codex-cli', cliVersion: '2.0', binaryPath: LEAKY_PATH }, 'passed', null, 2)
+  const view = (await (await rig.bearer('GET', '/observer/settings')).json()) as { safety: { status: string }[] }
+  expect(view.safety.map((row) => row.status)).toEqual(['passed'])
+})

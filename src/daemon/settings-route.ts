@@ -14,7 +14,7 @@ import type { Database } from '../sqlite/types'
 import { type ObserverSettingsInput, type ObserverSettingsRow, listObserverSettings, upsertObserverSettings } from '../store/observer-settings-store'
 
 const HOST_PATTERN = /^(\*|[a-z0-9][a-z0-9._-]{0,63})$/
-const MAX_MODEL_CHARS = 200
+export const MAX_MODEL_CHARS = 200
 /**
  * Hosts whose effective setting GET always reports, row or not. Every host the
  * contract knows is listed, so Codex and Cursor can be set before they are installed.

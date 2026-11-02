@@ -54,8 +54,8 @@ export interface ServerDeps {
   mcpRead: (read: McpRead) => number
   /** POST /observer/test: one fixed prompt through the chosen runner. */
   observerTest: ObserverTestRoute
-/** GET /observer/models: the installed CLI's model names, cached for ten minutes. */
-observerModels: ObserverModelsRoute
+  /** GET /observer/models: the installed CLI's model names, cached for ten minutes. */
+  observerModels: ObserverModelsRoute
   /** Login codes and session cookies for the dashboard; in memory only. */
   auth: DashboardAuth
   /** Receives counts, ids and error messages only, never payloads. */

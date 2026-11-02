@@ -29,8 +29,16 @@ export function getSafety(db: Database, key: SafetyKey): SafetyRow | null {
   ).get({ ...key })
 }
 
-/** Inserts or replaces the row for this key. */
+/** Inserts or replaces the row for this key; a `passed` row also deletes the provider's failed rows. */
 export function recordSafety(db: Database, key: SafetyKey, status: SafetyStatus, errorClass: string | null, now: number): void {
+  db.transaction(() => {
+    upsert(db, key, status, errorClass, now)
+    // A pass retires the provider's older failures (a CLI upgrade), so the page never shows a stale Stopped.
+    if (status === 'passed') clearFailedSafety(db, key.provider)
+  })()
+}
+
+function upsert(db: Database, key: SafetyKey, status: SafetyStatus, errorClass: string | null, now: number): void {
   db.query(
     `INSERT INTO observer_safety (provider, cli_version, binary_path, status, error_class, checked_at)
      VALUES ($provider, $cliVersion, $binaryPath, $status, $errorClass, $now)

@@ -47,16 +47,30 @@ export function stoppedClass(safety, provider) {
  * @param {string} errorClass
  */
 function stoppedNotice(provider, errorClass) {
+  const box = h('div', { class: 'notice notice-error stopped', role: 'alert' })
   const status = h('span', { 'aria-live': 'polite' })
   const button = h('button', { type: 'button', class: 'quiet', 'data-recheck': '1' }, 'Re-check')
   button.addEventListener('click', () => {
     button.setAttribute('disabled', '')
     replaceContent(status, notice('Re-checking…'))
     api('POST', '/observer/recheck', { provider }).then(
-      () => replaceContent(status, notice('Re-check queued; the next batch tests it again (within a minute).', 'ok')),
+      () => replaceContent(box, notice('Re-check queued; the next batch tests it again (within a minute).', 'ok')),
       (error) => { button.removeAttribute('disabled'); replaceContent(status, notice(errorText(error), 'error')) })
   })
-  return h('div', { class: 'notice notice-error stopped', role: 'alert' }, h('span', { class: 'badge run-failed' }, `Stopped: ${errorClass}`), ' The safety test failed, so this observer is not running. ', button, status)
+  replaceContent(box, h('span', { class: 'badge run-failed' }, `Stopped: ${errorClass}`), ' The safety test failed, so this observer is not running. ', button, status)
+  return box
+}
+
+/** One in-flight /observer/models request per provider, shared by every form. @type {Map<string, Promise<any>>} */
+const modelRequests = new Map()
+
+/** @param {string} provider */
+function fetchModelNames(provider) {
+  const shared = modelRequests.get(provider)
+  if (shared !== undefined) return shared
+  const request = api('GET', `/observer/models?provider=${encodeURIComponent(provider)}`).finally(() => modelRequests.delete(provider))
+  modelRequests.set(provider, request)
+  return request
 }
 
 /**
@@ -67,7 +81,7 @@ function stoppedNotice(provider, errorClass) {
  */
 function loadModelNames(list, provider) {
   if (!CLI_PROVIDERS.includes(provider)) { replaceContent(list); return }
-  api('GET', `/observer/models?provider=${encodeURIComponent(provider)}`).then(
+  fetchModelNames(provider).then(
     (answer) => {
       const names = answer.ok === true && Array.isArray(answer.models) ? answer.models.filter((name) => typeof name === 'string') : []
       replaceContent(list, names.map((name) => h('option', { value: name })))

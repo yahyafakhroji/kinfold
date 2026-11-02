@@ -106,7 +106,8 @@ test('a changed version or binary path is a new key that gets its own planted ch
   probe = { version: '0.51.0', binaryPath: '/opt/homebrew/bin/codex' }
   expect(await gate.check(settings('codex-cli'))).toEqual({ ok: true })
   expect(h.checks).toBe(2)
-  expect(listSafety(temp.store.db)).toHaveLength(3)
+  // the first pass retires the old failed row, leaving one passed row per key
+  expect(listSafety(temp.store.db)).toHaveLength(2)
 })
 
 test('concurrent checks for the same key share one planted check', async () => {

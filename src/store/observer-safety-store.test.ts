@@ -66,8 +66,8 @@ test('recordSafety round-trips and overwrites the row for the same key', () => {
 
 test('clearFailedSafety deletes only failed rows of that provider', () => {
   const db = temp.store.db
-  recordSafety(db, CODEX, 'failed', 'tool_attempt', 1)
   recordSafety(db, { ...CODEX, cliVersion: '0.49.0' }, 'passed', null, 1)
+  recordSafety(db, CODEX, 'failed', 'tool_attempt', 1)
   recordSafety(db, { provider: 'opencode-cli', cliVersion: '2.1.4', binaryPath: '/bin/opencode' }, 'failed', 'safety_check_failed', 1)
   expect(clearFailedSafety(db, 'codex-cli')).toBe(1)
   expect(listSafety(db).map((row) => [row.provider, row.cliVersion, row.status])).toEqual([
@@ -99,4 +99,18 @@ test('resetSafetyFailedEvents sends back only events whose last run used that pr
   expect(stateCounts(temp.store, safety)).toEqual({ pending: 1 })
   for (const session of [timeout, other, later]) expect(stateCounts(temp.store, session)).toEqual({ failed: 1 })
   expect(temp.store.db.query('SELECT observer_attempts AS n FROM events WHERE session_id = ?').get(toolAttempt)).toEqual({ n: 0 })
+})
+
+test('a passed row retires the same provider failed rows, and no other provider rows', () => {
+  const db = temp.store.db
+  const OPEN = { provider: 'opencode-cli', cliVersion: '2.1.4', binaryPath: '/bin/opencode' } as const
+  recordSafety(db, { ...CODEX, cliVersion: '1.0' }, 'failed', 'tool_attempt', 1)
+  recordSafety(db, OPEN, 'failed', 'safety_check_failed', 1)
+  recordSafety(db, { ...CODEX, cliVersion: '2.0' }, 'passed', null, 2)
+  expect(listSafety(db).map((row) => [row.provider, row.cliVersion, row.status])).toEqual([
+    ['codex-cli', '2.0', 'passed'],
+    ['opencode-cli', '2.1.4', 'failed'],
+  ])
+  recordSafety(db, { ...CODEX, cliVersion: '3.0' }, 'failed', 'tool_attempt', 3)
+  expect(listSafety(db).filter((row) => row.provider === 'codex-cli')).toHaveLength(2)
 })

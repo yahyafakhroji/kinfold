@@ -3,15 +3,16 @@
 // with a placeholder model because listModels never reads it. Answers are the
 // names or the ObserverError class only; CLI output, paths and env values stay
 // inside the runner. Good answers are cached for ten minutes per provider, and
-// one listing runs at a time so a held page cannot start process after process.
+// callers for one provider share a single in-flight listing, so a page full of forms starts one process.
 
 import type { CliObserverRunner } from '../observer/runners/cli-core'
 import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, type ObserverSettings, toObserverError } from '../observer/types'
 import type { RouteAnswer } from './data-routes'
-import { isCliLoginProvider } from './settings-route'
+import { MAX_MODEL_CHARS, isCliLoginProvider } from './settings-route'
 
 const CACHE_MS = 10 * 60_000
 const PLACEHOLDER_MODEL = '-'
+const MAX_LISTED_MODELS = 200
 
 export type ObserverModelsAnswer = { ok: true; models: string[] } | { ok: false; errorClass: string }
 
@@ -25,11 +26,12 @@ export function observerModelsRoute(
   now: () => number,
 ): ObserverModelsRoute {
   const cache = new Map<CliLoginProvider, { models: string[]; at: number }>()
-  let running = false
+  const inFlight = new Map<CliLoginProvider, Promise<ObserverModelsAnswer>>()
 
   const list = async (provider: CliLoginProvider, build: (settings: ObserverSettings) => CliObserverRunner): Promise<ObserverModelsAnswer> => {
     try {
-      const models = await build({ provider, model: PLACEHOLDER_MODEL, credentialRef: null, enabled: true, source: 'host' }).listModels()
+      const listed = await build({ provider, model: PLACEHOLDER_MODEL, credentialRef: null, enabled: true, source: 'host' }).listModels()
+      const models = listed.filter((name) => name.length <= MAX_MODEL_CHARS).slice(0, MAX_LISTED_MODELS)
       cache.set(provider, { models, at: now() })
       return { ok: true, models }
     } catch (error: unknown) {
@@ -44,14 +46,13 @@ export function observerModelsRoute(
     if (cliRunnerFor === null) return { status: 503, body: { error: 'the observer is off in this daemon' } }
     const cached = cache.get(provider)
     if (cached !== undefined && now() - cached.at < CACHE_MS) return { status: 200, body: { ok: true, models: cached.models } }
-    if (running) return { status: 409, body: { error: 'a model listing is already running' } }
-    running = true
-    try {
-      const answer = await list(provider, cliRunnerFor)
+    const shared = inFlight.get(provider)
+    if (shared !== undefined) return { status: 200, body: await shared }
+    const started = list(provider, cliRunnerFor).then((answer) => {
       log(`observer models provider=${provider} result=${answer.ok ? 'ok' : answer.errorClass}`)
-      return { status: 200, body: answer }
-    } finally {
-      running = false
-    }
+      return answer
+    }).finally(() => inFlight.delete(provider))
+    inFlight.set(provider, started)
+    return { status: 200, body: await started }
   }
 }

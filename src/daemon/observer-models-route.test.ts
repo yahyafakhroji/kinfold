@@ -66,17 +66,6 @@ test('only the CLI providers are accepted, without echoing the value; only GET',
   expect(built).toEqual([])
 })
 
-test('one listing at a time: a second request while one runs is 409', async () => {
-  let release: () => void = () => {}
-  const gate = new Promise<void>((resolve) => { release = resolve })
-  listing = async () => { await gate; return ['m'] }
-  const first = models('codex-cli')
-  await Bun.sleep(20)
-  expect((await models('opencode-cli')).status).toBe(409)
-  release()
-  expect(await (await first).json()).toEqual({ ok: true, models: ['m'] })
-})
-
 test('without a CLI runner factory the route says 503', async () => {
   await rig.stop()
   rig = startRig(temp.dataDir)
@@ -97,4 +86,35 @@ test('the cache expires after ten minutes', async () => {
   expect((await route('GET', url)).body).toEqual({ ok: true, models: ['call-1'] })
   clock += 2 * 60_000
   expect((await route('GET', url)).body).toEqual({ ok: true, models: ['call-2'] })
+})
+
+test('same-provider callers share one listing, a failure included and not cached; other providers run alongside', async () => {
+  let calls = 0
+  let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  let fail = true
+  const route = observerModelsRoute(
+    () => ({ listModels: async () => { calls++; await gate; if (fail) throw new ObserverError('timeout', LEAK); return ['m'] } }) as unknown as CliObserverRunner,
+    () => {},
+    () => 0,
+  )
+  const codex = new URL('http://x/observer/models?provider=codex-cli')
+  const open = new URL('http://x/observer/models?provider=opencode-cli')
+  const pending = [route('GET', codex), route('GET', codex), route('GET', open)]
+  await Bun.sleep(10)
+  expect(calls).toBe(2)
+  release()
+  const answers = await Promise.all(pending)
+  expect(answers.map((a) => a.body)).toEqual(Array(3).fill({ ok: false, errorClass: 'timeout' }))
+  fail = false
+  expect((await route('GET', codex)).body).toEqual({ ok: true, models: ['m'] })
+  expect(calls).toBe(3)
+})
+
+test('listed names are capped at 200 entries and overlong names are dropped', async () => {
+  const many = [...Array(250).keys()].map((n) => `m${n}`)
+  const route = observerModelsRoute(() => ({ listModels: async () => ['x'.repeat(201), ...many] }) as unknown as CliObserverRunner, () => {}, () => 0)
+  const body = (await route('GET', new URL('http://x/observer/models?provider=codex-cli'))).body as { models: string[] }
+  expect(body.models).toHaveLength(200)
+  expect(body.models[0]).toBe('m0')
 })

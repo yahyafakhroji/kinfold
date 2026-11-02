@@ -10,7 +10,7 @@ const CODEX = { provider: 'codex-cli', model: 'gpt-x', credentialRef: null, enab
 const VIEW = {
   rows: [{ host: 'codex', ...CODEX }],
   safety: [{ provider: 'codex-cli', cliVersion: '1.0', status: 'failed', errorClass: HOSTILE, checkedAt: 1 }],
-  effective: [{ host: 'codex', settings: CODEX }, { host: 'opencode', settings: { ...CODEX, provider: 'openrouter', model: 'openrouter/auto', credentialRef: 'openrouter' } }],
+  effective: [{ host: 'codex', settings: CODEX }, { host: 'cursor', settings: CODEX }, { host: 'opencode', settings: { ...CODEX, provider: 'openrouter', model: 'openrouter/auto', credentialRef: 'openrouter' } }],
 }
 const MODELS = { ok: true, models: ['gpt-a', HOSTILE] }
 
@@ -49,7 +49,7 @@ test('a host on a stopped CLI shows "Stopped: <class>" as text, and Re-check pos
   const page = await (await load()).renderModels()
   const shown = textOf(page)
   expect(shown).toContain(`Stopped: ${HOSTILE}`)
-  expect(shown.match(/Stopped:/g)).toHaveLength(1)
+  expect(shown.match(/Stopped:/g)).toHaveLength(2)
   const button = elements(page).find((element) => element.getAttribute('data-recheck') === '1')
   expect(button).toBeDefined()
   button!.listeners.get('click')![0]!({})
@@ -69,4 +69,15 @@ test('the model field is backed by a datalist filled from /observer/models, name
   expect(options).toEqual(['gpt-a', HOSTILE])
   const input = elements(page).find((element) => element.getAttribute('name') === 'model')
   expect(input?.getAttribute('list')).toBe(list!.getAttribute('id'))
+})
+
+test('two forms on one provider share one /observer/models fetch, and Re-check removes the notice', async () => {
+  calls.length = 0
+  const page = await (await load()).renderModels()
+  await Bun.sleep(10)
+  expect(calls.filter((call) => call.startsWith('GET /observer/models'))).toHaveLength(1)
+  const button = elements(page).find((element) => element.getAttribute('data-recheck') === '1')!
+  button.listeners.get('click')![0]!({})
+  await Bun.sleep(10)
+  expect(textOf(page).match(/Stopped:/g)).toHaveLength(1)
 })
