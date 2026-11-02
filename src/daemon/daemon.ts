@@ -31,6 +31,8 @@ import { listRecentSessions } from '../store/reads'
 import { rebuildProjectPacks } from '../context/packs'
 import { type BatchOutcome, processSessionBatch } from '../observer/process'
 import type { RunnerFactory } from '../observer/runners'
+import type { CliObserverRunner } from '../observer/runners/cli-core'
+import type { ObserverSettings } from '../observer/types'
 import type { SafetyGate } from '../observer/safety-gate'
 import { type CredentialProvider, NO_CREDENTIALS } from '../secrets/credentials'
 import { getObserverSession, recoverInterrupted } from '../store/observer-store'
@@ -47,6 +49,7 @@ import { contextHandler } from './context-route'
 import { dataHandlers } from './data-routes'
 import { mcpReadHandler } from './mcp-read-route'
 import { memoryHandlers } from './memory-routes'
+import { observerModelsRoute } from './observer-models-route'
 import { createObserverTester, observerTestRoute } from './observer-test'
 import { startDataTicks } from './data-ticks'
 import { startServer } from './server'
@@ -109,6 +112,8 @@ function startVectors(db: Database, dataDir: string, options: DaemonVectorOption
 
 export interface DaemonObserverOptions {
   runnerFor: RunnerFactory
+  /** Builds a CLI login runner, for listing the installed CLI's models. Without it /observer/models answers 503. */
+  cliRunnerFor?: (settings: ObserverSettings) => CliObserverRunner
   /** Builds the safety gate for CLI login observers on the daemon's own database. */
   safety?: (db: Database, log: (line: string) => void) => SafetyGate
   tickMs?: number
@@ -281,6 +286,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     memory: memoryHandlers(store.db, log),
     metrics: (window) => metricsRoute(store.db, window),
     mcpRead: mcpReadHandler(store.db, log),
+    observerModels: observerModelsRoute(options.observer?.cliRunnerFor ?? null, log, Date.now),
     observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log)),
     auth: createDashboardAuth(),
     log,

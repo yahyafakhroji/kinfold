@@ -7,8 +7,9 @@
 import type { Parsed } from '../context/types'
 import { KNOWN_HOSTS, isRecord } from '../contract/event'
 import { providerTakesKey, resolveObserverSettings } from '../observer/settings'
-import { OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
+import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
 import { assertCredentialRef, isSystemCredentialRef } from '../secrets/credentials'
+import { type SafetyRow, clearFailedSafety, listSafety } from '../store/observer-safety-store'
 import type { Database } from '../sqlite/types'
 import { type ObserverSettingsInput, type ObserverSettingsRow, listObserverSettings, upsertObserverSettings } from '../store/observer-settings-store'
 
@@ -22,14 +23,31 @@ export const REPORTED_HOSTS = KNOWN_HOSTS
 
 export type EffectiveSettings = { host: string } & ({ settings: ObserverSettings } | { error: string })
 
+/** A safety row as the page sees it: the resolved binary path stays in the daemon. */
+export type SafetyView = Omit<SafetyRow, 'binaryPath'>
+
 export interface ObserverSettingsView {
   rows: ObserverSettingsRow[]
+  safety: SafetyView[]
   effective: EffectiveSettings[]
 }
 
 export interface ObserverSettingsHandlers {
   list: () => ObserverSettingsView
   put: (input: ObserverSettingsInput) => ObserverSettingsRow
+  /** Forgets a CLI provider's failed safety rows so its next batch tests again; returns the count. */
+  recheck: (provider: CliLoginProvider) => number
+}
+
+export function isCliLoginProvider(provider: unknown): provider is CliLoginProvider {
+  return (CLI_LOGIN_PROVIDERS as readonly unknown[]).includes(provider)
+}
+
+/** POST /observer/recheck body. The error names the field and never echoes the value. */
+export function parseRecheck(body: unknown): Parsed<CliLoginProvider> {
+  const provider = isRecord(body) ? body.provider : undefined
+  if (!isCliLoginProvider(provider)) return { ok: false, error: `provider must be one of ${CLI_LOGIN_PROVIDERS.join(', ')}` }
+  return { ok: true, value: provider }
 }
 
 function parseCredentialRef(value: unknown): Parsed<string | null> {
@@ -72,7 +90,8 @@ function effectiveFor(db: Database, host: string): EffectiveSettings {
 export function observerSettingsView(db: Database): ObserverSettingsView {
   const rows = listObserverSettings(db)
   const hosts = [...new Set([...REPORTED_HOSTS, ...rows.map((row) => row.host).filter((host) => host !== '*')])]
-  return { rows, effective: hosts.map((host) => effectiveFor(db, host)) }
+  const safety = listSafety(db).map(({ binaryPath: _binaryPath, ...rest }) => rest)
+  return { rows, safety, effective: hosts.map((host) => effectiveFor(db, host)) }
 }
 
 /** Logs the host and provider only. */
@@ -81,8 +100,15 @@ export function settingsHandlers(db: Database, now: () => number, log: (line: st
     list: () => observerSettingsView(db),
     put: (input) => {
       const row = upsertObserverSettings(db, input, now())
+      // Saving a CLI choice is the user's answer to a stopped observer, even when the row is unchanged.
+      if (isCliLoginProvider(row.provider)) clearFailedSafety(db, row.provider)
       log(`observer settings saved host=${row.host} provider=${row.provider} enabled=${row.enabled}`)
       return row
+    },
+    recheck: (provider) => {
+      const cleared = clearFailedSafety(db, provider)
+      log(`observer recheck provider=${provider} cleared=${cleared}`)
+      return cleared
     },
   }
 }

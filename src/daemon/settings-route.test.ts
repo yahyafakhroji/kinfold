@@ -38,6 +38,7 @@ test('GET reports the built-in defaults for every known host before any row exis
   expect(response.status).toBe(200)
   expect(await response.json()).toEqual({
     rows: [],
+    safety: [],
     effective: [
       { host: 'claude-code', settings: { provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: true, source: 'built-in' } },
       { host: 'opencode', settings: { provider: 'openrouter', model: 'openrouter/auto', credentialRef: 'openrouter', enabled: true, source: 'built-in' } },

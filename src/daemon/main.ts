@@ -49,6 +49,7 @@ function main(): void {
       vectors: { embedder: embedderFrom(credentials) },
       observer: {
         runnerFor: runnerFactory(runnerDeps),
+        cliRunnerFor: (settings) => createCliRunner(settings, runnerDeps),
         safety: (db, log) => createSafetyGate({ db, cliRunnerFor: (settings) => createCliRunner(settings, runnerDeps), log }),
         credentials,
         schedule: {

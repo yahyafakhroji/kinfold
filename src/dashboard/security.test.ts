@@ -82,6 +82,7 @@ test('a wrong token next to a good cookie is 401: the Authorization header decid
 const STATE_CHANGING = [
   ['PUT', '/observer/settings', { host: 'opencode', provider: 'claude-cli', model: 'haiku' }],
   ['POST', '/observer/test', { host: 'opencode', provider: 'claude-cli', model: 'haiku' }],
+  ['POST', '/observer/recheck', { provider: 'codex-cli' }],
   ['POST', '/data/purge', { host: 'nobody', dryRun: true }],
   ['PUT', '/data/retention', { warnBytes: 1_000_000 }],
   ['POST', '/data/scan', {}],

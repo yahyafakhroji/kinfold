@@ -19,8 +19,9 @@ import { type DataHandlers, type RouteAnswer, dataRoute } from './data-routes'
 import { parseMcpRead } from './mcp-read-route'
 import type { HmacMode } from './hmac-rotation'
 import { type MemoryHandlers, memoryRoute } from './memory-routes'
+import type { ObserverModelsRoute } from './observer-models-route'
 import type { ObserverTestRoute } from './observer-test'
-import { type ObserverSettingsHandlers, parseSettingsPut } from './settings-route'
+import { type ObserverSettingsHandlers, parseRecheck, parseSettingsPut } from './settings-route'
 import { type SemanticAnswer, type SemanticRequest, parseSemanticRequest } from '../vectors/search'
 
 export interface ServerDeps {
@@ -53,6 +54,8 @@ export interface ServerDeps {
   mcpRead: (read: McpRead) => number
   /** POST /observer/test: one fixed prompt through the chosen runner. */
   observerTest: ObserverTestRoute
+/** GET /observer/models: the installed CLI's model names, cached for ten minutes. */
+observerModels: ObserverModelsRoute
   /** Login codes and session cookies for the dashboard; in memory only. */
   auth: DashboardAuth
   /** Receives counts, ids and error messages only, never payloads. */
@@ -136,6 +139,9 @@ async function semanticRoute(request: Request, deps: ServerDeps): Promise<Respon
 
 async function route(request: Request, url: URL, deps: ServerDeps): Promise<Response> {
   if (url.pathname === '/observer/settings') return observerSettingsRoute(request, deps.observerSettings)
+  if (url.pathname === '/observer/recheck') {
+    return postJson(request, parseRecheck, (provider) => json(200, { ok: true, cleared: deps.observerSettings.recheck(provider) }))
+  }
   if (url.pathname === '/search/semantic') return semanticRoute(request, deps)
   if (url.pathname === '/context') return postJson(request, parseContextRequest, async (value) => json(200, await deps.context(value)))
   if (url.pathname === '/metrics/mcp-read') return postJson(request, parseMcpRead, (value) => json(201, { id: deps.mcpRead(value) }))
@@ -161,6 +167,7 @@ async function panelRoute(request: Request, url: URL, deps: ServerDeps): Promise
   const path = url.pathname
   if (path.startsWith('/data/')) return dataRoute(request.method, url, () => readJson(request), deps.data)
   if (path.startsWith('/memory/')) return memoryRoute(request.method, url, deps.memory)
+  if (path === '/observer/models') return deps.observerModels(request.method, url)
   if (path === '/observer/test') return deps.observerTest(request.method, () => readJson(request))
   if (path === '/metrics/summary') return request.method === 'GET' ? deps.metrics(url.searchParams.get('window')) : { status: 405, body: { error: 'method not allowed' } }
   return null
