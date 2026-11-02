@@ -4,8 +4,10 @@
 
 import { type CredentialProvider, isSystemCredentialRef } from '../../secrets/credentials'
 import { OPENROUTER_CREDENTIAL_REF } from '../settings'
-import { ObserverError, type ObserverRunner, type ObserverSettings } from '../types'
+import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, ObserverError, type ObserverProvider, type ObserverRunner, type ObserverSettings } from '../types'
 import { type SpawnFn, createClaudeCliRunner } from './claude-cli'
+import { type CliAdapter, type CliObserverRunner, createCliObserverRunner } from './cli-core'
+import { codexAdapter } from './codex-cli'
 import { type FetchFn, createOpenRouterRunner } from './openrouter'
 
 export interface RunnerDeps {
@@ -14,6 +16,8 @@ export interface RunnerDeps {
   spawn?: SpawnFn
   fetch?: FetchFn
   parentEnv?: Readonly<Record<string, string | undefined>>
+  /** Receives fixed, class-only lines from CLI login runners, such as a cleanup failure. */
+  log?: (line: string) => void
 }
 
 export type RunnerFactory = (settings: ObserverSettings) => ObserverRunner
@@ -30,6 +34,30 @@ function readCredential(credentials: CredentialProvider, ref: string): string {
   return value
 }
 
+/** The CLI login adapters built so far. opencode-cli joins in Task 4. */
+const CLI_ADAPTERS: Partial<Record<CliLoginProvider, CliAdapter>> = { 'codex-cli': codexAdapter }
+
+function isCliLoginProvider(provider: ObserverProvider): provider is CliLoginProvider {
+  return (CLI_LOGIN_PROVIDERS as readonly string[]).includes(provider)
+}
+
+/**
+ * The one way to build a CLI login runner (run, probe, listModels). Throws
+ * config_invalid for any provider without a built adapter.
+ */
+export function createCliRunner(settings: ObserverSettings, deps: RunnerDeps): CliObserverRunner {
+  if (!isCliLoginProvider(settings.provider)) throw new ObserverError('config_invalid', `${settings.provider} is not a CLI login observer`)
+  const adapter = CLI_ADAPTERS[settings.provider]
+  if (adapter === undefined) throw new ObserverError('config_invalid', `${settings.provider} observer is not built yet`)
+  return createCliObserverRunner(adapter, {
+    dataDir: deps.dataDir,
+    model: settings.model,
+    ...(deps.spawn !== undefined ? { spawn: deps.spawn } : {}),
+    ...(deps.parentEnv !== undefined ? { parentEnv: deps.parentEnv } : {}),
+    ...(deps.log !== undefined ? { log: deps.log } : {}),
+  })
+}
+
 /** Throws ObserverError before any network or process work when the runner cannot be built. */
 export function createRunner(settings: ObserverSettings, deps: RunnerDeps): ObserverRunner {
   if (settings.provider === 'claude-cli') {
@@ -40,6 +68,7 @@ export function createRunner(settings: ObserverSettings, deps: RunnerDeps): Obse
       ...(deps.parentEnv !== undefined ? { parentEnv: deps.parentEnv } : {}),
     })
   }
+  if (settings.provider === 'codex-cli') return createCliRunner(settings, deps)
   if (settings.provider !== 'openrouter') {
     throw new ObserverError('config_invalid', `${settings.provider} observer is not built yet`)
   }

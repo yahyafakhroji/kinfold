@@ -22,6 +22,7 @@ import {
   type ObserverPrompt,
   type ObserverRunner,
   type RunnerResult,
+  type RunnerUsage,
   toObserverError,
 } from '../types'
 import { DEFAULT_CLI_TIMEOUT_MS, type SpawnFn, type SpawnRequest, type SpawnResult, ensureObserverDir, spawnProcess } from './claude-cli'
@@ -31,7 +32,7 @@ export interface CliProbe { version: string; binaryPath: string }
 export interface PlantedFile { name: string; content: string }
 /** `files` are written into runDir before spawn. */
 export interface CliInvocation { cmd: string[]; env: Record<string, string>; files: PlantedFile[] }
-export interface CliParsed { text: string; model: string | null; toolEvents: number; sessionId: string | null }
+export interface CliParsed { text: string; model: string | null; toolEvents: number; sessionId: string | null; usage?: RunnerUsage }
 export interface CliRunContext { binaryPath: string; runDir: string; env: Record<string, string>; title: string; sessionId: string | null; spawn: SpawnFn }
 
 export interface CliAdapter {
@@ -293,7 +294,7 @@ export function createCliObserverRunner(adapter: CliAdapter, options: CliRunnerO
       const parsed = adapter.parse(result.stdout)
       sessionId = parsed.sessionId
       if (parsed.toolEvents > 0) throw toolAttempt(label, parsed.toolEvents)
-      return { text: parsed.text, model: parsed.model ?? options.model }
+      return { text: parsed.text, model: parsed.model ?? options.model, ...(parsed.usage !== undefined ? { usage: parsed.usage } : {}) }
     }
     const cleanup = async (runDir: string): Promise<void> => {
       if (adapter.cleanup === undefined) return
