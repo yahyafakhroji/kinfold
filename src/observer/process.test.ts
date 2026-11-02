@@ -258,3 +258,40 @@ test('other failures do not report a tool attempt', async () => {
   await processSessionBatch({ db: temp.store.db, runnerFor: () => fakeRunner([new ObserverError('timeout', 't')]), safety: gate, now: () => clock }, session)
   expect(seen.toolAttempts).toEqual([])
 })
+
+test('settings that change during the gate check are read again: a host disabled meanwhile is disabled, with no run', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedTurn(session)
+  temp.store.db.run(CODEX_ROW)
+  const gate: SafetyGate = {
+    check: async () => {
+      temp.store.db.run("UPDATE observer_settings SET enabled = 0 WHERE host = 'codex'")
+      return { ok: true }
+    },
+    reportToolAttempt: async () => {},
+  }
+  let built = 0
+  const runnerFor = () => { built += 1; return fakeRunner([citingReply()]) }
+  expect(await processSessionBatch({ db: temp.store.db, runnerFor, safety: gate, now: () => clock }, session)).toEqual({ status: 'disabled' })
+  expect(built).toBe(0)
+  expect(runs()).toEqual([])
+  expect(stateCounts(temp.store, session)).toEqual({ pending: 4 })
+})
+
+test('a provider changed during the gate check goes through the gate again with the new settings', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedTurn(session)
+  temp.store.db.run(CODEX_ROW)
+  const checked: string[] = []
+  const gate: SafetyGate = {
+    check: async (settings) => {
+      checked.push(settings.provider)
+      if (settings.provider === 'codex-cli') temp.store.db.run("UPDATE observer_settings SET provider = 'opencode-cli' WHERE host = 'codex'")
+      return settings.provider === 'codex-cli' ? { ok: true } : { ok: false, errorClass: 'cli_missing' }
+    },
+    reportToolAttempt: async () => {},
+  }
+  expect(await processSessionBatch({ db: temp.store.db, runnerFor: () => fakeRunner(['{}']), safety: gate, now: () => clock }, session)).toEqual({ status: 'blocked', errorClass: 'cli_missing' })
+  expect(checked).toEqual(['codex-cli', 'opencode-cli'])
+  expect(runs()).toEqual([])
+})

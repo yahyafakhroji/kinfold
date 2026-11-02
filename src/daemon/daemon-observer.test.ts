@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { openStore } from '../store/db'
 import { type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from '../observer/test-support'
+import type { SafetyGate } from '../observer/safety-gate'
 import { type RunningDaemon, startDaemon } from './daemon'
 
 let temp: TempStore
@@ -36,6 +37,30 @@ test('with observer options the daemon recovers interrupted work, then observes 
   try {
     expect(reader.db.query('SELECT observer_state FROM events').all()).toEqual([{ observer_state: 'done' }])
     expect(reader.db.query('SELECT title, evidence FROM observations').all()).toEqual([{ title: 'Turn ended', evidence: 'interpretation' }])
+  } finally {
+    reader.db.close()
+  }
+})
+
+test('startDaemon passes the safety gate through: a blocked CLI observer is blocked end to end', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedEvent(temp.store, session, { kind: 'turn_end', at: T0, promptNumber: 1, assistantText: 'x' })
+  temp.store.db.run("INSERT INTO observer_settings (host, provider, model, enabled, updated_at) VALUES ('codex', 'codex-cli', 'gpt-5-mini', 1, 1)")
+  const runner = fakeRunner(['{}'])
+  const gateDbs: unknown[] = []
+  const safety = (db: unknown): SafetyGate => {
+    gateDbs.push(db)
+    return { check: async () => ({ ok: false, errorClass: 'safety_check_failed' }), reportToolAttempt: async () => {} }
+  }
+  daemon = startDaemon({ dataDir: temp.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, observer: { runnerFor: () => runner, safety, tickMs: 60_000, resetCheckMs: 60_000 } })
+  await daemon.observer!.whenIdle()
+
+  expect(gateDbs).toHaveLength(1)
+  expect(runner.prompts).toEqual([])
+  const reader = openStore(temp.dataDir)
+  try {
+    expect(reader.db.query('SELECT observer_state FROM events').all()).toEqual([{ observer_state: 'pending' }])
+    expect(reader.db.query('SELECT count(*) AS n FROM observer_runs').get()).toEqual({ n: 0 })
   } finally {
     reader.db.close()
   }

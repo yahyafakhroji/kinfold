@@ -58,6 +58,15 @@ const TURN_CLOSERS: ReadonlySet<DueReason> = new Set(['boundary', 'ended', 'quie
 
 export const DEFAULT_OBSERVER_TICK_MS = 5_000
 
+/**
+ * A session whose batch came back blocked (safety gate) or disabled keeps its
+ * events retryable, so it stays due. It is parked this long so stopped
+ * sessions, which sort first by their oldest event, cannot hold every slot.
+ */
+export const PARKED_MS = 60_000
+
+const PARKING_OUTCOMES: ReadonlySet<BatchOutcome['status']> = new Set(['blocked', 'disabled'])
+
 export interface ObserverSchedulerOptions {
   db: Database
   processSession: (sessionId: number) => Promise<BatchOutcome>
@@ -137,6 +146,8 @@ export function createObserverScheduler(options: ObserverSchedulerOptions): Obse
   const idle = idleWaiters(running)
   /** sessionId -> 'waited' starts since its last turn-closing start. In memory: a restart grants a fresh allowance. */
   let earlyRuns: ReadonlyMap<number, number> = new Map()
+  /** sessionId -> time its parking ends. In memory: a restart tries every session again. */
+  let parked: ReadonlyMap<number, number> = new Map()
   let stopped = false
 
   const count = (sessionId: number, reason: DueReason): void => {
@@ -151,7 +162,10 @@ export function createObserverScheduler(options: ObserverSchedulerOptions): Obse
     options.onStart?.(sessionId, reason)
     running.add(sessionId)
     options.processSession(sessionId).then(
-      (outcome) => finish(sessionId, outcome.status === 'succeeded'),
+      (outcome) => {
+        if (PARKING_OUTCOMES.has(outcome.status)) park(sessionId)
+        finish(sessionId, outcome.status === 'succeeded')
+      },
       (error: unknown) => {
         log(`observer session=${sessionId} crashed error=${errorName(error)}`)
         finish(sessionId, false)
@@ -159,9 +173,24 @@ export function createObserverScheduler(options: ObserverSchedulerOptions): Obse
     )
   }
 
+  const park = (sessionId: number): void => {
+    parked = new Map(parked).set(sessionId, now() + PARKED_MS)
+  }
+
+  /** True while the session's parking lasts; an expired entry is dropped. */
+  const isParked = (sessionId: number, at: number): boolean => {
+    const until = parked.get(sessionId)
+    if (until === undefined) return false
+    if (at < until) return true
+    const next = new Map(parked)
+    next.delete(sessionId)
+    parked = next
+    return false
+  }
+
   /**
    * Only a success re-ticks at once: a failed batch waits for its retry time, and a
-   * disabled host or a blocked observer (safety gate) waits for the next tick.
+   * disabled host or a blocked observer (safety gate) is parked for PARKED_MS.
    */
   const finish = (sessionId: number, again: boolean): void => {
     running.delete(sessionId)
@@ -177,7 +206,7 @@ export function createObserverScheduler(options: ObserverSchedulerOptions): Obse
     const oldest = oldestPendingIngest(options.db)
     for (const stats of queueStats(options.db, at)) {
       if (running.size >= config.maxGlobal) break
-      if (running.has(stats.sessionId)) continue
+      if (running.has(stats.sessionId) || isParked(stats.sessionId, at)) continue
       const reason = dueReason({ ...stats, oldestPendingAt: oldest.get(stats.sessionId) ?? null }, at, config, earlyRuns.get(stats.sessionId) ?? 0)
       if (reason !== null) start(stats.sessionId, reason)
     }

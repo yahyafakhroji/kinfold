@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import type { BatchOutcome } from '../observer/process'
 import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../observer/test-support'
-import { DEFAULT_SCHEDULE, LEGACY_SCHEDULE, createObserverScheduler, dueReason, parseIdleMs, parseMaxWaitMs, shouldObserve } from './observer-scheduler'
+import { DEFAULT_SCHEDULE, LEGACY_SCHEDULE, PARKED_MS, createObserverScheduler, dueReason, parseIdleMs, parseMaxWaitMs, shouldObserve } from './observer-scheduler'
 
 let temp: TempStore
 let clock: number
@@ -190,22 +190,65 @@ test('due reasons keep their order, and KINFOLD_OBSERVER_MAX_WAIT_MS parses like
   expect(() => parseMaxWaitMs('soon')).toThrow('KINFOLD_OBSERVER_MAX_WAIT_MS')
 })
 
-test('a blocked batch waits for the next tick like a disabled one: no immediate re-tick', async () => {
-  const session = busySession('blocked', 1, 'turn_end')
-  const calls: number[] = []
-  const s = createObserverScheduler({
-    db: temp.store.db,
-    processSession: async (sessionId) => {
-      calls.push(sessionId)
-      return { status: 'blocked', errorClass: 'safety_check_failed' }
-    },
-    now: () => clock,
-  })
+function seedDue(host: string, name: string, at: number): number {
+  const session = seedSession(temp.store, host, name, at)
+  seedEvent(temp.store, session, { kind: 'turn_end', at, promptNumber: 1, assistantText: 'x' })
+  return session
+}
+
+/** Ticks, waits for every started batch, and lets a finish re-tick settle. */
+async function round(s: ReturnType<typeof createObserverScheduler>): Promise<void> {
   s.tick()
   await s.whenIdle()
   await flush()
-  expect(calls).toEqual([session])
-  s.tick()
   await s.whenIdle()
+}
+
+test('blocked sessions are parked, so a healthy host still runs and they are not retried before PARKED_MS', async () => {
+  const b1 = seedDue('codex', 'b1', clock)
+  const b2 = seedDue('codex', 'b2', clock + 1)
+  const healthy = seedDue('claude-code', 'ok', clock + 2)
+  clock += 10
+  const calls: number[] = []
+  const s = createObserverScheduler({
+    db: temp.store.db,
+    now: () => clock,
+    processSession: async (sessionId) => {
+      calls.push(sessionId)
+      if (sessionId !== healthy) return { status: 'blocked', errorClass: 'safety_check_failed' }
+      temp.store.db.run(`UPDATE events SET observer_state = 'done' WHERE session_id = ${sessionId}`)
+      return { status: 'idle' }
+    },
+  })
+  await round(s)
+  await round(s)
+  expect(calls.slice(0, 2).sort()).toEqual([b1, b2].sort())
+  expect(calls).toContain(healthy)
+  for (let i = 0; i < 5; i += 1) {
+    clock += 10_000
+    await round(s)
+  }
+  expect(clock - T0).toBeLessThan(PARKED_MS)
+  expect(calls.filter((id) => id === b1)).toHaveLength(1)
+  expect(calls.filter((id) => id === b2)).toHaveLength(1)
+})
+
+test('a disabled session is parked like a blocked one, and tried again once PARKED_MS has passed', async () => {
+  const session = seedDue('claude-code', 'off', clock)
+  const calls: number[] = []
+  const s = createObserverScheduler({
+    db: temp.store.db,
+    now: () => clock,
+    processSession: async (sessionId) => {
+      calls.push(sessionId)
+      return { status: 'disabled' }
+    },
+  })
+  await round(s)
+  clock += PARKED_MS - 1
+  await round(s)
+  expect(calls).toEqual([session])
+  clock += 1
+  await round(s)
   expect(calls).toEqual([session, session])
 })

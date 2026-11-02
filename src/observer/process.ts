@@ -22,7 +22,7 @@ import { parseObserverOutput } from './parse'
 import { DEFAULT_PROMPT_LIMITS, type PromptLimits, buildObserverPrompt } from './prompt'
 import type { RunnerFactory } from './runners'
 import type { SafetyGate } from './safety-gate'
-import { resolveObserverSettings } from './settings'
+import { resolveObserverSettings, settingsFingerprint } from './settings'
 import { toSourceEvent } from './sources'
 import { ObserverError, type ObserverEvent, type ObserverSettings, toObserverError } from './types'
 import { type WriteCounts, writeBatchResult } from './write'
@@ -113,22 +113,42 @@ function pendingBatch(db: Database, sessionId: number, now: number): PendingBatc
   return { session, candidates }
 }
 
+/** Gate passes per batch before giving up to the next tick, if settings keep changing during the checks. */
+const MAX_GATE_PASSES = 3
+
+type Gated = { pending: PendingBatch; choice: SettingsChoice } | BatchOutcome
+
+/**
+ * Settings, then the safety gate. The gate may run a planted check for
+ * minutes, so after an ok it reads the batch and the settings again; changed
+ * settings go through the enabled check and the gate once more.
+ */
+async function gated(deps: ProcessDeps, sessionId: number, first: PendingBatch, now: () => number): Promise<Gated> {
+  let pending = first
+  let choice = chooseSettings(deps.db, pending.session.host)
+  for (let pass = 0; pass < MAX_GATE_PASSES; pass += 1) {
+    if (choice.ok && !choice.settings.enabled) return { status: 'disabled' }
+    if (!choice.ok || deps.safety === undefined) return { pending, choice }
+    const gate = await deps.safety.check(choice.settings)
+    if (!gate.ok) return { status: 'blocked', errorClass: gate.errorClass }
+    const again = pendingBatch(deps.db, sessionId, now())
+    if ('status' in again) return again
+    pending = again
+    const checked = choice.settings
+    choice = chooseSettings(deps.db, pending.session.host)
+    if (choice.ok && settingsFingerprint(choice.settings) === settingsFingerprint(checked)) return { pending, choice }
+  }
+  return { status: 'idle' }
+}
+
 export async function processSessionBatch(deps: ProcessDeps, sessionId: number): Promise<BatchOutcome> {
   const now = deps.now ?? Date.now
   const log = deps.log ?? (() => {})
   const first = pendingBatch(deps.db, sessionId, now())
   if ('status' in first) return first
-  const choice = chooseSettings(deps.db, first.session.host)
-  if (choice.ok && !choice.settings.enabled) return { status: 'disabled' }
-  let pending = first
-  if (choice.ok && deps.safety !== undefined) {
-    const gate = await deps.safety.check(choice.settings)
-    if (!gate.ok) return { status: 'blocked', errorClass: gate.errorClass }
-    // The gate may have run a planted check for minutes: read the batch again.
-    const again = pendingBatch(deps.db, sessionId, now())
-    if ('status' in again) return again
-    pending = again
-  }
+  const ready = await gated(deps, sessionId, first, now)
+  if ('status' in ready) return ready
+  const { pending, choice } = ready
   const { session, candidates } = pending
 
   const known = injectedObservations(deps.db, sessionId)
