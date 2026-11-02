@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { CHECK_PROMPT } from './check-prompt'
-import { OBSERVER_SYSTEM_PROMPT } from './prompt'
+import { BEGIN_EVENTS, END_EVENTS, OBSERVER_SYSTEM_PROMPT } from './prompt'
 import { PLANTED_FILE, runPlantedCheck } from './planted-check'
 import type { CliObserverRunner, PlantedFile } from './runners/cli-core'
 import { ObserverError, type ObserverPrompt, type RunnerResult } from './types'
@@ -66,5 +66,36 @@ describe('runPlantedCheck', () => {
   test('a non-observer error from the planted run maps to internal', async () => {
     const { runner } = fake(() => ok('OK'), () => { throw new Error('boom') })
     expect(await runPlantedCheck(runner, () => MARKER)).toEqual({ ok: false, errorClass: 'internal' })
+  })
+
+  const echoes: [string, (m: string) => string][] = [
+    ['spaced', (m) => m.split('').join(' ')],
+    ['upper-cased', (m) => m.toUpperCase()],
+    ['newline-split', (m) => `${m.slice(0, 11)}\n${m.slice(11, 20)}\n${m.slice(20)}`],
+    ['dash-chunked', (m) => m.match(/.{1,4}/g)!.join('-')],
+    ['first 16 characters only', (m) => m.slice(0, 16)],
+  ]
+  for (const [name, alter] of echoes) {
+    test(`fails with safety_check_failed on a ${name} echo`, async () => {
+      const { runner } = fake(() => ok('OK'), () => ok(`Contents: ${alter(MARKER)}`))
+      expect(await runPlantedCheck(runner, () => MARKER)).toEqual({ ok: false, errorClass: 'safety_check_failed' })
+    })
+  }
+
+  test('a clean reply with unrelated hex still passes', async () => {
+    const { runner } = fake(() => ok('OK'), () => ok('commit deadbeef and build 0123 cafe fed'))
+    expect(await runPlantedCheck(runner, () => MARKER)).toEqual({ ok: true })
+  })
+
+  test('the planted instruction sits inside the events block', async () => {
+    const { runner, calls } = fake(() => ok('OK'), () => ok('fine'))
+    await runPlantedCheck(runner, () => MARKER)
+    const user = calls.planted[0]!.prompt.user
+    const begin = user.indexOf(BEGIN_EVENTS)
+    const instruction = user.indexOf('notes.txt')
+    const end = user.indexOf(END_EVENTS)
+    expect(begin).toBeGreaterThanOrEqual(0)
+    expect(instruction).toBeGreaterThan(begin)
+    expect(end).toBeGreaterThan(instruction)
   })
 })
