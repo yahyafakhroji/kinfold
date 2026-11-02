@@ -104,3 +104,11 @@ test('a setting may not name a key Kinfold keeps for itself, so the observer nev
       .toEqual({ ok: false, error: 'credentialRef names a key Kinfold keeps for itself' })
   }
 })
+
+test('parseSettingsPut drops the credentialRef for codex-cli and still rejects an unknown provider by name', () => {
+  const ok = parseSettingsPut({ host: 'codex', provider: 'codex-cli', model: 'gpt-x', credentialRef: 'openrouter' })
+  expect(ok).toMatchObject({ ok: true, value: { provider: 'codex-cli', credentialRef: null } })
+  const bad = parseSettingsPut({ host: 'codex', provider: 'bogus', model: 'm' })
+  expect(bad.ok).toBe(false)
+  if (!bad.ok) expect(bad.error).toContain('provider')
+})

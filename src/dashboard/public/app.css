@@ -227,6 +227,7 @@ input:focus-visible, select:focus-visible { outline-offset: 0; border-color: var
 input[type="checkbox"] { width: 1rem; min-height: 1rem; accent-color: var(--accent); }
 
 .field { display: grid; gap: var(--space-1); min-width: 0; }
+.field[hidden] { display: none; }
 .check { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); align-self: end; min-height: 2.25rem; }
 .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; }
 .actions.tight { flex-wrap: nowrap; }

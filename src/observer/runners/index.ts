@@ -40,6 +40,9 @@ export function createRunner(settings: ObserverSettings, deps: RunnerDeps): Obse
       ...(deps.parentEnv !== undefined ? { parentEnv: deps.parentEnv } : {}),
     })
   }
+  if (settings.provider !== 'openrouter') {
+    throw new ObserverError('config_invalid', `${settings.provider} observer is not built yet`)
+  }
   const apiKey = readCredential(deps.credentials, settings.credentialRef ?? OPENROUTER_CREDENTIAL_REF)
   return createOpenRouterRunner({ apiKey, model: settings.model, ...(deps.fetch !== undefined ? { fetch: deps.fetch } : {}) })
 }

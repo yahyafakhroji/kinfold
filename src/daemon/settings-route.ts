@@ -6,7 +6,7 @@
 
 import type { Parsed } from '../context/types'
 import { KNOWN_HOSTS, isRecord } from '../contract/event'
-import { resolveObserverSettings } from '../observer/settings'
+import { providerTakesKey, resolveObserverSettings } from '../observer/settings'
 import { OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
 import { assertCredentialRef, isSystemCredentialRef } from '../secrets/credentials'
 import type { Database } from '../sqlite/types'
@@ -57,7 +57,7 @@ export function parseSettingsPut(body: unknown): Parsed<ObserverSettingsInput> {
   if (enabled !== undefined && typeof enabled !== 'boolean') return { ok: false, error: 'enabled must be a boolean' }
   const ref = parseCredentialRef(body.credentialRef)
   if (!ref.ok) return ref
-  const credentialRef = provider === 'claude-cli' ? null : ref.value
+  const credentialRef = providerTakesKey(provider as ObserverProvider) ? ref.value : null
   return { ok: true, value: { host, provider: provider as ObserverProvider, model: model.trim(), credentialRef, enabled: enabled ?? true } }
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { resolveObserverSettings } from './settings'
+import { credentialRefFor, providerTakesKey, resolveObserverSettings } from './settings'
 import { type TempStore, openTempStore } from './test-support'
 import { ObserverError } from './types'
 
@@ -48,4 +48,14 @@ test('an unknown provider is a config error, never a silent switch', () => {
   setRow('claude-code', 'gemini-cli', 'flash')
   expect(() => resolveObserverSettings(temp.store.db, 'claude-code')).toThrow(ObserverError)
   expect(() => resolveObserverSettings(temp.store.db, 'claude-code')).toThrow('config_invalid')
+})
+
+test('only openrouter takes a key; credentialRefFor is null for every CLI-login provider', () => {
+  const base = { model: 'm', credentialRef: null, enabled: true, source: 'host' as const }
+  for (const provider of ['claude-cli', 'codex-cli', 'opencode-cli'] as const) {
+    expect(providerTakesKey(provider)).toBe(false)
+    expect(credentialRefFor({ ...base, provider })).toBeNull()
+  }
+  expect(providerTakesKey('openrouter')).toBe(true)
+  expect(credentialRefFor({ ...base, provider: 'openrouter' })).toBe('openrouter')
 })

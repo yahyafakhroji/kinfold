@@ -6,7 +6,7 @@
 import { api, errorText } from './api.js'
 import { h, notice, replaceContent } from './dom.js'
 
-export const PROVIDERS = ['claude-cli', 'openrouter']
+export const PROVIDERS = ['claude-cli', 'openrouter', 'codex-cli', 'opencode-cli']
 const SOURCES = { host: 'saved for this host', 'default-row': 'from the * default row', 'built-in': 'built-in default' }
 
 /**
@@ -48,7 +48,7 @@ function hostForm(host, choice, problem) {
         h('select', { id: id('provider'), name: 'provider' }, PROVIDERS.map((provider) => h('option', { value: provider, selected: provider === current.provider }, provider)))),
       h('label', { class: 'field field-wide', for: id('model') }, h('span', { class: 'field-label' }, 'Model'),
         h('input', { id: id('model'), name: 'model', value: current.model, required: true, maxlength: 200, class: 'mono', autocomplete: 'off', spellcheck: 'false' })),
-      h('label', { class: 'field', for: id('credential') }, h('span', { class: 'field-label' }, 'Keychain entry'),
+      h('label', { class: 'field', for: id('credential'), 'data-credential': '1', hidden: current.provider !== 'openrouter' }, h('span', { class: 'field-label' }, 'Keychain entry'),
         h('input', { id: id('credential'), name: 'credentialRef', value: current.credentialRef ?? '', placeholder: 'openrouter', maxlength: 64, class: 'mono', autocomplete: 'off', spellcheck: 'false' })),
       h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'enabled', checked: current.enabled }), ' Observer enabled')),
     h('div', { class: 'actions' },
@@ -62,6 +62,9 @@ function hostForm(host, choice, problem) {
       () => replaceContent(status, notice('Saved. The observer uses it from its next batch.', 'ok')),
       (error) => replaceContent(status, notice(errorText(error), 'error')))
   })
+  const providerSelect = form.querySelector('select[name="provider"]')
+  const credentialField = form.querySelector('[data-credential]')
+  providerSelect?.addEventListener('change', () => { if (credentialField) credentialField.hidden = providerSelect.value !== 'openrouter' })
   const testButton = form.querySelector('[data-test]')
   testButton?.addEventListener('click', () => runTest(host, form, status, testButton))
   return form

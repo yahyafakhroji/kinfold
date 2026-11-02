@@ -8,7 +8,7 @@
 import { createKeychainProvider } from '../secrets/keychain'
 import { type CredentialProvider, isSystemCredentialRef } from '../secrets/credentials'
 import { assertStorableValue, credentialWriterFor } from '../secrets/keychain-writer'
-import { OPENROUTER_CREDENTIAL_REF, builtInSettings, credentialRefFor } from '../observer/settings'
+import { OPENROUTER_CREDENTIAL_REF, builtInSettings, credentialRefFor, providerTakesKey } from '../observer/settings'
 import { OBSERVER_PROVIDERS, type ObserverPrompt, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import type { InstallHost } from './detect'
@@ -58,7 +58,7 @@ export class ChoiceError extends Error {
 }
 
 export function settingsInputFor(host: string, provider: ObserverProvider, model: string): ObserverSettingsInput {
-  return { host, provider, model, credentialRef: provider === 'claude-cli' ? null : OPENROUTER_CREDENTIAL_REF, enabled: true }
+  return { host, provider, model, credentialRef: providerTakesKey(provider) ? OPENROUTER_CREDENTIAL_REF : null, enabled: true }
 }
 
 export function asSettings(input: ObserverSettingsInput): ObserverSettings {

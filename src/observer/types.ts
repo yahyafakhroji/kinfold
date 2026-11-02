@@ -83,8 +83,12 @@ export interface ObserverRunner {
   run(prompt: ObserverPrompt): Promise<RunnerResult>
 }
 
-export const OBSERVER_PROVIDERS = ['claude-cli', 'openrouter'] as const
+export const OBSERVER_PROVIDERS = ['claude-cli', 'openrouter', 'codex-cli', 'opencode-cli'] as const
 export type ObserverProvider = (typeof OBSERVER_PROVIDERS)[number]
+
+/** Providers that borrow the user's own CLI login instead of a Keychain key. */
+export const CLI_LOGIN_PROVIDERS = ['codex-cli', 'opencode-cli'] as const
+export type CliLoginProvider = (typeof CLI_LOGIN_PROVIDERS)[number]
 
 export interface ObserverSettings {
   provider: ObserverProvider
@@ -109,6 +113,8 @@ export const OBSERVER_ERROR_CLASSES = [
   'config_invalid',
   'interrupted',
   'internal',
+  'tool_attempt',
+  'safety_check_failed',
 ] as const
 export type ObserverErrorClass = (typeof OBSERVER_ERROR_CLASSES)[number]
 

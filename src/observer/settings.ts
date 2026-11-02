@@ -49,9 +49,14 @@ function fromRow(row: SettingsRow, source: ObserverSettings['source']): Observer
   }
 }
 
-/** The keychain ref a provider reads, as runners/index.ts resolves it; null for claude-cli (the user's login). */
+/** Only OpenRouter reads a Keychain key; the CLI providers use the user's own login. */
+export function providerTakesKey(provider: ObserverProvider): boolean {
+  return provider === 'openrouter'
+}
+
+/** The keychain ref a provider reads, as runners/index.ts resolves it; null for providers that use a CLI login. */
 export function credentialRefFor(settings: ObserverSettings): string | null {
-  return settings.provider === 'claude-cli' ? null : (settings.credentialRef ?? OPENROUTER_CREDENTIAL_REF)
+  return providerTakesKey(settings.provider) ? (settings.credentialRef ?? OPENROUTER_CREDENTIAL_REF) : null
 }
 
 /** What decides which observer runs; `source` is left out, so a row equal to the default is no change. Holds no secret. */
