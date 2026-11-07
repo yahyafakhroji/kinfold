@@ -39,7 +39,7 @@ jobs:
 
       # Fetches the pinned build for the runner's platform and exports
       # KINFOLD_TEST_VEC0, so the contract and integration tests load the real
-      # extension instead of skipping. Only macOS arm64 has a pinned build.
+      # extension instead of skipping. Every Kinfold target has a pinned build.
       - name: Fetch the pinned sqlite-vec build
         timeout-minutes: 3
         run: bun tools/fetch-vec0.ts

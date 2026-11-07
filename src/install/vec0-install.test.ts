@@ -36,7 +36,7 @@ function tarOf(name: string, content: Uint8Array): Uint8Array<ArrayBuffer> {
 }
 
 const TARBALL = Bun.gzipSync(tarOf('./vec0.dylib', DYLIB))
-const ASSET: Vec0Asset = { url: 'https://example.test/vec0.tgz', tarballSha256: sha(TARBALL), member: 'vec0.dylib', dylibSha256: sha(DYLIB) }
+const ASSET: Vec0Asset = { url: 'https://example.test/vec0.tgz', tarballSha256: sha(TARBALL), member: 'vec0.dylib', fileSha256: sha(DYLIB) }
 const README_TARBALL = Bun.gzipSync(tarOf('README', DYLIB))
 
 function envServing(body: Uint8Array, status = 200): { env: InstallEnv; urls: string[] } {
@@ -62,7 +62,7 @@ test('a matching download is unpacked and written 0600 into <dataDir>/lib', asyn
 
 test.each([
   ['a tarball whose hash differs', Bun.gzipSync(tarOf('vec0.dylib', new TextEncoder().encode('tampered'))), 200, ASSET, 'download does not match'],
-  ['a dylib whose hash differs', TARBALL, 200, { ...ASSET, dylibSha256: 'f'.repeat(64) }, 'vec0.dylib does not match'],
+  ['a dylib whose hash differs', TARBALL, 200, { ...ASSET, fileSha256: 'f'.repeat(64) }, 'vec0.dylib does not match'],
   ['a tarball without the member', README_TARBALL, 200, { ...ASSET, tarballSha256: sha(README_TARBALL) }, 'has no vec0.dylib'],
   ['an HTTP error', new Uint8Array(0), 404, ASSET, 'answered 404'],
 ] as const)('%s stops the step with nothing written', async (_name, body, status, asset, message) => {

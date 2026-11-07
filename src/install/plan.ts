@@ -8,6 +8,7 @@ import { chmodSync, closeSync, mkdirSync, openSync, rmSync } from 'node:fs'
 import { KEYCHAIN_SERVICE } from '../secrets/credentials'
 import { HMAC_LEGACY_REF } from '../secrets/hmac-keys'
 import { credentialWriterFor } from '../secrets/keychain-writer'
+import type { EmbeddedAssets } from '../runtime/embedded'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import { putObserverSettings, waitForHealth } from './daemon-client'
 import { createDbKey, describeCreateDbKey } from './db-encryption'
@@ -15,8 +16,8 @@ import { type InstallEnv, installPaths } from './env'
 import { writeBackup, writeFileAtomic } from './files'
 import { BACKUP_REMOVAL_SUMMARY, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
 import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
-import { describeSqlite3mcInstall, installSqlite3mc } from './sqlite3mc-install'
-import { installVec0 } from './vec0-install'
+import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbeddedSqlite3mc, installSqlite3mc } from './sqlite3mc-install'
+import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from './vec0-install'
 import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describeMoveDataDir, describeRemoveLegacyEntry, moveDataDir, removeLegacyEntry, stopLegacyAgent } from './rename-migration'
 import { legacyBootoutArgv } from './launch-agent'
 import type { Vec0Asset } from '../vectors/vec0-release'
@@ -50,8 +51,12 @@ export type Action =
   | { kind: 'remove-redundant-hmac-backup'; path: string; legacyPath: string }
   /** The pinned sqlite-vec build, downloaded and hash-checked twice before it is written. */
   | { kind: 'install-vec0'; path: string; asset: Vec0Asset }
+  /** The sqlite-vec build the program carries, checked against its recorded hash before it is written. */
+  | { kind: 'install-vec0-embedded'; path: string; asset: EmbeddedAssets['vec0'] }
   /** sqlite3mc built here from the pinned amalgamation; every process opens the store through it. */
   | { kind: 'install-sqlite3mc'; path: string }
+  /** The sqlite3mc build the program carries, checked against its recorded hash before it is written. */
+  | { kind: 'install-sqlite3mc-embedded'; path: string; asset: EmbeddedAssets['sqlite3mc'] }
   /** db-key for a store the daemon has yet to create, made at run time and added without replacing any entry. */
   | { kind: 'create-db-key'; path: string }
   /** Rename migration: bootout dev.shared-agent-memory.daemon when launchd has it loaded. */
@@ -99,7 +104,9 @@ export function describeAction(action: Action): string {
     case 'hmac-daemon-down': return `check that no daemon answers /health on port ${action.port} (a hand-started one must be stopped first: ${stopCommand(action.pid, action.port)})`
     case 'remove-redundant-hmac-backup': return `remove ${action.path} if it equals ${action.legacyPath}: a kept install backup, redundant once hmac.key is back`
     case 'install-vec0': return `download ${action.asset.url} and write its ${action.asset.member} to ${action.path} (mode 0600), after checking both against the pinned sha256`
+    case 'install-vec0-embedded': return describeEmbeddedVec0Install(action.path)
     case 'install-sqlite3mc': return describeSqlite3mcInstall(action.path)
+    case 'install-sqlite3mc-embedded': return describeEmbeddedSqlite3mcInstall(action.path)
     case 'create-db-key': return describeCreateDbKey(action.path)
     case 'stop-legacy-agent': return `${legacyBootoutArgv(action.uid).join(' ')} (if loaded): stop the daemon installed under the old name`
     case 'migration-daemon-down': return `check that no daemon answers /health on port ${action.port}, waiting up to ${action.waitMs / 1000} s (one still running must be stopped first; nothing is moved while it runs)`
@@ -168,7 +175,9 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
         + ` stop it (${stopCommand(action.pid, action.port)}) and rerun; no HMAC key was touched`)
     case 'remove-redundant-hmac-backup': return removeRedundantBackup(action.path, action.legacyPath)
     case 'install-vec0': return installVec0(env, action.path, action.asset)
+    case 'install-vec0-embedded': return installEmbeddedVec0(env, action.path, action.asset)
     case 'install-sqlite3mc': return installSqlite3mc(env, action.path)
+    case 'install-sqlite3mc-embedded': return installEmbeddedSqlite3mc(env, action.asset)
     case 'create-db-key': return createDbKey(env, action.path)
     case 'stop-legacy-agent': return stopLegacyAgent(env)
     case 'migration-daemon-down': return checkDaemonDown(env, action.port, action.waitMs)

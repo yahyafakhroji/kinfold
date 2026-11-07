@@ -4,9 +4,12 @@
 // first change to a file is preceded by a 0600 backup of the original. Messages
 // carry paths and counts only, never file contents.
 
-import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { isRecord } from '../contract/event'
+import { writeFileAtomic } from '../fs/atomic'
+
+export { writeFileAtomic }
 
 export const BACKUP_INFIX = '.kinfold-backup-'
 /** What the pre-rename version wrote; still found and cleaned, never written. */
@@ -39,26 +42,6 @@ export function serializeJson(value: unknown, original: string | null): string {
 
 export function readTextOrNull(path: string): string | null {
   return existsSync(path) ? readFileSync(path, 'utf8') : null
-}
-
-/** Temp file next to the target, fsync, then rename: readers see the old or the new file, never a mix. */
-export function writeFileAtomic(path: string, content: string | Uint8Array, mode: number): void {
-  const temp = join(dirname(path), `.${basename(path)}.kinfold-tmp-${process.pid}`)
-  const fd = openSync(temp, 'w', mode)
-  try {
-    if (typeof content === 'string') writeSync(fd, content)
-    else writeSync(fd, content)
-    fsyncSync(fd)
-  } finally {
-    closeSync(fd)
-  }
-  try {
-    chmodSync(temp, mode)
-    renameSync(temp, path)
-  } catch (error: unknown) {
-    rmSync(temp, { force: true })
-    throw error
-  }
 }
 
 /** 20261025T101500Z */

@@ -10,8 +10,9 @@
 import { createHash } from 'node:crypto'
 import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { type EmbeddedAssets, embeddedAssets } from '../runtime/embedded'
 import { type BuildInput, buildSqlite3mc } from '../sqlite/build'
-import { type LibraryManifest, checkLibrary, libDir, libraryFileName, manifestPath, sha256File } from '../sqlite/library'
+import { type LibraryManifest, checkLibrary, hasLibraryBuild, installLibraryBuild, libDir, libraryFileName, manifestPath, sha256File } from '../sqlite/library'
 import { MAX_SQLITE3MC_ZIP_BYTES, SQLITE3MC_VERSION, SQLITE3MC_ZIP_SHA256, SQLITE3MC_ZIP_URL, sqlite3mcLibraryExtension } from '../sqlite/release'
 import { DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
 import type { InstallEnv } from './env'
@@ -33,12 +34,19 @@ export function hasBuiltLibrary(dataDir: string, pinnedSha256: string = SQLITE3M
   return result.ok && result.manifest.sourceSha256 === pinnedSha256
 }
 
-export function sqlite3mcInstallActions(env: InstallEnv): Sqlite3mcPlan {
+export function sqlite3mcInstallActions(env: InstallEnv, assets: EmbeddedAssets | null = embeddedAssets()): Sqlite3mcPlan {
   if (sqlite3mcLibraryExtension(env.platform) === null) {
     env.out(`database library: no sqlite3mc build for ${env.platform}`)
     return { actions: [], restartDaemon: false }
   }
   const dir = libDir(env.dataDir)
+  if (assets !== null) {
+    if (hasLibraryBuild(env.dataDir, assets.sqlite3mc.sha256, assets.sqlite3mc.sourceSha256)) {
+      env.out(`database library: embedded sqlite3mc ${SQLITE3MC_VERSION} already in ${dir}`)
+      return { actions: [], restartDaemon: false }
+    }
+    return { actions: [{ kind: 'install-sqlite3mc-embedded', path: dir, asset: assets.sqlite3mc }], restartDaemon: true }
+  }
   if (hasBuiltLibrary(env.dataDir)) {
     env.out(`database library: sqlite3mc ${SQLITE3MC_VERSION} already in ${dir}`)
     return { actions: [], restartDaemon: false }
@@ -49,6 +57,16 @@ export function sqlite3mcInstallActions(env: InstallEnv): Sqlite3mcPlan {
 export function describeSqlite3mcInstall(dir: string): string {
   return `download ${SQLITE3MC_ZIP_URL}, check it against the pinned sha256, build sqlite3mc ${SQLITE3MC_VERSION} with the system C compiler (about 10 s),`
     + ` and write it to ${dir} (mode 0600) with ${join(dir, 'sqlite3mc.json')} naming it`
+}
+
+export function describeEmbeddedSqlite3mcInstall(dir: string): string {
+  return `write the embedded sqlite3mc ${SQLITE3MC_VERSION} build to ${dir} (mode 0600) after checking it against its recorded sha256,`
+    + ` with ${join(dir, 'sqlite3mc.json')} naming it; no compiler, no download`
+}
+
+/** The program's own build: checked against its recorded hash, then placed exactly as a local build is. */
+export async function installEmbeddedSqlite3mc(env: InstallEnv, asset: EmbeddedAssets['sqlite3mc']): Promise<void> {
+  installLibraryBuild(env.dataDir, await asset.bytes(), asset.sha256, asset.sourceSha256, env.platform)
 }
 
 function removeQuietly(path: string): void {
