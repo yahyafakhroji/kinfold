@@ -6,6 +6,7 @@ import { seedObservation } from '../context/test-support'
 import { PROJECT, T0, seedSession } from '../observer/test-support'
 import { openStore } from '../store/db'
 import { vectorCounts } from '../store/vector-store'
+import { vec0FileName } from '../vectors/extension'
 import { type FakeEmbedder, fakeEmbedder } from '../vectors/test-support'
 import { type RunningDaemon, startDaemon } from './daemon'
 
@@ -51,8 +52,9 @@ test('the route takes the token only, and rejects a bad body with 400', async ()
 })
 
 test('without sqlite-vec the answer is unavailable with the loader reason; the query is never logged', async () => {
+  const member = vec0FileName(process.platform)!
   const response = await post({ query: 'SECRET-QUERY-TEXT', project: PROJECT, k: 3 })
-  expect(await response.json()).toEqual({ status: 'unavailable', reason: expect.stringContaining('vec0.dylib is missing; run kinfold install') })
+  expect(await response.json()).toEqual({ status: 'unavailable', reason: expect.stringContaining(`${member} is missing; run kinfold install`) })
   expect(logs).toContain('semantic search status=unavailable')
   expect(logs.join('\n')).not.toContain('SECRET-QUERY-TEXT')
 })
@@ -62,7 +64,7 @@ test('health says search is off, and the indexer still embeds the store at start
   expect(health.vectorSearch).toBe('off')
   await daemon.vectors!.whenIdle()
   expect(daemon.vectors!.status()).toMatchObject({ indexed: 2, pending: 0 })
-  expect(logs.some((line) => line.startsWith('vectors search=off (') && line.includes('vec0.dylib is missing'))).toBe(true)
+  expect(logs.some((line) => line.startsWith('vectors search=off (') && line.includes(`${vec0FileName(process.platform)} is missing`))).toBe(true)
 })
 
 test('a daemon without vector options answers unavailable and embeds nothing', async () => {
