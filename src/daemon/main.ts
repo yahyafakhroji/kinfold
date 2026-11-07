@@ -34,7 +34,8 @@ function fail(message: string): never {
   process.exit(1)
 }
 
-function main(): void {
+/** The daemon entry when `kinfold daemon` runs it; `argv` is what follows the subcommand, of which there are no flags yet. */
+export async function runDaemon(_argv: readonly string[]): Promise<void> {
   process.umask(OWNER_ONLY_UMASK)
   for (const line of deprecationLines(process.env)) process.stderr.write(logLine(line))
   let daemon: ReturnType<typeof startDaemon>
@@ -76,4 +77,4 @@ function main(): void {
   process.on('SIGTERM', () => shutdown('SIGTERM'))
 }
 
-if (import.meta.main) main()
+if (import.meta.main) await runDaemon(process.argv.slice(2))

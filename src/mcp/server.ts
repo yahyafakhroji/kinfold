@@ -126,7 +126,8 @@ export async function runStdio(server: McpServer, input: ReadableStream<Uint8Arr
   if (!skipping) await answer(buffer + decoder.decode())
 }
 
-async function main(): Promise<void> {
+/** The MCP entry when `kinfold mcp` runs it; `argv` is what follows the subcommand, of which there are no flags yet. */
+export async function runMcpServer(_argv: readonly string[]): Promise<void> {
   const log = (line: string) => process.stderr.write(`kinfold-mcp: ${line}\n`)
   const dataDir = resolveDataDir()
   const host = hostFromEnv(process.env)
@@ -144,9 +145,13 @@ async function main(): Promise<void> {
   }
 }
 
-if (import.meta.main) {
-  main().catch((error: unknown) => {
+async function main(): Promise<void> {
+  try {
+    await runMcpServer(process.argv.slice(2))
+  } catch (error: unknown) {
     process.stderr.write(`kinfold-mcp: fatal ${error instanceof Error ? error.name : typeof error}\n`)
     process.exit(1)
-  })
+  }
 }
+
+if (import.meta.main) await main()

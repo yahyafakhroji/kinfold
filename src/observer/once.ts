@@ -32,14 +32,15 @@ export async function observeSessionOnce(dataDir: string, sessionId: number, log
   }
 }
 
-async function main(): Promise<void> {
+/** The observer entry when `kinfold observe` runs it; `argv` is the session id. */
+export async function runObserveOnce(argv: readonly string[]): Promise<void> {
   const log = (line: string): void => {
     process.stderr.write(`kinfold-observe: ${line}\n`)
   }
   const dataDir = readEnv(process.env, 'DATA_DIR')
-  const sessionId = Number(process.argv[2])
+  const sessionId = Number(argv[0])
   if (dataDir === undefined || dataDir === '' || !Number.isSafeInteger(sessionId)) {
-    log('usage: KINFOLD_DATA_DIR=<dir> bun src/observer/once.ts <session-id>')
+    log('usage: kinfold observe <session-id> with KINFOLD_DATA_DIR or --data-dir set')
     process.exit(2)
   }
   try {
@@ -51,4 +52,4 @@ async function main(): Promise<void> {
   }
 }
 
-if (import.meta.main) await main()
+if (import.meta.main) await runObserveOnce(process.argv.slice(2))

@@ -40,7 +40,7 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
 }
 
 export const USAGE = [
-  'usage: kinfold <install|uninstall|status|size|retention|scan|findings|purge|dashboard|encrypt|decrypt|rekey|key> [flags]',
+  'usage: kinfold <install|uninstall|status|size|retention|scan|findings|purge|dashboard|encrypt|decrypt|rekey|key|hook|mcp|daemon|observe> [--data-dir <path>] [--version] [flags]',
   '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>]...',
   '             [--skip-check] [--replace-credential] [--credential-stdin] [--takeover]',
   '  uninstall  [--dry-run] [--remove-credentials] [--remove-hmac-keys]',
@@ -58,6 +58,12 @@ export const USAGE = [
   '  rekey      give memory.db a new key and a new recovery code',
   '  key show-recovery | key recover   show the recovery code, or put the key back from one (on stdin or typed)',
   '  key resume finish or undo a kinfold encrypt, decrypt or rekey that was cut short',
+  '  hook       [--host codex|cursor]   record one host hook payload from stdin, Claude Code by default',
+  '  mcp        answer the MCP stdio protocol on stdin and stdout',
+  '  daemon     run the local daemon on loopback',
+  '  observe    <session-id>   run the observer once for one session',
+  '  --data-dir <path>   the data folder for this process; wins over KINFOLD_DATA_DIR',
+  '  --version  print the version of this build',
 ].join('\n')
 
 // ---- Data control: `kinfold size|retention|scan|findings|purge` -----------------

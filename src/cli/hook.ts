@@ -131,13 +131,14 @@ export async function runHook(
   }
 }
 
-async function main(): Promise<void> {
+/** The hook entry when `kinfold hook` runs it; `argv` is what follows the subcommand. Never throws, so the host sees exit 0. */
+export async function runHookCli(argv: readonly string[]): Promise<void> {
   const stderr: ErrorSink = (line) => {
     process.stderr.write(`${line}\n`)
   }
-  if (isObserverProcess()) process.exit(0)
+  if (isObserverProcess()) return
   try {
-    const host = hostFromArgs(process.argv.slice(2))
+    const host = hostFromArgs(argv)
     if (host === null) {
       stderr('kinfold-hook: unknown --host; nothing captured')
     } else {
@@ -147,6 +148,10 @@ async function main(): Promise<void> {
   } catch (error: unknown) {
     stderr(`kinfold-hook: ${errorMessage(error)}`)
   }
+}
+
+async function main(): Promise<void> {
+  await runHookCli(process.argv.slice(2))
   process.exit(0)
 }
 
