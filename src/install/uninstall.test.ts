@@ -65,7 +65,7 @@ test('uninstall --dry-run prints the plan and changes nothing', async () => {
   expect(w.fetches).toEqual([])
   const plan = w.out.join('\n')
   expect(plan).toContain('/bin/launchctl bootout gui/501/dev.kinfold.daemon')
-  expect(plan).toContain(`remove ${installPaths(w.env).opencodePlugin}: the Kinfold plugin shim`)
+  expect(plan).toContain(`remove ${installPaths(w.env).opencodePlugin}: the Kinfold OpenCode plugin file`)
   expect(plan).toContain('remove 6 Kinfold hook entries; every other key and hook kept')
   expect(plan).toContain('keychain: /usr/bin/security delete-generic-password -s kinfold -a openrouter')
 })
@@ -76,7 +76,7 @@ test('a second uninstall has nothing to do, and a foreign file by our plugin nam
   writeFileSync(installPaths(w.env).opencodePlugin, 'export default { id: "someone-else" }\n')
   w.out.length = 0
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
-  expect(w.out[0]).toContain('is not a Kinfold shim; left alone')
+  expect(w.out[0]).toContain('is not a Kinfold plugin file; left alone')
   expect(w.out).toContain('nothing to change')
   expect(existsSync(installPaths(w.env).opencodePlugin)).toBe(true)
 })

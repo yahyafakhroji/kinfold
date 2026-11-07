@@ -14,11 +14,12 @@
 // result; the warning below says so when the working tree has it tracked.
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { SQLITE3MC_ZIP_SHA256, sqlite3mcLibraryExtension } from '../src/sqlite/release'
 import { vec0AssetFor } from '../src/vectors/vec0-release'
 import { vec0FileName } from '../src/vectors/extension'
+import { bundlePlugin } from './bundle-plugin'
 
 const ROOT = join(import.meta.dir, '..')
 const OUT = join(ROOT, 'src', 'runtime', 'embedded.generated.ts')
@@ -56,21 +57,10 @@ function readRequired(path: string, hint: string): Uint8Array {
 }
 
 /** One self-contained OpenCode plugin file, which the program writes at install time. */
-async function bundlePlugin(target: string): Promise<string> {
+async function bundleFor(target: string): Promise<string> {
   const dir = join(CACHE_DIR, 'embedded', target)
   rmSync(dir, { recursive: true, force: true })
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
-  const result = await Bun.build({
-    entrypoints: [join(ROOT, 'src', 'plugins', 'opencode.ts')],
-    target: 'bun',
-    format: 'esm',
-    outdir: dir,
-    naming: 'opencode-plugin.js',
-  })
-  if (!result.success || result.outputs.length === 0) {
-    throw new Error(`could not bundle the OpenCode plugin for ${target}: ${result.logs.join(' | ')}`)
-  }
-  return result.outputs[0]!.path
+  return bundlePlugin(join(dir, 'opencode-plugin.js'))
 }
 
 async function generate(targetName: string): Promise<string> {
@@ -89,7 +79,7 @@ async function generate(targetName: string): Promise<string> {
   const vec0Sha256 = sha256(vec0)
   if (vec0Sha256 !== asset.fileSha256) throw new Error(`${vec0Path} does not match the pinned sqlite-vec sha256 for ${targetName}; nothing was written`)
 
-  const pluginPath = await bundlePlugin(targetName)
+  const pluginPath = await bundleFor(targetName)
   const dashboard = readdirSync(PUBLIC_DIR).filter((name) => /^[a-z0-9-]+\.(js|css|html)$/.test(name)).sort()
 
   const imports = [

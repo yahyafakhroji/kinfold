@@ -13,6 +13,8 @@
 
 import { join } from 'node:path'
 
+export { isCompiledProgram } from '../runtime/program'
+
 export type EntryRole = 'hook' | 'mcp' | 'daemon'
 
 export type InstallMode =
@@ -191,9 +193,4 @@ function shellWords(input: string): string[] | null {
   }
   if (inWord) words.push(current)
   return words
-}
-
-/** True when this process is a compiled program rather than a checkout run through bun. */
-export function isCompiledProgram(main: string = Bun.main): boolean {
-  return main.startsWith('/$bunfs/') || main.startsWith('B:\\~BUN\\')
 }

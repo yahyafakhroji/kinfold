@@ -1,10 +1,12 @@
 // OpenCode's per-request context injection. OpenCode calls the context hook on
 // every model request with that request's system parts; the pack is fetched
-// once per session, cached (the promise, so concurrent requests share one
-// fetch), and appended as one text part. Existing parts are never changed or
-// removed; if the same text is already there, nothing is added, so a reused
-// list never holds it twice. Compaction drops the session's cache, so the
-// next request fetches a pack that reflects what was learned meanwhile.
+// once per session (from the daemon only; the plugin never reads the store),
+// cached (the promise, so concurrent requests share one fetch), and appended as
+// one text part. Existing parts are never changed or removed; if the same text
+// is already there, nothing is added, so a reused list never holds it twice.
+// A down daemon or an empty answer leaves the request untouched.
+// Compaction drops the session's cache, so the next request fetches a pack that
+// reflects what was learned meanwhile.
 // Mid-session updates: a request may also ask for the prompt-time
 // delta (memory written since this session last received it), at most once
 // per request and at most once per DELTA_INTERVAL_MS per session. Each

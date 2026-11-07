@@ -56,8 +56,8 @@ function claudeActions(env: InstallEnv): Action[] {
 function opencodeActions(env: InstallEnv): Action[] {
   const paths = installPaths(env)
   const state = inspectShim(readTextOrNull(paths.opencodePlugin), paths.pluginEntry)
-  if (state === 'foreign') env.out(`opencode: ${paths.opencodePlugin} is not a Kinfold shim; left alone`)
-  return state === 'yes' || state === 'stale' ? [{ kind: 'remove', path: paths.opencodePlugin, summary: 'the Kinfold plugin shim' }] : []
+  if (state === 'foreign') env.out(`opencode: ${paths.opencodePlugin} is not a Kinfold plugin file; left alone`)
+  return state === 'yes' || state === 'stale' ? [{ kind: 'remove', path: paths.opencodePlugin, summary: 'the Kinfold OpenCode plugin file' }] : []
 }
 
 /** The default ref plus any ref a stored setting names. A dry run asks the daemon nothing (only /health is allowed). */

@@ -23,9 +23,8 @@ import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, seri
 import { bootoutArgv, bootstrapArgv, isAgentLoaded, legacyPrintArgv, plistContent } from './launch-agent'
 import { ChoiceError, type ChoiceOptions, type ObserverChoice, chooseObservers, describeInput } from './observer-choice'
 import { hmacMigrationActions } from './hmac-migration'
-import { hostHookInstallActions, hostVersionActions } from './host-wiring'
+import { hostHookInstallActions, hostVersionActions, opencodeInstallActions } from './host-wiring'
 import { claudeMcpInstallActions, claudeMcpState, opencodeMcpInstallActions } from './mcp-wiring'
-import { inspectShim, shimContent } from './opencode-shim'
 import { scanDataDirModes } from './permissions'
 import { type Action, runPlan, stopCommand } from './plan'
 import { legacyClaudeMcpRemoval, legacyShimRemoval, migrationFailureNote, renameMigrationActions } from './rename-migration'
@@ -125,20 +124,6 @@ function claudeActions(env: InstallEnv): Action[] {
   ]
 }
 
-function opencodeActions(env: InstallEnv): Action[] {
-  const paths = installPaths(env)
-  const before = readTextOrNull(paths.opencodePlugin)
-  const state = inspectShim(before, paths.pluginEntry)
-  if (state === 'foreign') throw new Error(`${paths.opencodePlugin} exists and is not a Kinfold plugin shim; move it away first`)
-  if (state === 'yes') {
-    env.out(`opencode: plugin shim already in ${paths.opencodePlugin}`)
-    return []
-  }
-  const content = shimContent(paths.pluginEntry)
-  const summary = `${describeTextChange(before, content) ?? 'unchanged'}${state === 'stale' ? ', replacing a stale plugin path' : ''}`
-  return [...mkdirIfMissing(paths.opencodePluginsDir, DIR_MODE), { kind: 'write', path: paths.opencodePlugin, content, mode: FILE_MODE, summary }]
-}
-
 /** `restart`: a loaded daemon is reloaded even with an unchanged plist, so it reads a new HMAC master. */
 function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeover: boolean, restart: boolean): Action[] {
   if (env.platform !== 'darwin') {
@@ -163,12 +148,13 @@ function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeove
  * failed step never leaves an agent without a memory server. Reads host
  * config files only, never the data dir or the Keychain.
  */
-function agentWiringActions(env: InstallEnv, hosts: readonly InstallHost[]): Action[] {
+async function agentWiringActions(env: InstallEnv, hosts: readonly InstallHost[]): Promise<Action[]> {
   const claudeState = hosts.includes('claude-code') ? claudeMcpState(env) : null
   const claudeLegacy = claudeState === 'yes' || claudeState === 'no' || claudeState === 'stale' ? legacyClaudeMcpRemoval(env) : []
+  const opencode = hosts.includes('opencode') ? [...(await opencodeInstallActions(env)), ...opencodeMcpInstallActions(env), ...legacyShimRemoval(env)] : []
   return [
     ...(hosts.includes('claude-code') ? [...claudeActions(env), ...claudeMcpInstallActions(env), ...claudeLegacy] : []),
-    ...(hosts.includes('opencode') ? [...opencodeActions(env), ...opencodeMcpInstallActions(env), ...legacyShimRemoval(env)] : []),
+    ...opencode,
   ]
 }
 
@@ -185,7 +171,7 @@ interface Prepared {
   situation: DaemonSituation
 }
 
-function buildPlan(env: InstallEnv, prepared: Prepared, choices: readonly ObserverChoice[], takeover: boolean): Action[] {
+async function buildPlan(env: InstallEnv, prepared: Prepared, choices: readonly ObserverChoice[], takeover: boolean): Promise<Action[]> {
   const { hosts, detections, situation } = prepared
   const hmac = hmacMigrationActions(env)
   const sqlite3mc = sqlite3mcInstallActions(env)
@@ -198,7 +184,7 @@ function buildPlan(env: InstallEnv, prepared: Prepared, choices: readonly Observ
     ...vec0.actions,
     ...hostVersionActions(env, detections),
     ...credentialActions(choices),
-    ...agentWiringActions(env, hosts),
+    ...(await agentWiringActions(env, hosts)),
     ...(hosts.includes('codex') ? hostHookInstallActions(env, 'codex') : []),
     ...(hosts.includes('cursor') ? hostHookInstallActions(env, 'cursor') : []),
     ...launchAgentActions(env, situation, takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon),
@@ -264,7 +250,7 @@ async function migrate(env: InstallEnv, prepared: Prepared, options: InstallOpti
   if (options.dryRun) {
     // The wiring steps read host config files only, which the migration leaves alone, so this part of the install plan is exact now.
     env.out('then, among the install steps, the agent wiring (old entries go only after the kinfold ones are written):')
-    await runPlan(env, agentWiringActions(env, prepared.hosts), true)
+    await runPlan(env, await agentWiringActions(env, prepared.hosts), true)
     env.out(`the other install steps are planned once the migration has run, against ${env.dataDir}; run kinfold install --dry-run again then to see them`)
     return null
   }
@@ -292,7 +278,7 @@ export async function install(env: InstallEnv, options: InstallOptions): Promise
     for (const choice of choices) {
       env.out(`observer ${choice.input.host}: ${describeInput(choice.input)} (${choice.origin}); ${choice.credentialNote}; check ${choice.check}`)
     }
-    await runPlan(env, buildPlan(env, prepared, choices, options.takeover), options.dryRun)
+    await runPlan(env, await buildPlan(env, prepared, choices, options.takeover), options.dryRun)
     if (options.dryRun && prepared.situation.foreign && !options.takeover) {
       for (const line of foreignDaemonMessage(prepared.situation)) env.out(line)
       env.out('a real install would stop here, before step 1.')
