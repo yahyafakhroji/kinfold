@@ -138,8 +138,11 @@ function claudeActions(env: InstallEnv): Action[] {
 
 /**
  * `restart`: a loaded daemon is reloaded even with an unchanged plist, so it
- * reads a new HMAC master. An unchanged plist on a loaded daemon plans nothing,
- * so a reinstall with nothing else to do is not a restart.
+ * reads a new HMAC master. An unchanged plist plans no write, but a loaded
+ * agent is always checked: launchd reports a crashed job as loaded while
+ * nothing answers, and running install again is how a user repairs that. When
+ * the daemon is already down at plan time the plan restarts it first, because
+ * a bare health wait would only report the failure.
  */
 function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeover: boolean, restart: boolean): Action[] {
   if (env.platform !== 'darwin') {
@@ -150,8 +153,12 @@ function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeove
   const content = plistContent(env)
   const change = describeTextChange(readTextOrNull(paths.launchAgentPlist), content)
   if (change === null && situation.loaded && !restart) {
-    env.out('LaunchAgent: loaded with an unchanged plist; nothing to restart')
-    return []
+    if (situation.health.up) {
+      env.out('LaunchAgent: loaded with an unchanged plist; checking that the daemon answers')
+      return [{ kind: 'wait-health' }]
+    }
+    env.out('LaunchAgent: loaded with an unchanged plist but the daemon is not answering; restarting it')
+    return [{ kind: 'launchctl', argv: bootoutArgv(env.uid) }, { kind: 'launchctl', argv: bootstrapArgv(env) }, { kind: 'wait-health' }]
   }
   const write: Action[] = change === null ? [] : [{ kind: 'write', path: paths.launchAgentPlist, content, mode: FILE_MODE, summary: change }]
   const wait: Action[] = situation.foreign && takeover ? [{ kind: 'wait-takeover', pid: situation.pid, port: situation.port }] : []
@@ -201,9 +208,11 @@ function sameSettings(row: ObserverSettingsRow | undefined, input: ObserverSetti
 
 /**
  * The settings PUTs this plan needs. A running daemon that already holds the
- * same row needs none, so a reinstall with nothing to change plans nothing.
- * A failed safety row or probe still gets a PUT: saving the row again is how a
- * user's reinstall clears a stopped observer.
+ * same row needs none, so a reinstall changes no settings. A failed safety row
+ * still gets a PUT: saving the row is what clears it in the daemon. A probe
+ * failure lives in the daemon's memory and only a successful probe clears it,
+ * so the PUT does not clear it; it is planned anyway so a reinstall does not
+ * hide the failure.
  */
 async function settingsActions(env: InstallEnv, choices: readonly ObserverChoice[]): Promise<Action[]> {
   const read = await getObserverSettings(env)

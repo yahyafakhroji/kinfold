@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { EmbeddedAssets } from '../runtime/embedded'
+import { DAEMON_INFO_FILE, DB_FILE } from '../store/data-dir'
 import { samHookGroup } from './claude-hooks'
 import { checkHealth, readDaemonInfo } from './daemon-client'
 import { entryCommand, installedProgramPath, type InstallMode } from './entry'
@@ -12,7 +13,7 @@ import { LAUNCHCTL } from './launch-agent'
 import { MCP_SERVER_NAME, claudeMcpEntry, openCodeMcpEntry } from './mcp-config'
 import { mcpPaths, mcpTarget } from './mcp-wiring'
 import { pluginFileContent, shimContent } from './opencode-shim'
-import { type FakeWorld, YES, createWorld } from './test-support'
+import { type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
 
 const CLAUDE = '2.1.310 (Claude Code)'
 const OPENCODE = 'opencode v2.1.4'
@@ -127,6 +128,11 @@ function launchctlVerbs(w: FakeWorld): string[] {
   return w.commands.filter((call) => call.argv[0] === LAUNCHCTL).map((call) => call.argv[1] ?? '')
 }
 
+/** Keychain operations that change an entry, as opposed to the reads a daemon start makes. */
+function keychainWrites(calls: FakeWorld['securityCalls'], from: number): FakeWorld['securityCalls'] {
+  return calls.slice(from).filter((call) => call.args[0] === '-i' || call.args.includes('delete-generic-password') || call.args.includes('add-generic-password'))
+}
+
 test('a program install rewrites only Kinfold entries, keeps foreign ones and backs each changed config up', async () => {
   const move = await checkoutInstalled()
   const { w, program } = move
@@ -147,7 +153,10 @@ test('a program install rewrites only Kinfold entries, keeps foreign ones and ba
   expect(w.commands.filter((call) => call.argv[0] === 'claude' && call.argv[1] === 'mcp').map((call) => call.argv[2])).toEqual(['remove', 'add-json'])
 
   const hookTarget = { entry: entryCommand(program, 'hook', w.dataDir) }
+  // The host writers re-serialise each config as two-space JSON, so the
+  // contract is the parsed content and key order, not the original bytes.
   const settings = JSON.parse(readFileSync(paths.claudeSettings, 'utf8')) as { theme: string; hooks: Record<string, unknown[]> }
+  expect(Object.keys(settings)).toEqual(['theme', 'hooks'])
   expect(settings.theme).toBe('dark')
   expect(settings.hooks.SessionStart).toEqual([FOREIGN_CLAUDE_HOOK, samHookGroup('SessionStart', hookTarget)])
   for (const event of ['UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd'] as const) {
@@ -217,11 +226,11 @@ test('the plist points at the program and the service restarts', async () => {
   expect((await checkHealth(w.env, readDaemonInfo(w.dataDir).port)).up).toBe(true)
 })
 
-test('the move plans no key, data folder or database action', async () => {
+test('the move plans no key, data folder or database action, and a real move applies none', async () => {
   const move = await checkoutInstalled()
   const { w, program } = move
   useMode(move, program)
-  const securityWrites = w.securityCalls.length
+  const securityCalls = w.securityCalls.length
   w.out.length = 0
   expect(await install(w.env, { ...programOptions(move), dryRun: true })).toBe(EXIT_OK)
 
@@ -236,8 +245,29 @@ test('the move plans no key, data folder or database action', async () => {
     expect(line).not.toMatch(/^  \d+\. chmod <dataDir>/)
     if (/^  \d+\. (mkdir|create|touch|write|remove|backup|chmod|move|link) /.test(line)) expect(line).not.toContain(w.dataDir)
   }
-  const writesAfter = w.securityCalls.slice(securityWrites).filter((call) => call.args[0] === '-i' || call.args.includes('delete-generic-password') || call.args.includes('add-generic-password'))
-  expect(writesAfter).toEqual([])
+  expect(keychainWrites(w.securityCalls, securityCalls)).toEqual([])
+
+  // The same checks against the applied plan, which is where a write would show.
+  const dataBefore = snapshotTree(w.dataDir)
+  const databaseInode = statSync(join(w.dataDir, DB_FILE)).ino
+  const refsBefore = [...w.keychain].sort()
+  w.out.length = 0
+  expect(await install(w.env, programOptions(move))).toBe(EXIT_OK)
+  expect(keychainWrites(w.securityCalls, securityCalls)).toEqual([])
+  expect([...w.keychain].sort()).toEqual(refsBefore)
+  // A move that copies the program restarts the daemon, so daemon.json and the
+  // store's WAL change with the new process. Every other file in the data dir
+  // keeps its bytes and mode, none appears or disappears, and the store file
+  // itself is the same file rather than a new one.
+  const dataAfter = snapshotTree(w.dataDir)
+  const runtime = new Set([DAEMON_INFO_FILE, DB_FILE, `${DB_FILE}-shm`, `${DB_FILE}-wal`])
+  const outsideBin = Object.keys({ ...dataBefore, ...dataAfter }).filter((path) => path !== '.' && path !== 'bin' && !path.startsWith('bin/'))
+  expect(outsideBin.filter((path) => dataAfter[path] === undefined)).toEqual([])
+  for (const path of outsideBin) {
+    expect(dataAfter[path]?.mode).toBe(dataBefore[path]?.mode)
+    if (!runtime.has(path)) expect(dataAfter[path]).toEqual(dataBefore[path])
+  }
+  expect(statSync(join(w.dataDir, DB_FILE)).ino).toBe(databaseInode)
 })
 
 test('a checkout install afterwards moves the wiring back', async () => {
@@ -259,11 +289,14 @@ test('a checkout install afterwards moves the wiring back', async () => {
   expect(JSON.parse(readFileSync(paths.cursorHooks, 'utf8')).hooks.beforeSubmitPrompt).toEqual([FOREIGN_CURSOR_HOOK, samItem(CURSOR_HOOK_SPEC, 'beforeSubmitPrompt', { entry: entryCommand(checkout, 'hook', w.dataDir, 'cursor') })])
   expect(readFileSync(paths.opencodePlugin, 'utf8')).toBe(shimContent(paths.pluginEntry))
   expect(JSON.parse(readFileSync(config.opencodeConfig, 'utf8')).mcp[MCP_SERVER_NAME]).toEqual(openCodeMcpEntry(mcpTarget(w.env)))
+  const claudeUser = JSON.parse(readFileSync(config.claudeUserConfig, 'utf8')) as { mcpServers: Record<string, unknown> }
+  expect(claudeUser.mcpServers['other-tool']).toEqual(FOREIGN_CLAUDE_MCP)
+  expect(claudeUser.mcpServers[MCP_SERVER_NAME]).toEqual(claudeMcpEntry(mcpTarget(w.env)))
   expect(readFileSync(paths.launchAgentPlist, 'utf8')).toContain(`<array><string>${checkout.bunPath}</string><string>${paths.daemonMain}</string></array>`)
   expect(planLines(w).some((line) => line.includes('install program'))).toBe(false)
 })
 
-test('a second program install with nothing to do plans no action', async () => {
+test('a second program install writes nothing but still checks the daemon', async () => {
   const move = await checkoutInstalled()
   const { w, program, checkout } = move
   useMode(move, program)
@@ -275,9 +308,30 @@ test('a second program install with nothing to do plans no action', async () => 
 
   w.out.length = 0
   w.commands.length = 0
-  expect(await install(w.env, { ...programOptions(move), dryRun: true })).toBe(EXIT_OK)
-  expect(w.out.at(-1)).toBe('plan: nothing to change')
+  expect(await install(w.env, programOptions(move))).toBe(EXIT_OK)
+  const lines = planLines(w)
+  expect(lines).toHaveLength(1)
+  expect(lines[0]).toContain('wait up to 15 s for GET /health')
+  expect(lines[0]).toEndWith('[done]')
+  expect(w.out).not.toContain('plan: nothing to change')
   expect(launchctlVerbs(w)).toEqual(['print'])
+})
+
+test('an unchanged plist with a dead daemon restarts the service', async () => {
+  const move = await checkoutInstalled()
+  const { w, program } = move
+  useMode(move, program)
+  expect(await install(w.env, programOptions(move))).toBe(EXIT_OK)
+  const port = readDaemonInfo(w.dataDir).port
+  await w.launchd.daemon?.stop()
+  w.launchd.daemon = null
+  expect((await checkHealth(w.env, port)).up).toBe(false)
+
+  w.commands.length = 0
+  expect(await install(w.env, programOptions(move))).toBe(EXIT_OK)
+  expect(launchctlVerbs(w)).toEqual(['print', 'bootout', 'bootstrap'])
+  expect(w.launchd.loaded).toBe(true)
+  expect((await checkHealth(w.env, readDaemonInfo(w.dataDir).port)).up).toBe(true)
 })
 
 test('a failed step leaves the old wiring working', async () => {
