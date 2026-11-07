@@ -11,9 +11,11 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { deprecationLines, envName, legacyName, readEnv } from '../env-names'
 import { LEGACY_LAUNCH_AGENT_LABEL } from '../names'
+import type { EmbeddedAssets } from '../runtime/embedded'
 import { DAEMON_INFO_FILE, DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
+import type { ObserverSettingsInput, ObserverSettingsRow } from '../store/observer-settings-store'
 import { mergeSamHooks } from './claude-hooks'
-import { type Health, checkHealth, readDaemonInfo, waitForHealth } from './daemon-client'
+import { type Health, checkHealth, getObserverSettings, readDaemonInfo, waitForHealth } from './daemon-client'
 import { dbKeyActions } from './db-encryption'
 import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
@@ -48,6 +50,8 @@ export interface InstallOptions extends ChoiceOptions {
   programSource?: string
   /** The release version to check against; the CLI leaves it out so src/version.ts decides. */
   releaseVersion?: string
+  /** The build's OpenCode plugin bundle; tests inject one because a checkout carries no embedded assets. */
+  opencodeAssets?: EmbeddedAssets | null
 }
 
 export interface DaemonSituation {
@@ -132,7 +136,11 @@ function claudeActions(env: InstallEnv): Action[] {
   ]
 }
 
-/** `restart`: a loaded daemon is reloaded even with an unchanged plist, so it reads a new HMAC master. */
+/**
+ * `restart`: a loaded daemon is reloaded even with an unchanged plist, so it
+ * reads a new HMAC master. An unchanged plist on a loaded daemon plans nothing,
+ * so a reinstall with nothing else to do is not a restart.
+ */
 function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeover: boolean, restart: boolean): Action[] {
   if (env.platform !== 'darwin') {
     env.out('LaunchAgent: macOS only; start the daemon yourself with `bun run daemon`')
@@ -141,6 +149,10 @@ function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeove
   const paths = installPaths(env)
   const content = plistContent(env)
   const change = describeTextChange(readTextOrNull(paths.launchAgentPlist), content)
+  if (change === null && situation.loaded && !restart) {
+    env.out('LaunchAgent: loaded with an unchanged plist; nothing to restart')
+    return []
+  }
   const write: Action[] = change === null ? [] : [{ kind: 'write', path: paths.launchAgentPlist, content, mode: FILE_MODE, summary: change }]
   const wait: Action[] = situation.foreign && takeover ? [{ kind: 'wait-takeover', pid: situation.pid, port: situation.port }] : []
   let load: Action[] = []
@@ -156,10 +168,10 @@ function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeove
  * failed step never leaves an agent without a memory server. Reads host
  * config files only, never the data dir or the Keychain.
  */
-async function agentWiringActions(env: InstallEnv, hosts: readonly InstallHost[]): Promise<Action[]> {
+async function agentWiringActions(env: InstallEnv, hosts: readonly InstallHost[], opencodeAssets?: EmbeddedAssets | null): Promise<Action[]> {
   const claudeState = hosts.includes('claude-code') ? claudeMcpState(env) : null
   const claudeLegacy = claudeState === 'yes' || claudeState === 'no' || claudeState === 'stale' ? legacyClaudeMcpRemoval(env) : []
-  const opencode = hosts.includes('opencode') ? [...(await opencodeInstallActions(env)), ...opencodeMcpInstallActions(env), ...legacyShimRemoval(env)] : []
+  const opencode = hosts.includes('opencode') ? [...(await opencodeInstallActions(env, opencodeAssets)), ...opencodeMcpInstallActions(env), ...legacyShimRemoval(env)] : []
   return [
     ...(hosts.includes('claude-code') ? [...claudeActions(env), ...claudeMcpInstallActions(env), ...claudeLegacy] : []),
     ...opencode,
@@ -177,6 +189,32 @@ interface Prepared {
   hosts: InstallHost[]
   detections: HostDetection[]
   situation: DaemonSituation
+}
+
+function sameSettings(row: ObserverSettingsRow | undefined, input: ObserverSettingsInput): boolean {
+  return row !== undefined
+    && row.provider === input.provider
+    && row.model === input.model
+    && row.credentialRef === input.credentialRef
+    && row.enabled === input.enabled
+}
+
+/**
+ * The settings PUTs this plan needs. A running daemon that already holds the
+ * same row needs none, so a reinstall with nothing to change plans nothing.
+ * A failed safety row or probe still gets a PUT: saving the row again is how a
+ * user's reinstall clears a stopped observer.
+ */
+async function settingsActions(env: InstallEnv, choices: readonly ObserverChoice[]): Promise<Action[]> {
+  const read = await getObserverSettings(env)
+  if (!read.ok) return choices.map((choice): Action => ({ kind: 'settings-put', input: choice.input }))
+  const rows = new Map(read.view.rows.map((row) => [row.host, row]))
+  const failed = new Set<string>(read.view.safety.filter((row) => row.status === 'failed').map((row) => row.provider))
+  for (const probe of read.view.probe) failed.add(probe.provider)
+  return choices.flatMap((choice) => {
+    if (sameSettings(rows.get(choice.input.host), choice.input) && !failed.has(choice.input.provider)) return []
+    return [{ kind: 'settings-put', input: choice.input } as const]
+  })
 }
 
 interface InstallPlan {
@@ -217,11 +255,11 @@ async function buildPlan(
       ...program.actions,
       ...hostVersionActions(env, detections),
       ...credentialActions(choices),
-      ...(await agentWiringActions(env, hosts)),
+      ...(await agentWiringActions(env, hosts, options.opencodeAssets)),
       ...(hosts.includes('codex') ? hostHookInstallActions(env, 'codex') : []),
       ...(hosts.includes('cursor') ? hostHookInstallActions(env, 'cursor') : []),
       ...launchAgentActions(env, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon),
-      ...choices.map((choice): Action => ({ kind: 'settings-put', input: choice.input })),
+      ...(await settingsActions(env, choices)),
       ...hmac.cleanup,
     ],
     stopsService: stopped,
@@ -294,7 +332,7 @@ async function migrate(env: InstallEnv, prepared: Prepared, options: InstallOpti
     env.out(program.actions.length > 0
       ? 'then, among the install steps, the program copy and the agent wiring (old entries go only after the kinfold ones are written):'
       : 'then, among the install steps, the agent wiring (old entries go only after the kinfold ones are written):')
-    await runPlan(env, [...program.actions, ...(await agentWiringActions(env, prepared.hosts))], true)
+    await runPlan(env, [...program.actions, ...(await agentWiringActions(env, prepared.hosts, options.opencodeAssets))], true)
     env.out(`the other install steps are planned once the migration has run, against ${env.dataDir}; run kinfold install --dry-run again then to see them`)
     return null
   }
