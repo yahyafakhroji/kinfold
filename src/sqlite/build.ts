@@ -77,12 +77,21 @@ function readMembers(zip: Uint8Array, names: readonly string[]): Map<string, Uin
   return out
 }
 
-/** The compiler command for this platform, or null where local builds are not set up (Windows uses a prebuilt DLL, E4). */
+/** The compiler command for this platform, or null on a platform Kinfold does not build for. */
 export function compileCommand(platform: string, source: string, output: string, cc: string): string[] | null {
   const common = ['-O2', '-fPIC', ...SQLITE3MC_DEFINES, '-o', output, source, '-lm']
   if (platform === 'darwin') return [cc, '-dynamiclib', ...common]
   if (platform === 'linux') return [cc, '-shared', '-Wl,-Bsymbolic', ...common, '-lpthread']
+  // Windows has no -fPIC or -lm, and MinGW gcc links a DLL that exports every global
+  // symbol; MSVC would need a .def file to export the SQLite API. libgcc is linked
+  // statically so the DLL does not depend on the MinGW runtime being installed.
+  if (platform === 'win32') return [cc, '-shared', '-O2', ...SQLITE3MC_DEFINES, '-o', output, source, '-static-libgcc']
   return null
+}
+
+/** The C compiler assumed when the caller names none. */
+export function defaultCompiler(platform: string): string {
+  return platform === 'win32' ? 'gcc' : 'cc'
 }
 
 export interface BuildInput {
@@ -101,8 +110,9 @@ export function buildSqlite3mc(input: BuildInput): string {
   mkdirSync(input.workDir, { recursive: true, mode: 0o700 })
   if (readdirSync(input.workDir).length > 0) throw new BuildError('build directory is not empty')
   for (const [name, bytes] of zipMembers(input.zip, AMALGAMATION_MEMBERS)) writeFileSync(join(input.workDir, name), bytes, { mode: 0o600 })
-  const command = compileCommand(input.platform ?? process.platform, join(input.workDir, 'sqlite3mc_amalgamation.c'), input.output, input.cc ?? 'cc')
-  if (command === null) throw new BuildError(`no local sqlite3mc build for ${input.platform ?? process.platform}`)
+  const platform = input.platform ?? process.platform
+  const command = compileCommand(platform, join(input.workDir, 'sqlite3mc_amalgamation.c'), input.output, input.cc ?? defaultCompiler(platform))
+  if (command === null) throw new BuildError(`no local sqlite3mc build for ${platform}`)
   const result = Bun.spawnSync(command, { cwd: input.workDir, stdout: 'ignore', stderr: 'pipe', timeout: BUILD_TIMEOUT_MS })
   if (result.exitCode !== 0) {
     const tail = result.stderr.toString().trim().split('\n').slice(-3).join(' | ')

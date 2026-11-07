@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { deflateRawSync } from 'node:zlib'
-import { BuildError, buildSqlite3mc, compileCommand, zipMembers } from './build'
+import { BuildError, buildSqlite3mc, compileCommand, defaultCompiler, zipMembers } from './build'
 
 interface Entry { name: string; data: Uint8Array; deflate?: boolean }
 
@@ -63,11 +63,21 @@ test('the build refuses a zip that is not the pinned one before it writes anythi
   expect(() => buildSqlite3mc({ zip: text('x'), workDir: '/nonexistent/never-created', output: '/nonexistent/out' })).toThrow('does not match the pinned sha256')
 })
 
-test('compile commands exist for macOS and Linux only, with FTS5 and dbstat on', () => {
+test('compile commands exist for macOS, Linux and Windows, with FTS5 and dbstat on', () => {
   const mac = compileCommand('darwin', 'in.c', 'out', 'cc')!
   expect(mac.slice(0, 2)).toEqual(['cc', '-dynamiclib'])
   expect(mac).toContain('-DSQLITE_ENABLE_FTS5')
   expect(mac).toContain('-DSQLITE_ENABLE_DBSTAT_VTAB')
   expect(compileCommand('linux', 'in.c', 'out', 'cc')).toContain('-Wl,-Bsymbolic')
-  expect(compileCommand('win32', 'in.c', 'out', 'cc')).toBeNull()
+  const win = compileCommand('win32', 'in.c', 'out.dll', 'gcc')!
+  expect(win.slice(0, 2)).toEqual(['gcc', '-shared'])
+  expect(win).toContain('-DSQLITE_ENABLE_FTS5')
+  expect(win).toContain('-DSQLITE_ENABLE_DBSTAT_VTAB')
+  expect(compileCommand('freebsd', 'in.c', 'out', 'cc')).toBeNull()
+})
+
+test('the default compiler is gcc on Windows, since MinGW exports every global symbol of a DLL', () => {
+  expect(defaultCompiler('win32')).toBe('gcc')
+  expect(defaultCompiler('darwin')).toBe('cc')
+  expect(defaultCompiler('linux')).toBe('cc')
 })
