@@ -6,10 +6,11 @@
 // entries so the CLI observers find `claude`, `codex` (and the `node` its
 // `#!/usr/bin/env node` shebang runs on) and `opencode`.
 
-import { delimiter, dirname, isAbsolute } from 'node:path'
+import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { envName } from '../env-names'
 import { LEGACY_LAUNCH_AGENT_LABEL } from '../names'
 import { type InstallEnv, LAUNCH_AGENT_LABEL, installPaths } from './env'
+import { entryCommand } from './entry'
 
 /** 0o077 as launchd's decimal Umask key. */
 const OWNER_ONLY_UMASK = 63
@@ -36,12 +37,12 @@ export type Which = (command: string, path: string) => string | null
 const bunWhich: Which = (command, path) => Bun.which(command, { PATH: path })
 
 /**
- * The bun directory, the directories holding the daemon's tools on the
+ * The launcher's directory, the directories holding the daemon's tools on the
  * installer's PATH, then the system dirs. Copying the whole PATH made the plist
  * depend on which shell ran the installer (`bun run` alone adds seven
  * node_modules/.bin entries), so every re-install rewrote it and restarted the daemon.
  */
-export function launchdPath(env: Pick<InstallEnv, 'bunPath' | 'pathEnv'>, which: Which = bunWhich): string {
+export function launchdPath(env: { bunPath: string; pathEnv: string }, which: Which = bunWhich): string {
   const tools = DAEMON_TOOLS.flatMap((tool) => {
     const found = which(tool, env.pathEnv)
     if (found === null) return []
@@ -52,8 +53,9 @@ export function launchdPath(env: Pick<InstallEnv, 'bunPath' | 'pathEnv'>, which:
   return [...new Set(entries.filter((entry) => entry !== '' && isAbsolute(entry)))].join(delimiter)
 }
 
-export function plistContent(env: Pick<InstallEnv, 'bunPath' | 'pathEnv' | 'homeDir' | 'dataDir' | 'projectRoot'>): string {
-  const paths = installPaths(env)
+export function plistContent(env: Pick<InstallEnv, 'mode' | 'pathEnv' | 'homeDir' | 'dataDir'>): string {
+  const daemon = entryCommand(env.mode, 'daemon', env.dataDir)
+  const logFile = join(env.dataDir, 'logs', 'daemon.log')
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -61,18 +63,18 @@ export function plistContent(env: Pick<InstallEnv, 'bunPath' | 'pathEnv' | 'home
     '<dict>',
     `  <key>Label</key>${str(LAUNCH_AGENT_LABEL)}`,
     '  <key>ProgramArguments</key>',
-    `  <array>${str(env.bunPath)}${str(paths.daemonMain)}</array>`,
+    `  <array>${[daemon.command, ...daemon.args].map(str).join('')}</array>`,
     '  <key>RunAtLoad</key><true/>',
     '  <key>KeepAlive</key><true/>',
     `  <key>WorkingDirectory</key>${str(env.dataDir)}`,
-    `  <key>StandardOutPath</key>${str(paths.logFile)}`,
-    `  <key>StandardErrorPath</key>${str(paths.logFile)}`,
+    `  <key>StandardOutPath</key>${str(logFile)}`,
+    `  <key>StandardErrorPath</key>${str(logFile)}`,
     `  <key>Umask</key><integer>${OWNER_ONLY_UMASK}</integer>`,
     '  <key>ProcessType</key><string>Background</string>',
     '  <key>EnvironmentVariables</key>',
     '  <dict>',
     `    <key>${envName('DATA_DIR')}</key>${str(env.dataDir)}`,
-    `    <key>PATH</key>${str(launchdPath(env))}`,
+    `    <key>PATH</key>${str(launchdPath({ bunPath: daemon.command, pathEnv: env.pathEnv }))}`,
     `    <key>HOME</key>${str(env.homeDir)}`,
     '  </dict>',
     '</dict>',

@@ -15,6 +15,7 @@ import { isAbsolute, resolve } from 'node:path'
 import type { Parsed } from '../context/types'
 import { envName } from '../env-names'
 import type { InstallEnv } from '../install/env'
+import type { InstallMode } from '../install/entry'
 import { resolveDataDir, resolveInstallDataDir } from '../store/data-dir'
 import { VERSION } from '../version'
 
@@ -197,21 +198,29 @@ export function dataDirFor(argv: readonly string[], env: Readonly<Record<string,
 }
 
 async function systemEnv(argv: readonly string[]): Promise<InstallEnv> {
-  const [{ createCliRunner, createRunner }, { NO_CREDENTIALS }, { createSecurityRunner }, { createCommandRunner, createPromptIO }] = await Promise.all([
+  const [{ createCliRunner, createRunner }, { NO_CREDENTIALS }, { createSecurityRunner }, { createCommandRunner, createPromptIO }, { installedProgramPath, isCompiledProgram }] = await Promise.all([
     import('../observer/runners'),
     import('../secrets/credentials'),
     import('../secrets/keychain-writer'),
     import('../install/system'),
+    import('../install/entry'),
   ])
   const homeDir = homedir()
   const dataDir = dataDirFor(argv, process.env, homeDir)
   const pathEnv = process.env.PATH ?? '/usr/bin:/bin'
+  const projectRoot = resolve(import.meta.dir, '..', '..')
+  // A compiled program wires hosts to the program installed in the data
+  // folder, not to where this copy happens to run; a checkout run keeps
+  // pointing bun at the checkout's scripts.
+  const mode: InstallMode = isCompiledProgram()
+    ? { kind: 'program', binPath: installedProgramPath(dataDir, process.platform) }
+    : { kind: 'checkout', bunPath: process.execPath, projectRoot }
   return {
     homeDir,
     dataDir,
     platform: process.platform,
-    bunPath: process.execPath,
-    projectRoot: resolve(import.meta.dir, '..', '..'),
+    mode,
+    projectRoot,
     cwd: process.cwd(),
     codexHomeEnv: process.env.CODEX_HOME,
     arch: process.arch,

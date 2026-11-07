@@ -7,6 +7,7 @@
 
 import { join } from 'node:path'
 import type { InstallEnv } from './env'
+import { entryCommand, entryPath } from './entry'
 import { plannedBackup, readJsonObject, serializeJson } from './files'
 import { LEGACY_MCP_SERVER_NAME } from '../names'
 import { MCP_SERVER_NAME, type McpEntryState, type McpTarget, claudeMcpEntry, hasOurMcpEntryNamed, inspectMcpEntry, mergeMcpEntry, removeMcpEntry, removeMcpEntryNamed } from './mcp-config'
@@ -27,8 +28,10 @@ export function mcpPaths(env: Pick<InstallEnv, 'homeDir'>): McpPaths {
   return { claudeUserConfig: join(env.homeDir, '.claude.json'), opencodeConfig: join(opencodeDir, 'opencode.json'), opencodeDir }
 }
 
-export function mcpTarget(env: Pick<InstallEnv, 'bunPath' | 'projectRoot'>): McpTarget {
-  return { bunPath: env.bunPath, serverScript: join(env.projectRoot, 'src', 'mcp', 'server.ts') }
+export function mcpTarget(env: Pick<InstallEnv, 'mode' | 'dataDir'>): McpTarget {
+  const entry = entryCommand(env.mode, 'mcp', env.dataDir)
+  const script = entryPath(entry.command, entry.args) ?? entry.command
+  return { bunPath: env.mode.kind === 'checkout' ? env.mode.bunPath : entry.command, serverScript: script, entry }
 }
 
 const claudeAdd = (target: McpTarget): Action => ({

@@ -245,7 +245,8 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
   } as unknown as FakeWorld
   world.env = {
     // An arch with no pinned sqlite-vec build: a fake world never plans the real GitHub download (vec0-install.test.ts covers that step).
-    homeDir: home, dataDir: world.dataDir, platform: options.platform ?? 'darwin', arch: 'test-arch', bunPath: BUN, projectRoot: world.projectRoot, cwd, uid: UID,
+    homeDir: home, dataDir: world.dataDir, platform: options.platform ?? 'darwin', arch: 'test-arch', projectRoot: world.projectRoot, cwd, uid: UID,
+    mode: { kind: 'checkout', bunPath: BUN, projectRoot: world.projectRoot },
     pathEnv: '/opt/fake/bin:relative/bin:/usr/bin', run: fakeRun(world, options), security: fakeSecurity({ refs: world.keychain, values: world.keychainValues }, { refs: world.legacyKeychain, values: world.legacyKeychainValues }, world.securityCalls),
     now: () => (clock += 100), sleep: async () => {}, fetch: guardedFetch(world.allowedPorts, world.fetches), out: (line) => world.out.push(line),
     io: {

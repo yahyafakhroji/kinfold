@@ -1,13 +1,15 @@
 // Everything the installer touches outside its own code arrives in one
-// InstallEnv value: the home and data dirs, the platform, the bun binary, the
-// checkout, the command runner, the keychain command, the clock, HTTP and the
-// prompts. Only src/cli/kinfold.ts builds the real one; tests build a temp home
-// with fakes, so no test can reach ~/.claude, launchctl or the keychain.
+// InstallEnv value: the home and data dirs, the platform, the install mode
+// (a checkout run through bun or an installed program), the command runner,
+// the keychain command, the clock, HTTP and the prompts. Only
+// src/cli/kinfold.ts builds the real one; tests build a temp home with fakes,
+// so no test can reach ~/.claude, launchctl or the keychain.
 
 import { join } from 'node:path'
 import { HOST_VERSIONS_FILE } from '../adapters/host-version'
 import { LAUNCH_AGENT_LABEL, LEGACY_DATA_DIR_NAME, LEGACY_LAUNCH_AGENT_LABEL, LEGACY_PLUGIN_FILE_NAME, PLUGIN_FILE_NAME } from '../names'
 import { resolveCodexHome } from './codex-home'
+import type { InstallMode } from './entry'
 import type { CredentialProvider } from '../secrets/credentials'
 import type { SecurityRunner } from '../secrets/keychain-writer'
 import type { BuildInput } from '../sqlite/build'
@@ -49,9 +51,9 @@ export interface InstallEnv {
   homeDir: string
   dataDir: string
   platform: NodeJS.Platform
-  /** Absolute bun binary written into hooks and the LaunchAgent (process.execPath by default). */
-  bunPath: string
-  /** The checkout whose src/ the hooks, plugin and daemon run from. */
+  /** The checkout or installed program every host entry runs (entry.ts). */
+  mode: InstallMode
+  /** The checkout whose src/ the plugin shim and legacy paths use; program installs keep it for those developer paths. */
   projectRoot: string
   /** Where duplicate project wiring is looked for. */
   cwd: string

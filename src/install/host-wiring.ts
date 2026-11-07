@@ -15,6 +15,7 @@ import { normalizeVersion, parseHostVersions, serializeHostVersions, statMtime, 
 import { DATA_FILE_MODE } from '../store/data-dir'
 import type { HostDetection } from './detect'
 import { type InstallEnv, codexHomeProblem, errorMessage, installPaths } from './env'
+import { entryCommand, entryIdentity } from './entry'
 import { plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, type CommandHookHost, type CommandHookSpec, inspectHostHooks, mergeHostHooks, removeHostHooks } from './host-hooks'
 import type { Action } from './plan'
@@ -41,7 +42,7 @@ export function hostHookInstallActions(env: InstallEnv, host: CommandHookHost): 
   const { dir, file: path } = hostFiles(env, host)
   if (host === 'codex' && env.codexHomeEnv !== undefined && env.codexHomeEnv !== '') env.out(`codex: CODEX_HOME is set; using ${path}`)
   const file = readJsonObject(path)
-  const merge = mergeHostHooks(HOST_HOOK_SPECS[host], file.exists ? file.value : {}, { bunPath: env.bunPath, hookScript: installPaths(env).hookScript })
+  const merge = mergeHostHooks(HOST_HOOK_SPECS[host], file.exists ? file.value : {}, { entry: entryCommand(env.mode, 'hook', env.dataDir, host) })
   if (!merge.changed) {
     env.out(`${host}: hooks already wired in ${path}`)
     return []
@@ -88,7 +89,7 @@ export function hostWiringLine(env: InstallEnv, host: CommandHookHost): string {
   if (problem !== null) return `unknown (${problem}) in ${path}`
   try {
     const file = readJsonObject(path)
-    return `${file.exists ? inspectHostHooks(HOST_HOOK_SPECS[host], file.value, installPaths(env).hookScript) : 'no (no hooks.json)'} in ${path}`
+    return `${file.exists ? inspectHostHooks(HOST_HOOK_SPECS[host], file.value, entryIdentity(env.mode, 'hook', env.dataDir, host)) : 'no (no hooks.json)'} in ${path}`
   } catch (error: unknown) {
     return `unknown (${errorMessage(error)}) in ${path}`
   }

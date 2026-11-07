@@ -4,23 +4,31 @@
 // in ~/.claude.json, project scope in .mcp.json) as { type: 'stdio', command,
 // args }. OpenCode 2.x keeps them under `mcp` in opencode.json as
 // { type: 'local', command: [bin, ...args] }, the shape claude-mem's
-// OpenCodeInstaller writes. OpenCode does no path substitution, so both use
-// the absolute bun and the absolute src/mcp/server.ts. An entry is ours when
-// it runs bun with a script ending in /src/mcp/server.ts; an entry under our
-// name that runs anything else is foreign and is never replaced or removed.
+// OpenCodeInstaller writes. The command comes from entry.ts: the checkout's
+// bun on src/mcp/server.ts, or the installed program with --data-dir before
+// `mcp`. An entry is ours when it runs one of those; an entry under our name
+// that runs anything else is foreign and is never replaced or removed.
 
 import { isRecord } from '../contract/event'
 import { MCP_HOST_ENV } from '../mcp/read-reporter'
 import { MCP_SERVER_NAME } from '../names'
 import type { Settings } from './claude-hooks'
+import { entryPath, entryRole, type EntryCommand } from './entry'
 
 export { MCP_SERVER_NAME }
-const SERVER_SCRIPT_SUFFIX = '/src/mcp/server.ts'
-const BUN_COMMAND = /(^|\/)bun$/
 
 export interface McpTarget {
-  bunPath: string
-  serverScript: string
+  /** The checkout's bun; used with serverScript when entry is absent. */
+  bunPath?: string
+  serverScript?: string
+  /** The command an install writes, from entry.ts. */
+  entry?: EntryCommand
+}
+
+function mcpEntry(target: McpTarget): EntryCommand {
+  if (target.entry !== undefined) return target.entry
+  if (target.bunPath === undefined || target.serverScript === undefined) throw new Error('an MCP target needs an entry or a checkout path')
+  return { command: target.bunPath, args: [target.serverScript] }
 }
 
 export type McpHost = 'claude-code' | 'opencode'
@@ -48,11 +56,13 @@ const SECTION: Readonly<Record<McpHost, string>> = { 'claude-code': 'mcpServers'
  * reads as stale, and the next `kinfold install` replaces it.
  */
 export function claudeMcpEntry(target: McpTarget): Record<string, unknown> {
-  return { type: 'stdio', command: target.bunPath, args: [target.serverScript], env: { [MCP_HOST_ENV]: 'claude-code' } }
+  const entry = mcpEntry(target)
+  return { type: 'stdio', command: entry.command, args: entry.args, env: { [MCP_HOST_ENV]: 'claude-code' } }
 }
 
 export function openCodeMcpEntry(target: McpTarget): Record<string, unknown> {
-  return { type: 'local', command: [target.bunPath, target.serverScript], enabled: true, environment: { [MCP_HOST_ENV]: 'opencode' } }
+  const entry = mcpEntry(target)
+  return { type: 'local', command: [entry.command, ...entry.args], enabled: true, environment: { [MCP_HOST_ENV]: 'opencode' } }
 }
 
 export function mcpEntryFor(host: McpHost, target: McpTarget): Record<string, unknown> {
@@ -67,13 +77,15 @@ function argvOf(entry: unknown): readonly unknown[] | null {
   return [entry.command, ...(Array.isArray(entry.args) ? entry.args : [])]
 }
 
-/** The server.ts path an entry runs, or null when it is not our server. */
+/** The server.ts path or program path an entry runs, or null when it is not our MCP server. */
 export function mcpServerScript(entry: unknown): string | null {
   const argv = argvOf(entry)
-  if (argv === null || argv.length !== 2) return null
-  const [command, script] = argv
-  if (typeof command !== 'string' || typeof script !== 'string') return null
-  return BUN_COMMAND.test(command) && script.endsWith(SERVER_SCRIPT_SUFFIX) ? script : null
+  if (argv === null) return null
+  const words = argv.filter((arg): arg is string => typeof arg === 'string')
+  if (words.length !== argv.length || words.length === 0) return null
+  const [command, ...args] = words
+  if (command === undefined) return null
+  return entryRole(command, args) === 'mcp' ? entryPath(command, args) : null
 }
 
 function sectionOf(config: Settings, host: McpHost): Readonly<Record<string, unknown>> {

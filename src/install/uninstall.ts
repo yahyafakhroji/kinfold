@@ -1,6 +1,8 @@
 // `kinfold uninstall`: unload and remove the LaunchAgent, take our hook entries out
-// of ~/.claude/settings.json and remove the OpenCode shim. Every other entry
-// stays. The data dir and the keychain entries stay too, because they hold the
+// of ~/.claude/settings.json and remove the OpenCode shim. Hook and MCP entries
+// are found by what they run (entry.ts), so a checkout install and an installed
+// program are removed the same way. Every other entry stays. The data dir and
+// the keychain entries stay too, because they hold the
 // user's memory and keys; the command prints how to remove them, and
 // --remove-credentials deletes our credential entries. The HMAC master and
 // legacy key stay with the data dir, since stored refs need them,

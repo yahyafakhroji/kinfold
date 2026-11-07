@@ -18,6 +18,7 @@ import { dbKeyActions } from './db-encryption'
 import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
 import { type InstallEnv, errorMessage, installPaths } from './env'
+import { entryCommand } from './entry'
 import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import { bootoutArgv, bootstrapArgv, isAgentLoaded, legacyPrintArgv, plistContent } from './launch-agent'
 import { ChoiceError, type ChoiceOptions, type ObserverChoice, chooseObservers, describeInput } from './observer-choice'
@@ -106,7 +107,7 @@ function credentialActions(choices: readonly ObserverChoice[]): Action[] {
 function claudeActions(env: InstallEnv): Action[] {
   const paths = installPaths(env)
   const file = readJsonObject(paths.claudeSettings)
-  const merge = mergeSamHooks(file.exists ? file.value : {}, { bunPath: env.bunPath, hookScript: paths.hookScript })
+  const merge = mergeSamHooks(file.exists ? file.value : {}, { entry: entryCommand(env.mode, 'hook', env.dataDir) })
   if (!merge.changed) {
     env.out(`claude-code: hooks already wired in ${paths.claudeSettings}`)
     return []
