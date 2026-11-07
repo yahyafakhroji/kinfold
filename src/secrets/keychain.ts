@@ -5,6 +5,7 @@
 // The value comes back on stdout and goes to the caller only. Errors carry the
 // exit code, never stdout or stderr, so nothing here can leak the value.
 
+import { readEnv } from '../env-names'
 import { LEGACY_KEYCHAIN_SERVICE } from '../names'
 import { type CredentialProvider, KEYCHAIN_SERVICE, NO_CREDENTIALS, assertCredentialRef } from './credentials'
 
@@ -51,7 +52,16 @@ export function createKeychainProvider(run: SecurityCommand = runSecurity): Cred
   }
 }
 
-/** The keychain on macOS; elsewhere every credential is missing until a libsecret provider exists. */
-export function platformCredentialProvider(platform: NodeJS.Platform = process.platform): CredentialProvider {
-  return platform === 'darwin' ? createKeychainProvider() : NO_CREDENTIALS
+/**
+ * The keychain on macOS; elsewhere every credential is missing until a libsecret
+ * provider exists. KINFOLD_DB_KEYSTORE=none under bun test turns the keychain
+ * off too, as it does the database key store, so a test never reads the real one.
+ */
+export function platformCredentialProvider(
+  platform: NodeJS.Platform = process.platform,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): CredentialProvider {
+  if (platform !== 'darwin') return NO_CREDENTIALS
+  if (readEnv(env, 'DB_KEYSTORE') === 'none' && env.NODE_ENV === 'test') return NO_CREDENTIALS
+  return createKeychainProvider()
 }

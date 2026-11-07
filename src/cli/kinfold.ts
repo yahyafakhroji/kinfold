@@ -6,9 +6,9 @@
 //
 // Only the store location is read here at startup. Each command's modules are
 // imported when that command runs, so a hook pays for the hook alone and never
-// the installer, keychain or sqlite build. `--data-dir` is handled before the
-// subcommand: it is the path every command then resolves, so nothing can fall
-// back to another store mid-run.
+// the installer, keychain or sqlite build. `--data-dir` is read from the whole
+// argv and removed before the command runs: it is the path every command then
+// resolves, so nothing can fall back to another store mid-run.
 
 import { homedir } from 'node:os'
 import { isAbsolute, resolve } from 'node:path'
@@ -51,20 +51,23 @@ export interface GlobalArgs {
   /** Set by `--data-dir`; wins over KINFOLD_DATA_DIR and SAM_DATA_DIR. */
   dataDir: string | null
   version: boolean
-  /** Everything from the subcommand on, with the global flags removed. */
+  /** The command and its arguments, with the global flags removed. */
   argv: string[]
 }
 
-/** Reads the flags that must come before the subcommand; anything else ends the scan. */
+/**
+ * Reads the global flags wherever they appear, so a hook or a daemon can take
+ * `--data-dir` after its name too. The rest keeps its order and reaches the
+ * command untouched.
+ */
 export function parseGlobalArgs(argv: readonly string[]): Parsed<GlobalArgs> {
   let dataDir: string | null = null
   let version = false
-  let index = 0
-  while (index < argv.length) {
+  const rest: string[] = []
+  for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] ?? ''
     if (arg === '--version') {
       version = true
-      index += 1
       continue
     }
     if (arg === '--data-dir' || arg.startsWith('--data-dir=')) {
@@ -74,12 +77,12 @@ export function parseGlobalArgs(argv: readonly string[]): Parsed<GlobalArgs> {
       if (!isAbsolute(value)) return { ok: false, error: '--data-dir must be an absolute path' }
       if (dataDir !== null) return { ok: false, error: '--data-dir given twice' }
       dataDir = value
-      index += inline ? 1 : 2
+      if (!inline) index += 1
       continue
     }
-    break
+    rest.push(arg)
   }
-  return { ok: true, value: { dataDir, version, argv: argv.slice(index) } }
+  return { ok: true, value: { dataDir, version, argv: rest } }
 }
 
 /**

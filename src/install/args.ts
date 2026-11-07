@@ -62,7 +62,7 @@ export const USAGE = [
   '  mcp        answer the MCP stdio protocol on stdin and stdout',
   '  daemon     run the local daemon on loopback',
   '  observe    <session-id>   run the observer once for one session',
-  '  --data-dir <path>   the data folder for this process; wins over KINFOLD_DATA_DIR',
+  '  --data-dir <path>   the data folder for this process; wins over KINFOLD_DATA_DIR; may come before or after the command',
   '  --version  print the version of this build',
 ].join('\n')
 

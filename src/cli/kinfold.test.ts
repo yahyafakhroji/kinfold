@@ -1,11 +1,12 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { USAGE, parseArgs } from '../install/args'
 import { HOOK_TIMEOUT_S } from '../install/claude-hooks'
 import { EXIT_USAGE } from '../install/install'
 import { type FakeWorld, createWorld } from '../install/test-support'
+import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
 import { VERSION } from '../version'
 import { type SubcommandRunners, dataDirFor, runKinfold } from './kinfold'
 
@@ -198,6 +199,139 @@ test('the hook subcommand loads no installer module', async () => {
     expect(exitCode).toBe(0)
     expect(stderr).toContain('not a JSON hook payload')
     expect(JSON.parse(readFileSync(loadedFile, 'utf8'))).toEqual([])
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('--data-dir after the subcommand also reaches it', async () => {
+  world = createWorld()
+  let seen: string | undefined
+  const hook = async (): Promise<void> => {
+    seen = process.env.KINFOLD_DATA_DIR
+  }
+  expect(await runKinfold(['hook', '--data-dir', '/tmp/a b'], world.env, { ...recordRunners([]), hook })).toBe(0)
+  expect(seen).toBe('/tmp/a b')
+})
+
+test('install --data-dir uses the given folder for a dry run', async () => {
+  world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', keychainRefs: ['openrouter'] })
+  const root = mkdtempSync(join(tmpdir(), 'kinfold-install-dir-'))
+  const dir = join(root, 'data')
+  try {
+    expect(await runKinfold(['install', '--data-dir', dir, '--yes', '--dry-run'], world.env)).toBe(0)
+    const plan = world.out.join('\n')
+    expect(plan).toContain(`mkdir ${dir} (mode 0700)`)
+    expect(existsSync(join(dir, 'memory.db'))).toBe(false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('the daemon subcommand stays up and stops cleanly on SIGTERM', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'kinfold-daemon-cli-'))
+  const dataDir = join(root, 'data')
+  const child = Bun.spawn([process.execPath, join(import.meta.dir, 'kinfold.ts'), '--data-dir', dataDir, 'daemon'], {
+    cwd: join(import.meta.dir, '..', '..'),
+    env: {
+      PATH: process.env.PATH ?? '',
+      HOME: root,
+      NODE_ENV: 'test',
+      KINFOLD_PORT: '0',
+      KINFOLD_DB_KEYSTORE: 'none',
+      [SQLITE3MC_LIB_ENV]: process.env[SQLITE3MC_LIB_ENV] ?? '',
+    },
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  const stderr = new Response(child.stderr).text()
+  try {
+    const deadline = Date.now() + 10_000
+    let port: number | null = null
+    while (port === null && Date.now() < deadline && child.exitCode === null) {
+      const info = join(dataDir, 'daemon.json')
+      if (existsSync(info)) {
+        try {
+          const parsed = JSON.parse(readFileSync(info, 'utf8')) as { port?: unknown }
+          if (typeof parsed.port === 'number') port = parsed.port
+        } catch {
+          // The file is written whole, so a parse error means it is not ready yet.
+        }
+      }
+      if (port === null) await Bun.sleep(25)
+    }
+    expect(port).not.toBeNull()
+    const health = await fetch(`http://127.0.0.1:${port}/health`)
+    expect(health.status).toBe(200)
+    expect(await health.json()).toMatchObject({ ok: true })
+    expect(child.exitCode).toBeNull()
+    child.kill('SIGTERM')
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const timeout = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), 5_000)
+    })
+    const exitCode = await Promise.race([child.exited, timeout])
+    if (timer !== null) clearTimeout(timer)
+    expect(exitCode).toBe(0)
+    const log = await stderr
+    expect(log).toContain('listening on 127.0.0.1')
+    expect(log).toContain('SIGTERM, shutting down')
+  } finally {
+    if (child.exitCode === null) child.kill('SIGKILL')
+    await child.exited.catch(() => {})
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('the mcp subcommand keeps running while its stdin is open', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'kinfold-mcp-cli-'))
+  const dataDir = join(root, 'data')
+  const child = Bun.spawn([process.execPath, join(import.meta.dir, 'kinfold.ts'), '--data-dir', dataDir, 'mcp'], {
+    cwd: join(import.meta.dir, '..', '..'),
+    env: {
+      PATH: process.env.PATH ?? '',
+      HOME: root,
+      NODE_ENV: 'test',
+      KINFOLD_DB_KEYSTORE: 'none',
+      [SQLITE3MC_LIB_ENV]: process.env[SQLITE3MC_LIB_ENV] ?? '',
+    },
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  try {
+    await Bun.sleep(200)
+    expect(child.exitCode).toBeNull()
+    await child.stdin.end()
+    const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+    expect(exitCode).toBe(0)
+    expect(stdout).toBe('')
+    expect(stderr).toContain('ready')
+    expect(stderr).toContain('stdin closed, exiting')
+  } finally {
+    if (child.exitCode === null) child.kill('SIGKILL')
+    await child.exited.catch(() => {})
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a fatal mcp error logs only its name, not the message', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'kinfold-mcp-fatal-'))
+  try {
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, 'kinfold.ts'), 'mcp'], {
+      cwd: join(import.meta.dir, '..', '..'),
+      env: { PATH: process.env.PATH ?? '', HOME: home, KINFOLD_DATA_DIR: 'relative/path' },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+    expect(exitCode).toBe(1)
+    expect(stdout).toBe('')
+    expect(stderr).toContain('kinfold-mcp: fatal Error')
+    expect(stderr).not.toContain('must be an absolute path')
+    expect(stderr).not.toContain('kinfold:')
   } finally {
     rmSync(home, { recursive: true, force: true })
   }

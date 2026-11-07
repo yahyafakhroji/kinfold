@@ -63,18 +63,25 @@ export async function runDaemon(_argv: readonly string[]): Promise<void> {
     fail(`failed to start: ${error instanceof Error ? error.message : String(error)}`)
   }
 
-  let stopping = false
-  const shutdown = (signal: string): void => {
-    if (stopping) return
-    stopping = true
-    process.stderr.write(logLine(`${signal}, shutting down`))
-    daemon.stop().then(
-      () => process.exit(0),
-      (error: unknown) => fail(`shutdown failed: ${error instanceof Error ? error.message : String(error)}`),
-    )
-  }
-  process.on('SIGINT', () => shutdown('SIGINT'))
-  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  // The server stays up until a stop signal arrives. The caller exits after
+  // this resolves, so a `kinfold daemon` process never tears down its own server.
+  await new Promise<void>((resolve) => {
+    let stopping = false
+    const shutdown = (signal: string): void => {
+      if (stopping) return
+      stopping = true
+      process.stderr.write(logLine(`${signal}, shutting down`))
+      daemon.stop().then(
+        () => resolve(),
+        (error: unknown) => fail(`shutdown failed: ${error instanceof Error ? error.message : String(error)}`),
+      )
+    }
+    process.on('SIGINT', () => shutdown('SIGINT'))
+    process.on('SIGTERM', () => shutdown('SIGTERM'))
+  })
 }
 
-if (import.meta.main) await runDaemon(process.argv.slice(2))
+if (import.meta.main) {
+  await runDaemon(process.argv.slice(2))
+  process.exit(0)
+}

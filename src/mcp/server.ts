@@ -126,8 +126,13 @@ export async function runStdio(server: McpServer, input: ReadableStream<Uint8Arr
   if (!skipping) await answer(buffer + decoder.decode())
 }
 
-/** The MCP entry when `kinfold mcp` runs it; `argv` is what follows the subcommand, of which there are no flags yet. */
-export async function runMcpServer(_argv: readonly string[]): Promise<void> {
+/** A fatal error logs its name only: a message can quote a payload. */
+export function failMcp(error: unknown): never {
+  process.stderr.write(`kinfold-mcp: fatal ${error instanceof Error ? error.name : typeof error}\n`)
+  process.exit(1)
+}
+
+async function serveMcp(_argv: readonly string[]): Promise<void> {
   const log = (line: string) => process.stderr.write(`kinfold-mcp: ${line}\n`)
   const dataDir = resolveDataDir()
   const host = hostFromEnv(process.env)
@@ -145,12 +150,20 @@ export async function runMcpServer(_argv: readonly string[]): Promise<void> {
   }
 }
 
+/** The MCP entry when `kinfold mcp` runs it; a fatal error takes the same name-only path as the direct entry. */
+export async function runMcpServer(argv: readonly string[]): Promise<void> {
+  try {
+    await serveMcp(argv)
+  } catch (error: unknown) {
+    failMcp(error)
+  }
+}
+
 async function main(): Promise<void> {
   try {
-    await runMcpServer(process.argv.slice(2))
+    await serveMcp(process.argv.slice(2))
   } catch (error: unknown) {
-    process.stderr.write(`kinfold-mcp: fatal ${error instanceof Error ? error.name : typeof error}\n`)
-    process.exit(1)
+    failMcp(error)
   }
 }
 
