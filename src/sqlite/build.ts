@@ -94,6 +94,20 @@ export function defaultCompiler(platform: string): string {
   return platform === 'win32' ? 'gcc' : 'cc'
 }
 
+/** Runs the compiler in `cwd`; a compiler that cannot be started or exits nonzero throws a BuildError. */
+export function runCompiler(command: readonly string[], cwd: string): void {
+  try {
+    const result = Bun.spawnSync([...command], { cwd, stdout: 'ignore', stderr: 'pipe', timeout: BUILD_TIMEOUT_MS })
+    if (result.exitCode !== 0) {
+      const tail = result.stderr.toString().trim().split('\n').slice(-3).join(' | ')
+      throw new BuildError(`compiler failed (exit ${result.exitCode ?? 'timeout'}): ${tail}`)
+    }
+  } catch (error: unknown) {
+    if (error instanceof BuildError) throw error
+    throw new BuildError(`compiler ${command[0]} could not be run; is a C compiler installed?`)
+  }
+}
+
 export interface BuildInput {
   zip: Uint8Array
   /** Must be empty or missing; the build writes only here. */
@@ -113,10 +127,6 @@ export function buildSqlite3mc(input: BuildInput): string {
   const platform = input.platform ?? process.platform
   const command = compileCommand(platform, join(input.workDir, 'sqlite3mc_amalgamation.c'), input.output, input.cc ?? defaultCompiler(platform))
   if (command === null) throw new BuildError(`no local sqlite3mc build for ${platform}`)
-  const result = Bun.spawnSync(command, { cwd: input.workDir, stdout: 'ignore', stderr: 'pipe', timeout: BUILD_TIMEOUT_MS })
-  if (result.exitCode !== 0) {
-    const tail = result.stderr.toString().trim().split('\n').slice(-3).join(' | ')
-    throw new BuildError(`compiler failed (exit ${result.exitCode ?? 'timeout'}): ${tail}`)
-  }
+  runCompiler(command, input.workDir)
   return sha256(readFileSync(input.output))
 }

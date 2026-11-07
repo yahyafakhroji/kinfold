@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { deflateRawSync } from 'node:zlib'
-import { BuildError, buildSqlite3mc, compileCommand, defaultCompiler, zipMembers } from './build'
+import { BuildError, buildSqlite3mc, compileCommand, defaultCompiler, runCompiler, zipMembers } from './build'
 
 interface Entry { name: string; data: Uint8Array; deflate?: boolean }
 
@@ -74,6 +74,11 @@ test('compile commands exist for macOS, Linux and Windows, with FTS5 and dbstat 
   expect(win).toContain('-DSQLITE_ENABLE_FTS5')
   expect(win).toContain('-DSQLITE_ENABLE_DBSTAT_VTAB')
   expect(compileCommand('freebsd', 'in.c', 'out', 'cc')).toBeNull()
+})
+
+test('a compiler that is not on PATH fails with a BuildError that names it, not a raw spawn error', () => {
+  expect(() => runCompiler(['kinfold-no-such-compiler', '-v'], process.cwd())).toThrow('compiler kinfold-no-such-compiler could not be run; is a C compiler installed?')
+  expect(() => runCompiler(['kinfold-no-such-compiler', '-v'], process.cwd())).toThrow(BuildError)
 })
 
 test('the default compiler is gcc on Windows, since MinGW exports every global symbol of a DLL', () => {
