@@ -111,6 +111,7 @@ export function vectorStatusLine(env: InstallEnv, health: Health, assets: Embedd
   const arch = env.arch ?? process.arch
   const asset = vec0AssetFor(env.platform, arch)
   if (assets === null && asset === null) return `semantic search: off (no pinned sqlite-vec build for ${env.platform}-${arch})`
+  if (assets !== null && vec0FileName(env.platform) === null) return `semantic search: off (no sqlite-vec build for ${env.platform})`
   const path = vec0Path(env.dataDir, env.platform)
   const expected = assets === null ? asset!.fileSha256 : assets.vec0.sha256
   const missing = [

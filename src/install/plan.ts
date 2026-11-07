@@ -177,7 +177,7 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'install-vec0': return installVec0(env, action.path, action.asset)
     case 'install-vec0-embedded': return installEmbeddedVec0(env, action.path, action.asset)
     case 'install-sqlite3mc': return installSqlite3mc(env, action.path)
-    case 'install-sqlite3mc-embedded': return installEmbeddedSqlite3mc(env, action.asset)
+    case 'install-sqlite3mc-embedded': return installEmbeddedSqlite3mc(env, action.path, action.asset)
     case 'create-db-key': return createDbKey(env, action.path)
     case 'stop-legacy-agent': return stopLegacyAgent(env)
     case 'migration-daemon-down': return checkDaemonDown(env, action.port, action.waitMs)

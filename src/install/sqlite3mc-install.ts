@@ -65,8 +65,8 @@ export function describeEmbeddedSqlite3mcInstall(dir: string): string {
 }
 
 /** The program's own build: checked against its recorded hash, then placed exactly as a local build is. */
-export async function installEmbeddedSqlite3mc(env: InstallEnv, asset: EmbeddedAssets['sqlite3mc']): Promise<void> {
-  installLibraryBuild(env.dataDir, await asset.bytes(), asset.sha256, asset.sourceSha256, env.platform)
+export async function installEmbeddedSqlite3mc(env: InstallEnv, dir: string, asset: EmbeddedAssets['sqlite3mc']): Promise<void> {
+  installLibraryBuild(dir, await asset.bytes(), asset.sha256, asset.sourceSha256, env.platform, env.out)
 }
 
 function removeQuietly(path: string): void {

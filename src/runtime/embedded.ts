@@ -24,12 +24,17 @@ export interface GeneratedAssets {
   opencodePlugin: string
 }
 
-/** A dashboard name is one plain file name: never a path, and never a parent step. */
+/**
+ * A dashboard name is one plain file name: never a path, a parent step or a
+ * percent-encoded one. The asset routes also require an exact name from a fixed
+ * list; this check is the last line for a caller that joins the name itself.
+ */
 export function safeDashboardName(name: string): boolean {
   return name !== ''
     && !name.includes('..')
     && !name.includes('/')
     && !name.includes('\\')
+    && !name.includes('%')
     && !name.startsWith('.')
 }
 

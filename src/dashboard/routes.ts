@@ -47,9 +47,12 @@ function json(status: number, body: unknown): Response {
 export function listAssets(dir: string = PUBLIC_DIR): ReadonlySet<string> {
   try {
     return new Set(readdirSync(dir).filter((name) => ASSET_NAME.test(name)))
-  } catch {
+  } catch (error: unknown) {
     // A compiled program has no public folder on disk; its assets are embedded.
-    return new Set()
+    // Any other failure would turn every asset into a silent 404, so it must not
+    // read as an empty folder.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Set()
+    throw error
   }
 }
 
