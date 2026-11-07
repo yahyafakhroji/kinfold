@@ -1,9 +1,9 @@
 // Puts the pinned sqlite-vec build for this machine under .cache/vec0/ so the
 // two vec0 tests can run against the real extension, checking the same two
 // hashes `kinfold install` checks. It prints KINFOLD_TEST_VEC0 and, in CI,
-// adds it to GITHUB_ENV for the test step. A platform with no pinned build
-// prints the reason and exits 0: the program itself has no vec0 there, so the
-// tests skipping is the correct result, not an error.
+// adds it to GITHUB_ENV for the test step. A platform or architecture with no
+// pinned build prints the reason and exits 0: the program itself has no vec0
+// there, so the tests skipping is the correct result, not an error.
 
 import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -31,7 +31,7 @@ if (tarball.length > MAX_VEC0_TARBALL_BYTES) throw new Error('the sqlite-vec dow
 if (sha256(tarball) !== asset.tarballSha256) throw new Error('the sqlite-vec download does not match the pinned sha256; nothing was written')
 const member = tarMember(Bun.gunzipSync(tarball), asset.member)
 if (member === null) throw new Error(`the sqlite-vec tarball has no ${asset.member}; nothing was written`)
-if (sha256(member) !== asset.dylibSha256) throw new Error(`${asset.member} does not match the pinned sha256; nothing was written`)
+if (sha256(member) !== asset.fileSha256) throw new Error(`${asset.member} does not match the pinned sha256; nothing was written`)
 
 mkdirSync(CACHE_DIR, { recursive: true, mode: 0o700 })
 const path = join(CACHE_DIR, asset.member)
