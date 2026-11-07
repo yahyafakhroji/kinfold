@@ -1,8 +1,9 @@
 // `kinfold uninstall`: unload and remove the LaunchAgent, take our hook entries out
 // of ~/.claude/settings.json and remove the OpenCode shim. Hook and MCP entries
 // are found by what they run (entry.ts), so a checkout install and an installed
-// program are removed the same way. Every other entry stays. The data dir and
-// the keychain entries stay too, because they hold the
+// program are removed the same way. Every other entry stays. The installed
+// program and libraries go too; the rest of the data dir and
+// the keychain entries stay, because they hold the
 // user's memory and keys; the command prints how to remove them, and
 // --remove-credentials deletes our credential entries. The HMAC master and
 // legacy key stay with the data dir, since stored refs need them,
@@ -10,6 +11,7 @@
 // hmac-legacy, then deletes both entries and hmac.d/ (hmac-cleanup.ts).
 
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { KEYCHAIN_SERVICE, isSystemCredentialRef } from '../secrets/credentials'
 import { credentialWriterFor } from '../secrets/keychain-writer'
 import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
@@ -38,6 +40,16 @@ async function launchAgentActions(env: InstallEnv): Promise<Action[]> {
   const unload: Action[] = (await isAgentLoaded(env)) ? [{ kind: 'launchctl', argv: bootoutArgv(env.uid) }] : []
   const remove: Action[] = existsSync(paths.launchAgentPlist) ? [{ kind: 'remove', path: paths.launchAgentPlist, summary: 'the LaunchAgent' }] : []
   return [...unload, ...remove]
+}
+
+/** The program and its libraries are the install's own files; the rest of the data folder is the user's. */
+function installedFilesActions(env: InstallEnv): Action[] {
+  const bin = join(env.dataDir, 'bin')
+  const lib = join(env.dataDir, 'lib')
+  return [
+    ...(existsSync(bin) ? [{ kind: 'remove', path: bin, summary: 'the installed kinfold program', recursive: true } as const] : []),
+    ...(existsSync(lib) ? [{ kind: 'remove', path: lib, summary: 'the installed sqlite libraries', recursive: true } as const] : []),
+  ]
 }
 
 function claudeActions(env: InstallEnv): Action[] {
@@ -85,6 +97,7 @@ export async function uninstall(env: InstallEnv, options: UninstallOptions): Pro
     const hmac = options.removeHmacKeys === true ? hmacRemoval(env, options.dryRun) : null
     const actions = [
       ...(await launchAgentActions(env)),
+      ...installedFilesActions(env),
       ...claudeActions(env),
       ...claudeMcpUninstallActions(env),
       ...opencodeActions(env),

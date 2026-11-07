@@ -11,10 +11,11 @@ export type EnvKey =
   | 'DB_KEYSTORE'
   | 'SQLITE3MC_LIB'
   | 'TEST_VEC0'
+  | 'RELEASE_SUMS_URL'
 
 type Env = Readonly<Record<string, string | undefined>>
 
-const ENV_KEYS: readonly EnvKey[] = ['DATA_DIR', 'PORT', 'SESSION_IDLE_MS', 'OBSERVER_MAX_WAIT_MS', 'OBSERVER', 'MCP_HOST', 'DB_KEYSTORE', 'SQLITE3MC_LIB', 'TEST_VEC0']
+const ENV_KEYS: readonly EnvKey[] = ['DATA_DIR', 'PORT', 'SESSION_IDLE_MS', 'OBSERVER_MAX_WAIT_MS', 'OBSERVER', 'MCP_HOST', 'DB_KEYSTORE', 'SQLITE3MC_LIB', 'TEST_VEC0', 'RELEASE_SUMS_URL']
 
 export function envName(key: EnvKey): string {
   return `KINFOLD_${key}`

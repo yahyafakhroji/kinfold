@@ -18,6 +18,7 @@ import { BACKUP_REMOVAL_SUMMARY, removeHmacBackup, removeRedundantBackup, restor
 import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
 import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbeddedSqlite3mc, installSqlite3mc } from './sqlite3mc-install'
 import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from './vec0-install'
+import { installProgram } from './self-install'
 import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describeMoveDataDir, describeRemoveLegacyEntry, moveDataDir, removeLegacyEntry, stopLegacyAgent } from './rename-migration'
 import { legacyBootoutArgv } from './launch-agent'
 import type { Vec0Asset } from '../vectors/vec0-release'
@@ -57,6 +58,8 @@ export type Action =
   | { kind: 'install-sqlite3mc'; path: string }
   /** The sqlite3mc build the program carries, checked against its recorded hash before it is written. */
   | { kind: 'install-sqlite3mc-embedded'; path: string; asset: EmbeddedAssets['sqlite3mc'] }
+  /** The running program copied to <dataDir>/bin, after its release checksum was checked. */
+  | { kind: 'install-program'; from: string; to: string; assetName: string | null; expectedSha256: string | null; check: boolean }
   /** db-key for a store the daemon has yet to create, made at run time and added without replacing any entry. */
   | { kind: 'create-db-key'; path: string }
   /** Rename migration: bootout dev.shared-agent-memory.daemon when launchd has it loaded. */
@@ -107,6 +110,10 @@ export function describeAction(action: Action): string {
     case 'install-vec0-embedded': return describeEmbeddedVec0Install(action.path)
     case 'install-sqlite3mc': return describeSqlite3mcInstall(action.path)
     case 'install-sqlite3mc-embedded': return describeEmbeddedSqlite3mcInstall(action.path)
+    case 'install-program': {
+      const check = action.check ? ` after checking ${action.assetName ?? 'it'} against SHA256SUMS` : ' (checksum check skipped for the development version)'
+      return `install program ${action.to} from ${action.from}${check}`
+    }
     case 'create-db-key': return describeCreateDbKey(action.path)
     case 'stop-legacy-agent': return `${legacyBootoutArgv(action.uid).join(' ')} (if loaded): stop the daemon installed under the old name`
     case 'migration-daemon-down': return `check that no daemon answers /health on port ${action.port}, waiting up to ${action.waitMs / 1000} s (one still running must be stopped first; nothing is moved while it runs)`
@@ -178,6 +185,7 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'install-vec0-embedded': return installEmbeddedVec0(env, action.path, action.asset)
     case 'install-sqlite3mc': return installSqlite3mc(env, action.path)
     case 'install-sqlite3mc-embedded': return installEmbeddedSqlite3mc(env, action.path, action.asset)
+    case 'install-program': return installProgram(env, action)
     case 'create-db-key': return createDbKey(env, action.path)
     case 'stop-legacy-agent': return stopLegacyAgent(env)
     case 'migration-daemon-down': return checkDaemonDown(env, action.port, action.waitMs)

@@ -27,6 +27,7 @@ import { hostHookInstallActions, hostVersionActions, opencodeInstallActions } fr
 import { claudeMcpInstallActions, claudeMcpState, opencodeMcpInstallActions } from './mcp-wiring'
 import { scanDataDirModes } from './permissions'
 import { type Action, runPlan, stopCommand } from './plan'
+import { programInstallActions } from './self-install'
 import { legacyClaudeMcpRemoval, legacyShimRemoval, migrationFailureNote, renameMigrationActions } from './rename-migration'
 import { sqlite3mcInstallActions } from './sqlite3mc-install'
 import { vec0InstallActions } from './vec0-install'
@@ -43,6 +44,10 @@ const FILE_MODE = 0o644
 export interface InstallOptions extends ChoiceOptions {
   hosts: readonly InstallHost[] | null
   takeover: boolean
+  /** The running program to place in <dataDir>/bin; the CLI leaves it out so process.execPath is used. */
+  programSource?: string
+  /** The release version to check against; the CLI leaves it out so src/version.ts decides. */
+  releaseVersion?: string
 }
 
 export interface DaemonSituation {
@@ -88,10 +93,13 @@ function dataDirActions(env: InstallEnv): Action[] {
   const paths = installPaths(env)
   const scan = scanDataDirModes(env.dataDir)
   for (const link of scan.symlinks) env.out(`data dir: symlink ${link} left alone`)
+  // <dataDir>/bin holds the installed program, which has to stay executable;
+  // the 0600 rule belongs to the store and its keys, not to the program.
+  const changes = scan.changes.filter((change) => change.path !== 'bin' && !change.path.startsWith('bin/'))
   const touchLog: Action[] = existsSync(paths.logFile) ? [] : [{ kind: 'touch', path: paths.logFile, mode: DATA_FILE_MODE }]
   return [
     ...mkdirIfMissing(env.dataDir, DATA_DIR_MODE),
-    ...scan.changes.map((change): Action => ({ kind: 'chmod', dataDir: env.dataDir, change })),
+    ...changes.map((change): Action => ({ kind: 'chmod', dataDir: env.dataDir, change })),
     ...mkdirIfMissing(paths.logsDir, DATA_DIR_MODE),
     ...touchLog,
   ]
@@ -171,23 +179,34 @@ interface Prepared {
   situation: DaemonSituation
 }
 
-async function buildPlan(env: InstallEnv, prepared: Prepared, choices: readonly ObserverChoice[], takeover: boolean): Promise<Action[]> {
+async function buildPlan(env: InstallEnv, prepared: Prepared, choices: readonly ObserverChoice[], options: InstallOptions): Promise<Action[]> {
   const { hosts, detections, situation } = prepared
   const hmac = hmacMigrationActions(env)
   const sqlite3mc = sqlite3mcInstallActions(env)
   const vec0 = vec0InstallActions(env, situation.health)
+  const program = await programInstallActions(env, {
+    source: options.programSource ?? process.execPath,
+    dryRun: options.dryRun,
+    version: options.releaseVersion,
+  })
+  // The running service starts the program being replaced, so it stops before
+  // the copy and the LaunchAgent step below starts it again from the new file.
+  const stopped = program.actions.length > 0 && env.platform === 'darwin' && situation.loaded
+  const plannedSituation = stopped ? { ...situation, loaded: false } : situation
   return [
     ...dataDirActions(env),
     ...hmac.actions,
     ...sqlite3mc.actions,
     ...dbKeyActions(env),
     ...vec0.actions,
+    ...(stopped ? [{ kind: 'launchctl', argv: bootoutArgv(env.uid) } satisfies Action] : []),
+    ...program.actions,
     ...hostVersionActions(env, detections),
     ...credentialActions(choices),
     ...(await agentWiringActions(env, hosts)),
     ...(hosts.includes('codex') ? hostHookInstallActions(env, 'codex') : []),
     ...(hosts.includes('cursor') ? hostHookInstallActions(env, 'cursor') : []),
-    ...launchAgentActions(env, situation, takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon),
+    ...launchAgentActions(env, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon),
     ...choices.map((choice): Action => ({ kind: 'settings-put', input: choice.input })),
     ...hmac.cleanup,
   ]
@@ -278,7 +297,7 @@ export async function install(env: InstallEnv, options: InstallOptions): Promise
     for (const choice of choices) {
       env.out(`observer ${choice.input.host}: ${describeInput(choice.input)} (${choice.origin}); ${choice.credentialNote}; check ${choice.check}`)
     }
-    await runPlan(env, await buildPlan(env, prepared, choices, options.takeover), options.dryRun)
+    await runPlan(env, await buildPlan(env, prepared, choices, options), options.dryRun)
     if (options.dryRun && prepared.situation.foreign && !options.takeover) {
       for (const line of foreignDaemonMessage(prepared.situation)) env.out(line)
       env.out('a real install would stop here, before step 1.')
