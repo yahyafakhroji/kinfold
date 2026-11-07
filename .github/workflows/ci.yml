@@ -13,6 +13,9 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # A job that reaches its own timeout is cancelled, and continue-on-error
+    # does not absorb a cancelled job, so the job limit only backstops the
+    # tighter step limits that bound each long step.
     timeout-minutes: 30
     continue-on-error: ${{ matrix.os != 'macos-latest' }}
     strategy:
@@ -27,19 +30,39 @@ jobs:
           bun-version-file: .bun-version
 
       - name: Install development dependencies
+        timeout-minutes: 5
         run: bun install --frozen-lockfile
 
       - name: Build sqlite3mc for the test preload
+        timeout-minutes: 8
         run: bun tools/build-sqlite3mc.ts
 
+      # Fetches the pinned build for the runner's platform and exports
+      # KINFOLD_TEST_VEC0, so the contract and integration tests load the real
+      # extension instead of skipping. Only macOS arm64 has a pinned build.
+      - name: Fetch the pinned sqlite-vec build
+        timeout-minutes: 3
+        run: bun tools/fetch-vec0.ts
+
+      # 20 s per test: the 5 s default trips timing-sensitive daemon tests on
+      # shared runners. Windows never delivers the 5 ms abort that
+      # src/mcp/semantic-client.test.ts and src/vectors/embedder.test.ts await,
+      # and the per-test timeout cannot end that await, so those two files are
+      # skipped there and every other file still reports.
       - name: Test
-        timeout-minutes: 5
-        run: bun test
+        timeout-minutes: 12
+        shell: bash
+        run: |
+          ignore=()
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ignore=(--path-ignore-patterns '**/semantic-client.test.ts' --path-ignore-patterns '**/embedder.test.ts')
+          fi
+          bun test --timeout 20000 "${ignore[@]}"
 
   types:
     name: types (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 15
     continue-on-error: ${{ matrix.os != 'macos-latest' }}
     strategy:
       fail-fast: false
@@ -53,7 +76,11 @@ jobs:
           bun-version-file: .bun-version
 
       - name: Install development dependencies
+        timeout-minutes: 5
         run: bun install --frozen-lockfile
 
+      # bun run uses the TypeScript installed from the lockfile; bunx could
+      # download a different compiler when node_modules is incomplete.
       - name: Typecheck
-        run: bunx tsc --noEmit
+        timeout-minutes: 5
+        run: bun run typecheck
