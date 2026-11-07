@@ -6,11 +6,12 @@
 // holding the project's context pack to event.system, and never alters or
 // removes the parts already there. The pack comes from the daemon only; a down
 // daemon adds nothing and the plugin never opens the store, so this bundle can
-// load where SQLite is not available. The pack is fetched once per session and
-// cached until the session compacts; a failure or an empty pack appends
-// nothing. At most once per 30 s per session it also asks for the prompt-time
-// delta and keeps it with the pack (context-injector.ts). A new prompt asks at
-// once and carries its text, for prompt-time related memory.
+// load where SQLite is not available. The pack is cached once the daemon
+// answers; a miss is not cached and is retried on a later request after 30 s,
+// so a daemon that comes back is used. At most once per 30 s per session it
+// also asks for the prompt-time delta and keeps it with the pack
+// (context-injector.ts). A new prompt asks at once and carries its text, for
+// prompt-time related memory.
 // Kept apart from opencode.ts because that file may export only { id, setup }.
 // Under the observer (KINFOLD_OBSERVER=1) setup registers nothing, so an observer
 // process can never feed events back into the store.

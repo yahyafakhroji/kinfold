@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { installPaths } from './env'
 import { EXIT_OK, install } from './install'
 import { LAUNCHCTL } from './launch-agent'
+import { pluginFileContent } from './opencode-shim'
 import { type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
 import { uninstall } from './uninstall'
 
@@ -45,6 +46,21 @@ test('uninstall removes only our hooks, the shim and the LaunchAgent; the data d
   expect(w.keychain.has('openrouter')).toBe(true)
   expect(w.out).toContain('kept keychain entry openrouter; remove it with: security delete-generic-password -s kinfold -a openrouter  (or rerun with --remove-credentials)')
   expect(w.out.some((line) => line.startsWith(`kept the data dir ${w.dataDir}`))).toBe(true)
+})
+
+test('uninstall removes a program-mode plugin file and leaves other plugins alone', async () => {
+  const w = await installed()
+  const paths = installPaths(w.env)
+  const bundle = [
+    '// @bun',
+    'var plugin_default = { id: "kinfold", setup() {} };',
+    'export { plugin_default as default };',
+    '',
+  ].join('\n')
+  writeFileSync(paths.opencodePlugin, pluginFileContent({ kind: 'program', binPath: join(w.dataDir, 'bin', 'kinfold') }, w.dataDir, bundle))
+  expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
+  expect(existsSync(paths.opencodePlugin)).toBe(false)
+  expect(existsSync(join(paths.opencodePluginsDir, 'other-plugin.js'))).toBe(true)
 })
 
 test('--remove-credentials deletes our keychain entries through delete-generic-password', async () => {

@@ -1,10 +1,13 @@
 // OpenCode's per-request context injection. OpenCode calls the context hook on
 // every model request with that request's system parts; the pack is fetched
-// once per session (from the daemon only; the plugin never reads the store),
-// cached (the promise, so concurrent requests share one fetch), and appended as
-// one text part. Existing parts are never changed or removed; if the same text
-// is already there, nothing is added, so a reused list never holds it twice.
-// A down daemon or an empty answer leaves the request untouched.
+// from the daemon only (the plugin never reads the store), cached once it
+// arrives (concurrent requests share the fetch), and appended as one text
+// part. A failed fetch caches nothing, so a session that starts while the
+// daemon is down gets the pack later; the next attempt waits
+// PACK_RETRY_INTERVAL_MS so a down daemon does not stall every prompt.
+// Existing parts are never changed or removed; if the same text is already
+// there, nothing is added, so a reused list never holds it twice. A down
+// daemon or an empty answer leaves the request untouched.
 // Compaction drops the session's cache, so the next request fetches a pack that
 // reflects what was learned meanwhile.
 // Mid-session updates: a request may also ask for the prompt-time
@@ -24,6 +27,8 @@ import { type ContextRequest, type ContextResult, MAX_CONTEXT_PROMPT_CHARS } fro
 
 export const MAX_CACHED_SESSIONS = 256
 export const DELTA_INTERVAL_MS = 30_000
+/** How long a session without a pack waits before asking the daemon again. */
+export const PACK_RETRY_INTERVAL_MS = 30_000
 /** About 2,400 tokens at the 300-token delta cap. */
 export const MAX_DELTAS_PER_SESSION = 8
 
@@ -50,7 +55,12 @@ interface SystemPart {
 }
 
 interface SessionCache {
-  pack: Promise<ContextResult | null>
+  /** The last real pack from the daemon; null until one arrives. */
+  pack: ContextResult | null
+  /** Shared by concurrent requests; cleared when the ask settles. */
+  packInFlight: Promise<ContextResult | null> | null
+  /** When the last pack ask failed; the next one waits PACK_RETRY_INTERVAL_MS from here. */
+  packMissingAt: number | null
   deltas: readonly string[]
   /** The latest prompt's related memory; replaced by each prompt's answer. */
   related: string
@@ -98,9 +108,32 @@ export function createContextInjector(options: ContextInjectorOptions): ContextI
     if (cached !== undefined) return cached
     const oldest = cache.keys().next()
     if (cache.size >= MAX_CACHED_SESSIONS && oldest.done !== true) cache.delete(oldest.value)
-    const entry: SessionCache = { pack: ask(sessionId, 'request'), deltas: [], related: '', askedAt: now() }
+    const entry: SessionCache = { pack: null, packInFlight: null, packMissingAt: null, deltas: [], related: '', askedAt: now() }
     cache.set(sessionId, entry)
     return entry
+  }
+
+  /**
+   * The session's pack, asking the daemon only while none is cached and no
+   * ask is in flight. A null answer is not cached: the next request more than
+   * PACK_RETRY_INTERVAL_MS later asks again, and requests in between add
+   * nothing instead of paying the daemon wait each time.
+   */
+  const packFor = async (sessionId: string): Promise<ContextResult | null> => {
+    const entry = entryFor(sessionId)
+    if (entry.pack !== null) return entry.pack
+    if (entry.packInFlight !== null) return entry.packInFlight
+    if (entry.packMissingAt !== null && now() - entry.packMissingAt < PACK_RETRY_INTERVAL_MS) return null
+    entry.packMissingAt = now()
+    const pending = ask(sessionId, 'request')
+    entry.packInFlight = pending
+    const result = await pending
+    entry.packInFlight = null
+    if (result !== null) {
+      entry.pack = result
+      entry.packMissingAt = null
+    }
+    return result
   }
 
   /**
@@ -131,7 +164,7 @@ export function createContextInjector(options: ContextInjectorOptions): ContextI
     const sessionId = sessionOf(event)
     if (sessionId === null || !isRecord(event) || !Array.isArray(event.system)) return
     const system = event.system as SystemPart[]
-    const pack = await entryFor(sessionId).pack
+    const pack = await packFor(sessionId)
     await refreshDelta(sessionId)
     const session = cache.get(sessionId)
     const texts = [pack?.text ?? '', ...(session?.deltas ?? []), session?.related ?? ''].filter((text) => text !== '')

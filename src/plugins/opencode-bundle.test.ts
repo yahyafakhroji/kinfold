@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { pluginFileContent } from '../install/opencode-shim'
 import type { InstallMode } from '../install/entry'
-import { bundlePlugin, importSpecifiers, isBuiltinSpecifier } from '../../tools/bundle-plugin'
+import { assertStandalone, bundlePlugin, importSpecifiers, isBuiltinSpecifier } from '../../tools/bundle-plugin'
 
 let root: string | null = null
 afterEach(() => {
@@ -33,6 +33,18 @@ test('the bundle imports only Node and Bun builtins, never a checkout path or SQ
   expect(specifiers).not.toContain('bun:ffi')
   expect(text).not.toContain('bun:sqlite')
   expect(text).not.toContain('node:sqlite')
+})
+
+test('the bundle carries no module-path comments from the build machine', async () => {
+  const text = readFileSync(await built(), 'utf8')
+  expect(text.split('\n').filter((line) => line.startsWith('// '))).toEqual(['// @bun'])
+})
+
+test('assertStandalone names a checkout path, an npm package and a SQLite loader', () => {
+  expect(() => assertStandalone('import x from "/Users/dev/repo/src/plugins/opencode.ts"\n')).toThrow('imports a checkout path')
+  expect(() => assertStandalone('import x from "left-pad"\n')).toThrow('not a Node or Bun builtin')
+  expect(() => assertStandalone('import x from "bun:sqlite"\n')).toThrow('would load SQLite')
+  expect(() => assertStandalone('import { join } from "node:path"\n')).not.toThrow()
 })
 
 test('the standalone file installs as an OpenCode plugin and spools a prompt with the daemon down', async () => {

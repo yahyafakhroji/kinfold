@@ -4,7 +4,7 @@
 //
 // Usage: bun tools/bundle-plugin.ts <outfile>
 
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 
 const ROOT = join(import.meta.dir, '..')
@@ -43,10 +43,23 @@ export function importSpecifiers(text: string): string[] {
  */
 export function assertStandalone(text: string): void {
   for (const specifier of importSpecifiers(text)) {
-    if (!isBuiltinSpecifier(specifier)) throw new Error(`the plugin bundle imports ${specifier}, which is not a Node or Bun builtin`)
+    // A checkout path is not a builtin either; naming it as such is the clearer error.
     if (specifier.includes('/src/')) throw new Error(`the plugin bundle imports a checkout path: ${specifier}`)
+    if (!isBuiltinSpecifier(specifier)) throw new Error(`the plugin bundle imports ${specifier}, which is not a Node or Bun builtin`)
     if (/sqlite|ffi/i.test(specifier)) throw new Error(`the plugin bundle imports ${specifier}, so it would load SQLite`)
   }
+}
+
+const MODULE_COMMENT = /^\/\/ .+[\\/].+\.[cm]?[jt]sx?$/
+
+/**
+ * Bun writes a `// <module path>` line above every module it emits, and a
+ * build run from another directory writes an absolute path there. The
+ * installed file must not carry the build machine's layout, so those lines
+ * are dropped. The `// @bun` banner does not match and stays.
+ */
+export function stripModulePaths(text: string): string {
+  return text.split('\n').filter((line) => !MODULE_COMMENT.test(line)).join('\n')
 }
 
 /** Writes the bundle to `outfile` and returns that path. */
@@ -64,7 +77,9 @@ export async function bundlePlugin(outfile: string): Promise<string> {
     throw new Error(`could not bundle the OpenCode plugin: ${result.logs.map(String).join(' | ')}`)
   }
   const output = result.outputs[0]!.path
-  assertStandalone(await Bun.file(output).text())
+  const text = stripModulePaths(await Bun.file(output).text())
+  assertStandalone(text)
+  writeFileSync(output, text)
   return output
 }
 
