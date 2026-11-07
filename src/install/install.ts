@@ -13,7 +13,7 @@ import { deprecationLines, envName, legacyName, readEnv } from '../env-names'
 import { LEGACY_LAUNCH_AGENT_LABEL } from '../names'
 import { DAEMON_INFO_FILE, DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
 import { mergeSamHooks } from './claude-hooks'
-import { type Health, checkHealth, readDaemonInfo } from './daemon-client'
+import { type Health, checkHealth, readDaemonInfo, waitForHealth } from './daemon-client'
 import { dbKeyActions } from './db-encryption'
 import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
@@ -25,9 +25,9 @@ import { ChoiceError, type ChoiceOptions, type ObserverChoice, chooseObservers, 
 import { hmacMigrationActions } from './hmac-migration'
 import { hostHookInstallActions, hostVersionActions, opencodeInstallActions } from './host-wiring'
 import { claudeMcpInstallActions, claudeMcpState, opencodeMcpInstallActions } from './mcp-wiring'
-import { scanDataDirModes } from './permissions'
-import { type Action, runPlan, stopCommand } from './plan'
-import { programInstallActions } from './self-install'
+import { isInBinFolder, scanDataDirModes } from './permissions'
+import { type Action, HEALTH_WAIT_MS, runPlan, startAgent, stopCommand } from './plan'
+import { type ProgramCheck, checkProgram, programInstallActions } from './self-install'
 import { legacyClaudeMcpRemoval, legacyShimRemoval, migrationFailureNote, renameMigrationActions } from './rename-migration'
 import { sqlite3mcInstallActions } from './sqlite3mc-install'
 import { vec0InstallActions } from './vec0-install'
@@ -95,7 +95,7 @@ function dataDirActions(env: InstallEnv): Action[] {
   for (const link of scan.symlinks) env.out(`data dir: symlink ${link} left alone`)
   // <dataDir>/bin holds the installed program, which has to stay executable;
   // the 0600 rule belongs to the store and its keys, not to the program.
-  const changes = scan.changes.filter((change) => change.path !== 'bin' && !change.path.startsWith('bin/'))
+  const changes = scan.changes.filter((change) => !isInBinFolder(change.path))
   const touchLog: Action[] = existsSync(paths.logFile) ? [] : [{ kind: 'touch', path: paths.logFile, mode: DATA_FILE_MODE }]
   return [
     ...mkdirIfMissing(env.dataDir, DATA_DIR_MODE),
@@ -179,7 +179,19 @@ interface Prepared {
   situation: DaemonSituation
 }
 
-async function buildPlan(env: InstallEnv, prepared: Prepared, choices: readonly ObserverChoice[], options: InstallOptions): Promise<Action[]> {
+interface InstallPlan {
+  actions: Action[]
+  /** The plan stops the loaded LaunchAgent to replace the running program. */
+  stopsService: boolean
+}
+
+async function buildPlan(
+  env: InstallEnv,
+  prepared: Prepared,
+  choices: readonly ObserverChoice[],
+  options: InstallOptions,
+  check: ProgramCheck | null,
+): Promise<InstallPlan> {
   const { hosts, detections, situation } = prepared
   const hmac = hmacMigrationActions(env)
   const sqlite3mc = sqlite3mcInstallActions(env)
@@ -188,28 +200,32 @@ async function buildPlan(env: InstallEnv, prepared: Prepared, choices: readonly 
     source: options.programSource ?? process.execPath,
     dryRun: options.dryRun,
     version: options.releaseVersion,
+    check: check ?? undefined,
   })
   // The running service starts the program being replaced, so it stops before
   // the copy and the LaunchAgent step below starts it again from the new file.
   const stopped = program.actions.length > 0 && env.platform === 'darwin' && situation.loaded
   const plannedSituation = stopped ? { ...situation, loaded: false } : situation
-  return [
-    ...dataDirActions(env),
-    ...hmac.actions,
-    ...sqlite3mc.actions,
-    ...dbKeyActions(env),
-    ...vec0.actions,
-    ...(stopped ? [{ kind: 'launchctl', argv: bootoutArgv(env.uid) } satisfies Action] : []),
-    ...program.actions,
-    ...hostVersionActions(env, detections),
-    ...credentialActions(choices),
-    ...(await agentWiringActions(env, hosts)),
-    ...(hosts.includes('codex') ? hostHookInstallActions(env, 'codex') : []),
-    ...(hosts.includes('cursor') ? hostHookInstallActions(env, 'cursor') : []),
-    ...launchAgentActions(env, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon),
-    ...choices.map((choice): Action => ({ kind: 'settings-put', input: choice.input })),
-    ...hmac.cleanup,
-  ]
+  return {
+    actions: [
+      ...dataDirActions(env),
+      ...hmac.actions,
+      ...sqlite3mc.actions,
+      ...dbKeyActions(env),
+      ...vec0.actions,
+      ...(stopped ? [{ kind: 'launchctl', argv: bootoutArgv(env.uid) } satisfies Action] : []),
+      ...program.actions,
+      ...hostVersionActions(env, detections),
+      ...credentialActions(choices),
+      ...(await agentWiringActions(env, hosts)),
+      ...(hosts.includes('codex') ? hostHookInstallActions(env, 'codex') : []),
+      ...(hosts.includes('cursor') ? hostHookInstallActions(env, 'cursor') : []),
+      ...launchAgentActions(env, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon),
+      ...choices.map((choice): Action => ({ kind: 'settings-put', input: choice.input })),
+      ...hmac.cleanup,
+    ],
+    stopsService: stopped,
+  }
 }
 
 function agentState(situation: DaemonSituation): string {
@@ -257,24 +273,58 @@ async function prepare(env: InstallEnv, options: InstallOptions): Promise<Prepar
  * The rename migration runs as its own plan before the install plan is built,
  * so every later step plans against the moved data dir and the kinfold
  * Keychain entries (planned before, the HMAC step would mint a new master
- * over the copied one). A dry run therefore lists it and the agent wiring
- * (which reads host config files only), then stops.
+ * over the copied one). A dry run therefore lists it, the program copy and the
+ * agent wiring (which reads host config files only), then stops.
  * Returns the situation to plan with, or null when a dry run stopped here.
  */
-async function migrate(env: InstallEnv, prepared: Prepared, options: InstallOptions): Promise<Prepared | null> {
+async function migrate(env: InstallEnv, prepared: Prepared, options: InstallOptions, check: ProgramCheck | null): Promise<Prepared | null> {
   const actions = renameMigrationActions(env, { takeover: options.takeover })
   if (actions.length === 0) return prepared
   env.out('migration: an install under the old name Shared Agent Memory was found; it moves to the Kinfold names first')
   await runPlan(env, actions, options.dryRun, (index) => migrationFailureNote(actions, index))
   if (options.dryRun) {
-    // The wiring steps read host config files only, which the migration leaves alone, so this part of the install plan is exact now.
-    env.out('then, among the install steps, the agent wiring (old entries go only after the kinfold ones are written):')
-    await runPlan(env, await agentWiringActions(env, prepared.hosts), true)
+    // The program copy and the wiring read the running program and host config
+    // files only, which the migration leaves alone, so this part is exact now.
+    const program = await programInstallActions(env, {
+      source: options.programSource ?? process.execPath,
+      dryRun: true,
+      version: options.releaseVersion,
+      check: check ?? undefined,
+    })
+    env.out(program.actions.length > 0
+      ? 'then, among the install steps, the program copy and the agent wiring (old entries go only after the kinfold ones are written):'
+      : 'then, among the install steps, the agent wiring (old entries go only after the kinfold ones are written):')
+    await runPlan(env, [...program.actions, ...(await agentWiringActions(env, prepared.hosts))], true)
     env.out(`the other install steps are planned once the migration has run, against ${env.dataDir}; run kinfold install --dry-run again then to see them`)
     return null
   }
   env.out('migration: done')
   return { ...prepared, situation: await daemonSituation(env) }
+}
+
+/**
+ * A failed step after the plan stopped the LaunchAgent must not leave every
+ * host without memory: start the service again from whichever program is in
+ * place. A service that is still loaded is running and is left alone. Health,
+ * not the bootstrap exit code, decides whether the service came back.
+ */
+async function restartService(env: InstallEnv): Promise<void> {
+  let started = false
+  let startError: unknown = null
+  try {
+    if (!(await isAgentLoaded(env))) {
+      await startAgent(env)
+      started = true
+    }
+  } catch (error: unknown) {
+    startError = error
+  }
+  if (await waitForHealth(env, true, HEALTH_WAIT_MS)) {
+    if (started) env.out('the daemon was started again from the program in place')
+    return
+  }
+  const reason = startError === null ? '' : ` (${errorMessage(startError)})`
+  env.out(`the daemon did not answer /health after restarting${reason}; see ${installPaths(env).logFile}`)
 }
 
 export async function install(env: InstallEnv, options: InstallOptions): Promise<number> {
@@ -286,7 +336,14 @@ export async function install(env: InstallEnv, options: InstallOptions): Promise
     }
     const found = await prepare(env, options)
     if (typeof found === 'number') return found
-    const prepared = await migrate(env, found, options)
+    // A release build is checked before the migration or any plan can change the
+    // machine, so a bad or unreachable SHA256SUMS stops with nothing changed.
+    const check = await checkProgram(env, {
+      source: options.programSource ?? process.execPath,
+      dryRun: options.dryRun,
+      version: options.releaseVersion,
+    })
+    const prepared = await migrate(env, found, options, check)
     if (prepared === null) {
       if (!found.situation.foreign || options.takeover) return EXIT_OK
       for (const line of foreignDaemonMessage(found.situation)) env.out(line)
@@ -297,7 +354,13 @@ export async function install(env: InstallEnv, options: InstallOptions): Promise
     for (const choice of choices) {
       env.out(`observer ${choice.input.host}: ${describeInput(choice.input)} (${choice.origin}); ${choice.credentialNote}; check ${choice.check}`)
     }
-    await runPlan(env, await buildPlan(env, prepared, choices, options), options.dryRun)
+    const plan = await buildPlan(env, prepared, choices, options, check)
+    try {
+      await runPlan(env, plan.actions, options.dryRun)
+    } catch (error: unknown) {
+      if (!options.dryRun && plan.stopsService) await restartService(env)
+      throw error
+    }
     if (options.dryRun && prepared.situation.foreign && !options.takeover) {
       for (const line of foreignDaemonMessage(prepared.situation)) env.out(line)
       env.out('a real install would stop here, before step 1.')

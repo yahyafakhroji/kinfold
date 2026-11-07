@@ -20,7 +20,7 @@ import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbe
 import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from './vec0-install'
 import { installProgram } from './self-install'
 import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describeMoveDataDir, describeRemoveLegacyEntry, moveDataDir, removeLegacyEntry, stopLegacyAgent } from './rename-migration'
-import { legacyBootoutArgv } from './launch-agent'
+import { legacyBootoutArgv, bootstrapArgv } from './launch-agent'
 import type { Vec0Asset } from '../vectors/vec0-release'
 
 export const HEALTH_WAIT_MS = 15_000
@@ -147,6 +147,11 @@ async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Promise<v
     await env.sleep(BOOTSTRAP_RETRY_MS)
   }
   if (exitCode !== 0) throw new Error(`${argv.slice(0, 2).join(' ')} failed (exit ${exitCode})`)
+}
+
+/** Starts the LaunchAgent with the same retry as the plan step, for a failed step that left it stopped. */
+export async function startAgent(env: InstallEnv): Promise<void> {
+  await runLaunchctl(env, bootstrapArgv(env))
 }
 
 async function waitFor(env: InstallEnv, wantUp: boolean, timeoutMs: number, failure: string): Promise<void> {

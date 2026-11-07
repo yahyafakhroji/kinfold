@@ -1,13 +1,16 @@
 import { afterEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { newDbKey } from '../sqlite/keys'
+import { checkHealth, readDaemonInfo } from './daemon-client'
+import { installPaths } from './env'
 import { installedProgramPath } from './entry'
 import { EXIT_OK, install } from './install'
 import { LAUNCHCTL } from './launch-agent'
 import { parseSha256Sums, releaseAssetName, releaseSumsUrl, verifyProgram } from './self-install'
-import { type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
+import { type FakeWorld, YES, createWorld, snapshotTree, startWorldDaemon } from './test-support'
 import { uninstall } from './uninstall'
 
 const HEX = 'a'.repeat(64)
@@ -52,6 +55,33 @@ function sumsLine(asset: string, hash: string): string {
   return `${hash}  ${asset}\n`
 }
 
+const LEGACY_REF = 'hmac-master'
+const LEGACY_VALUE = 'd'.repeat(64)
+const DB_KEY = newDbKey()
+
+/**
+ * A machine with an install under the old name still to migrate: an old store,
+ * plist, Keychain entry, config and a running legacy daemon.
+ */
+function migrationWorld(): { w: FakeWorld; binPath: string; source: string; asset: string } {
+  const w = createWorld({ claudeVersion: '2.1.310 (Claude Code)', withLibrary: false, legacyKeychainRefs: [LEGACY_REF, 'db-key'] })
+  world = w
+  w.legacyKeychainValues.set(LEGACY_REF, LEGACY_VALUE)
+  w.legacyKeychainValues.set('db-key', DB_KEY)
+  const paths = installPaths(w.env)
+  mkdirSync(paths.launchAgentsDir, { recursive: true })
+  writeFileSync(paths.legacyLaunchAgentPlist, '<plist/>\n')
+  mkdirSync(join(w.home, '.claude'), { recursive: true })
+  writeFileSync(join(w.home, '.claude', 'settings.json'), '{"kept":true}\n')
+  w.launchd.legacyLoaded = true
+  w.launchd.legacyDaemon = startWorldDaemon(w, paths.legacyDataDir)
+  const binPath = installedProgramPath(w.dataDir, w.env.platform)
+  w.env = { ...w.env, arch: process.arch, mode: { kind: 'program', binPath } }
+  const source = join(w.root, 'kinfold-build')
+  writeFileSync(source, 'kinfold program v1\n', { mode: 0o755 })
+  return { w, binPath, source, asset: releaseAssetName(w.env.platform, process.arch)! }
+}
+
 const installOptions = (source: string, releaseVersion?: string) => ({ ...YES, programSource: source, releaseVersion })
 
 test('releaseAssetName names the five release files and nothing else', () => {
@@ -81,6 +111,12 @@ test('parseSha256Sums reads hash and plain name pairs and rejects anything else'
   ]) {
     expect(() => parseSha256Sums(bad)).toThrow()
   }
+})
+
+test('parseSha256Sums accepts CRLF and still rejects a stray carriage return', () => {
+  const sums = parseSha256Sums(`${HEX}  kinfold-darwin-arm64\r\n${'b'.repeat(64)}  kinfold-windows-x64.exe\r\n`)
+  expect([...sums]).toEqual([['kinfold-darwin-arm64', HEX], ['kinfold-windows-x64.exe', 'b'.repeat(64)]])
+  expect(() => parseSha256Sums(`${HEX}  kinfold-darwin-arm64\r\r\n`)).toThrow()
 })
 
 test('verifyProgram answers true only for a listed, matching file', async () => {
@@ -145,6 +181,44 @@ test('a failed SHA256SUMS fetch stops the install unchecked', async () => {
   expect(snapshotTree(w.home)).toEqual(before)
 })
 
+test('a bad SHA256SUMS stops before a pending migration touches the store, keys, configs or service', async () => {
+  const { w, source, asset } = migrationWorld()
+  useSums(w, sumsLine(asset, sha('other bytes')))
+  const paths = installPaths(w.env)
+  const legacyPort = readDaemonInfo(paths.legacyDataDir).port
+  const settings = join(w.home, '.claude', 'settings.json')
+  const settingsBefore = readFileSync(settings, 'utf8')
+  const securityCalls = w.securityCalls.length
+  expect(await install(w.env, installOptions(source, '0.4.0-rc.1'))).toBe(1)
+  expect(w.out.at(-1)).toBe('install failed: program does not match the release checksums')
+  // The data folder was not moved, the config not rewritten, the keys not copied.
+  expect(lstatSync(paths.legacyDataDir).isDirectory()).toBe(true)
+  expect(existsSync(w.dataDir)).toBe(false)
+  expect(readFileSync(settings, 'utf8')).toBe(settingsBefore)
+  expect(w.securityCalls.length).toBe(securityCalls)
+  expect(w.legacyKeychain.has(LEGACY_REF)).toBe(true)
+  expect(w.legacyKeychainValues.get(LEGACY_REF)).toBe(LEGACY_VALUE)
+  // The service is still the old one, loaded and answering.
+  expect(w.launchd.legacyLoaded).toBe(true)
+  expect((await checkHealth(w.env, legacyPort)).up).toBe(true)
+  expect(w.commands.filter((call) => call.argv[1] === 'bootout')).toEqual([])
+})
+
+test('a dry run with a pending migration lists the program copy and fetches no sums', async () => {
+  const { w, binPath, source } = migrationWorld()
+  // A URL that cannot be read: the dry run must not touch it.
+  w.env.envVars = { KINFOLD_RELEASE_SUMS_URL: pathToFileURL(join(w.root, 'absent-SHA256SUMS')).href }
+  const paths = installPaths(w.env)
+  const settings = join(w.home, '.claude', 'settings.json')
+  const settingsBefore = readFileSync(settings, 'utf8')
+  expect(await install(w.env, { ...installOptions(source, '0.4.0-rc.1'), dryRun: true })).toBe(EXIT_OK)
+  expect(lstatSync(paths.legacyDataDir).isDirectory()).toBe(true)
+  expect(existsSync(w.dataDir)).toBe(false)
+  expect(readFileSync(settings, 'utf8')).toBe(settingsBefore)
+  expect(w.out.join('\n')).toContain(`install program ${binPath}`)
+  expect(w.fetches.every((call) => call === 'GET /health')).toBe(true)
+})
+
 test('a dry run lists install program without writing or fetching the sums', async () => {
   const { w, binPath, source } = releaseWorld()
   // A URL that cannot be read: the dry run must not touch it.
@@ -168,6 +242,36 @@ test('a copy that fails before the rename leaves the old program in place', asyn
   }
   expect(await install(w.env, installOptions(source))).toBe(1)
   expect(readFileSync(binPath, 'utf8')).toBe('old program\n')
+  expect(readdirSync(join(w.dataDir, 'bin')).filter((name) => name.startsWith('.kinfold-tmp-'))).toEqual([])
+})
+
+test('a failed copy starts the daemon again from the program still in place', async () => {
+  const { w, binPath, source } = programWorld()
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  writeFileSync(source, 'kinfold program v2\n')
+  w.commands.length = 0
+  w.out.length = 0
+  const out = w.env.out
+  w.env.out = (line) => {
+    out(line)
+    if (line.startsWith('applying ')) rmSync(source)
+  }
+  expect(await install(w.env, installOptions(source))).toBe(1)
+  expect(readFileSync(binPath, 'utf8')).toBe('kinfold program v1\n')
+  const verbs = w.commands.filter((call) => call.argv[0] === LAUNCHCTL).map((call) => call.argv[1])
+  expect(verbs).toContain('bootout')
+  expect(verbs.slice(-2)).toEqual(['print', 'bootstrap'])
+  expect(w.launchd.loaded).toBe(true)
+  expect((await checkHealth(w.env, readDaemonInfo(w.dataDir).port)).up).toBe(true)
+  expect(w.out.join('\n')).toContain('the daemon was started again from the program in place')
+})
+
+test('a failed rename removes the temp file it copied', async () => {
+  const { w, binPath, source } = programWorld()
+  // A directory at the destination makes the rename fail after the copy ran.
+  mkdirSync(binPath, { recursive: true })
+  expect(await install(w.env, installOptions(source))).toBe(1)
+  expect(existsSync(binPath)).toBe(true)
   expect(readdirSync(join(w.dataDir, 'bin')).filter((name) => name.startsWith('.kinfold-tmp-'))).toEqual([])
 })
 
