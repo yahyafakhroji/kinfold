@@ -38,7 +38,9 @@ mkdir -p "$work"
 zip="$work/$name"
 
 sha256_of() {
-  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
+  # Reading stdin keeps the file name out of the output; sha256sum prefixes a
+  # backslash to the hash when the name has one, as Windows temp paths do.
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum < "$1" | cut -d' ' -f1; else shasum -a 256 < "$1" | cut -d' ' -f1; fi
 }
 
 # Prints the HTTP status; 000 means the request itself failed or timed out.
@@ -60,7 +62,7 @@ fi
 
 actual="$(sha256_of "$zip")"
 if [ "$actual" != "$expected" ]; then
-  echo "the Bun download does not match the pinned sha256; nothing was installed" >&2
+  echo "the Bun download (sha256 $actual) does not match the pinned sha256; nothing was installed" >&2
   exit 1
 fi
 
