@@ -320,6 +320,26 @@ const DECRYPT_EXPECT = [
   '',
 ].join('\n')
 
+/**
+ * The workflow creates the throwaway keychain under the runner's home, but
+ * every kinfold command runs with HOME set to the smoke's temporary home.
+ * security reads the default keychain and the search list from that home, so
+ * the throwaway has to be made the default there too, or writes fall back to
+ * the locked login keychain.
+ */
+function adoptKeychain(world: World): void {
+  const keychain = process.env.KINFOLD_SMOKE_KEYCHAIN
+  if (keychain === undefined || keychain === '') return
+  const password = process.env.KINFOLD_SMOKE_KEYCHAIN_PASSWORD
+  const commands: string[][] = []
+  if (password !== undefined && password !== '') commands.push(['unlock-keychain', '-p', password, keychain])
+  commands.push(['default-keychain', '-s', keychain], ['list-keychains', '-d', 'user', '-s', keychain])
+  for (const args of commands) {
+    const result = Bun.spawnSync(['/usr/bin/security', ...args], { env: world.env, stdout: 'ignore', stderr: 'ignore' })
+    if (result.exitCode !== 0) throw new SmokeError('setup', `security ${args[0]} failed with exit ${result.exitCode}`)
+  }
+}
+
 function launchAgentLoaded(world: World): boolean {
   const uid = process.getuid?.() ?? -1
   if (uid < 0) return true
@@ -446,6 +466,7 @@ async function smoke(programPath: string): Promise<void> {
     ensurePortFree(DEFAULT_PORT)
     if (launchAgentLoaded(world)) throw new SmokeError('setup', `${LAUNCH_AGENT_LABEL} is already loaded; the smoke will not take over an existing install`)
     writeObserverShim(world, Bun.which('claude', { PATH: process.env.PATH ?? '' }))
+    adoptKeychain(world)
 
     installStarted = true
     await steps(world)

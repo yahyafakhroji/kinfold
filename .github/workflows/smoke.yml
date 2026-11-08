@@ -76,6 +76,8 @@ jobs:
           echo "KINFOLD_SMOKE_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
           echo "KINFOLD_SMOKE_ORIGINAL_KEYCHAIN=$original" >> "$GITHUB_ENV"
           password="$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          echo "KINFOLD_SMOKE_KEYCHAIN_PASSWORD=$password" >> "$GITHUB_ENV"
           security create-keychain -p "$password" "$keychain"
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$password" "$keychain"
