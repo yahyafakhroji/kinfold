@@ -8,6 +8,7 @@
 
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { DEVELOPMENT_VERSION } from '../src/install/self-install'
 
 export interface NpmTarget {
   /** The release target, matching tools/build-release.ts. */
@@ -57,6 +58,7 @@ function description(target: NpmTarget): string {
 export function packNpm(distDir: string, version: string, root = join(import.meta.dir, '..')): PackSummary[] {
   if (distDir === '' || version === '') throw new PackError('usage: bun tools/pack-npm.ts <distDir> <version>')
   if (!VERSION_PATTERN.test(version)) throw new PackError(`${version} is not a version; use letters, digits, dots, plus and hyphen`)
+  if (version === DEVELOPMENT_VERSION) throw new PackError(`${version} is the development version, which skips the checksum check; pack a real release version`)
 
   const sources = NPM_TARGETS.map((target) => {
     const path = join(distDir, target.program)

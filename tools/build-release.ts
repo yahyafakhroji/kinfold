@@ -9,6 +9,7 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { DEVELOPMENT_VERSION } from '../src/install/self-install'
 
 export interface ReleasePaths {
   root: string
@@ -105,6 +106,8 @@ export async function buildRelease(
   const target = TARGETS[targetName]
   if (target === undefined) throw new BuildError(`unknown target ${targetName}; expected one of ${Object.keys(TARGETS).join(', ')}`)
   if (!VERSION_PATTERN.test(version)) throw new BuildError(`${version} is not a version; use letters, digits, dots, plus and hyphen`)
+  // The program skips its checksum check for this version, so a release must never carry it.
+  if (version === DEVELOPMENT_VERSION) throw new BuildError(`${version} is the development version, which skips the checksum check; build a real release version`)
   if (host.platform !== target.platform || host.arch !== target.arch) {
     throw new BuildError(`${targetName} needs ${target.platform} ${target.arch}; this host is ${host.platform} ${host.arch}, and the build embeds a sqlite3mc library compiled for the target`)
   }

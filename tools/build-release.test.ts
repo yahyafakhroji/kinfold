@@ -116,6 +116,7 @@ test('an unknown target or a non-version is refused', async () => {
 
   await expect(buildRelease(paths, 'linux-riscv64', '0.2.0', toolchain(), LINUX_X64)).rejects.toThrow('unknown target linux-riscv64')
   await expect(buildRelease(paths, 'linux-x64', 'not a version', toolchain(), LINUX_X64)).rejects.toThrow('is not a version')
+  await expect(buildRelease(paths, 'linux-x64', '0.0.0-dev', toolchain(), LINUX_X64)).rejects.toThrow('development version')
 })
 
 test('the Windows program carries the .exe suffix', () => {

@@ -84,9 +84,12 @@ export async function verifyProgram(path: string, assetName: string, sumsText: s
  * override exists so a candidate can be checked before its release exists; a
  * final version always comes from GitHub, even when the variable is set.
  */
+/** A release candidate ends in -rc.<n>; a name that merely contains it is not one. */
+const RELEASE_CANDIDATE = /-rc\.\d+$/
+
 export function releaseSumsUrl(envVars: Readonly<Record<string, string | undefined>> = {}, version: string = VERSION): string {
   const override = readEnv(envVars, 'RELEASE_SUMS_URL')
-  if (override !== undefined && version.includes('-rc.')) return override
+  if (override !== undefined && RELEASE_CANDIDATE.test(version)) return override
   return `${RELEASE_BASE}/v${version}/SHA256SUMS`
 }
 

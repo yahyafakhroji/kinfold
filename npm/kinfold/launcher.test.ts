@@ -239,6 +239,7 @@ describe('pack-npm', () => {
     const { dir } = distWithPrograms()
 
     expect(() => packNpm(dir, '')).toThrow()
+    expect(() => packNpm(dir, '0.0.0-dev')).toThrow('development version')
     expect(existsSync(join(dir, 'npm'))).toBe(false)
 
     rmSync(join(dir, NPM_TARGETS[0]!.program))

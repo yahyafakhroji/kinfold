@@ -133,6 +133,10 @@ test('the release checksum URL is overridden only for a release candidate', () =
   const override = 'file:///tmp/kinfold-rc-sums'
   expect(releaseSumsUrl({ KINFOLD_RELEASE_SUMS_URL: override }, '0.4.0-rc.1')).toBe(override)
   expect(releaseSumsUrl({ KINFOLD_RELEASE_SUMS_URL: override }, '0.4.0')).toBe(`${GITHUB}/v0.4.0/SHA256SUMS`)
+  for (const version of ['0.4.0-rc.1.evil', '0.4.0-rc.', '0.4.0-rc.x', '0.4.0-rc.1+build', '0.4.0-rcx.1']) {
+    expect(releaseSumsUrl({ KINFOLD_RELEASE_SUMS_URL: override }, version)).toBe(`${GITHUB}/v${version}/SHA256SUMS`)
+  }
+  expect(releaseSumsUrl({ KINFOLD_RELEASE_SUMS_URL: override }, '1.0.0-rc.12')).toBe(override)
   expect(releaseSumsUrl({}, '0.4.0-rc.1')).toBe(`${GITHUB}/v0.4.0-rc.1/SHA256SUMS`)
   expect(releaseSumsUrl({}, '0.4.0')).toBe(`${GITHUB}/v0.4.0/SHA256SUMS`)
 })
@@ -143,6 +147,7 @@ test('a development version copies the program without a checksum and says so', 
   expect(readFileSync(binPath, 'utf8')).toBe(readFileSync(source, 'utf8'))
   expect(statSync(binPath).mode & 0o777).toBe(0o755)
   expect(w.out).toContain('program: the release checksum check is skipped for the development version')
+  expect(w.out.at(-1)).toBe(`installed. Check it with: ${binPath} status`)
   expect(readdirSync(join(w.dataDir, 'bin')).filter((name) => name.startsWith('.kinfold-tmp-'))).toEqual([])
 })
 
