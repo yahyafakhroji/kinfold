@@ -14,7 +14,7 @@
 
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join, resolve, sep } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 
 const DEFAULT_PORT = 37_811
 const LAUNCH_AGENT_LABEL = 'dev.kinfold.daemon'
@@ -30,25 +30,14 @@ export class SmokeError extends Error {
   }
 }
 
-/** A real home is only safe on an ephemeral CI runner. */
+/** The smoke writes to the default keychain and the launchd user domain, so it only runs on an ephemeral CI runner. */
 export function homeForSmoke(env: NodeJS.ProcessEnv = process.env): string {
   const home = env.HOME ?? ''
   if (home === '') throw new SmokeError('setup', 'HOME is not set; the smoke needs a home to install into')
-  if (isTemporaryPath(home)) return home
   if (env.GITHUB_ACTIONS !== 'true') {
-    throw new SmokeError('setup', `${home} is a real home; the smoke only runs there on GitHub Actions (set GITHUB_ACTIONS=true)`)
+    throw new SmokeError('setup', 'the smoke touches the keychain and launchd; it only runs on GitHub Actions (set GITHUB_ACTIONS=true)')
   }
   return home
-}
-
-function isTemporaryPath(path: string): boolean {
-  try {
-    const real = realpathSync(path)
-    const temp = realpathSync(tmpdir())
-    return real === temp || real.startsWith(`${temp}${sep}`)
-  } catch {
-    return false
-  }
 }
 
 interface Result {

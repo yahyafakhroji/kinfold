@@ -23,16 +23,20 @@ const DEFAULT_TIMEOUT_MS = 60_000
 class Unavailable extends Error {}
 
 async function fetchOnce(url: string, headers: Record<string, string>, input: PinnedDownload): Promise<Uint8Array<ArrayBuffer>> {
+  if ('Authorization' in headers && new URL(url).host !== 'api.github.com') throw new Error('the token is only sent to api.github.com')
   const doFetch = input.fetch ?? fetch
-  let response: Response
+  let response: Response | undefined
   try {
     response = await doFetch(url, { redirect: 'follow', headers, signal: AbortSignal.timeout(input.timeoutMs ?? DEFAULT_TIMEOUT_MS) })
+    if (response.status >= 500) throw new Unavailable(`answered ${response.status}`)
+    if (!response.ok) throw new Error(`answered ${response.status}`)
+    // The body read sits inside the try so a timeout or reset mid-download also counts as unavailable.
+    return new Uint8Array(await response.arrayBuffer())
   } catch (error) {
+    if (error instanceof Unavailable) throw error
+    if (response !== undefined && !response.ok) throw error
     throw new Unavailable(`${error instanceof Error ? error.message : String(error)}`)
   }
-  if (response.status >= 500) throw new Unavailable(`answered ${response.status}`)
-  if (!response.ok) throw new Error(`answered ${response.status}`)
-  return new Uint8Array(await response.arrayBuffer())
 }
 
 function check(bytes: Uint8Array<ArrayBuffer>, input: PinnedDownload): Uint8Array<ArrayBuffer> {

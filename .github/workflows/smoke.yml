@@ -20,30 +20,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Resolve the Bun download URL
-        id: bun
+      - name: Install the pinned Bun
         shell: bash
         env:
           # Anonymous API calls share a rate limit per runner address and answer 403.
           GH_TOKEN: ${{ github.token }}
-        run: |
-          # The github.com releases/download path answers 504 in this runner;
-          # the API asset URL redirects to the same release-assets host and works.
-          case "$(uname -s)-$(uname -m)" in
-            Darwin-arm64) name="bun-darwin-aarch64.zip" ;;
-            Darwin-x86_64) name="bun-darwin-x64.zip" ;;
-            Linux-x86_64) name="bun-linux-x64.zip" ;;
-            Linux-aarch64) name="bun-linux-aarch64.zip" ;;
-            MINGW*|MSYS*) name="bun-windows-x64.zip" ;;
-            *) echo "no Bun asset for $(uname -s)-$(uname -m)"; exit 1 ;;
-          esac
-          url="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/oven-sh/bun/releases/tags/bun-v1.4.4" | jq -r --arg name "$name" '.assets[] | select(.name == $name) | .url')"
-          location="$(curl -fsSL -I -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' -o /dev/null -w '%{url_effective}' "$url")"
-          echo "url=$location" >> "$GITHUB_OUTPUT"
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-download-url: ${{ steps.bun.outputs.url }}
+        run: bash tools/install-bun.sh
 
       - name: Download the release programs
         uses: actions/download-artifact@v8

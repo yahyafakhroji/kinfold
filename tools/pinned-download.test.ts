@@ -75,12 +75,36 @@ test('rejects an oversized download', async () => {
 
 test('sends the token to the API asset URL and never to the release URL', async () => {
   const warn = spyOn(console, 'warn').mockImplementation(() => {})
+  const GH_API = 'https://api.github.com/repos/x/y/releases/assets/1'
   const auth: (string | null)[] = []
   const impl = (async (url: string, init?: RequestInit) => {
     auth.push(new Headers(init?.headers).get('authorization'))
     return url === RELEASE ? new Response('', { status: 504 }) : new Response(GOOD)
   }) as unknown as typeof fetch
-  await download(impl, 'tok')
+  await downloadPinned({ label: 'test asset', releaseUrl: RELEASE, apiUrl: GH_API, sha256: sha, maxBytes: 1000, fetch: impl, token: 'tok' })
   expect(auth).toEqual([null, 'Bearer tok'])
+  warn.mockRestore()
+})
+
+test('names a 403 from the API asset URL after a release 5xx', async () => {
+  const warn = spyOn(console, 'warn').mockImplementation(() => {})
+  const { impl } = fakeFetch({ [RELEASE]: new Response('', { status: 504 }), [API]: new Response('', { status: 403 }) })
+  await expect(download(impl)).rejects.toThrow('API asset URL answered 403')
+  warn.mockRestore()
+})
+
+test('falls back when the body read fails mid-download', async () => {
+  const warn = spyOn(console, 'warn').mockImplementation(() => {})
+  const broken = new Response(new ReadableStream({ start: (c) => c.error(new Error('connection reset')) }))
+  const { impl } = fakeFetch({ [RELEASE]: broken, [API]: new Response(GOOD) })
+  expect(await download(impl)).toEqual(GOOD)
+  warn.mockRestore()
+})
+
+test('refuses to send the token to a host other than api.github.com', async () => {
+  const warn = spyOn(console, 'warn').mockImplementation(() => {})
+  const { impl, calls } = fakeFetch({ [RELEASE]: new Response('', { status: 504 }), [API]: new Response(GOOD) })
+  await expect(download(impl, 'tok')).rejects.toThrow('only sent to api.github.com')
+  expect(calls).toHaveLength(1)
   warn.mockRestore()
 })

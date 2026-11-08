@@ -13,10 +13,10 @@ describe('homeForSmoke', () => {
     expect(homeForSmoke({ HOME: '/Users/example', GITHUB_ACTIONS: 'true' })).toBe('/Users/example')
   })
 
-  test('allows a temporary home without GitHub Actions', () => {
+  test('refuses a temporary home without GitHub Actions', () => {
     const root = mkdtempSync(join(tmpdir(), 'kinfold-smoke-test-'))
     try {
-      expect(homeForSmoke({ HOME: root })).toBe(root)
+      expect(() => homeForSmoke({ HOME: root })).toThrow(SmokeError)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
