@@ -10,6 +10,7 @@ import { EXIT_OK, install } from './install'
 import { inspectShim, pluginFileContent, shimContent } from './opencode-shim'
 import { runPlan } from './plan'
 import { status } from './status'
+import { entryCommand } from './entry'
 import { BUN, type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
 import { uninstall } from './uninstall'
 
@@ -68,11 +69,11 @@ test('detected Codex (CLI) and Cursor (app): wired with backups, foreign entries
   expect(await install(w.env, YES)).toBe(EXIT_OK)
 
   const codex = JSON.parse(readFileSync(paths.codexHooks, 'utf8')) as { hooks: Record<string, unknown[]> }
-  for (const event of CODEX_HOOK_SPEC.events) expect(codex.hooks[event]).toEqual([samItem(CODEX_HOOK_SPEC, event, { bunPath: BUN, hookScript })])
+  for (const event of CODEX_HOOK_SPEC.events) expect(codex.hooks[event]).toEqual([samItem(CODEX_HOOK_SPEC, event, { entry: entryCommand(w.env.mode, 'hook', w.dataDir, 'codex') })])
   const cursor = JSON.parse(readFileSync(paths.cursorHooks, 'utf8')) as { version: number; hooks: Record<string, unknown[]> }
   expect(cursor.version).toBe(1)
-  expect(cursor.hooks.beforeSubmitPrompt).toEqual([FOREIGN_CURSOR, samItem(CURSOR_HOOK_SPEC, 'beforeSubmitPrompt', { bunPath: BUN, hookScript })])
-  expect(cursor.hooks.sessionStart).toEqual([samItem(CURSOR_HOOK_SPEC, 'sessionStart', { bunPath: BUN, hookScript })])
+  expect(cursor.hooks.beforeSubmitPrompt).toEqual([FOREIGN_CURSOR, samItem(CURSOR_HOOK_SPEC, 'beforeSubmitPrompt', { entry: entryCommand(w.env.mode, 'hook', w.dataDir, 'cursor') })])
+  expect(cursor.hooks.sessionStart).toEqual([samItem(CURSOR_HOOK_SPEC, 'sessionStart', { entry: entryCommand(w.env.mode, 'hook', w.dataDir, 'cursor') })])
   expect(readdirSync(paths.codexDir).filter((name) => name.includes('.kinfold-backup-'))).toHaveLength(1)
   expect(readdirSync(paths.cursorDir).filter((name) => name.includes('.kinfold-backup-'))).toHaveLength(1)
   expect(w.out).toContain(CODEX_TRUST_NOTE)

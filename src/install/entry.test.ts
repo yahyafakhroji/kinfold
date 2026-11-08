@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { inspectSamHooks, mergeSamHooks } from './claude-hooks'
-import { entryCommand, entryIdentity, installedProgramPath, isCompiledProgram, isOurEntry } from './entry'
+import { entryCommand, entryIdentity, entryRole, installedProgramPath, isCompiledProgram, isOurEntry } from './entry'
 import { serializeJson } from './files'
 import { samCommand, samCommandScript } from './host-hooks'
 import { plistContent } from './launch-agent'
@@ -26,16 +26,23 @@ describe('the entry command', () => {
     expect(entryCommand(mode, 'daemon', DATA_DIR)).toEqual({ command: PROGRAM, args: ['--data-dir', DATA_DIR, 'daemon'] })
   })
 
-  test('a checkout hook is bun on the checkout script, as before, with the host when one is named', () => {
+  test('a checkout hook is bun on the checkout script with the data folder, and the host when one is named', () => {
     expect(entryCommand(CHECKOUT, 'hook', DATA_DIR)).toEqual({
       command: CHECKOUT.bunPath,
-      args: [join(CHECKOUT.projectRoot, 'src/cli/hook.ts')],
+      args: [join(CHECKOUT.projectRoot, 'src/cli/hook.ts'), '--data-dir', DATA_DIR],
     })
-    expect(entryCommand(CHECKOUT, 'hook', DATA_DIR, 'codex').args).toEqual([join(CHECKOUT.projectRoot, 'src/cli/hook.ts'), '--host', 'codex'])
+    expect(entryCommand(CHECKOUT, 'hook', DATA_DIR, 'codex').args).toEqual([join(CHECKOUT.projectRoot, 'src/cli/hook.ts'), '--data-dir', DATA_DIR, '--host', 'codex'])
   })
 
-  test('a checkout MCP server and daemon keep their script paths', () => {
-    expect(entryCommand(CHECKOUT, 'mcp', DATA_DIR).args).toEqual([join(CHECKOUT.projectRoot, 'src/mcp/server.ts')])
+  test('a checkout MCP server carries the data folder too, and entries with or without it are ours', () => {
+    const mcp = entryCommand(CHECKOUT, 'mcp', DATA_DIR)
+    expect(mcp.args).toEqual([join(CHECKOUT.projectRoot, 'src/mcp/server.ts'), '--data-dir', DATA_DIR])
+    expect(entryRole(mcp.command, mcp.args)).toBe('mcp')
+    expect(entryRole(mcp.command, [mcp.args[0]!])).toBe('mcp')
+    expect(entryRole(mcp.command, [...mcp.args, 'extra'])).toBeNull()
+  })
+
+  test('a checkout daemon keeps its script path and takes its folder from the plist environment', () => {
     expect(entryCommand(CHECKOUT, 'daemon', DATA_DIR).args).toEqual([join(CHECKOUT.projectRoot, 'src/daemon/main.ts')])
   })
 

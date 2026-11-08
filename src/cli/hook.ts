@@ -25,6 +25,7 @@ import { type ContextChannel, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
 import type { NormalizedEvent } from '../contract/event'
 import { isObserverProcess } from '../observer/env'
 import { resolveDataDir } from '../store/data-dir'
+import { applyDataDirFlag } from '../store/data-dir-flag'
 import { recordEvent } from './record'
 
 export type ErrorSink = (line: string) => void
@@ -139,7 +140,7 @@ export async function runHookCli(argv: readonly string[]): Promise<void> {
   }
   if (isObserverProcess()) return
   try {
-    const host = hostFromArgs(argv)
+    const host = hostFromArgs(applyDataDirFlag(argv))
     if (host === null) {
       stderr('kinfold-hook: unknown --host; nothing captured')
     } else {

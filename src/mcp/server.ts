@@ -11,6 +11,7 @@
 // back to keyword-only when the daemon is down or slow.
 
 import { resolveDataDir } from '../store/data-dir'
+import { applyDataDirFlag } from '../store/data-dir-flag'
 import { DAEMON_GIT_TIMEOUT_MS, type GitRunner, GitTimeoutError, gitRunnerWithTimeout, resolveProjectKey } from '../store/project-key'
 import { MAX_LINE_CHARS, handleLine, oversizeReply } from './protocol'
 import { type ReadReporter, createReadReporter, hostFromEnv } from './read-reporter'
@@ -132,7 +133,8 @@ export function failMcp(error: unknown): never {
   process.exit(1)
 }
 
-async function serveMcp(_argv: readonly string[]): Promise<void> {
+async function serveMcp(argv: readonly string[]): Promise<void> {
+  applyDataDirFlag(argv)
   const log = (line: string) => process.stderr.write(`kinfold-mcp: ${line}\n`)
   const dataDir = resolveDataDir()
   const host = hostFromEnv(process.env)

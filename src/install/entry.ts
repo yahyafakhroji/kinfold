@@ -1,8 +1,8 @@
 // One place decides what a host runs and which entries are Kinfold's. A
 // checkout install starts bun on a script in the checkout; an installed
 // program runs <dataDir>/bin/kinfold. Both forms carry the data folder, the
-// checkout through the store defaults and the program through --data-dir
-// before the subcommand, so a hook, MCP server or daemon always reads the
+// checkout after the script and the program before the subcommand, both
+// through --data-dir, so a hook, MCP server or daemon always reads the
 // store the installer chose.
 //
 // Recognition is by what the command runs, never by position or by a name
@@ -49,7 +49,9 @@ export function entryCommand(mode: InstallMode, role: EntryRole, dataDir: string
   if (mode.kind === 'program') {
     return { command: mode.binPath, args: ['--data-dir', dataDir, role, ...hostArgs] }
   }
-  return { command: mode.bunPath, args: [join(mode.projectRoot, CHECKOUT_SCRIPTS[role]), ...hostArgs] }
+  // The daemon gets its folder from the plist environment, so only the entries a host starts carry it.
+  const dataArgs = role === 'daemon' ? [] : ['--data-dir', dataDir]
+  return { command: mode.bunPath, args: [join(mode.projectRoot, CHECKOUT_SCRIPTS[role]), ...dataArgs, ...hostArgs] }
 }
 
 /** What an entry of ours names: the checkout script, or the program path. */
@@ -95,12 +97,18 @@ function classify(command: string, args: readonly string[]): ParsedEntry | null 
   return role === null ? null : { command, args: list, role }
 }
 
-/** A checkout runs bun with one of our scripts; a hook may add its host. */
+/** A checkout runs bun with one of our scripts, then --data-dir; a hook may add its host. */
 function checkoutRole(args: readonly string[]): EntryRole | null {
   const script = normalizePath(args[0] ?? '')
   const role = PROGRAM_SUBCOMMANDS.find((candidate) => script.endsWith(`/${CHECKOUT_SCRIPTS[candidate]}`))
   if (role === undefined) return null
-  const rest = args.slice(1)
+  return restAllowed(role, args.slice(1))
+}
+
+/** After the optional --data-dir pair, nothing may follow but a hook's --host. */
+function restAllowed(role: EntryRole, args: readonly string[]): EntryRole | null {
+  const first = args[0]
+  const rest = first === '--data-dir' ? args.slice(2) : first?.startsWith('--data-dir=') === true ? args.slice(1) : args
   if (rest.length === 0) return role
   return role === 'hook' && rest.length === 2 && rest[0] === '--host' && rest[1] !== undefined && rest[1] !== '' ? role : null
 }
