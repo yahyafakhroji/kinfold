@@ -77,6 +77,7 @@ test('with only the old data dir, install targets ~/.kinfold and every other com
   try {
     mkdirSync(join(home, '.shared-agent-memory'))
     expect(dataDirFor(['install', '--dry-run'], {}, home)).toBe(join(home, '.kinfold'))
+    expect(dataDirFor([], {}, home)).toBe(join(home, '.kinfold'))
     for (const command of ['status', 'uninstall', 'dashboard', 'size']) {
       expect(dataDirFor([command], {}, home)).toBe(join(home, '.shared-agent-memory'))
     }
@@ -125,6 +126,18 @@ test('--version prints the build version and starts nothing', async () => {
   expect(await runKinfold(['--version'], world.env, recordRunners(routed))).toBe(0)
   expect(world.out).toEqual([VERSION])
   expect(routed).toEqual([])
+})
+
+test('a bare kinfold installs, and --help prints usage without installing', async () => {
+  world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', interactive: true })
+
+  expect(await runKinfold([], world.env)).toBe(0)
+  expect(world.out.at(-1)).toBe('installed. Check it with: bun src/cli/kinfold.ts status')
+
+  world.out.length = 0
+  expect(await runKinfold(['--help'], world.env)).toBe(0)
+  expect(world.out[0]).toStartWith('usage: kinfold ')
+  expect(world.out.at(-1)).not.toBe('installed. Check it with: bun src/cli/kinfold.ts status')
 })
 
 test('--data-dir before the subcommand wins over the environment and reaches the subcommand', async () => {

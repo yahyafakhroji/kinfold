@@ -1,0 +1,30 @@
+{
+  "name": "kinfold",
+  "version": "0.0.0-dev",
+  "description": "A local memory your coding agents share: Claude Code, OpenCode, Codex and Cursor.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/yahyafakhroji/kinfold",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yahyafakhroji/kinfold.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yahyafakhroji/kinfold/issues"
+  },
+  "bin": {
+    "kinfold": "bin/kinfold.js"
+  },
+  "files": [
+    "bin/kinfold.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@kinfold/cli-darwin-arm64": "0.0.0-dev",
+    "@kinfold/cli-darwin-x64": "0.0.0-dev",
+    "@kinfold/cli-linux-x64": "0.0.0-dev",
+    "@kinfold/cli-linux-arm64": "0.0.0-dev",
+    "@kinfold/cli-windows-x64": "0.0.0-dev"
+  }
+}

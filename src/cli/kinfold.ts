@@ -103,14 +103,20 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     write(VERSION)
     return 0
   }
-  const args = global.value.argv
+  // A bare `kinfold`, and so `npx kinfold`, opens the installer.
+  const args = global.value.argv.length === 0 ? ['install'] : global.value.argv
   const name = args[0]
+  if (args.length === 1 && (name === '--help' || name === '-h')) {
+    const { USAGE } = await import('../install/args')
+    write(USAGE)
+    return 0
+  }
   if (isSubcommand(name)) {
     const run = runners[name] ?? (await loadSubcommand(name))
     await withDataDir(global.value.dataDir, () => run(args.slice(1)))
     return 0
   }
-  const base = env ?? (await systemEnv(argv))
+  const base = env ?? (await systemEnv(args, global.value.dataDir))
   const effective = global.value.dataDir === null ? base : { ...base, dataDir: global.value.dataDir }
   const { parseArgs, parseDashboardArgs, parseDataArgs, parseKeyArgs } = await import('../install/args')
   const dashboard = parseDashboardArgs(args)
@@ -192,12 +198,19 @@ async function withDataDir(dataDir: string | null, run: () => Promise<void>): Pr
 export function dataDirFor(argv: readonly string[], env: Readonly<Record<string, string | undefined>>, home: string): string {
   const global = parseGlobalArgs(argv)
   if (!global.ok) throw new Error(global.error)
-  const configured = global.value.dataDir
-  const effective = configured === null ? env : { ...env, [envName('DATA_DIR')]: configured }
-  return global.value.argv[0] === 'install' ? resolveInstallDataDir(effective, home) : resolveDataDir(effective, home)
+  return dataDirForCommand(global.value.argv[0], global.value.dataDir, env, home)
 }
 
-async function systemEnv(argv: readonly string[]): Promise<InstallEnv> {
+/**
+ * A bare program runs install, so an undefined command targets the install
+ * data folder just as the explicit command does.
+ */
+function dataDirForCommand(command: string | undefined, configured: string | null, env: Readonly<Record<string, string | undefined>>, home: string): string {
+  const effective = configured === null ? env : { ...env, [envName('DATA_DIR')]: configured }
+  return command === undefined || command === 'install' ? resolveInstallDataDir(effective, home) : resolveDataDir(effective, home)
+}
+
+async function systemEnv(args: readonly string[], configuredDataDir: string | null): Promise<InstallEnv> {
   const [{ createCliRunner, createRunner }, { NO_CREDENTIALS }, { createSecurityRunner }, { createCommandRunner, createPromptIO }, { installedProgramPath, isCompiledProgram }] = await Promise.all([
     import('../observer/runners'),
     import('../secrets/credentials'),
@@ -206,7 +219,7 @@ async function systemEnv(argv: readonly string[]): Promise<InstallEnv> {
     import('../install/entry'),
   ])
   const homeDir = homedir()
-  const dataDir = dataDirFor(argv, process.env, homeDir)
+  const dataDir = dataDirForCommand(args[0], configuredDataDir, process.env, homeDir)
   const pathEnv = process.env.PATH ?? '/usr/bin:/bin'
   const projectRoot = resolve(import.meta.dir, '..', '..')
   // A compiled program wires hosts to the program installed in the data
