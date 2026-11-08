@@ -30,7 +30,7 @@ import { waitForHealth, waitForStart } from './daemon-client'
 import { type InstallEnv, errorMessage } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
 import { HEALTH_WAIT_MS } from './plan'
-import { confirmRecoveryCode } from './recovery-confirm'
+import { confirmRecoveryCode, recoverySinkFromEnv } from './recovery-confirm'
 import { serviceOf } from './service/control'
 
 export const KEY_COMMANDS = ['encrypt', 'decrypt', 'rekey', 'show-recovery', 'recover', 'resume'] as const
@@ -86,7 +86,7 @@ function keyAt(ctx: Context, ref: string | null): string | null {
 }
 
 /** Prints the code and waits for its last two groups; false when the person typed something else. */
-const confirmCode = (ctx: Context, code: string): Promise<boolean> => confirmRecoveryCode((question) => ctx.env.io.ask(question), ctx.log, code)
+const confirmCode = (ctx: Context, code: string): Promise<boolean> => confirmRecoveryCode(recoverySinkFromEnv(ctx.env), code)
 
 interface Daemon {
   restart: boolean

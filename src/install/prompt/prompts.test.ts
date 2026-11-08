@@ -19,6 +19,18 @@ test('decodeKeys keeps typed text, and drops unknown sequences and control bytes
   expect(decodeKeys('\u001bOB')).toEqual([{ name: 'down' }])
 })
 
+test('decodeKeys reads CRLF as one Enter', () => {
+  expect(decodeKeys('a\r\nb')).toEqual([{ name: 'char', char: 'a' }, { name: 'enter' }, { name: 'char', char: 'b' }])
+})
+
+test('cooked mode is restored even when the cursor write fails', async () => {
+  const term = fakeTerminal(['\r'])
+  let writes = 0
+  const failing = { ...term, write: (text: string) => { if (++writes > 1 && text.includes('?25h')) throw new Error('EPIPE'); term.write(text) } }
+  await expect(createPrompts(failing).confirm('Go?', true)).rejects.toThrow('EPIPE')
+  expect(term.rawStates()).toEqual([true, false])
+})
+
 test('select: Enter accepts the default', async () => {
   const term = fakeTerminal(['\r'])
   expect(await createPrompts(term).select('Port', choices, 'c')).toBe('c')

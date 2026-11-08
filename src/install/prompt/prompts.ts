@@ -62,9 +62,16 @@ async function session<R>(io: TerminalIO, hideCursor: boolean, body: (next: Next
     if (error instanceof PromptCancelled) io.write('\r\n')
     throw error
   } finally {
-    io.write(SHOW_CURSOR)
-    io.setRaw(false)
-    await iterator.return?.()
+    // Cooked mode first: nothing after it may skip it, even a failed write.
+    try {
+      io.setRaw(false)
+    } finally {
+      try {
+        io.write(SHOW_CURSOR)
+      } finally {
+        await iterator.return?.()
+      }
+    }
   }
 }
 

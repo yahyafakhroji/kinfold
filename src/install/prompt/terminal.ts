@@ -56,7 +56,26 @@ export function nodeTerminal(): TerminalIO | null {
       // The terminal is already gone; nothing is left to restore.
     }
   }
-  process.once('exit', restore)
+  // Armed only while raw mode is on, so a command that never prompts leaves no hook behind.
+  const onExit = (): void => restore()
+  const onSignal = (signal: NodeJS.Signals): void => {
+    disarm()
+    restore()
+    // With our listener gone, re-sending the signal ends the process the way it would have ended anyway.
+    process.kill(process.pid, signal)
+  }
+  const onTerm = (): void => onSignal('SIGTERM')
+  const onHup = (): void => onSignal('SIGHUP')
+  const arm = (): void => {
+    process.once('exit', onExit)
+    process.once('SIGTERM', onTerm)
+    process.once('SIGHUP', onHup)
+  }
+  const disarm = (): void => {
+    process.off('exit', onExit)
+    process.off('SIGTERM', onTerm)
+    process.off('SIGHUP', onHup)
+  }
   return {
     async *keys() {
       attach()
@@ -77,6 +96,10 @@ export function nodeTerminal(): TerminalIO | null {
       }
     },
     write: (text) => void process.stdout.write(text),
-    setRaw: (on) => void stdin.setRawMode(on),
+    setRaw: (on) => {
+      if (on) arm()
+      else disarm()
+      stdin.setRawMode(on)
+    },
   }
 }

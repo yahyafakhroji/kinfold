@@ -48,6 +48,7 @@ export function decodeKeys(chunk: string): Key[] {
       continue
     }
     at += char.length
+    if (char === '\r' && text[at] === '\n') at++
     const named = SINGLE_BYTE[char]
     if (named !== undefined) keys.push(named)
     else if (!isControl(char)) keys.push({ name: 'char', char })
