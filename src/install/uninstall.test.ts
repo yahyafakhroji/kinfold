@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { installPaths } from './env'
 import { EXIT_OK, install } from './install'
 import { LAUNCHCTL } from './launch-agent'
+import { MCP_SERVER_NAME, claudeMcpEntry } from './mcp-config'
+import { mcpPaths, mcpTarget } from './mcp-wiring'
 import { pluginFileContent } from './opencode-shim'
 import { type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
 import { uninstall } from './uninstall'
@@ -95,4 +97,35 @@ test('a second uninstall has nothing to do, and a foreign file by our plugin nam
   expect(w.out[0]).toContain('is not a Kinfold plugin file; left alone')
   expect(w.out).toContain('nothing to change')
   expect(existsSync(installPaths(w.env).opencodePlugin)).toBe(true)
+})
+
+test('the program and libraries are removed after the hosts are unwired, so a failed step leaves them in place', async () => {
+  const w = createWorld({
+    claudeVersion: '2.1.310 (Claude Code)',
+    opencodeVersion: null,
+    commandOverride: (argv) => (argv[1] === 'mcp' && argv[2] === 'remove' ? { exitCode: 1, stdout: '' } : undefined),
+  })
+  world = w
+  const program = join(w.dataDir, 'bin', 'kinfold')
+  mkdirSync(join(w.dataDir, 'bin'), { recursive: true })
+  mkdirSync(join(w.dataDir, 'lib'), { recursive: true })
+  writeFileSync(program, 'program')
+  writeFileSync(mcpPaths(w.env).claudeUserConfig, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: claudeMcpEntry(mcpTarget(w.env)) } }))
+
+  expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).not.toBe(EXIT_OK)
+
+  expect(existsSync(program)).toBe(true)
+  expect(existsSync(join(w.dataDir, 'lib'))).toBe(true)
+
+  const dry = createWorld({ claudeVersion: '2.1.310 (Claude Code)', opencodeVersion: null })
+  await world.cleanup()
+  world = dry
+  mkdirSync(join(dry.dataDir, 'bin'), { recursive: true })
+  writeFileSync(mcpPaths(dry.env).claudeUserConfig, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: claudeMcpEntry(mcpTarget(dry.env)) } }))
+  expect(await uninstall(dry.env, { dryRun: true, removeCredentials: false })).toBe(EXIT_OK)
+  const lines = dry.out.filter((line) => /^\s+\d+\. /.test(line))
+  const mcp = lines.findIndex((line) => line.includes('claude mcp remove'))
+  const bin = lines.findIndex((line) => line.includes('the installed kinfold program'))
+  expect(mcp).toBeGreaterThanOrEqual(0)
+  expect(bin).toBeGreaterThan(mcp)
 })

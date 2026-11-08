@@ -97,7 +97,6 @@ export async function uninstall(env: InstallEnv, options: UninstallOptions): Pro
     const hmac = options.removeHmacKeys === true ? hmacRemoval(env, options.dryRun) : null
     const actions = [
       ...(await launchAgentActions(env)),
-      ...installedFilesActions(env),
       ...claudeActions(env),
       ...claudeMcpUninstallActions(env),
       ...opencodeActions(env),
@@ -106,6 +105,8 @@ export async function uninstall(env: InstallEnv, options: UninstallOptions): Pro
       ...hostHookUninstallActions(env, 'cursor'),
       ...(options.removeCredentials ? credentialActions(env, refs) : []),
       ...(hmac?.actions ?? []),
+      // Last: until every host entry is gone, each of them still names this program.
+      ...installedFilesActions(env),
     ]
     await runPlan(env, actions, options.dryRun)
     for (const note of [...keptNotes(env, refs, options.removeCredentials), ...(hmac?.notes ?? hmacKeptNotes(env))]) env.out(note)
