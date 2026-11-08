@@ -49,6 +49,9 @@ jobs:
       - name: Resolve the Bun download URL
         id: bun
         shell: bash
+        env:
+          # Anonymous API calls share a rate limit per runner address and answer 403.
+          GH_TOKEN: ${{ github.token }}
         run: |
           # The github.com releases/download path answers 504 in this runner;
           # the API asset URL redirects to the same release-assets host and works.
@@ -60,8 +63,8 @@ jobs:
             MINGW*|MSYS*) name="bun-windows-x64.zip" ;;
             *) echo "no Bun asset for $(uname -s)-$(uname -m)"; exit 1 ;;
           esac
-          url="$(curl -fsSL "https://api.github.com/repos/oven-sh/bun/releases/tags/bun-v1.4.4" | jq -r --arg name "$name" '.assets[] | select(.name == $name) | .url')"
-          location="$(curl -fsSL -I -H 'Accept: application/octet-stream' -o /dev/null -w '%{url_effective}' "$url")"
+          url="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/oven-sh/bun/releases/tags/bun-v1.4.4" | jq -r --arg name "$name" '.assets[] | select(.name == $name) | .url')"
+          location="$(curl -fsSL -I -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' -o /dev/null -w '%{url_effective}' "$url")"
           echo "url=$location" >> "$GITHUB_OUTPUT"
 
       - uses: oven-sh/setup-bun@v2
