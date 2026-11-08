@@ -302,7 +302,7 @@ test('a failed start after the plan stopped the service is reported and the step
   expect(await install(w.env, installOptions(source))).toBe(1)
   const lines = w.out.join('\n')
   expect(lines).toContain('the daemon did not answer /health after restarting (boom)')
-  expect(lines).toContain('install failed:')
+  expect(lines).toMatch(/install failed: .*(ENOENT|no such file)/i)
 })
 
 test('a failed rename removes the temp file it copied', async () => {

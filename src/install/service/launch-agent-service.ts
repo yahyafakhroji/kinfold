@@ -6,14 +6,14 @@ import { existsSync, readFileSync } from 'node:fs'
 import { envName } from '../../env-names'
 import { type InstallEnv, installPaths } from '../env'
 import { bootoutArgv, bootstrapArgv, isAgentLoaded } from '../launch-agent'
-import { runLaunchctl } from '../plan'
+import { HEALTH_WAIT_MS, runLaunchctl } from '../plan'
 import type { ServiceControl } from './control'
 
 export const LSOF = '/usr/sbin/lsof'
 export const PS = '/bin/ps'
-/** bootout returns before launchd has finished; stop waits this long for the job to go. */
-export const STOP_ATTEMPTS = 20
+/** bootout returns before launchd has finished; stop waits as long as the daemon's health wait for the job to go. */
 export const STOP_RETRY_MS = 250
+export const STOP_ATTEMPTS = Math.ceil(HEALTH_WAIT_MS / STOP_RETRY_MS)
 const PROBE_TIMEOUT_MS = 5_000
 const MAX_PORT = 65_535
 

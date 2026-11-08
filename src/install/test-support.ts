@@ -300,7 +300,7 @@ export interface FakeService extends ServiceControl {
 }
 
 /** A ServiceControl that records calls and touches nothing; each answer can be set. */
-export function fakeService(options: { running?: boolean; configured?: boolean; startError?: Error; holders?: string } = {}): FakeService {
+export function fakeService(options: { running?: boolean; configured?: boolean; startError?: Error; stopError?: Error; holders?: string } = {}): FakeService {
   const calls: string[] = []
   let running = options.running ?? true
   return {
@@ -313,7 +313,11 @@ export function fakeService(options: { running?: boolean; configured?: boolean; 
       if (options.startError !== undefined) throw options.startError
       running = true
     },
-    stop: async () => (calls.push('stop'), void (running = false)),
+    stop: async () => {
+      calls.push('stop')
+      running = false
+      if (options.stopError !== undefined) throw options.stopError
+    },
     configuredDataDir: () => null,
     configuredPort: () => null,
     fileHolders: async () => (calls.push('fileHolders'), options.holders ?? ''),

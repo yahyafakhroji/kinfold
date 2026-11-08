@@ -6,7 +6,7 @@
 //     converted store checks out);
 //   - encrypt and rekey show the recovery code first, and go on only once the
 //     person types its last two groups back;
-//   - the LaunchAgent's daemon is stopped and started again around the change,
+//   - the background service's daemon is stopped and started again around the change,
 //     a hand-started one makes the command refuse, and the maintenance marker
 //     keeps hooks and MCP servers off the file meanwhile;
 //   - the marker is also the journal: it names the operation and the Keychain
@@ -121,7 +121,14 @@ async function stopDaemon(ctx: Context): Promise<Daemon> {
   const service = serviceOf(ctx.env)
   const loaded = service !== null && (await service.isRunning())
   if (loaded) {
-    await service.stop()
+    try {
+      await service.stop()
+    } catch (error: unknown) {
+      // bootout was already sent: unless the service is still up, put it back before refusing.
+      const stillUp = await service.isRunning()
+      if (!stillUp) await startDaemon(ctx, { restart: true })
+      throw new Refusal(`the ${service.label} did not stop (${errorMessage(error)}); ${stillUp ? 'it is still running' : 'it was started again'}; nothing was changed`)
+    }
     ctx.log(`daemon: stopped the ${service.label}`)
   }
   if (!(await waitForHealth(ctx.env, false, HEALTH_WAIT_MS))) {

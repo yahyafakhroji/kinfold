@@ -334,3 +334,14 @@ test('a service that was not running is not started after encrypt', async () => 
   expect(await runKeyCommand({ ...env, service }, 'encrypt')).toBe(EXIT_OK)
   expect(service.calls).toEqual(['isRunning'])
 })
+
+test('a service that fails to stop is started again and the store and marker are untouched', async () => {
+  const { w, env, path } = world(null)
+  const service = fakeService({ stopError: new Error('still loaded') })
+  expect(await runKeyCommand({ ...env, service }, 'encrypt')).toBe(EXIT_FAILED)
+  expect(service.calls.at(-1)).toBe('start')
+  expect(w.out.join('\n')).toContain('did not stop (still loaded); it was started again; nothing was changed')
+  expect(fileState(path)).toBe('plain')
+  expect(existsSync(maintenancePath(path))).toBe(false)
+  expect(w.keychainValues.has(DB_KEY_REF)).toBe(false)
+})
