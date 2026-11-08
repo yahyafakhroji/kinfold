@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MAX_VEC0_TARBALL_BYTES, tarMember } from '../src/install/vec0-install'
+import { downloadPinned } from './pinned-download'
 import { vec0AssetFor } from '../src/vectors/vec0-release'
 
 const CACHE_DIR = join(import.meta.dir, '..', '.cache', 'vec0')
@@ -24,11 +25,8 @@ if (asset === null) {
   process.exit(0)
 }
 
-const response = await fetch(asset.url, { redirect: 'follow', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
-if (!response.ok) throw new Error(`the sqlite-vec download answered ${response.status}; nothing was written`)
-const tarball = new Uint8Array(await response.arrayBuffer())
-if (tarball.length > MAX_VEC0_TARBALL_BYTES) throw new Error('the sqlite-vec download is far larger than the release; nothing was written')
-if (sha256(tarball) !== asset.tarballSha256) throw new Error('the sqlite-vec download does not match the pinned sha256; nothing was written')
+if (asset.apiUrl === undefined) throw new Error(`no API asset URL is pinned for ${asset.member}`)
+const tarball = await downloadPinned({ label: 'sqlite-vec', releaseUrl: asset.url, apiUrl: asset.apiUrl, sha256: asset.tarballSha256, maxBytes: MAX_VEC0_TARBALL_BYTES, timeoutMs: DOWNLOAD_TIMEOUT_MS })
 const member = tarMember(Bun.gunzipSync(tarball), asset.member)
 if (member === null) throw new Error(`the sqlite-vec tarball has no ${asset.member}; nothing was written`)
 if (sha256(member) !== asset.fileSha256) throw new Error(`${asset.member} does not match the pinned sha256; nothing was written`)
