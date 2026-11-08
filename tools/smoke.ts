@@ -438,9 +438,14 @@ async function smoke(programPath: string): Promise<void> {
   if (!existsSync(program)) throw new SmokeError('setup', `${program} does not exist`)
   const home = homeForSmoke()
   const root = mkdtempSync(join(tmpdir(), 'kinfold-smoke-'))
-  const project = join(root, 'project')
+  const projectRoot = join(root, 'project')
   const fakeBin = join(root, 'bin')
-  mkdirSync(project, { recursive: true, mode: 0o700 })
+  mkdirSync(projectRoot, { recursive: true, mode: 0o700 })
+  // The daemon resolves the hook event's cwd from the payload, while the MCP
+  // server resolves its own process.cwd(). On macOS the temporary directory is
+  // a symlink, so the kernel reports the real path to the child; the payload
+  // and the child must name the same project or the search misses the event.
+  const project = realpathSync(projectRoot)
   const world: World = {
     program,
     root,
