@@ -6,6 +6,7 @@ import { installedProgramPath } from './entry'
 import { installPaths } from './env'
 import { EXIT_OK, install } from './install'
 import { mcpPaths, mcpTarget } from './mcp-wiring'
+import { VERSION } from '../version'
 import { status } from './status'
 import { BUN, type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
 
@@ -59,7 +60,8 @@ test('after install: wired, loaded, healthy, observers with their source, modes 
   expect(out).toContain('claude-code: detected 2.1.310 (Claude Code); wired: yes')
   expect(out).toContain('opencode: detected 2.1.4; wired: yes')
   expect(out).toContain('launch agent: plist present; loaded: yes')
-  expect(out).toMatch(/daemon \/health: up on 127\.0\.0\.1:\d+ version 0\.0\.1 schema \d+ pid \d+, LaunchAgent/)
+  expect(out).toMatch(/daemon \/health: up on 127\.0\.0\.1:\d+ version \S+ schema \d+ pid \d+, LaunchAgent/)
+  expect(out).toContain(` version ${VERSION} schema `)
   expect(out).toContain('  claude-code: claude-cli/haiku; source host')
   expect(out).toContain('  opencode: openrouter/openrouter/auto key openrouter; source host')
   expect(out).toMatch(/data dir .*: modes ok/)

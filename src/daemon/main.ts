@@ -10,6 +10,7 @@ import { platformCredentialProvider } from '../secrets/keychain'
 import { resolveDataDir } from '../store/data-dir'
 import { applyDataDirFlag } from '../store/data-dir-flag'
 import { type Embedder, createOpenRouterEmbedder } from '../vectors/embedder'
+import { VERSION } from '../version'
 import { parsePort, startDaemon } from './daemon'
 import { logLine } from './log-line'
 import { parseIdleMs, parseMaxWaitMs } from './observer-scheduler'
@@ -48,6 +49,7 @@ export async function runDaemon(argv: readonly string[]): Promise<void> {
     daemon = startDaemon({
       dataDir,
       port: parsePort(readEnv(process.env, 'PORT')),
+      version: VERSION,
       keychain: credentials,
       vectors: { embedder: embedderFrom(credentials) },
       observer: {

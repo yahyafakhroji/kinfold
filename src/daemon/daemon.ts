@@ -52,6 +52,7 @@ import { memoryHandlers } from './memory-routes'
 import { observerModelsRoute } from './observer-models-route'
 import { createObserverTester, observerTestRoute } from './observer-test'
 import { startDataTicks } from './data-ticks'
+import { VERSION } from '../version'
 import { startServer } from './server'
 import { settingsHandlers } from './settings-route'
 import type { Embedder } from '../vectors/embedder'
@@ -59,7 +60,6 @@ import { type Support, loadVec0 } from '../vectors/extension'
 import { DEFAULT_INDEX_TICK_MS, type VectorIndexer, createVectorIndexer } from '../vectors/indexer'
 import { type SemanticAnswer, type SemanticRequest, createSemanticSearch } from '../vectors/search'
 
-export const DAEMON_VERSION = '0.0.1'
 export const DEFAULT_PORT = 37_811
 export const FALLBACK_DRAIN_MS = 2_000
 
@@ -67,6 +67,8 @@ export interface DaemonOptions {
   dataDir: string
   /** 0 picks a free port; the chosen one is written to daemon.json. */
   port: number
+  /** The program version /health reports. main.ts passes VERSION; tests inject a release one. */
+  version?: string
   fallbackDrainMs?: number
   debounceMs?: number
   log?: (line: string) => void
@@ -273,7 +275,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const server = startServer({
     port: options.port,
     token,
-    version: DAEMON_VERSION,
+    version: options.version ?? VERSION,
     schemaVersion: store.schemaVersion,
     hmacMode: () => hmacKeys.mode(),
     vectorSearch: vectors.support.ok ? 'on' : 'off',

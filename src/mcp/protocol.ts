@@ -12,11 +12,12 @@ import { MCP_SERVER_NAME } from '../names'
 import { MCP_READ_STATUSES, MCP_TOOLS, type McpReadStatus, type McpTool } from '../store/mcp-read-store'
 import type { ReadReporter } from './read-reporter'
 import { TOOL_DEFINITIONS, type ToolContext, type ToolOutcome, callTool } from './tools'
+import { VERSION } from '../version'
 
 /** Newest first; an unknown requested version gets the newest. */
 export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as const
 export const SERVER_NAME = MCP_SERVER_NAME
-export const SERVER_VERSION = '0.0.1'
+export const SERVER_VERSION = VERSION
 export const MAX_LINE_CHARS = 1_000_000
 
 export const ERROR_CODES = { parse: -32700, invalidRequest: -32600, methodNotFound: -32601, invalidParams: -32602, internal: -32603 } as const

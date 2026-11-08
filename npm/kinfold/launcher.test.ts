@@ -10,7 +10,8 @@ const launcher = createRequire(import.meta.url)('./bin/kinfold.js') as {
   packageName(platform: string, arch: string): string | null
   programName(platform: string): string
   unsupportedMessage(platform: string, arch: string): string
-  isMusl(platform: string, report: unknown, isBun?: boolean): boolean
+  isMusl(platform: string, report: unknown, probe: (path: string) => boolean): boolean
+  currentReport(platform: string): unknown
 }
 
 const LAUNCHER_FILE = join(import.meta.dir, 'bin', 'kinfold.js')
@@ -180,12 +181,52 @@ shellTest('a supported host with no platform package prints the same message', a
   expect(result.stderr).toBe(`kinfold: no build for darwin-x64. ${SUPPORTED}\n`)
 })
 
+const NO_LOADER = (): boolean => false
+
 test('only a Linux report with no glibc version is musl', () => {
-  expect(launcher.isMusl('linux', { header: {} })).toBe(true)
-  expect(launcher.isMusl('linux', { header: { glibcVersionRuntime: '2.39' } })).toBe(false)
-  expect(launcher.isMusl('linux', { header: {} }, true)).toBe(false)
-  expect(launcher.isMusl('linux', null)).toBe(false)
-  expect(launcher.isMusl('darwin', { header: {} })).toBe(false)
+  expect(launcher.isMusl('linux', { header: {} }, NO_LOADER)).toBe(true)
+  expect(launcher.isMusl('linux', { header: { glibcVersionRuntime: '2.39' } }, NO_LOADER)).toBe(false)
+  expect(launcher.isMusl('linux', null, NO_LOADER)).toBe(false)
+  expect(launcher.isMusl('darwin', { header: {} }, NO_LOADER)).toBe(false)
+})
+
+test('musl is found under Bun too', () => {
+  expect(launcher.isMusl('linux', null, (p) => p === '/lib/ld-musl-x86_64.so.1')).toBe(true)
+  expect(launcher.isMusl('linux', null, (p) => p === '/lib/ld-musl-aarch64.so.1')).toBe(true)
+  expect(launcher.isMusl('linux', { header: { glibcVersionRuntime: '2.39' } }, () => false)).toBe(false)
+  expect(launcher.isMusl('darwin', null, () => true)).toBe(false)
+})
+
+test('the report is read only on Linux', () => {
+  const original = Object.getOwnPropertyDescriptor(process, 'report')
+  const bun = Object.getOwnPropertyDescriptor(process.versions, 'bun')
+  let calls = 0
+  let excludedAtCall: unknown
+  const fake = {
+    excludeNetwork: false,
+    getReport() {
+      calls++
+      excludedAtCall = fake.excludeNetwork
+      return { header: {} }
+    },
+  }
+  Object.defineProperty(process, 'report', { value: fake, configurable: true })
+  // Run as Node would: Bun's own report is deliberately never read.
+  Object.defineProperty(process.versions, 'bun', { value: undefined, configurable: true })
+  try {
+    expect(launcher.currentReport('darwin')).toBeNull()
+    expect(calls).toBe(0)
+    expect(launcher.currentReport('linux')).toEqual({ header: {} })
+    expect(calls).toBe(1)
+    expect(excludedAtCall).toBe(true)
+    Object.defineProperty(process.versions, 'bun', { value: '1.4.4', configurable: true })
+    expect(launcher.currentReport('linux')).toBeNull()
+    expect(calls).toBe(1)
+  } finally {
+    if (bun !== undefined) Object.defineProperty(process.versions, 'bun', bun)
+    if (original !== undefined) Object.defineProperty(process, 'report', original)
+    else delete (process as { report?: unknown }).report
+  }
 })
 
 shellTest('linux musl prints the supported platforms and exits 1 even with the glibc package installed', async () => {
