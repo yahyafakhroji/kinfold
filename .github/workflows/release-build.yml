@@ -1,0 +1,112 @@
+name: release-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version stamped into each program
+        required: true
+        type: string
+  # A draft pull request proves the pipeline with a candidate version before
+  # the workflow is in place on main, where workflow_dispatch can see it.
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  KINFOLD_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '0.1.0-rc.1' }}
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each runner matches its target, so the C compiler builds sqlite3mc
+          # for the platform the program will run on.
+          - target: darwin-arm64
+            os: macos-latest
+          - target: darwin-x64
+            os: macos-15-intel
+          - target: linux-x64
+            os: ubuntu-latest
+          - target: linux-arm64
+            os: ubuntu-24.04-arm
+          - target: windows-x64
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install development dependencies
+        timeout-minutes: 5
+        run: bun install --frozen-lockfile
+
+      - name: Build sqlite3mc for this target
+        timeout-minutes: 10
+        run: bun tools/build-sqlite3mc.ts
+
+      - name: Download the pinned sqlite-vec member
+        timeout-minutes: 3
+        run: bun tools/fetch-vec0.ts
+
+      - name: Build the program
+        timeout-minutes: 10
+        shell: bash
+        run: bun tools/build-release.ts "${{ matrix.target }}" "$KINFOLD_VERSION"
+
+      - name: Smoke-run the program
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          program=dist/kinfold-${{ matrix.target }}
+          if [ "$RUNNER_OS" = "Windows" ]; then program="$program.exe"; fi
+          actual=$("$program" --version)
+          if [ "$actual" != "$KINFOLD_VERSION" ]; then
+            echo "$program --version printed '$actual', expected '$KINFOLD_VERSION'"
+            exit 1
+          fi
+          echo "$program --version printed $actual"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kinfold-${{ matrix.target }}
+          path: dist/kinfold-*
+          if-no-files-found: error
+
+  checksums:
+    name: checksums
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # The installer accepts exactly "64 lowercase hex characters, two spaces,
+      # the asset name", which is sha256sum's plain output on Linux.
+      - name: Write SHA256SUMS
+        shell: bash
+        run: |
+          cd dist
+          sha256sum kinfold-* | sort -k2 > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kinfold-programs
+          path: dist/
+          if-no-files-found: error
