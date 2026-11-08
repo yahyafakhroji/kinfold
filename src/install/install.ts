@@ -413,10 +413,19 @@ export async function install(env: InstallEnv, options: InstallOptions): Promise
       env.out('a real install would stop here, before step 1.')
       return EXIT_BLOCKED
     }
-    if (!options.dryRun) env.out('installed. Check it with: bun src/cli/kinfold.ts status')
+    if (!options.dryRun) env.out(`installed. Check it with: ${statusCommand(env)}`)
     return EXIT_OK
   } catch (error: unknown) {
     env.out(`install failed: ${error instanceof ChoiceError ? error.message : errorMessage(error)}`)
     return EXIT_FAILED
   }
+}
+
+/** What a user types to see the install: the installed program, or the checkout's script. */
+function statusCommand(env: InstallEnv): string {
+  if (env.mode.kind === 'checkout') return 'bun src/cli/kinfold.ts status'
+  const quote = (value: string): string => (/\s/.test(value) ? JSON.stringify(value) : value)
+  // Run by hand, the program reads ~/.kinfold unless told otherwise.
+  const folder = env.dataDir === join(env.homeDir, '.kinfold') ? '' : ` --data-dir ${quote(env.dataDir)}`
+  return `${quote(env.mode.binPath)}${folder} status`
 }
