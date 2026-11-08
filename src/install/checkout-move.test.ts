@@ -311,7 +311,7 @@ test('a second program install writes nothing but still checks the daemon', asyn
   expect(await install(w.env, programOptions(move))).toBe(EXIT_OK)
   const lines = planLines(w)
   expect(lines).toHaveLength(1)
-  expect(lines[0]).toContain('wait up to 15 s for GET /health')
+  expect(lines[0]).toContain('wait up to 180 s for GET /health (a large store takes a while to open)')
   expect(lines[0]).toEndWith('[done]')
   expect(w.out).not.toContain('plan: nothing to change')
   expect(launchctlVerbs(w)).toEqual(['print'])
