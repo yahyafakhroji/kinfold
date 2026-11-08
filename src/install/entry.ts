@@ -60,6 +60,17 @@ export function entryIdentity(mode: InstallMode, role: EntryRole, dataDir: strin
   return entryPath(entry.command, entry.args) ?? entry.command
 }
 
+/**
+ * True when `command` and `args` are one of our entries and run exactly what
+ * `expected` runs, data folder included. A command string (Codex, Cursor) is
+ * split the way a shell reads it first.
+ */
+export function sameEntry(command: string, args: readonly string[], expected: EntryCommand): boolean {
+  const parsed = parseEntry(command, args)
+  if (parsed === null) return false
+  return parsed.command === expected.command && parsed.args.length === expected.args.length && parsed.args.every((arg, index) => arg === expected.args[index])
+}
+
 export function isOurEntry(command: string, args: readonly string[]): boolean {
   return parseEntry(command, args) !== null
 }

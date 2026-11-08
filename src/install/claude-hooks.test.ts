@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
 import { CLAUDE_HOOK_EVENTS, inspectSamHooks, mergeSamHooks, removeSamHooks, samHookGroup, samHookScript } from './claude-hooks'
 
-const TARGET = { bunPath: '/Users/dev/.bun/bin/bun', hookScript: '/Users/dev/sam/src/cli/hook.ts' }
-const OLD = { bunPath: '/Users/dev/.bun/bin/bun', hookScript: '/Users/dev/old-checkout/src/cli/hook.ts' }
+const TARGET = { bunPath: '/Users/dev/.bun/bin/bun', hookScript: '/Users/dev/sam/src/cli/hook.ts', entry: { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/sam/src/cli/hook.ts'] } }
+const OLD = { bunPath: '/Users/dev/.bun/bin/bun', hookScript: '/Users/dev/old-checkout/src/cli/hook.ts', entry: { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/old-checkout/src/cli/hook.ts'] } }
 const OTHER_HOOK = { matcher: 'Bash', hooks: [{ type: 'command', command: '/usr/local/bin/other-tool', timeout: 5 }] }
 
 const userSettings = () => ({
@@ -28,7 +28,7 @@ test('merge adds all six events and keeps every unrelated key and hook', () => {
   expect(settings.env).toEqual({ SOME_FLAG: '1' })
   expect(settings.hooks.PreCompact).toEqual(userSettings().hooks.PreCompact)
   expect(settings.hooks.PostToolUse).toEqual([OTHER_HOOK, samHookGroup('PostToolUse', TARGET)])
-  expect(inspectSamHooks(merged.settings, TARGET.hookScript)).toBe('yes')
+  expect(inspectSamHooks(merged.settings, TARGET.entry)).toBe('yes')
 })
 
 test('a re-run changes nothing and returns the same object', () => {
@@ -41,7 +41,7 @@ test('a re-run changes nothing and returns the same object', () => {
 
 test('a moved checkout replaces the stale path instead of adding a second entry', () => {
   const stale = mergeSamHooks(userSettings(), OLD).settings
-  expect(inspectSamHooks(stale, TARGET.hookScript)).toBe('stale')
+  expect(inspectSamHooks(stale, TARGET.entry)).toBe('stale')
   const fixed = mergeSamHooks(stale, TARGET)
   expect(fixed.replaced).toEqual([...CLAUDE_HOOK_EVENTS])
   const hooks = (fixed.settings as { hooks: Record<string, unknown[]> }).hooks
@@ -75,8 +75,8 @@ test('ours is recognised by the bun + hook.ts path, including the older command-
   expect(samHookScript({ type: 'command', command: 'bun /a/src/cli/hook.ts' })).toBe('/a/src/cli/hook.ts')
   expect(samHookScript({ type: 'command', command: '/x/node', args: ['/a/src/cli/hook.ts'] })).toBeNull()
   expect(samHookScript({ type: 'command', command: 'node /plugin/scripts/hook.js' })).toBeNull()
-  expect(inspectSamHooks({ hooks: { Stop: [samHookGroup('Stop', TARGET)] } }, TARGET.hookScript)).toBe('partial')
-  expect(inspectSamHooks({}, TARGET.hookScript)).toBe('no')
+  expect(inspectSamHooks({ hooks: { Stop: [samHookGroup('Stop', TARGET)] } }, TARGET.entry)).toBe('partial')
+  expect(inspectSamHooks({}, TARGET.entry)).toBe('no')
 })
 
 test('a hooks value of the wrong shape is an error, never overwritten', () => {

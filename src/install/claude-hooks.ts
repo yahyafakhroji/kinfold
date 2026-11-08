@@ -8,7 +8,7 @@
 // event and hook stays as it was.
 
 import { isRecord } from '../contract/event'
-import { entryPath, entryRole, type EntryCommand } from './entry'
+import { entryPath, entryRole, sameEntry, type EntryCommand } from './entry'
 
 export const CLAUDE_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd'] as const
 export type ClaudeHookEvent = (typeof CLAUDE_HOOK_EVENTS)[number]
@@ -17,17 +17,8 @@ const TOOL_EVENTS: readonly ClaudeHookEvent[] = ['PostToolUse', 'PostToolUseFail
 export const HOOK_TIMEOUT_S = 10
 
 export interface HookTarget {
-  /** The checkout's bun; used with hookScript when entry is absent. */
-  bunPath?: string
-  hookScript?: string
   /** The command an install writes, from entry.ts. */
-  entry?: EntryCommand
-}
-
-export function hookEntry(target: HookTarget): EntryCommand {
-  if (target.entry !== undefined) return target.entry
-  if (target.bunPath === undefined || target.hookScript === undefined) throw new Error('a hook target needs an entry or a checkout path')
-  return { command: target.bunPath, args: [target.hookScript] }
+  entry: EntryCommand
 }
 
 export type Settings = Readonly<Record<string, unknown>>
@@ -43,7 +34,7 @@ export type WiringState = 'yes' | 'no' | 'stale' | 'partial'
 
 export function samHookGroup(event: ClaudeHookEvent, target: HookTarget): Record<string, unknown> {
   const isTool = TOOL_EVENTS.includes(event)
-  const entry = hookEntry(target)
+  const entry = target.entry
   const hook = { type: 'command', command: entry.command, args: entry.args, timeout: HOOK_TIMEOUT_S, ...(isTool ? { async: true } : {}) }
   return isTool ? { matcher: '*', hooks: [hook] } : { hooks: [hook] }
 }
@@ -134,12 +125,23 @@ export function samScriptsIn(settings: Settings): string[] {
   return Object.keys(hooks).flatMap((event) => samScripts(groupsOf(hooks, event)))
 }
 
-/** yes: every event runs the current script; stale: some entry names another path; partial: some events missing. */
-export function inspectSamHooks(settings: Settings, hookScript: string): WiringState {
+function runsExpected(entry: unknown, expected: EntryCommand): boolean {
+  if (!isRecord(entry) || typeof entry.command !== 'string') return false
+  const args = Array.isArray(entry.args) ? entry.args.filter((arg): arg is string => typeof arg === 'string') : []
+  return sameEntry(entry.command, args, expected)
+}
+
+const ownEntries = (groups: readonly unknown[]): unknown[] => groups.flatMap(entriesOf).filter((entry) => samHookScript(entry) !== null)
+
+/**
+ * yes: every event runs the expected entry; stale: some entry of ours runs
+ * another script, program or data folder; partial: some events missing.
+ */
+export function inspectSamHooks(settings: Settings, expected: EntryCommand): WiringState {
   const hooks = hooksOf(settings)
-  const all = samScriptsIn(settings)
+  const all = Object.keys(hooks).flatMap((event) => ownEntries(groupsOf(hooks, event)))
   if (all.length === 0) return 'no'
-  if (all.some((script) => script !== hookScript)) return 'stale'
-  const wired = CLAUDE_HOOK_EVENTS.every((event) => samScripts(groupsOf(hooks, event)).includes(hookScript))
+  if (all.some((entry) => !runsExpected(entry, expected))) return 'stale'
+  const wired = CLAUDE_HOOK_EVENTS.every((event) => ownEntries(groupsOf(hooks, event)).length > 0)
   return wired ? 'yes' : 'partial'
 }

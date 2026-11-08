@@ -14,7 +14,7 @@
 
 import { isRecord } from '../contract/event'
 import type { HookTarget, Settings, WiringState } from './claude-hooks'
-import { entryPath, entryRole, parseEntry, type EntryCommand } from './entry'
+import { entryPath, entryRole, parseEntry, sameEntry, type EntryCommand } from './entry'
 
 export type CommandHookHost = 'codex' | 'cursor'
 
@@ -83,9 +83,8 @@ function renderCommand(entry: EntryCommand): string {
   return parts.join(' ')
 }
 
-export function samCommand(target: HookTarget, host: CommandHookHost): string {
-  const entry = target.entry ?? { command: target.bunPath ?? '', args: [target.hookScript ?? '', '--host', host] }
-  return renderCommand(entry)
+export function samCommand(target: HookTarget): string {
+  return renderCommand(target.entry)
 }
 
 /** The hook.ts path or program path an entry of ours runs for `host`, or null when the entry is not ours. */
@@ -99,7 +98,7 @@ export function samCommandScript(entry: unknown, host: CommandHookHost): string 
 }
 
 export function samItem(spec: CommandHookSpec, event: string, target: HookTarget): Record<string, unknown> {
-  const entry = spec.entry(event, samCommand(target, spec.host))
+  const entry = spec.entry(event, samCommand(target))
   return spec.grouped ? { hooks: [entry] } : entry
 }
 
@@ -174,11 +173,24 @@ export function removeHostHooks(spec: CommandHookSpec, settings: Settings): { se
   return removed === 0 ? { settings, removed } : { settings: { ...settings, hooks: next }, removed }
 }
 
-/** yes: every event runs the current script; stale: some entry names another path; partial: some events missing. */
-export function inspectHostHooks(spec: CommandHookSpec, settings: Settings, hookScript: string): WiringState {
+function runsExpected(entry: unknown, expected: EntryCommand): boolean {
+  if (!isRecord(entry) || typeof entry.command !== 'string') return false
+  const args = Array.isArray(entry.args) ? entry.args.filter((arg): arg is string => typeof arg === 'string') : []
+  return sameEntry(entry.command, args, expected)
+}
+
+function ownEntries(spec: CommandHookSpec, list: readonly unknown[]): unknown[] {
+  return list.flatMap((item) => entriesOf(spec, item)).filter((entry) => samCommandScript(entry, spec.host) !== null)
+}
+
+/**
+ * yes: every event runs the expected entry; stale: some entry of ours runs
+ * another script, program or data folder; partial: some events missing.
+ */
+export function inspectHostHooks(spec: CommandHookSpec, settings: Settings, expected: EntryCommand): WiringState {
   const hooks = hooksOf(spec, settings)
-  const all = Object.keys(hooks).flatMap((event) => samScripts(spec, listOf(spec, hooks, event)))
+  const all = Object.keys(hooks).flatMap((event) => ownEntries(spec, listOf(spec, hooks, event)))
   if (all.length === 0) return 'no'
-  if (all.some((script) => script !== hookScript)) return 'stale'
-  return spec.events.every((event) => samScripts(spec, listOf(spec, hooks, event)).includes(hookScript)) ? 'yes' : 'partial'
+  if (all.some((entry) => !runsExpected(entry, expected))) return 'stale'
+  return spec.events.every((event) => ownEntries(spec, listOf(spec, hooks, event)).length > 0) ? 'yes' : 'partial'
 }

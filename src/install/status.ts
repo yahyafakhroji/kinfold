@@ -13,7 +13,7 @@ import { dbStatusLines } from './db-encryption'
 import { detectHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
 import { type InstallEnv, errorMessage, installPaths } from './env'
-import { entryIdentity } from './entry'
+import { entryCommand } from './entry'
 import { readJsonObject, readTextOrNull } from './files'
 import { EXIT_OK, daemonSituation } from './install'
 import { hmacStatusLines } from './hmac-migration'
@@ -27,7 +27,7 @@ function claudeWiring(env: InstallEnv): string {
   const paths = installPaths(env)
   try {
     const file = readJsonObject(paths.claudeSettings)
-    return file.exists ? inspectSamHooks(file.value, entryIdentity(env.mode, 'hook', env.dataDir)) : 'no (no settings.json)'
+    return file.exists ? inspectSamHooks(file.value, entryCommand(env.mode, 'hook', env.dataDir)) : 'no (no settings.json)'
   } catch (error: unknown) {
     return `unknown (${errorMessage(error)})`
   }
@@ -35,7 +35,7 @@ function claudeWiring(env: InstallEnv): string {
 
 function opencodeWiring(env: InstallEnv): string {
   const paths = installPaths(env)
-  const state = inspectShim(readTextOrNull(paths.opencodePlugin), paths.pluginEntry)
+  const state = inspectShim(readTextOrNull(paths.opencodePlugin), { pluginEntry: paths.pluginEntry, dataDir: env.dataDir })
   return state === 'foreign' ? 'no (a file by our name exists but is not our shim)' : state === 'stale' ? 'stale path' : state
 }
 

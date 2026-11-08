@@ -8,9 +8,10 @@
 import { join } from 'node:path'
 import { isRecord } from '../contract/event'
 import type { InstallEnv } from './env'
-import { entryCommand, entryPath } from './entry'
+import { entryCommand, entryIdentity } from './entry'
 import { plannedBackup, readJsonObject, serializeJson } from './files'
 import { LEGACY_MCP_SERVER_NAME } from '../names'
+import { MCP_HOST_ENV } from '../mcp/read-reporter'
 import { MCP_SERVER_NAME, type McpEntryState, type McpTarget, claudeMcpEntry, hasOurMcpEntryNamed, inspectMcpEntry, mergeMcpEntry, removeMcpEntry, removeMcpEntryNamed } from './mcp-config'
 import type { Action } from './plan'
 
@@ -31,8 +32,7 @@ export function mcpPaths(env: Pick<InstallEnv, 'homeDir'>): McpPaths {
 
 export function mcpTarget(env: Pick<InstallEnv, 'mode' | 'dataDir'>): McpTarget {
   const entry = entryCommand(env.mode, 'mcp', env.dataDir)
-  const script = entryPath(entry.command, entry.args) ?? entry.command
-  return { bunPath: env.mode.kind === 'checkout' ? env.mode.bunPath : entry.command, serverScript: script, entry }
+  return { entry }
 }
 
 export const claudeAddArgv = (entry: Record<string, unknown>): string[] => ['claude', 'mcp', 'add-json', '--scope', 'user', MCP_SERVER_NAME, JSON.stringify(entry)]
@@ -43,6 +43,17 @@ const claudeAdd = (target: McpTarget): Action => ({
   argv: claudeAddArgv(claudeMcpEntry(target)),
   summary: 'register the Kinfold MCP server with Claude Code (user scope)',
 })
+
+/**
+ * The swap replays the previous entry through argv, which any process can read
+ * and which the plan prints. That is safe only for an entry whose env holds
+ * nothing but the host name Kinfold wrote itself.
+ */
+export function rollbackSafe(previous: Record<string, unknown>): boolean {
+  const env = previous.env
+  if (env === undefined) return true
+  return isRecord(env) && Object.keys(env).every((key) => key === MCP_HOST_ENV)
+}
 
 /** Our own entry as ~/.claude.json holds it now, or null when it cannot be read back. */
 function previousClaudeEntry(path: string): Record<string, unknown> | null {
@@ -97,6 +108,10 @@ export function claudeMcpInstallActions(env: InstallEnv): Action[] {
   const previous = previousClaudeEntry(where)
   if (previous === null) {
     env.out(`claude-code: MCP server entry in ${where} could not be read back; left alone`)
+    return []
+  }
+  if (!rollbackSafe(previous)) {
+    env.out(`claude-code: MCP server entry in ${where} is stale but carries env values Kinfold did not write; left alone, since replacing it would pass them on a command line. Remove it with claude mcp remove --scope user ${MCP_SERVER_NAME} and rerun`)
     return []
   }
   return [{ kind: 'claude-mcp-replace', previous, next: claudeMcpEntry(mcpTarget(env)) }]
@@ -163,7 +178,7 @@ export function opencodeMcpUninstallActions(env: InstallEnv): Action[] {
 export function mcpStatusLines(env: InstallEnv): string[] {
   const paths = mcpPaths(env)
   return [
-    `mcp server ${mcpTarget(env).serverScript}:`,
+    `mcp server ${entryIdentity(env.mode, 'mcp', env.dataDir)}:`,
     `  claude-code: ${claudeMcpState(env)} in ${paths.claudeUserConfig}`,
     `  opencode: ${opencodeMcpState(env)} in ${paths.opencodeConfig}`,
   ]

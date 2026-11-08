@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
 import { MCP_SERVER_NAME, claudeMcpEntry, inspectMcpEntry, mcpServerScript, mergeMcpEntry, openCodeMcpEntry, removeMcpEntry } from './mcp-config'
 
-const TARGET = { bunPath: '/Users/dev/.bun/bin/bun', serverScript: '/Users/dev/sam/src/mcp/server.ts' }
-const OLD = { bunPath: '/Users/dev/.bun/bin/bun', serverScript: '/Users/dev/old-checkout/src/mcp/server.ts' }
+const TARGET = { bunPath: '/Users/dev/.bun/bin/bun', serverScript: '/Users/dev/sam/src/mcp/server.ts', entry: { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/sam/src/mcp/server.ts'] } }
+const OLD = { bunPath: '/Users/dev/.bun/bin/bun', serverScript: '/Users/dev/old-checkout/src/mcp/server.ts', entry: { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/old-checkout/src/mcp/server.ts'] } }
 const FOREIGN_CLAUDE = { type: 'stdio', command: 'npx', args: ['-y', 'some-server'] }
 const FOREIGN_OPENCODE = { type: 'local', command: ['node', '/x/claude-mem/mcp-server.cjs'] }
 

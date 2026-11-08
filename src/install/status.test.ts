@@ -1,9 +1,10 @@
 import { afterEach, expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { samHookGroup } from './claude-hooks'
-import { installedProgramPath } from './entry'
+import { mergeSamHooks, samHookGroup } from './claude-hooks'
+import { entryCommand, entryIdentity, installedProgramPath } from './entry'
 import { installPaths } from './env'
+import { CODEX_HOOK_SPEC, mergeHostHooks } from './host-hooks'
 import { EXIT_OK, install } from './install'
 import { mcpPaths, mcpTarget } from './mcp-wiring'
 import { VERSION } from '../version'
@@ -33,7 +34,7 @@ test('before install: hosts detected but not wired, daemon down, nothing created
     `  opencode: detected 2.1.4; wired: no in ${paths.opencodePlugin}`,
     `  codex: not detected (not found (no codex on PATH, no Codex.app)); wired: no (no hooks.json) in ${paths.codexHooks}`,
     `  cursor: not detected (not found (no cursor-agent or cursor on PATH, no Cursor.app)); wired: no (no hooks.json) in ${paths.cursorHooks}`,
-    `mcp server ${mcpTarget(w.env).serverScript}:`,
+    `mcp server ${entryIdentity(w.env.mode, 'mcp', w.env.dataDir)}:`,
     `  claude-code: no in ${mcpPaths(w.env).claudeUserConfig}`,
     `  opencode: no in ${mcpPaths(w.env).opencodeConfig}`,
     'launch agent: plist missing; loaded: no',
@@ -71,7 +72,7 @@ test('stale paths, loose modes and duplicate project wiring are each reported', 
   const w = make({ withLibrary: false })
   const paths = installPaths(w.env)
   mkdirSync(paths.claudeDir, { recursive: true })
-  writeFileSync(paths.claudeSettings, JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { bunPath: BUN, hookScript: '/old/src/cli/hook.ts' })] } }))
+  writeFileSync(paths.claudeSettings, JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { entry: { command: BUN, args: ['/old/src/cli/hook.ts'] } })] } }))
   mkdirSync(paths.opencodePluginsDir, { recursive: true })
   writeFileSync(paths.opencodePlugin, 'export { default } from "/old/src/plugins/opencode.ts";\n')
   mkdirSync(w.dataDir, { recursive: true })
@@ -79,7 +80,7 @@ test('stale paths, loose modes and duplicate project wiring are each reported', 
   chmodSync(join(w.dataDir, 'memory.db'), 0o644)
   chmodSync(w.dataDir, 0o700)
   mkdirSync(join(w.cwd, '.claude'))
-  writeFileSync(join(w.cwd, '.claude', 'settings.json'), JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { bunPath: BUN, hookScript: '/x/src/cli/hook.ts' })] } }))
+  writeFileSync(join(w.cwd, '.claude', 'settings.json'), JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { entry: { command: BUN, args: ['/x/src/cli/hook.ts'] } })] } }))
   await status(w.env)
   const out = w.out.join('\n')
   expect(out).toContain('claude-code: detected 2.1.310 (Claude Code); wired: stale')
@@ -139,4 +140,26 @@ test('status shows the program-form wiring', async () => {
   expect(hosts.length).toBeGreaterThan(0)
   expect(w.out.join('\n')).toContain(binPath)
   expect(statSync(binPath).mode & 0o777).toBe(0o755)
+})
+
+test('checkout status sees a hook for another folder as stale', async () => {
+  const w = make({ withLibrary: false, codexVersion: 'codex-cli 0.120.0' })
+  const paths = installPaths(w.env)
+  mkdirSync(paths.claudeDir, { recursive: true })
+  const claude = mergeSamHooks({}, { entry: entryCommand(w.env.mode, 'hook', '/a') }).settings
+  writeFileSync(paths.claudeSettings, JSON.stringify(claude))
+  mkdirSync(paths.codexDir, { recursive: true })
+  const codex = mergeHostHooks(CODEX_HOOK_SPEC, {}, { entry: entryCommand(w.env.mode, 'hook', '/a', 'codex') }).settings
+  writeFileSync(paths.codexHooks, JSON.stringify(codex))
+
+  await status(w.env)
+  const out = w.out.join('\n')
+  expect(out).toContain('claude-code: detected 2.1.310 (Claude Code); wired: stale')
+  expect(out).toContain(`wired: stale in ${paths.codexHooks}`)
+
+  const same = mergeSamHooks({}, { entry: entryCommand(w.env.mode, 'hook', w.env.dataDir) }).settings
+  writeFileSync(paths.claudeSettings, JSON.stringify(same))
+  w.out.length = 0
+  await status(w.env)
+  expect(w.out.join('\n')).toContain('claude-code: detected 2.1.310 (Claude Code); wired: yes')
 })

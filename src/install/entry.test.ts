@@ -90,7 +90,7 @@ describe('a data folder with spaces', () => {
     const settingsText = serializeJson(mergeSamHooks({}, { entry: hook }).settings, null)
     expect(settingsText).toContain(PROGRAM)
     expect(settingsText).toContain(DATA_DIR)
-    expect(inspectSamHooks(JSON.parse(settingsText), entryIdentity(mode, 'hook', DATA_DIR))).toBe('yes')
+    expect(inspectSamHooks(JSON.parse(settingsText), hook)).toBe('yes')
 
     const mcp = entryCommand(mode, 'mcp', DATA_DIR)
     const claude = JSON.parse(serializeJson({ mcpServers: { [MCP_SERVER_NAME]: claudeMcpEntry({ entry: mcp }) } }, null))
@@ -102,7 +102,7 @@ describe('a data folder with spaces', () => {
     expect(plist).toContain(`<array><string>${PROGRAM}</string><string>--data-dir</string><string>${DATA_DIR}</string><string>daemon</string></array>`)
     expect(plist).toContain(`<key>KINFOLD_DATA_DIR</key><string>${DATA_DIR}</string>`)
 
-    const written = samCommand({ entry: entryCommand(mode, 'hook', DATA_DIR, 'codex') }, 'codex')
+    const written = samCommand({ entry: entryCommand(mode, 'hook', DATA_DIR, 'codex') })
     expect(written).toBe(`'${PROGRAM}' --data-dir '${DATA_DIR}' hook --host codex`)
     expect(samCommandScript({ command: written }, 'codex')).toBe(PROGRAM)
   })

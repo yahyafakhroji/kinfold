@@ -272,8 +272,8 @@ test('the dry run lists every step and shows no Keychain value', async () => {
 
 test('a shim is ours under either marker; one without a marker, or not re-exporting the plugin, is not', () => {
   const entry = '/repo/src/plugins/opencode.ts'
-  expect(isOwnShim(shimContent(entry))).toBe(true)
-  expect(shimContent(entry)).toStartWith('// kinfold: ')
+  expect(isOwnShim(shimContent(entry, '/data'))).toBe(true)
+  expect(shimContent(entry, '/data')).toStartWith('// kinfold: ')
   expect(isOwnShim(legacyShim(entry))).toBe(true)
   expect(isOwnShim(`export { default } from ${JSON.stringify(entry)};\n`)).toBe(false)
   expect(isOwnShim('// shared-agent-memory: but something else\nexport const x = 1\n')).toBe(false)
@@ -291,7 +291,7 @@ test('a foreign file under the old shim name stays, and the rest still migrates'
 })
 
 test('removeMcpEntryNamed takes only our entry under that name', () => {
-  const target = { bunPath: '/b/bun', serverScript: '/r/src/mcp/server.ts' }
+  const target = { entry: { command: '/b/bun', args: ['/r/src/mcp/server.ts'] } }
   const config = { mcp: { [LEGACY_MCP_SERVER_NAME]: openCodeMcpEntry(target), [MCP_SERVER_NAME]: openCodeMcpEntry(target) } }
   expect(removeMcpEntryNamed(config, 'opencode', LEGACY_MCP_SERVER_NAME)).toEqual({ config: { mcp: { [MCP_SERVER_NAME]: openCodeMcpEntry(target) } }, removed: true })
   const foreign = { mcp: { [LEGACY_MCP_SERVER_NAME]: { type: 'local', command: ['node', 'x.js'] } } }

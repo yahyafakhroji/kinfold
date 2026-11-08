@@ -287,12 +287,12 @@ test('a checkout install afterwards moves the wiring back', async () => {
   expect(JSON.parse(readFileSync(paths.claudeSettings, 'utf8')).hooks.SessionStart).toEqual([FOREIGN_CLAUDE_HOOK, samHookGroup('SessionStart', hookTarget)])
   expect(JSON.parse(readFileSync(paths.codexHooks, 'utf8')).hooks.SessionStart).toEqual([FOREIGN_CODEX_HOOK, samItem(CODEX_HOOK_SPEC, 'SessionStart', { entry: entryCommand(checkout, 'hook', w.dataDir, 'codex') })])
   expect(JSON.parse(readFileSync(paths.cursorHooks, 'utf8')).hooks.beforeSubmitPrompt).toEqual([FOREIGN_CURSOR_HOOK, samItem(CURSOR_HOOK_SPEC, 'beforeSubmitPrompt', { entry: entryCommand(checkout, 'hook', w.dataDir, 'cursor') })])
-  expect(readFileSync(paths.opencodePlugin, 'utf8')).toBe(shimContent(paths.pluginEntry))
+  expect(readFileSync(paths.opencodePlugin, 'utf8')).toBe(shimContent(paths.pluginEntry, w.dataDir))
   expect(JSON.parse(readFileSync(config.opencodeConfig, 'utf8')).mcp[MCP_SERVER_NAME]).toEqual(openCodeMcpEntry(mcpTarget(w.env)))
   const claudeUser = JSON.parse(readFileSync(config.claudeUserConfig, 'utf8')) as { mcpServers: Record<string, unknown> }
   expect(claudeUser.mcpServers['other-tool']).toEqual(FOREIGN_CLAUDE_MCP)
   expect(claudeUser.mcpServers[MCP_SERVER_NAME]).toEqual(claudeMcpEntry(mcpTarget(w.env)))
-  expect(readFileSync(paths.launchAgentPlist, 'utf8')).toContain(`<array><string>${checkout.bunPath}</string><string>${paths.daemonMain}</string></array>`)
+  expect(readFileSync(paths.launchAgentPlist, 'utf8')).toContain(`<array><string>${checkout.bunPath}</string><string>${join(checkout.projectRoot, 'src', 'daemon', 'main.ts')}</string></array>`)
   expect(planLines(w).some((line) => line.includes('install program'))).toBe(false)
 })
 

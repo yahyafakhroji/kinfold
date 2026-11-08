@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { EXIT_OK, install } from './install'
 import { MCP_SERVER_NAME, claudeMcpEntry, openCodeMcpEntry } from './mcp-config'
-import { mcpPaths, mcpTarget } from './mcp-wiring'
+import { claudeAddArgv, claudeMcpInstallActions, mcpPaths, mcpTarget, rollbackSafe } from './mcp-wiring'
 import { type FakeWorld, YES, createWorld } from './test-support'
 import { uninstall } from './uninstall'
 
@@ -65,9 +65,9 @@ test('re-running install replaces entries written before KINFOLD_MCP_HOST: remov
   const w = both()
   const paths = mcpPaths(w.env)
   const target = mcpTarget(w.env)
-  writeFileSync(paths.claudeUserConfig, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: { type: 'stdio', command: target.bunPath, args: [target.serverScript] } } }))
+  writeFileSync(paths.claudeUserConfig, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: { type: 'stdio', command: target.entry.command, args: target.entry.args } } }))
   mkdirSync(paths.opencodeDir, { recursive: true })
-  writeFileSync(paths.opencodeConfig, JSON.stringify({ mcp: { [MCP_SERVER_NAME]: { type: 'local', command: [target.bunPath, target.serverScript], enabled: true } } }))
+  writeFileSync(paths.opencodeConfig, JSON.stringify({ mcp: { [MCP_SERVER_NAME]: { type: 'local', command: [target.entry.command, ...target.entry.args], enabled: true } } }))
 
   expect(await install(w.env, YES)).toBe(EXIT_OK)
 
@@ -95,7 +95,7 @@ test('a failed Claude add puts the previous entry back and fails the step', asyn
   })
   const w = world
   const target = mcpTarget(w.env)
-  const old = { type: 'stdio', command: target.bunPath, args: [target.serverScript] }
+  const old = { type: 'stdio', command: target.entry.command, args: target.entry.args }
   writeFileSync(mcpPaths(w.env).claudeUserConfig, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: old } }))
 
   expect(await install(w.env, YES)).not.toBe(EXIT_OK)
@@ -106,4 +106,73 @@ test('a failed Claude add puts the previous entry back and fails the step', asyn
     ['claude', 'mcp', 'add-json', '--scope', 'user', MCP_SERVER_NAME, JSON.stringify(old)],
   ])
   expect(w.out.some((line) => line.includes('the previous entry was put back'))).toBe(true)
+})
+
+test('the MCP swap never puts a hand-added env value into argv', async () => {
+  const w = both()
+  const target = mcpTarget(w.env)
+  const previous = { type: 'stdio', command: target.entry.command, args: target.entry.args, env: { KINFOLD_MCP_HOST: 'claude-code', API_TOKEN: 's3cret' } }
+  writeFileSync(mcpPaths(w.env).claudeUserConfig, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: previous } }))
+
+  const actions = claudeMcpInstallActions(w.env)
+  expect(actions.some((action) => action.kind === 'claude-mcp-replace')).toBe(false)
+  expect(w.out.some((line) => line.includes('env values Kinfold did not write'))).toBe(true)
+  expect(JSON.stringify(actions)).not.toContain('s3cret')
+  expect(w.out.join('\n')).not.toContain('s3cret')
+
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(mcpCommands(w)).toEqual([])
+  expect(w.out.join('\n')).not.toContain('s3cret')
+})
+
+test('rollbackSafe accepts an absent env or one holding only the host name', () => {
+  expect(rollbackSafe({ type: 'stdio' })).toBe(true)
+  expect(rollbackSafe({ env: { KINFOLD_MCP_HOST: 'claude-code' } })).toBe(true)
+  expect(rollbackSafe({ env: {} })).toBe(true)
+  expect(rollbackSafe({ env: { KINFOLD_MCP_HOST: 'claude-code', A: 'b' } })).toBe(false)
+  expect(rollbackSafe({ env: 'x' })).toBe(false)
+})
+
+test('a rollback replays only KINFOLD_MCP_HOST', async () => {
+  let failedOnce = false
+  world = createWorld({
+    claudeVersion: '2.1.310 (Claude Code)',
+    opencodeVersion: null,
+    keychainRefs: ['openrouter'],
+    commandOverride: (argv) => {
+      if (argv[1] === 'mcp' && argv[2] === 'add-json' && !failedOnce) {
+        failedOnce = true
+        return { exitCode: 1, stdout: '' }
+      }
+      return undefined
+    },
+  })
+  const w = world
+  const target = mcpTarget(w.env)
+  const previous = { type: 'stdio', command: target.entry.command, args: ['/old/src/mcp/server.ts'], env: { KINFOLD_MCP_HOST: 'claude-code' } }
+  writeFileSync(mcpPaths(w.env).claudeUserConfig, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: previous } }))
+
+  expect(await install(w.env, YES)).not.toBe(EXIT_OK)
+
+  const putBack = mcpCommands(w).at(-1)!
+  expect(putBack).toEqual(claudeAddArgv(previous))
+  expect(JSON.parse(putBack.at(-1)!).env).toEqual({ KINFOLD_MCP_HOST: 'claude-code' })
+})
+
+test('a remove that times out does not claim the entry was kept', async () => {
+  world = createWorld({
+    claudeVersion: '2.1.310 (Claude Code)',
+    opencodeVersion: null,
+    keychainRefs: ['openrouter'],
+    commandOverride: (argv) => (argv[1] === 'mcp' && argv[2] === 'remove' ? { exitCode: 124, stdout: '', timedOut: true } : undefined),
+  })
+  const w = world
+  const target = mcpTarget(w.env)
+  const previous = { type: 'stdio', command: target.entry.command, args: ['/old/src/mcp/server.ts'], env: { KINFOLD_MCP_HOST: 'claude-code' } }
+  writeFileSync(mcpPaths(w.env).claudeUserConfig, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: previous } }))
+
+  expect(await install(w.env, YES)).not.toBe(EXIT_OK)
+  const text = w.out.join('\n')
+  expect(text).toContain('claude mcp remove did not finish; check the entry with claude mcp list --scope user')
+  expect(text).not.toContain('left in place')
 })

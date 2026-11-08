@@ -67,7 +67,7 @@ function claudeActions(env: InstallEnv): Action[] {
 
 function opencodeActions(env: InstallEnv): Action[] {
   const paths = installPaths(env)
-  const state = inspectShim(readTextOrNull(paths.opencodePlugin), paths.pluginEntry)
+  const state = inspectShim(readTextOrNull(paths.opencodePlugin), { pluginEntry: paths.pluginEntry, dataDir: env.dataDir })
   if (state === 'foreign') env.out(`opencode: ${paths.opencodePlugin} is not a Kinfold plugin file; left alone`)
   return state === 'yes' || state === 'stale' ? [{ kind: 'remove', path: paths.opencodePlugin, summary: 'the Kinfold OpenCode plugin file' }] : []
 }

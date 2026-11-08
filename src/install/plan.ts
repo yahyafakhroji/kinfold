@@ -18,7 +18,7 @@ import { BACKUP_REMOVAL_SUMMARY, removeHmacBackup, removeRedundantBackup, restor
 import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
 import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbeddedSqlite3mc, installSqlite3mc } from './sqlite3mc-install'
 import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from './vec0-install'
-import { CLAUDE_MCP_REMOVE_ARGV, claudeAddArgv } from './mcp-wiring'
+import { CLAUDE_MCP_REMOVE_ARGV, claudeAddArgv, rollbackSafe } from './mcp-wiring'
 import { installProgram } from './self-install'
 import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describeMoveDataDir, describeRemoveLegacyEntry, moveDataDir, removeLegacyEntry, stopLegacyAgent } from './rename-migration'
 import { legacyBootoutArgv, bootstrapArgv } from './launch-agent'
@@ -154,14 +154,22 @@ async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Promise<v
 }
 
 async function replaceClaudeMcp(env: InstallEnv, previous: Record<string, unknown>, next: Record<string, unknown>): Promise<void> {
+  if (!rollbackSafe(previous)) throw new Error('the previous Claude Code MCP entry carries env values Kinfold did not write; it was left alone')
+  let timedOut = false
   const step = async (argv: readonly string[]): Promise<boolean> => {
     try {
-      return (await env.run({ argv, timeoutMs: 15_000 })).exitCode === 0
+      const result = await env.run({ argv, timeoutMs: 15_000 })
+      timedOut = result.timedOut === true
+      return result.exitCode === 0
     } catch {
+      timedOut = false
       return false
     }
   }
-  if (!(await step(CLAUDE_MCP_REMOVE_ARGV))) throw new Error('claude mcp remove failed; the previous entry was left in place')
+  if (!(await step(CLAUDE_MCP_REMOVE_ARGV))) {
+    // A killed remove may or may not have taken effect, so the entry's state is unknown.
+    throw new Error(timedOut ? 'claude mcp remove did not finish; check the entry with claude mcp list --scope user' : 'claude mcp remove failed; the previous entry was left in place')
+  }
   if (await step(claudeAddArgv(next))) return
   if (await step(claudeAddArgv(previous))) throw new Error('the Claude Code MCP entry could not be replaced; the previous entry was put back')
   throw new Error(`the Claude Code MCP entry could not be replaced and the previous one could not be put back; add it again with: ${claudeAddArgv(previous).join(' ')}`)

@@ -96,9 +96,7 @@ export interface InstallPaths {
   launchAgentPlist: string
   /** The plist an install under the old name left behind; migration removes it. */
   legacyLaunchAgentPlist: string
-  hookScript: string
   pluginEntry: string
-  daemonMain: string
   logsDir: string
   logFile: string
   codexDir: string
@@ -133,9 +131,7 @@ export function installPaths(env: Pick<InstallEnv, 'homeDir' | 'dataDir' | 'proj
     launchAgentsDir,
     launchAgentPlist: join(launchAgentsDir, `${LAUNCH_AGENT_LABEL}.plist`),
     legacyLaunchAgentPlist: join(launchAgentsDir, `${LEGACY_LAUNCH_AGENT_LABEL}.plist`),
-    hookScript: join(env.projectRoot, 'src', 'cli', 'hook.ts'),
     pluginEntry: join(env.projectRoot, 'src', 'plugins', 'opencode.ts'),
-    daemonMain: join(env.projectRoot, 'src', 'daemon', 'main.ts'),
     logsDir,
     logFile: join(logsDir, 'daemon.log'),
     codexDir,

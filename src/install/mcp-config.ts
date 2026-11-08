@@ -18,17 +18,8 @@ import { entryPath, entryRole, type EntryCommand } from './entry'
 export { MCP_SERVER_NAME }
 
 export interface McpTarget {
-  /** The checkout's bun; used with serverScript when entry is absent. */
-  bunPath?: string
-  serverScript?: string
   /** The command an install writes, from entry.ts. */
-  entry?: EntryCommand
-}
-
-function mcpEntry(target: McpTarget): EntryCommand {
-  if (target.entry !== undefined) return target.entry
-  if (target.bunPath === undefined || target.serverScript === undefined) throw new Error('an MCP target needs an entry or a checkout path')
-  return { command: target.bunPath, args: [target.serverScript] }
+  entry: EntryCommand
 }
 
 export type McpHost = 'claude-code' | 'opencode'
@@ -56,12 +47,12 @@ const SECTION: Readonly<Record<McpHost, string>> = { 'claude-code': 'mcpServers'
  * reads as stale, and the next `kinfold install` replaces it.
  */
 export function claudeMcpEntry(target: McpTarget): Record<string, unknown> {
-  const entry = mcpEntry(target)
+  const entry = target.entry
   return { type: 'stdio', command: entry.command, args: entry.args, env: { [MCP_HOST_ENV]: 'claude-code' } }
 }
 
 export function openCodeMcpEntry(target: McpTarget): Record<string, unknown> {
-  const entry = mcpEntry(target)
+  const entry = target.entry
   return { type: 'local', command: [entry.command, ...entry.args], enabled: true, environment: { [MCP_HOST_ENV]: 'opencode' } }
 }
 
