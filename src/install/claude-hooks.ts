@@ -1,24 +1,33 @@
 // Our entries in Claude Code's settings.json, as pure functions over the
 // parsed file. Our entry has the shape this project's .claude/settings.local.json
-// proved live: the absolute bun as `command`, the absolute src/cli/hook.ts as
-// the only arg, timeout 10, async for the tool events. Ours are found by the
-// hook.ts path, never by position, so a re-run is a no-op, a moved checkout
-// replaces the old path, and every other key, event and hook stays as it was.
+// proved live: one command and its args, timeout 10, async for the tool events.
+// The command is the checkout's bun on src/cli/hook.ts, or the installed
+// program with --data-dir before `hook` (entry.ts). Ours are found by what the
+// command runs, never by position, so a re-run is a no-op, a moved checkout or
+// a switch between the two forms replaces the old entry, and every other key,
+// event and hook stays as it was.
 
 import { isRecord } from '../contract/event'
+import { entryPath, entryRole, type EntryCommand } from './entry'
 
 export const CLAUDE_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd'] as const
 export type ClaudeHookEvent = (typeof CLAUDE_HOOK_EVENTS)[number]
 
 const TOOL_EVENTS: readonly ClaudeHookEvent[] = ['PostToolUse', 'PostToolUseFailure']
 export const HOOK_TIMEOUT_S = 10
-const HOOK_SCRIPT_SUFFIX = '/src/cli/hook.ts'
-/** The older string form: "bun /path/src/cli/hook.ts". */
-const COMMAND_STRING = /(^|\/)bun\s+("?)(\/\S*\/src\/cli\/hook\.ts)\2(\s|$)/
 
 export interface HookTarget {
-  bunPath: string
-  hookScript: string
+  /** The checkout's bun; used with hookScript when entry is absent. */
+  bunPath?: string
+  hookScript?: string
+  /** The command an install writes, from entry.ts. */
+  entry?: EntryCommand
+}
+
+export function hookEntry(target: HookTarget): EntryCommand {
+  if (target.entry !== undefined) return target.entry
+  if (target.bunPath === undefined || target.hookScript === undefined) throw new Error('a hook target needs an entry or a checkout path')
+  return { command: target.bunPath, args: [target.hookScript] }
 }
 
 export type Settings = Readonly<Record<string, unknown>>
@@ -34,18 +43,16 @@ export type WiringState = 'yes' | 'no' | 'stale' | 'partial'
 
 export function samHookGroup(event: ClaudeHookEvent, target: HookTarget): Record<string, unknown> {
   const isTool = TOOL_EVENTS.includes(event)
-  const hook = { type: 'command', command: target.bunPath, args: [target.hookScript], timeout: HOOK_TIMEOUT_S, ...(isTool ? { async: true } : {}) }
+  const entry = hookEntry(target)
+  const hook = { type: 'command', command: entry.command, args: entry.args, timeout: HOOK_TIMEOUT_S, ...(isTool ? { async: true } : {}) }
   return isTool ? { matcher: '*', hooks: [hook] } : { hooks: [hook] }
 }
 
-/** The hook.ts path a Kinfold entry runs, or null when the entry is not ours. */
+/** The hook.ts path or program path a Kinfold entry runs, or null when the entry is not ours. */
 export function samHookScript(entry: unknown): string | null {
   if (!isRecord(entry) || typeof entry.command !== 'string') return null
-  const args = entry.args
-  if (Array.isArray(args) && args.length === 1 && typeof args[0] === 'string' && args[0].endsWith(HOOK_SCRIPT_SUFFIX)) {
-    return /(^|\/)bun$/.test(entry.command) ? args[0] : null
-  }
-  return COMMAND_STRING.exec(entry.command)?.[3] ?? null
+  const args = Array.isArray(entry.args) ? entry.args.filter((arg): arg is string => typeof arg === 'string') : []
+  return entryRole(entry.command, args) === 'hook' ? entryPath(entry.command, args) : null
 }
 
 function groupsOf(hooks: Readonly<Record<string, unknown>>, event: string): readonly unknown[] {

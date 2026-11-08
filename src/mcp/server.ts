@@ -11,6 +11,7 @@
 // back to keyword-only when the daemon is down or slow.
 
 import { resolveDataDir } from '../store/data-dir'
+import { applyDataDirFlag } from '../store/data-dir-flag'
 import { DAEMON_GIT_TIMEOUT_MS, type GitRunner, GitTimeoutError, gitRunnerWithTimeout, resolveProjectKey } from '../store/project-key'
 import { MAX_LINE_CHARS, handleLine, oversizeReply } from './protocol'
 import { type ReadReporter, createReadReporter, hostFromEnv } from './read-reporter'
@@ -126,7 +127,14 @@ export async function runStdio(server: McpServer, input: ReadableStream<Uint8Arr
   if (!skipping) await answer(buffer + decoder.decode())
 }
 
-async function main(): Promise<void> {
+/** A fatal error logs its name only: a message can quote a payload. */
+export function failMcp(error: unknown): never {
+  process.stderr.write(`kinfold-mcp: fatal ${error instanceof Error ? error.name : typeof error}\n`)
+  process.exit(1)
+}
+
+async function serveMcp(argv: readonly string[]): Promise<void> {
+  applyDataDirFlag(argv)
   const log = (line: string) => process.stderr.write(`kinfold-mcp: ${line}\n`)
   const dataDir = resolveDataDir()
   const host = hostFromEnv(process.env)
@@ -144,9 +152,21 @@ async function main(): Promise<void> {
   }
 }
 
-if (import.meta.main) {
-  main().catch((error: unknown) => {
-    process.stderr.write(`kinfold-mcp: fatal ${error instanceof Error ? error.name : typeof error}\n`)
-    process.exit(1)
-  })
+/** The MCP entry when `kinfold mcp` runs it; a fatal error takes the same name-only path as the direct entry. */
+export async function runMcpServer(argv: readonly string[]): Promise<void> {
+  try {
+    await serveMcp(argv)
+  } catch (error: unknown) {
+    failMcp(error)
+  }
 }
+
+async function main(): Promise<void> {
+  try {
+    await serveMcp(process.argv.slice(2))
+  } catch (error: unknown) {
+    failMcp(error)
+  }
+}
+
+if (import.meta.main) await main()

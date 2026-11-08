@@ -8,6 +8,7 @@ import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
 import type { CredentialProvider } from '../secrets/credentials'
 import { platformCredentialProvider } from '../secrets/keychain'
 import { resolveDataDir } from '../store/data-dir'
+import { applyDataDirFlag } from '../store/data-dir-flag'
 import { type Embedder, createOpenRouterEmbedder } from '../vectors/embedder'
 import { parsePort, startDaemon } from './daemon'
 import { logLine } from './log-line'
@@ -34,11 +35,13 @@ function fail(message: string): never {
   process.exit(1)
 }
 
-function main(): void {
+/** The daemon entry when `kinfold daemon` runs it; `argv` is what follows the subcommand, of which there are no flags yet. */
+export async function runDaemon(argv: readonly string[]): Promise<void> {
   process.umask(OWNER_ONLY_UMASK)
   for (const line of deprecationLines(process.env)) process.stderr.write(logLine(line))
   let daemon: ReturnType<typeof startDaemon>
   try {
+    applyDataDirFlag(argv)
     const dataDir = resolveDataDir()
     const credentials = platformCredentialProvider()
     const runnerDeps: RunnerDeps = { dataDir, credentials }
@@ -62,18 +65,25 @@ function main(): void {
     fail(`failed to start: ${error instanceof Error ? error.message : String(error)}`)
   }
 
-  let stopping = false
-  const shutdown = (signal: string): void => {
-    if (stopping) return
-    stopping = true
-    process.stderr.write(logLine(`${signal}, shutting down`))
-    daemon.stop().then(
-      () => process.exit(0),
-      (error: unknown) => fail(`shutdown failed: ${error instanceof Error ? error.message : String(error)}`),
-    )
-  }
-  process.on('SIGINT', () => shutdown('SIGINT'))
-  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  // The server stays up until a stop signal arrives. The caller exits after
+  // this resolves, so a `kinfold daemon` process never tears down its own server.
+  await new Promise<void>((resolve) => {
+    let stopping = false
+    const shutdown = (signal: string): void => {
+      if (stopping) return
+      stopping = true
+      process.stderr.write(logLine(`${signal}, shutting down`))
+      daemon.stop().then(
+        () => resolve(),
+        (error: unknown) => fail(`shutdown failed: ${error instanceof Error ? error.message : String(error)}`),
+      )
+    }
+    process.on('SIGINT', () => shutdown('SIGINT'))
+    process.on('SIGTERM', () => shutdown('SIGTERM'))
+  })
 }
 
-if (import.meta.main) main()
+if (import.meta.main) {
+  await runDaemon(process.argv.slice(2))
+  process.exit(0)
+}

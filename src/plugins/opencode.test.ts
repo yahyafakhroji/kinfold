@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { rebuildProjectPacks } from '../context/packs'
@@ -266,6 +266,50 @@ test('end to end with a daemon: the stored pack lands in the request and the inj
     }
   } finally {
     await daemon.stop()
+  }
+})
+
+test('with the daemon down the context hook adds nothing, even when a stored pack exists', async () => {
+  const dataDir = join(root, 'data')
+  const store = openStore(dataDir)
+  try {
+    upsertProject(store.db, { key: root, kind: 'path', displayName: 'plugin-repo' }, Date.now())
+    const session = upsertSession(store.db, { host: 'claude-code', hostSessionId: 'cc', projectKey: root, cwd: root, occurredAt: Date.now() })
+    seedObservation(store, { sessionId: session, projectKey: root, host: 'claude-code', title: 'A pack the plugin must not read from disk', at: Date.now() })
+    rebuildProjectPacks(store.db, root, Date.now())
+  } finally {
+    store.db.close()
+  }
+  const { ctx, handlers } = fakeHost()
+  createOpenCodePlugin({ dataDir: () => dataDir, log: (line) => logs.push(line), sessionOwners: new Map() }).setup({ ...ctx, location: { directory: root } })
+  const event = contextEvent('ses_down')
+  const before = structuredClone(event.system)
+  await handlers.get('session.context')!(event)
+  expect(event.system).toEqual(before)
+  expect(logs.join('\n')).toContain('context: daemon not running')
+})
+
+test('with a fake daemon up the context hook adds the pack it answers', async () => {
+  const dataDir = join(root, 'data')
+  mkdirSync(dataDir, { recursive: true })
+  writeFileSync(join(dataDir, 'daemon.token'), 'a'.repeat(64))
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: async (request) => {
+      const body = (await request.json()) as { hostSessionId: string }
+      return Response.json({ text: `<kinfold>pack for ${body.hostSessionId}</kinfold>`, observationIds: [7], tokens: 5 })
+    },
+  })
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: server.port }))
+  try {
+    const { ctx, handlers } = fakeHost()
+    createOpenCodePlugin({ dataDir: () => dataDir, log: (line) => logs.push(line), sessionOwners: new Map() }).setup({ ...ctx, location: { directory: root } })
+    const event = contextEvent('ses_fake')
+    await handlers.get('session.context')!(event)
+    expect(event.system.at(-1)).toEqual({ type: 'text', text: '<kinfold>pack for ses_fake</kinfold>' })
+  } finally {
+    server.stop(true)
   }
 })
 

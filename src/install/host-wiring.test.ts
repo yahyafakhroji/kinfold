@@ -2,11 +2,15 @@ import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readHostVersions, recordedHostVersion } from '../adapters/host-version'
+import type { EmbeddedAssets } from '../runtime/embedded'
 import { installPaths } from './env'
 import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, samItem } from './host-hooks'
-import { CODEX_TRUST_NOTE } from './host-wiring'
+import { CODEX_TRUST_NOTE, opencodeInstallActions } from './host-wiring'
 import { EXIT_OK, install } from './install'
+import { inspectShim, pluginFileContent, shimContent } from './opencode-shim'
+import { runPlan } from './plan'
 import { status } from './status'
+import { entryCommand } from './entry'
 import { BUN, type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
 import { uninstall } from './uninstall'
 
@@ -65,11 +69,11 @@ test('detected Codex (CLI) and Cursor (app): wired with backups, foreign entries
   expect(await install(w.env, YES)).toBe(EXIT_OK)
 
   const codex = JSON.parse(readFileSync(paths.codexHooks, 'utf8')) as { hooks: Record<string, unknown[]> }
-  for (const event of CODEX_HOOK_SPEC.events) expect(codex.hooks[event]).toEqual([samItem(CODEX_HOOK_SPEC, event, { bunPath: BUN, hookScript })])
+  for (const event of CODEX_HOOK_SPEC.events) expect(codex.hooks[event]).toEqual([samItem(CODEX_HOOK_SPEC, event, { entry: entryCommand(w.env.mode, 'hook', w.dataDir, 'codex') })])
   const cursor = JSON.parse(readFileSync(paths.cursorHooks, 'utf8')) as { version: number; hooks: Record<string, unknown[]> }
   expect(cursor.version).toBe(1)
-  expect(cursor.hooks.beforeSubmitPrompt).toEqual([FOREIGN_CURSOR, samItem(CURSOR_HOOK_SPEC, 'beforeSubmitPrompt', { bunPath: BUN, hookScript })])
-  expect(cursor.hooks.sessionStart).toEqual([samItem(CURSOR_HOOK_SPEC, 'sessionStart', { bunPath: BUN, hookScript })])
+  expect(cursor.hooks.beforeSubmitPrompt).toEqual([FOREIGN_CURSOR, samItem(CURSOR_HOOK_SPEC, 'beforeSubmitPrompt', { entry: entryCommand(w.env.mode, 'hook', w.dataDir, 'cursor') })])
+  expect(cursor.hooks.sessionStart).toEqual([samItem(CURSOR_HOOK_SPEC, 'sessionStart', { entry: entryCommand(w.env.mode, 'hook', w.dataDir, 'cursor') })])
   expect(readdirSync(paths.codexDir).filter((name) => name.includes('.kinfold-backup-'))).toHaveLength(1)
   expect(readdirSync(paths.cursorDir).filter((name) => name.includes('.kinfold-backup-'))).toHaveLength(1)
   expect(w.out).toContain(CODEX_TRUST_NOTE)
@@ -130,4 +134,77 @@ test('host_version is recorded for all four hosts, pinned to the binary or app, 
   expect(await install(w.env, YES)).toBe(EXIT_OK)
   expect(w.out.some((line) => line.includes('record host_version'))).toBe(false)
   expect(existsSync(installPaths(w.env).hostVersionsFile)).toBe(true)
+})
+
+const BUNDLE = [
+  '// @bun',
+  'var plugin_default = { id: "kinfold", setup() {} };',
+  'export { plugin_default as default };',
+  '',
+].join('\n')
+
+function fakeAssets(bundle: string): EmbeddedAssets {
+  return {
+    sqlite3mc: { bytes: async () => new Uint8Array(), sha256: 'sqlite3mc-sha', sourceSha256: 'source-sha' },
+    vec0: { bytes: async () => new Uint8Array(), sha256: 'vec0-sha' },
+    dashboardFile: () => null,
+    opencodePlugin: async () => bundle,
+  }
+}
+
+test('program mode replaces a checkout shim with the bundle it carries, then plans nothing', async () => {
+  const w = createWorld({ opencodeVersion: 'opencode v2.1.4' })
+  world = w
+  w.env.mode = { kind: 'program', binPath: join(w.dataDir, 'bin', 'kinfold') }
+  const paths = installPaths(w.env)
+  mkdirSync(paths.opencodePluginsDir, { recursive: true })
+  writeFileSync(paths.opencodePlugin, shimContent('/old/checkout/src/plugins/opencode.ts'))
+
+  await runPlan(w.env, await opencodeInstallActions(w.env, fakeAssets(BUNDLE)), false)
+  const text = readFileSync(paths.opencodePlugin, 'utf8')
+  expect(text.split('\n')[0]).toStartWith('// kinfold: ')
+  expect(text).toContain(`const KINFOLD_DATA_DIR = ${JSON.stringify(w.dataDir)};`)
+  expect(text.endsWith(BUNDLE)).toBe(true)
+  expect(w.out.some((line) => line.includes('replacing a stale plugin path'))).toBe(true)
+
+  w.out.length = 0
+  expect(await opencodeInstallActions(w.env, fakeAssets(BUNDLE))).toEqual([])
+  expect(w.out).toContain(`opencode: plugin already in ${paths.opencodePlugin}`)
+})
+
+test('program mode upgrades an existing bundle whose bytes or data folder changed', async () => {
+  const w = createWorld({ opencodeVersion: 'opencode v2.1.4' })
+  world = w
+  const mode = { kind: 'program', binPath: join(w.dataDir, 'bin', 'kinfold') } as const
+  w.env.mode = mode
+  const paths = installPaths(w.env)
+  mkdirSync(paths.opencodePluginsDir, { recursive: true })
+  writeFileSync(paths.opencodePlugin, pluginFileContent(mode, join(w.root, 'old-data'), BUNDLE))
+
+  const NEXT_BUNDLE = [
+    '// @bun',
+    'var plugin_default = { id: "kinfold", setup() { return 2 } };',
+    'export { plugin_default as default };',
+    '',
+  ].join('\n')
+  await runPlan(w.env, await opencodeInstallActions(w.env, fakeAssets(NEXT_BUNDLE)), false)
+  const text = readFileSync(paths.opencodePlugin, 'utf8')
+  expect(text.split('\n')[0]).toStartWith('// kinfold: ')
+  expect(text).toContain(`const KINFOLD_DATA_DIR = ${JSON.stringify(w.dataDir)};`)
+  expect(text).not.toContain('old-data')
+  expect(text).toContain('setup() { return 2 }')
+  expect(text).not.toContain('setup() {};')
+  expect(inspectShim(text, paths.pluginEntry)).toBe('yes')
+})
+
+test('program mode refuses to write a plugin when the build carries none, and leaves the old file alone', async () => {
+  const w = createWorld({ opencodeVersion: 'opencode v2.1.4' })
+  world = w
+  w.env.mode = { kind: 'program', binPath: join(w.dataDir, 'bin', 'kinfold') }
+  const paths = installPaths(w.env)
+  const before = shimContent(paths.pluginEntry)
+  mkdirSync(paths.opencodePluginsDir, { recursive: true })
+  writeFileSync(paths.opencodePlugin, before)
+  await expect(opencodeInstallActions(w.env, null)).rejects.toThrow('this build carries no OpenCode plugin')
+  expect(readFileSync(paths.opencodePlugin, 'utf8')).toBe(before)
 })

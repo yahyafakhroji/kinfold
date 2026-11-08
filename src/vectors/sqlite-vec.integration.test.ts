@@ -1,7 +1,7 @@
-// The real sqlite-vec path: the pinned vec0.dylib loaded through sqlite3mc,
-// vec_distance_cosine answering. It runs test/vec0-probe.ts in a fresh process,
-// as the daemon would, and skips until KINFOLD_TEST_VEC0 names a copy of the
-// pinned vec0.dylib (the daemon's own copy is never touched by tests).
+// The real sqlite-vec path: the pinned member for this platform loaded through
+// sqlite3mc, vec_distance_cosine answering. It runs test/vec0-probe.ts in a
+// fresh process, as the daemon would, and skips until KINFOLD_TEST_VEC0 names a
+// copy of the pinned member (the daemon's own copy is never touched by tests).
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'

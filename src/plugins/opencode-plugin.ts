@@ -4,12 +4,14 @@
 // write finishes before a handler returns.
 // The one exception is ctx.session.hook("context"): it appends one text part
 // holding the project's context pack to event.system, and never alters or
-// removes the parts already there. The pack is fetched once per session
-// (daemon first, read-only fallback second, 300 ms for both) and cached until
-// the session compacts; a failure or an empty pack appends nothing. At most
-// once per 30 s per session it also asks for the prompt-time delta and keeps
-// it with the pack (context-injector.ts). A new prompt asks at once and
-// carries its text, for prompt-time related memory.
+// removes the parts already there. The pack comes from the daemon only; a down
+// daemon adds nothing and the plugin never opens the store, so this bundle can
+// load where SQLite is not available. The pack is cached once the daemon
+// answers; a miss is not cached and is retried on a later request after 30 s,
+// so a daemon that comes back is used. At most once per 30 s per session it
+// also asks for the prompt-time delta and keeps it with the pack
+// (context-injector.ts). A new prompt asks at once and carries its text, for
+// prompt-time related memory.
 // Kept apart from opencode.ts because that file may export only { id, setup }.
 // Under the observer (KINFOLD_OBSERVER=1) setup registers nothing, so an observer
 // process can never feed events back into the store.
@@ -19,7 +21,7 @@ import { type OpenCodeContext, OPENCODE_HOST, createOpenCodeBusMapper, normalize
 import { defaultAdapterContext } from '../adapters/context'
 import { recordedHostVersion } from '../adapters/host-version'
 import { recordEvent } from '../cli/record'
-import { fetchContext } from '../context/client'
+import { DAEMON_ONLY_TIMEOUT_MS, fetchDaemonContext } from '../context/daemon'
 import type { ContextRequest, ContextResult } from '../context/types'
 import { isObserverProcess } from '../observer/env'
 import { resolveDataDir } from '../store/data-dir'
@@ -49,7 +51,7 @@ export interface OpenCodePluginOptions {
   dataDir?: () => string
   log?: (line: string) => void
   env?: Readonly<Record<string, string | undefined>>
-  /** Test seam; the default asks the daemon, then the read-only fallback. */
+  /** Test seam; the default asks the daemon only, with no read of the store. */
   fetchContext?: ContextFetcher
   /** Test seam; the default is the process-wide registry on globalThis. */
   sessionOwners?: Map<string, string>
@@ -178,7 +180,7 @@ export function createOpenCodePlugin(options: OpenCodePluginOptions = {}): OpenC
     }
 
     const fetcher: ContextFetcher = options.fetchContext
-      ?? (async (request) => (await fetchContext(dataDir, request, { log: (line) => log(`kinfold-opencode: ${line}`) })).result)
+      ?? ((request) => fetchDaemonContext(dataDir, request, { timeoutMs: DAEMON_ONLY_TIMEOUT_MS, log: (line) => log(`kinfold-opencode: ${line}`) }))
     const injector = createContextInjector({ host: OPENCODE_HOST, cwd: ctx.location.directory, fetch: fetcher, log })
 
     ctx.tool.hook('execute.after', guarded((input) => normalizeOpenCodeToolAfter(input, context)))

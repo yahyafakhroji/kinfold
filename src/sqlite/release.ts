@@ -7,6 +7,8 @@ export const SQLITE3MC_VERSION = '2.6.1'
 export const SQLITE3MC_SQLITE_VERSION = '3.54.0'
 export const SQLITE3MC_ZIP_NAME = `sqlite3mc-${SQLITE3MC_VERSION}-sqlite-${SQLITE3MC_SQLITE_VERSION}-amalgamation.zip`
 export const SQLITE3MC_ZIP_URL = `https://github.com/utelle/SQLite3MultipleCiphers/releases/download/v${SQLITE3MC_VERSION}/${SQLITE3MC_ZIP_NAME}`
+/** The API URL for the same asset; build tools fall back to it when the release URL answers a server error. */
+export const SQLITE3MC_ZIP_API_URL = 'https://api.github.com/repos/utelle/SQLite3MultipleCiphers/releases/assets/633720268'
 /** Matches the GitHub asset digest and the release's SHA256SUMS (checked 2026-10-31). */
 export const SQLITE3MC_ZIP_SHA256 = '3f25af603566a23c821d8e581778b5ece2a541d2435776de57b8d845c176815a'
 /** The zip is about 3.9 MB; anything far larger is not it. */

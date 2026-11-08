@@ -1,5 +1,6 @@
-// Plan actions for the Codex and Cursor hook files and for the host_version
-// record, in the same form install.ts builds for Claude Code: read the file
+// Plan actions for the OpenCode plugin file, the Codex and Cursor hook files
+// and for the host_version record, in the same form install.ts builds for
+// Claude Code: read the file
 // (an unparseable one stops the install untouched), merge ours in with
 // host-hooks.ts, back the original up before the first change, write it
 // atomically. Uninstall takes only our entries out. Planning only reads;
@@ -12,11 +13,14 @@
 
 import { existsSync } from 'node:fs'
 import { normalizeVersion, parseHostVersions, serializeHostVersions, statMtime, type HostVersionRecord, type HostVersionRecords } from '../adapters/host-version'
+import { type EmbeddedAssets, embeddedAssets } from '../runtime/embedded'
 import { DATA_FILE_MODE } from '../store/data-dir'
 import type { HostDetection } from './detect'
 import { type InstallEnv, codexHomeProblem, errorMessage, installPaths } from './env'
-import { plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
+import { entryCommand, entryIdentity } from './entry'
+import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, type CommandHookHost, type CommandHookSpec, inspectHostHooks, mergeHostHooks, removeHostHooks } from './host-hooks'
+import { inspectShim, pluginFileContent } from './opencode-shim'
 import type { Action } from './plan'
 
 const DIR_MODE = 0o755
@@ -32,6 +36,31 @@ function hostFiles(env: InstallEnv, host: CommandHookHost): { dir: string; file:
   return host === 'codex' ? { dir: paths.codexDir, file: paths.codexHooks } : { dir: paths.cursorDir, file: paths.cursorHooks }
 }
 
+/**
+ * The OpenCode plugin file. A checkout writes the shim that re-exports its
+ * plugin; a program writes the bundle it carries under the data folder, so
+ * OpenCode loads a file that needs neither the checkout nor SQLite. Both carry
+ * our marker; a file without it is never touched.
+ */
+export async function opencodeInstallActions(env: InstallEnv, assets: EmbeddedAssets | null = embeddedAssets()): Promise<Action[]> {
+  const paths = installPaths(env)
+  const before = readTextOrNull(paths.opencodePlugin)
+  const state = inspectShim(before, paths.pluginEntry)
+  if (state === 'foreign') throw new Error(`${paths.opencodePlugin} exists and is not a Kinfold plugin file; move it away first`)
+  const bundle = env.mode.kind === 'program' ? (assets === null ? null : await assets.opencodePlugin()) : ''
+  if (bundle === null) throw new Error('this build carries no OpenCode plugin; reinstall from a release build')
+  const content = pluginFileContent(env.mode, env.dataDir, bundle)
+  if (state === 'yes' && before === content) {
+    env.out(`opencode: plugin already in ${paths.opencodePlugin}`)
+    return []
+  }
+  const summary = `${describeTextChange(before, content) ?? 'unchanged'}${state === 'stale' ? ', replacing a stale plugin path' : ''}`
+  return [
+    ...(existsSync(paths.opencodePluginsDir) ? [] : [{ kind: 'mkdir', path: paths.opencodePluginsDir, mode: DIR_MODE } as const]),
+    { kind: 'write', path: paths.opencodePlugin, content, mode: FILE_MODE, summary },
+  ]
+}
+
 export function hostHookInstallActions(env: InstallEnv, host: CommandHookHost): Action[] {
   const problem = host === 'codex' ? codexHomeProblem(env) : null
   if (problem !== null) {
@@ -41,7 +70,7 @@ export function hostHookInstallActions(env: InstallEnv, host: CommandHookHost): 
   const { dir, file: path } = hostFiles(env, host)
   if (host === 'codex' && env.codexHomeEnv !== undefined && env.codexHomeEnv !== '') env.out(`codex: CODEX_HOME is set; using ${path}`)
   const file = readJsonObject(path)
-  const merge = mergeHostHooks(HOST_HOOK_SPECS[host], file.exists ? file.value : {}, { bunPath: env.bunPath, hookScript: installPaths(env).hookScript })
+  const merge = mergeHostHooks(HOST_HOOK_SPECS[host], file.exists ? file.value : {}, { entry: entryCommand(env.mode, 'hook', env.dataDir, host) })
   if (!merge.changed) {
     env.out(`${host}: hooks already wired in ${path}`)
     return []
@@ -88,7 +117,7 @@ export function hostWiringLine(env: InstallEnv, host: CommandHookHost): string {
   if (problem !== null) return `unknown (${problem}) in ${path}`
   try {
     const file = readJsonObject(path)
-    return `${file.exists ? inspectHostHooks(HOST_HOOK_SPECS[host], file.value, installPaths(env).hookScript) : 'no (no hooks.json)'} in ${path}`
+    return `${file.exists ? inspectHostHooks(HOST_HOOK_SPECS[host], file.value, entryIdentity(env.mode, 'hook', env.dataDir, host)) : 'no (no hooks.json)'} in ${path}`
   } catch (error: unknown) {
     return `unknown (${errorMessage(error)}) in ${path}`
   }

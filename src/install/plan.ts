@@ -8,6 +8,7 @@ import { chmodSync, closeSync, mkdirSync, openSync, rmSync } from 'node:fs'
 import { KEYCHAIN_SERVICE } from '../secrets/credentials'
 import { HMAC_LEGACY_REF } from '../secrets/hmac-keys'
 import { credentialWriterFor } from '../secrets/keychain-writer'
+import type { EmbeddedAssets } from '../runtime/embedded'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import { putObserverSettings, waitForHealth } from './daemon-client'
 import { createDbKey, describeCreateDbKey } from './db-encryption'
@@ -15,10 +16,12 @@ import { type InstallEnv, installPaths } from './env'
 import { writeBackup, writeFileAtomic } from './files'
 import { BACKUP_REMOVAL_SUMMARY, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
 import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
-import { describeSqlite3mcInstall, installSqlite3mc } from './sqlite3mc-install'
-import { installVec0 } from './vec0-install'
+import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbeddedSqlite3mc, installSqlite3mc } from './sqlite3mc-install'
+import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from './vec0-install'
+import { CLAUDE_MCP_REMOVE_ARGV, claudeAddArgv } from './mcp-wiring'
+import { installProgram } from './self-install'
 import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describeMoveDataDir, describeRemoveLegacyEntry, moveDataDir, removeLegacyEntry, stopLegacyAgent } from './rename-migration'
-import { legacyBootoutArgv } from './launch-agent'
+import { legacyBootoutArgv, bootstrapArgv } from './launch-agent'
 import type { Vec0Asset } from '../vectors/vec0-release'
 
 export const HEALTH_WAIT_MS = 15_000
@@ -35,6 +38,8 @@ export type Action =
   | { kind: 'launchctl'; argv: readonly string[] }
   /** A host CLI call such as `claude mcp add-json`; argv holds no secret, so it prints whole. */
   | { kind: 'command'; argv: readonly string[]; summary: string }
+  /** Swaps our Claude Code MCP entry: remove, add the new one, and put `previous` back if the add fails. Neither entry holds a secret. */
+  | { kind: 'claude-mcp-replace'; previous: Record<string, unknown>; next: Record<string, unknown> }
   | { kind: 'wait-takeover'; pid: number | null; port: number }
   | { kind: 'wait-health' }
   | { kind: 'settings-put'; input: ObserverSettingsInput }
@@ -50,8 +55,14 @@ export type Action =
   | { kind: 'remove-redundant-hmac-backup'; path: string; legacyPath: string }
   /** The pinned sqlite-vec build, downloaded and hash-checked twice before it is written. */
   | { kind: 'install-vec0'; path: string; asset: Vec0Asset }
+  /** The sqlite-vec build the program carries, checked against its recorded hash before it is written. */
+  | { kind: 'install-vec0-embedded'; path: string; asset: EmbeddedAssets['vec0'] }
   /** sqlite3mc built here from the pinned amalgamation; every process opens the store through it. */
   | { kind: 'install-sqlite3mc'; path: string }
+  /** The sqlite3mc build the program carries, checked against its recorded hash before it is written. */
+  | { kind: 'install-sqlite3mc-embedded'; path: string; asset: EmbeddedAssets['sqlite3mc'] }
+  /** The running program copied to <dataDir>/bin, after its release checksum was checked. */
+  | { kind: 'install-program'; from: string; to: string; assetName: string | null; expectedSha256: string | null; check: boolean }
   /** db-key for a store the daemon has yet to create, made at run time and added without replacing any entry. */
   | { kind: 'create-db-key'; path: string }
   /** Rename migration: bootout dev.shared-agent-memory.daemon when launchd has it loaded. */
@@ -86,6 +97,7 @@ export function describeAction(action: Action): string {
     case 'remove': return `remove ${action.path}${action.recursive === true ? '/' : ''}: ${action.summary}`
     case 'launchctl': return action.argv.join(' ')
     case 'command': return `${action.summary}: ${action.argv.join(' ')}`
+    case 'claude-mcp-replace': return `replace the Kinfold MCP server entry in Claude Code (user scope), putting the old one back if the new one fails: ${CLAUDE_MCP_REMOVE_ARGV.join(' ')}, then ${claudeAddArgv(action.next).join(' ')}`
     case 'wait-takeover': return `wait up to ${TAKEOVER_WAIT_MS / 1000} s for the running daemon on port ${action.port} to stop (you stop it: ${stopCommand(action.pid, action.port)})`
     case 'wait-health': return `wait up to ${HEALTH_WAIT_MS / 1000} s for GET /health`
     case 'settings-put': {
@@ -99,7 +111,13 @@ export function describeAction(action: Action): string {
     case 'hmac-daemon-down': return `check that no daemon answers /health on port ${action.port} (a hand-started one must be stopped first: ${stopCommand(action.pid, action.port)})`
     case 'remove-redundant-hmac-backup': return `remove ${action.path} if it equals ${action.legacyPath}: a kept install backup, redundant once hmac.key is back`
     case 'install-vec0': return `download ${action.asset.url} and write its ${action.asset.member} to ${action.path} (mode 0600), after checking both against the pinned sha256`
+    case 'install-vec0-embedded': return describeEmbeddedVec0Install(action.path)
     case 'install-sqlite3mc': return describeSqlite3mcInstall(action.path)
+    case 'install-sqlite3mc-embedded': return describeEmbeddedSqlite3mcInstall(action.path)
+    case 'install-program': {
+      const check = action.check ? ` after checking ${action.assetName ?? 'it'} against SHA256SUMS` : ' (checksum check skipped for the development version)'
+      return `install program ${action.to} from ${action.from}${check}`
+    }
     case 'create-db-key': return describeCreateDbKey(action.path)
     case 'stop-legacy-agent': return `${legacyBootoutArgv(action.uid).join(' ')} (if loaded): stop the daemon installed under the old name`
     case 'migration-daemon-down': return `check that no daemon answers /health on port ${action.port}, waiting up to ${action.waitMs / 1000} s (one still running must be stopped first; nothing is moved while it runs)`
@@ -135,6 +153,25 @@ async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Promise<v
   if (exitCode !== 0) throw new Error(`${argv.slice(0, 2).join(' ')} failed (exit ${exitCode})`)
 }
 
+async function replaceClaudeMcp(env: InstallEnv, previous: Record<string, unknown>, next: Record<string, unknown>): Promise<void> {
+  const step = async (argv: readonly string[]): Promise<boolean> => {
+    try {
+      return (await env.run({ argv, timeoutMs: 15_000 })).exitCode === 0
+    } catch {
+      return false
+    }
+  }
+  if (!(await step(CLAUDE_MCP_REMOVE_ARGV))) throw new Error('claude mcp remove failed; the previous entry was left in place')
+  if (await step(claudeAddArgv(next))) return
+  if (await step(claudeAddArgv(previous))) throw new Error('the Claude Code MCP entry could not be replaced; the previous entry was put back')
+  throw new Error(`the Claude Code MCP entry could not be replaced and the previous one could not be put back; add it again with: ${claudeAddArgv(previous).join(' ')}`)
+}
+
+/** Starts the LaunchAgent with the same retry as the plan step, for a failed step that left it stopped. */
+export async function startAgent(env: InstallEnv): Promise<void> {
+  await runLaunchctl(env, bootstrapArgv(env))
+}
+
 async function waitFor(env: InstallEnv, wantUp: boolean, timeoutMs: number, failure: string): Promise<void> {
   if (!(await waitForHealth(env, wantUp, timeoutMs))) throw new Error(failure)
 }
@@ -154,6 +191,7 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'remove': return rmSync(action.path, { force: true, recursive: action.recursive === true })
     case 'launchctl': return runLaunchctl(env, action.argv)
     case 'command': return runLaunchctl(env, action.argv)
+    case 'claude-mcp-replace': return replaceClaudeMcp(env, action.previous, action.next)
     case 'wait-takeover':
       env.out(`waiting for you to stop the running daemon: ${stopCommand(action.pid, action.port)}`)
       return waitFor(env, false, TAKEOVER_WAIT_MS, `the daemon on port ${action.port} is still running; nothing after this step ran`)
@@ -168,7 +206,10 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
         + ` stop it (${stopCommand(action.pid, action.port)}) and rerun; no HMAC key was touched`)
     case 'remove-redundant-hmac-backup': return removeRedundantBackup(action.path, action.legacyPath)
     case 'install-vec0': return installVec0(env, action.path, action.asset)
+    case 'install-vec0-embedded': return installEmbeddedVec0(env, action.path, action.asset)
     case 'install-sqlite3mc': return installSqlite3mc(env, action.path)
+    case 'install-sqlite3mc-embedded': return installEmbeddedSqlite3mc(env, action.path, action.asset)
+    case 'install-program': return installProgram(env, action)
     case 'create-db-key': return createDbKey(env, action.path)
     case 'stop-legacy-agent': return stopLegacyAgent(env)
     case 'migration-daemon-down': return checkDaemonDown(env, action.port, action.waitMs)

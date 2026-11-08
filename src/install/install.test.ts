@@ -6,6 +6,7 @@ import { getObserverSettings } from './daemon-client'
 import { installPaths } from './env'
 import { EXIT_OK, install } from './install'
 import { LAUNCHCTL, launchdPath } from './launch-agent'
+import { entryCommand } from './entry'
 import { BUN, type FakeWorld, UID, YES, createWorld } from './test-support'
 
 const CLAUDE = '2.1.310 (Claude Code)'
@@ -35,7 +36,7 @@ test('a fresh install wires both hosts, starts the LaunchAgent and saves both ob
   expect(await install(w.env, YES)).toBe(EXIT_OK)
 
   const settings = JSON.parse(readFileSync(paths.claudeSettings, 'utf8'))
-  for (const event of CLAUDE_HOOK_EVENTS) expect(settings.hooks[event]).toEqual([samHookGroup(event, { bunPath: BUN, hookScript: paths.hookScript })])
+  for (const event of CLAUDE_HOOK_EVENTS) expect(settings.hooks[event]).toEqual([samHookGroup(event, { entry: entryCommand(w.env.mode, 'hook', w.dataDir) })])
   expect(readFileSync(paths.opencodePlugin, 'utf8')).toContain(`export { default } from ${JSON.stringify(join(w.projectRoot, 'src/plugins/opencode.ts'))};`)
   expect(launchctlCalls(w)).toEqual([
     [LAUNCHCTL, 'print', `gui/${UID}/dev.kinfold.daemon`],
@@ -110,7 +111,7 @@ test('a stale hook path and a stale plugin path from a moved checkout are replac
   expect(await install(w.env, YES)).toBe(EXIT_OK)
   const text = readFileSync(paths.claudeSettings, 'utf8')
   expect(text).not.toContain('/old/checkout')
-  expect(JSON.parse(text).hooks.Stop).toEqual([samHookGroup('Stop', { bunPath: BUN, hookScript: paths.hookScript })])
+  expect(JSON.parse(text).hooks.Stop).toEqual([samHookGroup('Stop', { entry: entryCommand(w.env.mode, 'hook', w.dataDir) })])
   expect(readFileSync(paths.opencodePlugin, 'utf8')).not.toContain('/old/checkout')
   expect(w.out.some((line) => line.includes('replace Kinfold hooks for Stop'))).toBe(true)
   expect(w.out.some((line) => line.includes('replacing a stale plugin path'))).toBe(true)

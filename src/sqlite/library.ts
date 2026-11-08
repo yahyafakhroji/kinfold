@@ -9,15 +9,20 @@
 // build, unchecked.
 
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { envName, readEnv } from '../env-names'
+import { writeFileAtomic } from '../fs/atomic'
+import { DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
 import { sqlite3mcLibraryExtension } from './release'
 import { SqliteError } from './types'
 
 export const SQLITE3MC_LIB_ENV = envName('SQLITE3MC_LIB')
 export const LIB_DIR = 'lib'
 export const MANIFEST_FILE = 'sqlite3mc.json'
+
+/** Fixed, with no hashes in it: a mismatch is a build problem, not something a user can inspect. */
+export const EMBEDDED_LIBRARY_SHA_MISMATCH = 'the embedded sqlite3mc build does not match its recorded sha256; nothing was written'
 
 export interface LibraryManifest {
   /** A file name in lib/, never a path. */
@@ -61,6 +66,47 @@ export function readManifest(dataDir: string): LibraryManifest | null {
 
 export function sha256File(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+export function sha256Bytes(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+/** The manifest names this exact build, from this exact source; what an embedded program checks. */
+export function hasLibraryBuild(dataDir: string, sha256: string, sourceSha256: string): boolean {
+  const result = checkLibrary(dataDir)
+  return result.ok && result.manifest.sha256 === sha256 && result.manifest.sourceSha256 === sourceSha256
+}
+
+/**
+ * A build a running process still holds cannot be unlinked on Windows; it is
+ * left for the next install, which retries, and only costs disk space until
+ * then. The log line carries the file name, never its path or contents.
+ */
+function removeLibraryBuildQuietly(path: string, log?: (line: string) => void): void {
+  try {
+    rmSync(path, { force: true })
+  } catch {
+    log?.(`database library: kept ${basename(path)}; it is still in use, and the next install removes it`)
+  }
+}
+
+/**
+ * Writes a build that came with the program into the lib dir. The bytes are
+ * checked against the recorded hash before that dir is touched, the build lands
+ * under the same hash name a local build uses, and the manifest is swapped
+ * atomically after it, so no reader ever sees a manifest naming a file that is
+ * not there. Older builds go only once the manifest no longer names them.
+ */
+export function installLibraryBuild(dir: string, bytes: Uint8Array, sha256: string, sourceSha256: string, platform: string = process.platform, log?: (line: string) => void): void {
+  if (sha256Bytes(bytes) !== sha256) throw new Error(EMBEDDED_LIBRARY_SHA_MISMATCH)
+  const file = libraryFileName(sha256, platform)
+  if (file === null) throw new Error(`no sqlite3mc build for ${platform}`)
+  mkdirSync(dir, { recursive: true, mode: DATA_DIR_MODE })
+  writeFileAtomic(join(dir, file), bytes, DATA_FILE_MODE)
+  const manifest: LibraryManifest = { file, sha256, sourceSha256 }
+  writeFileAtomic(join(dir, MANIFEST_FILE), `${JSON.stringify(manifest)}\n`, DATA_FILE_MODE)
+  for (const name of readdirSync(dir)) if (name.startsWith('libsqlite3mc') && name !== file) removeLibraryBuildQuietly(join(dir, name), log)
 }
 
 /** The library the manifest names, when it exists and matches its hash; else a reason. */

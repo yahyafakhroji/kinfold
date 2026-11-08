@@ -10,3 +10,5 @@ node_modules/
 .cache/
 docs/
 .superpowers/
+# Release programs and their checksum list, built by tools/build-release.ts.
+dist/

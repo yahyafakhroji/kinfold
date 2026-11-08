@@ -5,10 +5,11 @@
 // stdout empty, with two exceptions. On session start, after capturing the
 // event, it prints exactly one JSON object carrying the project's context pack
 // (daemon first, read-only fallback second, 300 ms for both) in the shape that
-// host reads. On a Claude Code user prompt it prints the prompt-time delta
-// (memory written since the session last received it) the same way, as
-// UserPromptSubmit additionalContext. Any failure or an empty answer prints
-// nothing. Errors go to stderr
+// host reads; a compiled program has no SQLite, so it asks the daemon only and
+// prints nothing while the daemon is down. On a Claude Code user prompt it
+// prints the prompt-time delta (memory written since the session last received
+// it) the same way, as UserPromptSubmit additionalContext. Any failure or an
+// empty answer prints nothing. Errors go to stderr
 // without the payload. Under the observer (KINFOLD_OBSERVER=1) it captures and
 // injects nothing. host_version comes from the payload when the host sends
 // one (Cursor), otherwise from the installer's record (adapters/host-version.ts):
@@ -24,6 +25,7 @@ import { type ContextChannel, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
 import type { NormalizedEvent } from '../contract/event'
 import { isObserverProcess } from '../observer/env'
 import { resolveDataDir } from '../store/data-dir'
+import { applyDataDirFlag } from '../store/data-dir-flag'
 import { recordEvent } from './record'
 
 export type ErrorSink = (line: string) => void
@@ -62,7 +64,7 @@ export function hostFromArgs(argv: readonly string[]): HookHost | null {
 }
 
 /** Test seams for the session-start injection; the CLI uses the defaults. */
-export type InjectOptions = Pick<ContextClientOptions, 'budgetMs' | 'daemonShareMs' | 'fetch'>
+export type InjectOptions = Pick<ContextClientOptions, 'budgetMs' | 'daemonShareMs' | 'fetch' | 'fallback'>
 
 /** Normalizes and spools one payload; null when it is not a JSON hook payload or not an event we capture. */
 async function capture(input: string, dataDir: string, host: HookHost, stderr: ErrorSink): Promise<NormalizedEvent | null> {
@@ -131,13 +133,14 @@ export async function runHook(
   }
 }
 
-async function main(): Promise<void> {
+/** The hook entry when `kinfold hook` runs it; `argv` is what follows the subcommand. Never throws, so the host sees exit 0. */
+export async function runHookCli(argv: readonly string[]): Promise<void> {
   const stderr: ErrorSink = (line) => {
     process.stderr.write(`${line}\n`)
   }
-  if (isObserverProcess()) process.exit(0)
+  if (isObserverProcess()) return
   try {
-    const host = hostFromArgs(process.argv.slice(2))
+    const host = hostFromArgs(applyDataDirFlag(argv))
     if (host === null) {
       stderr('kinfold-hook: unknown --host; nothing captured')
     } else {
@@ -147,6 +150,10 @@ async function main(): Promise<void> {
   } catch (error: unknown) {
     stderr(`kinfold-hook: ${errorMessage(error)}`)
   }
+}
+
+async function main(): Promise<void> {
+  await runHookCli(process.argv.slice(2))
   process.exit(0)
 }
 

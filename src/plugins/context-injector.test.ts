@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { type ContextRequest, type ContextResult, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
-import { DELTA_INTERVAL_MS, MAX_DELTAS_PER_SESSION, createContextInjector } from './context-injector'
+import { DELTA_INTERVAL_MS, MAX_DELTAS_PER_SESSION, PACK_RETRY_INTERVAL_MS, createContextInjector } from './context-injector'
 
 const PACK: ContextResult = { text: '<kinfold>pack</kinfold>', observationIds: [1], tokens: 10 }
 const delta = (n: number): ContextResult => ({ text: `<kinfold>delta ${n}</kinfold>`, observationIds: [100 + n], tokens: 8 })
@@ -36,6 +36,41 @@ function rig(deltas: (ContextResult | Error)[] = []): Rig {
 }
 
 const channels = (r: Rig): string[] => r.requests.map((request) => request.channel)
+
+test('a pack missed while the daemon is down is retried after 30 s, not on every request', async () => {
+  const requests: ContextRequest[] = []
+  const clock = { now: 1_000_000 }
+  let up = false
+  const injector = createContextInjector({
+    host: 'opencode', cwd: '/work/repo', log: () => {}, now: () => clock.now,
+    fetch: async (request) => {
+      requests.push(request)
+      if (request.channel === 'prompt') return { text: '', observationIds: [], tokens: 0 }
+      return up ? PACK : null
+    },
+  })
+  const texts = async (): Promise<(string | undefined)[]> => {
+    const system: { type: string; text?: string }[] = []
+    await injector.onContext({ sessionID: 's1', system })
+    return system.map((part) => part.text)
+  }
+  const packAsks = (): number => requests.filter((request) => request.channel === 'request').length
+
+  expect(await texts()).toEqual([])
+  up = true
+  clock.now += PACK_RETRY_INTERVAL_MS - 1
+  expect(await texts()).toEqual([])
+  expect(packAsks()).toBe(1)
+
+  clock.now += 1
+  expect(await texts()).toEqual([PACK.text])
+  expect(packAsks()).toBe(2)
+
+  // A cached pack is never asked for again, however long the session lasts.
+  clock.now += PACK_RETRY_INTERVAL_MS * 2
+  expect(await texts()).toEqual([PACK.text])
+  expect(packAsks()).toBe(2)
+})
 
 test('no delta is asked for within 30 s of the pack, then at most one per 30 s per session', async () => {
   const r = rig([delta(1), delta(2)])

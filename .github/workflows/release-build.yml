@@ -1,0 +1,151 @@
+name: release-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version stamped into each program
+        required: true
+        type: string
+  # A draft pull request proves the pipeline with a candidate version before
+  # the workflow is in place on main, where workflow_dispatch can see it.
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  # The draft pull request path has no version input, so it builds this one
+  # candidate. workflow_dispatch supplies its own version.
+  DRAFT_PR_VERSION: 0.1.0-rc.1
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each runner matches its target, so the C compiler builds sqlite3mc
+          # for the platform the program will run on.
+          - target: darwin-arm64
+            os: macos-latest
+          - target: darwin-x64
+            os: macos-15-intel
+          - target: linux-x64
+            os: ubuntu-latest
+          - target: linux-arm64
+            os: ubuntu-24.04-arm
+          - target: windows-x64
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the pinned Bun
+        shell: bash
+        env:
+          # Anonymous API calls share a rate limit per runner address and answer 403.
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/install-bun.sh
+
+      - name: Resolve the version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "value=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$DRAFT_PR_VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install development dependencies
+        timeout-minutes: 5
+        run: bun install --frozen-lockfile
+
+      - name: Build sqlite3mc for this target
+        timeout-minutes: 10
+        env:
+          # Lets the API asset fallback authenticate; anonymous calls hit a shared rate limit.
+          GH_TOKEN: ${{ github.token }}
+        run: bun tools/build-sqlite3mc.ts
+
+      - name: Download the pinned sqlite-vec member
+        timeout-minutes: 3
+        env:
+          # Lets the API asset fallback authenticate; anonymous calls hit a shared rate limit.
+          GH_TOKEN: ${{ github.token }}
+        run: bun tools/fetch-vec0.ts
+
+      - name: Build the program
+        timeout-minutes: 10
+        shell: bash
+        env:
+          KINFOLD_VERSION: ${{ steps.version.outputs.value }}
+        run: bun tools/build-release.ts "${{ matrix.target }}" "$KINFOLD_VERSION"
+
+      - name: Confirm the build restored its source stubs
+        shell: bash
+        run: git diff --exit-code -- src/version.ts src/runtime/embedded.generated.ts
+
+      - name: Smoke-run the program
+        timeout-minutes: 2
+        shell: bash
+        env:
+          KINFOLD_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          program=dist/kinfold-${{ matrix.target }}
+          if [ "$RUNNER_OS" = "Windows" ]; then program="$program.exe"; fi
+          actual=$("$program" --version)
+          if [ "$actual" != "$KINFOLD_VERSION" ]; then
+            echo "$program --version printed '$actual', expected '$KINFOLD_VERSION'"
+            exit 1
+          fi
+          echo "$program --version printed $actual"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kinfold-${{ matrix.target }}
+          path: dist/kinfold-*
+          if-no-files-found: error
+
+  checksums:
+    name: checksums
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      # The installer accepts exactly "64 lowercase hex characters, two spaces,
+      # the asset name". Text mode states that format instead of inheriting the
+      # platform default, and binary mode would add a "*" before the name.
+      - name: Write SHA256SUMS
+        shell: bash
+        run: |
+          cd dist
+          sha256sum --text kinfold-* | sort -k2 > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kinfold-programs
+          path: dist/
+          if-no-files-found: error
+
+  # The same run's artifact, so the programs are the ones just built and the
+  # local SHA256SUMS is the list the self-check reads.
+  smoke:
+    name: smoke
+    needs: checksums
+    uses: ./.github/workflows/smoke.yml

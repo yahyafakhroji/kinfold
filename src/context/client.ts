@@ -2,14 +2,17 @@
 // slow or broken, read the stored pack read-only. Both together get one hard
 // budget (300 ms): the daemon gets at most DAEMON_SHARE_MS of it, so a hung
 // daemon still leaves the fallback time to run, and a result that lands after
-// the budget is dropped. Never throws: a host sees a result or null.
+// the budget is dropped. A compiled program has no SQLite in its hook, so it
+// asks the daemon only. Never throws: a host sees a result or null.
 
-import { readDaemonEndpoint } from '../daemon/daemon-info'
+import { isCompiledProgram } from '../runtime/program'
+import { type DaemonMiss, DAEMON_SHARE_MS, type FetchFn, askDaemon } from './daemon'
 import { readStoredContext } from './fallback'
-import { type ContextRequest, type ContextResult, parseContextResult } from './types'
+import { type ContextRequest, type ContextResult } from './types'
+
+export { DAEMON_SHARE_MS, type FetchFn } from './daemon'
 
 export const CONTEXT_BUDGET_MS = 300
-export const DAEMON_SHARE_MS = 200
 /** Below this the fallback is not worth starting: opening SQLite and asking git take longer. */
 export const MIN_FALLBACK_MS = 20
 
@@ -21,41 +24,18 @@ export interface ContextFetch {
   ms: number
 }
 
-export type FetchFn = (url: string, init: RequestInit) => Promise<Response>
-
 export interface ContextClientOptions {
   budgetMs?: number
   daemonShareMs?: number
   log?: (line: string) => void
   fetch?: FetchFn
   now?: () => number
+  /** True when the stored pack may be read after the daemon misses; a compiled program's hook uses false. */
+  fallback?: boolean
 }
 
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : 'unknown error'
-}
-
-/** Why the daemon gave no result; `answered` is true when it replied but refused or sent something unusable. */
-interface DaemonMiss {
-  reason: string
-  answered: boolean
-}
-
-async function askDaemon(dataDir: string, request: ContextRequest, timeoutMs: number, fetchFn: FetchFn): Promise<ContextResult | DaemonMiss> {
-  const endpoint = readDaemonEndpoint(dataDir)
-  if (endpoint === null) return { reason: 'daemon not running', answered: false }
-  try {
-    const response = await fetchFn(`http://127.0.0.1:${endpoint.port}/context`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${endpoint.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify(request),
-      signal: AbortSignal.timeout(timeoutMs),
-    })
-    if (response.status !== 200) return { reason: `daemon answered ${response.status}`, answered: true }
-    return parseContextResult(await response.json()) ?? { reason: 'daemon reply malformed', answered: true }
-  } catch (error: unknown) {
-    return { reason: `daemon unreachable: ${errorName(error)}`, answered: false }
-  }
 }
 
 const isMiss = (value: ContextResult | DaemonMiss): value is DaemonMiss => 'reason' in value
@@ -89,6 +69,10 @@ export async function fetchContext(dataDir: string, request: ContextRequest, opt
 
   const daemon = await askDaemon(dataDir, request, Math.min(options.daemonShareMs ?? DAEMON_SHARE_MS, budget), options.fetch ?? fetch)
   if (!isMiss(daemon)) return { source: 'daemon', result: daemon, ms: elapsed() }
+  if (!(options.fallback ?? !isCompiledProgram())) {
+    log(`context: ${daemon.reason}; no read-only fallback in a compiled program`)
+    return none()
+  }
   if (!mayFallBack(request, daemon)) {
     log(`context: ${daemon.reason}; no fallback for the prompt channel`)
     return none()

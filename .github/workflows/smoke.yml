@@ -1,0 +1,133 @@
+name: smoke
+
+# Called by release-build after the checksums job, so the same run's artifact
+# is the program and SHA256SUMS under test.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the pinned Bun
+        shell: bash
+        env:
+          # Anonymous API calls share a rate limit per runner address and answer 403.
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/install-bun.sh
+
+      - name: Download the release programs
+        uses: actions/download-artifact@v8
+        with:
+          name: kinfold-programs
+          path: dist
+
+      # The artifact archive keeps the bytes, not the mode, so the downloaded
+      # programs arrive without the executable bit.
+      - name: Make the programs executable
+        shell: bash
+        run: chmod +x dist/kinfold-*
+
+      - name: Install Claude Code
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          npm install --global --no-audit --no-fund @anthropic-ai/claude-code
+          echo "$(npm prefix --global)/bin" >> "$GITHUB_PATH"
+          "$(npm prefix --global)/bin/claude" --version
+
+      # npm's opencode-ai reports 1.x, and Kinfold refuses anything below 2.0.
+      # The author runs the v2 formula from this tap; homebrew-core's opencode
+      # formula is older on some runners.
+      - name: Install OpenCode 2
+        timeout-minutes: 15
+        shell: bash
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: |
+          brew install anomalyco/tap/opencode-v2
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          "$(brew --prefix)/bin/opencode" --version | tee "$RUNNER_TEMP/opencode-version.txt"
+
+      - name: Check the agent CLIs
+        shell: bash
+        run: |
+          if ! grep -Eq '(^|[^0-9])2\.[0-9]+\.[0-9]+' "$RUNNER_TEMP/opencode-version.txt"; then
+            echo "opencode did not report a 2.x version; Kinfold will not wire it"
+            cat "$RUNNER_TEMP/opencode-version.txt"
+            exit 1
+          fi
+
+      # The commands write their keys to the default keychain. A throwaway one
+      # keeps the runner's login keychain untouched and goes away afterwards.
+      - name: Create a throwaway keychain
+        shell: bash
+        run: |
+          keychain="$RUNNER_TEMP/kinfold-smoke.keychain-db"
+          original="$(security default-keychain -d user | tr -d '"' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          security list-keychains -d user | tr -d '"' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' > "$RUNNER_TEMP/kinfold-original-keychains.txt"
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          {
+            echo "KINFOLD_SMOKE_KEYCHAIN=$keychain"
+            echo "KINFOLD_SMOKE_ORIGINAL_KEYCHAIN=$original"
+          } >> "$GITHUB_ENV"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security default-keychain -s "$keychain"
+          security list-keychains -d user -s "$keychain"
+
+      - name: Smoke the built program
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          program=dist/kinfold-darwin-arm64
+          if [ "$(uname -m)" = "x86_64" ]; then program=dist/kinfold-darwin-x64; fi
+          test -f "$program"
+          test -f dist/SHA256SUMS
+          KINFOLD_RELEASE_SUMS_URL="file://$PWD/dist/SHA256SUMS" bun tools/smoke.ts "$program"
+
+      - name: Show the daemon log
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$HOME/.kinfold/logs/daemon.log" ]; then
+            echo "daemon log"
+            cat "$HOME/.kinfold/logs/daemon.log"
+          else
+            echo "the daemon log is missing"
+          fi
+
+      - name: Restore the original keychain
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${KINFOLD_SMOKE_ORIGINAL_KEYCHAIN:-}" ]; then
+            security default-keychain -s "$KINFOLD_SMOKE_ORIGINAL_KEYCHAIN" || true
+          fi
+          if [ -f "$RUNNER_TEMP/kinfold-original-keychains.txt" ]; then
+            set --
+            while IFS= read -r keychain; do
+              if [ -n "$keychain" ]; then
+                set -- "$@" "$keychain"
+              fi
+            done < "$RUNNER_TEMP/kinfold-original-keychains.txt"
+            if [ "$#" -gt 0 ]; then
+              security list-keychains -d user -s "$@" || true
+            fi
+          fi
+          if [ -n "${KINFOLD_SMOKE_KEYCHAIN:-}" ] && [ -f "$KINFOLD_SMOKE_KEYCHAIN" ]; then
+            security delete-keychain "$KINFOLD_SMOKE_KEYCHAIN" || true
+          fi

@@ -1,0 +1,92 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # A job that reaches its own timeout is cancelled, and continue-on-error
+    # does not absorb a cancelled job, so the job limit only backstops the
+    # tighter step limits that bound each long step.
+    timeout-minutes: 30
+    continue-on-error: ${{ matrix.os != 'macos-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install development dependencies
+        timeout-minutes: 5
+        run: bun install --frozen-lockfile
+
+      - name: Build sqlite3mc for the test preload
+        timeout-minutes: 8
+        env:
+          # Lets the API asset fallback authenticate; anonymous calls hit a shared rate limit.
+          GH_TOKEN: ${{ github.token }}
+        run: bun tools/build-sqlite3mc.ts
+
+      # Fetches the pinned build for the runner's platform and exports
+      # KINFOLD_TEST_VEC0, so the contract and integration tests load the real
+      # extension instead of skipping. Every Kinfold target has a pinned build.
+      - name: Fetch the pinned sqlite-vec build
+        timeout-minutes: 3
+        env:
+          # Lets the API asset fallback authenticate; anonymous calls hit a shared rate limit.
+          GH_TOKEN: ${{ github.token }}
+        run: bun tools/fetch-vec0.ts
+
+      # 20 s per test: the 5 s default trips timing-sensitive daemon tests on
+      # shared runners. Windows never delivers the 5 ms abort that
+      # src/mcp/semantic-client.test.ts and src/vectors/embedder.test.ts await,
+      # and the per-test timeout cannot end that await, so those two files are
+      # skipped there and every other file still reports.
+      - name: Test
+        timeout-minutes: 12
+        shell: bash
+        run: |
+          ignore=()
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ignore=(--path-ignore-patterns '**/semantic-client.test.ts' --path-ignore-patterns '**/embedder.test.ts')
+          fi
+          bun test --timeout 20000 "${ignore[@]}"
+
+  types:
+    name: types (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    continue-on-error: ${{ matrix.os != 'macos-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install development dependencies
+        timeout-minutes: 5
+        run: bun install --frozen-lockfile
+
+      # bun run uses the TypeScript installed from the lockfile; bunx could
+      # download a different compiler when node_modules is incomplete.
+      - name: Typecheck
+        timeout-minutes: 5
+        run: bun run typecheck

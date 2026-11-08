@@ -184,6 +184,14 @@ test('with the daemon down, SessionStart prints the stored pack from the read-on
   expect(run.stderr).toContain('injection not recorded (read-only path)')
 })
 
+test('in a compiled program the hook skips the read-only fallback when the daemon is down', async () => {
+  seedProjectPack('A pack a compiled program must not read from disk')
+  const errors: string[] = []
+  const line = await runHookInProcess(inRoot('session-start.json'), dataDir, (message) => errors.push(message), {}, { fallback: false })
+  expect(line).toBeNull()
+  expect(errors.join('\n')).toContain('no read-only fallback in a compiled program')
+})
+
 test('a daemon that never answers costs at most the 300 ms budget, prints nothing and exits 0', async () => {
   const hung = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Promise<Response>(() => {}) })
   try {

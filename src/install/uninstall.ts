@@ -1,6 +1,9 @@
 // `kinfold uninstall`: unload and remove the LaunchAgent, take our hook entries out
-// of ~/.claude/settings.json and remove the OpenCode shim. Every other entry
-// stays. The data dir and the keychain entries stay too, because they hold the
+// of ~/.claude/settings.json and remove the OpenCode shim. Hook and MCP entries
+// are found by what they run (entry.ts), so a checkout install and an installed
+// program are removed the same way. Every other entry stays. The installed
+// program and libraries go too; the rest of the data dir and
+// the keychain entries stay, because they hold the
 // user's memory and keys; the command prints how to remove them, and
 // --remove-credentials deletes our credential entries. The HMAC master and
 // legacy key stay with the data dir, since stored refs need them,
@@ -8,6 +11,7 @@
 // hmac-legacy, then deletes both entries and hmac.d/ (hmac-cleanup.ts).
 
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { KEYCHAIN_SERVICE, isSystemCredentialRef } from '../secrets/credentials'
 import { credentialWriterFor } from '../secrets/keychain-writer'
 import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
@@ -38,6 +42,16 @@ async function launchAgentActions(env: InstallEnv): Promise<Action[]> {
   return [...unload, ...remove]
 }
 
+/** The program and its libraries are the install's own files; the rest of the data folder is the user's. */
+function installedFilesActions(env: InstallEnv): Action[] {
+  const bin = join(env.dataDir, 'bin')
+  const lib = join(env.dataDir, 'lib')
+  return [
+    ...(existsSync(bin) ? [{ kind: 'remove', path: bin, summary: 'the installed kinfold program', recursive: true } as const] : []),
+    ...(existsSync(lib) ? [{ kind: 'remove', path: lib, summary: 'the installed sqlite libraries', recursive: true } as const] : []),
+  ]
+}
+
 function claudeActions(env: InstallEnv): Action[] {
   const path = installPaths(env).claudeSettings
   const file = readJsonObject(path)
@@ -54,8 +68,8 @@ function claudeActions(env: InstallEnv): Action[] {
 function opencodeActions(env: InstallEnv): Action[] {
   const paths = installPaths(env)
   const state = inspectShim(readTextOrNull(paths.opencodePlugin), paths.pluginEntry)
-  if (state === 'foreign') env.out(`opencode: ${paths.opencodePlugin} is not a Kinfold shim; left alone`)
-  return state === 'yes' || state === 'stale' ? [{ kind: 'remove', path: paths.opencodePlugin, summary: 'the Kinfold plugin shim' }] : []
+  if (state === 'foreign') env.out(`opencode: ${paths.opencodePlugin} is not a Kinfold plugin file; left alone`)
+  return state === 'yes' || state === 'stale' ? [{ kind: 'remove', path: paths.opencodePlugin, summary: 'the Kinfold OpenCode plugin file' }] : []
 }
 
 /** The default ref plus any ref a stored setting names. A dry run asks the daemon nothing (only /health is allowed). */
@@ -91,6 +105,8 @@ export async function uninstall(env: InstallEnv, options: UninstallOptions): Pro
       ...hostHookUninstallActions(env, 'cursor'),
       ...(options.removeCredentials ? credentialActions(env, refs) : []),
       ...(hmac?.actions ?? []),
+      // Last: until every host entry is gone, each of them still names this program.
+      ...installedFilesActions(env),
     ]
     await runPlan(env, actions, options.dryRun)
     for (const note of [...keptNotes(env, refs, options.removeCredentials), ...(hmac?.notes ?? hmacKeptNotes(env))]) env.out(note)

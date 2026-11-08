@@ -4,9 +4,10 @@
 
 import { Database as BunDatabase } from 'bun:sqlite'
 import { afterAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { readEnv } from '../env-names'
 import { openTestDatabase } from './test-support'
 import type { Database } from './types'
 
@@ -133,13 +134,15 @@ describe('pinned behaviour', () => {
     db.close()
   })
 
-  const vec0 = join(process.env.HOME ?? '', '.shared-agent-memory', 'lib', 'vec0.dylib')
-  test.skipIf(process.platform !== 'darwin' || !existsSync(vec0))('vec0 loads, and SQL cannot load extensions afterwards', () => {
+  // The pinned build comes from KINFOLD_TEST_VEC0, the same variable the
+  // integration test uses, so no test reads a home directory or a real install.
+  const VEC0 = readEnv(process.env, 'TEST_VEC0')
+  test.skipIf(VEC0 === undefined || VEC0 === '')('vec0 loads, and SQL cannot load extensions afterwards', () => {
     const db = fresh(DRIVERS.sqlite3mc!)
-    db.loadExtension(vec0)
+    db.loadExtension(VEC0!)
     const a = new Float32Array([1, 0, 0, 0]), b = new Float32Array([0.6, 0.8, 0, 0])
     expect((db.query<{ d: number }, [Float32Array, Float32Array]>('SELECT vec_distance_cosine(?, ?) AS d').get(a, b)!.d)).toBeCloseTo(0.4, 6)
-    expect(() => db.query('SELECT load_extension(?)').get(vec0)).toThrow()
+    expect(() => db.query('SELECT load_extension(?)').get(VEC0)).toThrow()
     db.close()
   })
 })

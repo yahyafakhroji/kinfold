@@ -36,6 +36,8 @@ export interface WorldOptions {
   versionResults?: Record<string, (CommandResult & { timedOut?: boolean }) | 'throw'>
   /** Builds the CLI login runner for codex-cli and opencode-cli inputs; default answers OK, passes the planted test and lists no models. */
   cliRunner?: (settings: ObserverSettings) => CliObserverRunner
+  /** Answers a command before the built-in fakes do; return undefined to fall through. */
+  commandOverride?: (argv: readonly string[]) => CommandResult | undefined
   /** What `/usr/bin/which <binary>` prints; anything else is not found. */
   whichPaths?: Record<string, string>
   platform?: NodeJS.Platform
@@ -178,6 +180,8 @@ function fakeRun(world: FakeWorld, options: WorldOptions): (request: CommandRequ
   return async (request) => {
     world.commands.push(request)
     const [binary] = request.argv
+    const overridden = options.commandOverride?.(request.argv)
+    if (overridden !== undefined) return overridden
     if (binary === LAUNCHCTL) return launchctl(world, request.argv)
     if (binary === '/usr/bin/which') {
       const path = options.whichPaths?.[request.argv[1] ?? '']
@@ -245,7 +249,8 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
   } as unknown as FakeWorld
   world.env = {
     // An arch with no pinned sqlite-vec build: a fake world never plans the real GitHub download (vec0-install.test.ts covers that step).
-    homeDir: home, dataDir: world.dataDir, platform: options.platform ?? 'darwin', arch: 'test-arch', bunPath: BUN, projectRoot: world.projectRoot, cwd, uid: UID,
+    homeDir: home, dataDir: world.dataDir, platform: options.platform ?? 'darwin', arch: 'test-arch', projectRoot: world.projectRoot, cwd, uid: UID,
+    mode: { kind: 'checkout', bunPath: BUN, projectRoot: world.projectRoot },
     pathEnv: '/opt/fake/bin:relative/bin:/usr/bin', run: fakeRun(world, options), security: fakeSecurity({ refs: world.keychain, values: world.keychainValues }, { refs: world.legacyKeychain, values: world.legacyKeychainValues }, world.securityCalls),
     now: () => (clock += 100), sleep: async () => {}, fetch: guardedFetch(world.allowedPorts, world.fetches), out: (line) => world.out.push(line),
     io: {

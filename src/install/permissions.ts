@@ -54,6 +54,15 @@ export function applyModeChange(dataDir: string, change: ModeChange): void {
   chmodSync(join(dataDir, change.path), change.to)
 }
 
+/**
+ * The installed program's folder, which must keep its execute bit. `relative`
+ * returns backslashes on Windows, so compare the first segment rather than a
+ * `bin/` prefix.
+ */
+export function isInBinFolder(relativePath: string): boolean {
+  return relativePath.split(/[\\/]/, 1)[0] === 'bin'
+}
+
 export function formatMode(mode: number): string {
   return `0${mode.toString(8).padStart(3, '0')}`
 }

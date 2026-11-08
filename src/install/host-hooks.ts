@@ -1,10 +1,12 @@
 // Our entries in Codex's ~/.codex/hooks.json and Cursor's ~/.cursor/hooks.json,
 // as pure functions over the parsed file, following claude-hooks.ts. Both
-// hosts take a shell command string, so our command is
-// `'<bun>' '<checkout>/src/cli/hook.ts' --host <id>`, and ours are found by
-// that hook.ts path plus the --host id, never by position: a re-run is a
-// no-op, a moved checkout replaces the old path, and every other key, event
-// and entry stays as it was. Shapes, from each host's docs (2026-10-25):
+// hosts take one shell command string, so our entry is rendered from the
+// command entry.ts builds: the checkout's bun on src/cli/hook.ts with
+// `--host <id>`, or the installed program with --data-dir before `hook` and
+// the host. Ours are found by what the command runs, never by position: a
+// re-run is a no-op, a moved checkout or a switch between the two forms
+// replaces the old entry, and every other key, event and entry stays as it
+// was. Shapes, from each host's docs (2026-10-25):
 //   Codex:  { hooks: { Event: [ { matcher?, hooks: [ { type, command, timeout, async? } ] } ] } }
 //   Cursor: { version: 1, hooks: { event: [ { command, timeout, matcher? } ] } }
 // Codex has no wildcard matcher documented, so our groups carry none, which
@@ -12,6 +14,7 @@
 
 import { isRecord } from '../contract/event'
 import type { HookTarget, Settings, WiringState } from './claude-hooks'
+import { entryPath, entryRole, parseEntry, type EntryCommand } from './entry'
 
 export type CommandHookHost = 'codex' | 'cursor'
 
@@ -61,20 +64,38 @@ export interface HostHooksMerge {
 }
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`
-const QUOTED = /'((?:[^']|'\\'')*\/src\/cli\/hook\.ts)'\s+--host\s+([a-z][a-z0-9-]*)(?:\s|$)/
-const BARE = /(?:^|\s)(\/\S*\/src\/cli\/hook\.ts)\s+--host\s+([a-z][a-z0-9-]*)(?:\s|$)/
 
-export function samCommand(target: HookTarget, host: CommandHookHost): string {
-  return `${shellQuote(target.bunPath)} ${shellQuote(target.hookScript)} --host ${host}`
+const BARE_WORDS: ReadonlySet<string> = new Set(['hook', 'mcp', 'daemon'])
+
+/** One entry as the shell string these hosts read; flags, the host id and the subcommand stay bare. */
+function renderCommand(entry: EntryCommand): string {
+  const words = [entry.command, ...entry.args]
+  const parts: string[] = []
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index] ?? ''
+    if (word === '--host') {
+      parts.push(word, words[index + 1] ?? '')
+      index += 1
+      continue
+    }
+    parts.push(word.startsWith('--') || BARE_WORDS.has(word) ? word : shellQuote(word))
+  }
+  return parts.join(' ')
 }
 
-/** The hook.ts path an entry of ours runs for `host`, or null when the entry is not ours. */
+export function samCommand(target: HookTarget, host: CommandHookHost): string {
+  const entry = target.entry ?? { command: target.bunPath ?? '', args: [target.hookScript ?? '', '--host', host] }
+  return renderCommand(entry)
+}
+
+/** The hook.ts path or program path an entry of ours runs for `host`, or null when the entry is not ours. */
 export function samCommandScript(entry: unknown, host: CommandHookHost): string | null {
   if (!isRecord(entry) || typeof entry.command !== 'string') return null
-  const quoted = QUOTED.exec(entry.command)
-  if (quoted !== null) return quoted[2] === host ? (quoted[1] ?? '').replace(/'\\''/g, "'") : null
-  const bare = BARE.exec(entry.command)
-  return bare !== null && bare[2] === host ? (bare[1] ?? null) : null
+  const args = Array.isArray(entry.args) ? entry.args.filter((arg): arg is string => typeof arg === 'string') : []
+  if (entryRole(entry.command, args) !== 'hook') return null
+  const parsed = parseEntry(entry.command, args)
+  const at = parsed?.args.indexOf('--host') ?? -1
+  return at !== -1 && parsed?.args[at + 1] === host ? entryPath(entry.command, args) : null
 }
 
 export function samItem(spec: CommandHookSpec, event: string, target: HookTarget): Record<string, unknown> {
