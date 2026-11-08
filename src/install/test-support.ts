@@ -7,6 +7,7 @@
 // its HMAC master from those values, never from a real Keychain.
 // Tests only; nothing in the installer imports it.
 
+import type { TerminalIO } from './prompt/terminal'
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -47,6 +48,8 @@ export interface WorldOptions {
   secrets?: string[]
   stdin?: string
   interactive?: boolean
+  /** A scripted terminal for wizard tests; default null (no terminal). */
+  terminal?: TerminalIO | null
   keychainRefs?: string[]
   /** Refs held under the pre-rename service shared-agent-memory. */
   legacyKeychainRefs?: string[]
@@ -260,6 +263,7 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
       askSecret: async () => secrets.shift() ?? '',
       readStdin: async () => options.stdin ?? '',
     },
+    terminal: options.terminal ?? null,
     runnerFor: (settings) => (world.checks.push(settings), (options.runner ?? (() => okRunner))(settings)),
     cliRunnerFor: (settings) => (world.checks.push(settings), (options.cliRunner ?? (() => okCliRunner))(settings)),
     applicationsDirs: [join(root, 'Applications')],

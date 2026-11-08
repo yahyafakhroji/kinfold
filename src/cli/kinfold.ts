@@ -211,12 +211,13 @@ function dataDirForCommand(command: string | undefined, configured: string | nul
 }
 
 async function systemEnv(args: readonly string[], configuredDataDir: string | null): Promise<InstallEnv> {
-  const [{ createCliRunner, createRunner }, { NO_CREDENTIALS }, { createSecurityRunner }, { createCommandRunner, createPromptIO }, { installedProgramPath, isCompiledProgram }] = await Promise.all([
+  const [{ createCliRunner, createRunner }, { NO_CREDENTIALS }, { createSecurityRunner }, { createCommandRunner, createPromptIO }, { installedProgramPath, isCompiledProgram }, { nodeTerminal }] = await Promise.all([
     import('../observer/runners'),
     import('../secrets/credentials'),
     import('../secrets/keychain-writer'),
     import('../install/system'),
     import('../install/entry'),
+    import('../install/prompt/terminal'),
   ])
   const homeDir = homedir()
   const dataDir = dataDirForCommand(args[0], configuredDataDir, process.env, homeDir)
@@ -245,6 +246,7 @@ async function systemEnv(args: readonly string[], configuredDataDir: string | nu
     sleep: (ms) => Bun.sleep(ms),
     fetch: (url, init) => fetch(url, init),
     io: createPromptIO(),
+    terminal: nodeTerminal(),
     out: (line) => process.stdout.write(`${line}\n`),
     runnerFor: (settings, credentials) => createRunner(settings, { dataDir, credentials, parentEnv: process.env }),
     cliRunnerFor: (settings) => createCliRunner(settings, { dataDir, credentials: NO_CREDENTIALS, parentEnv: process.env }),

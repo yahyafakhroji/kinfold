@@ -10,6 +10,7 @@ import { HOST_VERSIONS_FILE } from '../adapters/host-version'
 import { LAUNCH_AGENT_LABEL, LEGACY_DATA_DIR_NAME, LEGACY_LAUNCH_AGENT_LABEL, LEGACY_PLUGIN_FILE_NAME, PLUGIN_FILE_NAME } from '../names'
 import { resolveCodexHome } from './codex-home'
 import type { InstallMode } from './entry'
+import type { TerminalIO } from './prompt/terminal'
 import type { CredentialProvider } from '../secrets/credentials'
 import type { SecurityRunner } from '../secrets/keychain-writer'
 import type { ServiceControl } from './service/control'
@@ -67,6 +68,8 @@ export interface InstallEnv {
   sleep: (ms: number) => Promise<void>
   fetch: HttpFetch
   io: PromptIO
+  /** Raw-key terminal for the setup wizard; null unless stdin and stdout are both TTYs. */
+  terminal: TerminalIO | null
   out: (line: string) => void
   runnerFor: RunnerBuilder
   /** The only way the installer builds a codex-cli or opencode-cli runner (createCliRunner). */

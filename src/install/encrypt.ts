@@ -24,12 +24,13 @@ import { type CredentialWriter, credentialWriterFor } from '../secrets/keychain-
 import { ConvertError, checkedCounts, convertStore, foundBackupPath, restoreBackup, sameCounts } from '../sqlite/convert'
 import { type DbKeyStore, credentialDbKeyStore, newDbKey } from '../sqlite/keys'
 import { fileState, maintenancePath, openEncrypted } from '../sqlite/open'
-import { RECOVERY_GROUP, RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../sqlite/recovery'
+import { RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../sqlite/recovery'
 import { DATA_FILE_MODE, DB_FILE } from '../store/data-dir'
 import { waitForHealth, waitForStart } from './daemon-client'
 import { type InstallEnv, errorMessage } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
 import { HEALTH_WAIT_MS } from './plan'
+import { confirmRecoveryCode } from './recovery-confirm'
 import { serviceOf } from './service/control'
 
 export const KEY_COMMANDS = ['encrypt', 'decrypt', 'rekey', 'show-recovery', 'recover', 'resume'] as const
@@ -84,20 +85,8 @@ function keyAt(ctx: Context, ref: string | null): string | null {
   return key
 }
 
-const normalize = (text: string): string => text.toUpperCase().replace(/[\s-]/g, '').replace(/[IL]/g, '1').replace(/O/g, '0')
-
 /** Prints the code and waits for its last two groups; false when the person typed something else. */
-async function confirmCode(ctx: Context, code: string): Promise<boolean> {
-  ctx.log('')
-  ctx.log('Recovery code for memory.db. Write it down or put it in a password manager, away from this machine:')
-  ctx.log('')
-  ctx.log(`    ${code}`)
-  ctx.log('')
-  ctx.log('Without the key or this code, the memory cannot be read again. Anyone with the code can read it.')
-  const tail = code.split('-').slice(-2).join('')
-  const typed = await ctx.env.io.ask(`Type the last two groups (${'*'.repeat(RECOVERY_GROUP)}-${'*'.repeat(RECOVERY_GROUP)}) to confirm you saved it: `)
-  return normalize(typed) === tail
-}
+const confirmCode = (ctx: Context, code: string): Promise<boolean> => confirmRecoveryCode((question) => ctx.env.io.ask(question), ctx.log, code)
 
 interface Daemon {
   restart: boolean
