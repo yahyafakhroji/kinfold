@@ -27,15 +27,14 @@ import { fileState, maintenancePath, openEncrypted } from '../sqlite/open'
 import { RECOVERY_GROUP, RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../sqlite/recovery'
 import { DATA_FILE_MODE, DB_FILE } from '../store/data-dir'
 import { waitForHealth } from './daemon-client'
-import { type InstallEnv, errorMessage, installPaths } from './env'
+import { type InstallEnv, errorMessage } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
-import { bootoutArgv, bootstrapArgv, isAgentLoaded } from './launch-agent'
 import { HEALTH_WAIT_MS } from './plan'
+import { serviceOf } from './service/control'
 
 export const KEY_COMMANDS = ['encrypt', 'decrypt', 'rekey', 'show-recovery', 'recover', 'resume'] as const
 export type KeyCommand = (typeof KEY_COMMANDS)[number]
 
-export const LSOF = '/usr/sbin/lsof'
 /** MCP servers close an idle reader after READER_TTL_MS (30 s); the marker stops them reopening, so a few seconds past that the file is free. */
 export const LOCK_ATTEMPTS = 36
 export const LOCK_RETRY_MS = 1_000
@@ -105,19 +104,25 @@ interface Daemon {
 }
 
 async function startDaemon(ctx: Context, daemon: Daemon): Promise<void> {
-  if (!daemon.restart) {
-    ctx.log('daemon: it was not running from the LaunchAgent; start it when you are ready')
+  const service = serviceOf(ctx.env)
+  if (!daemon.restart || service === null) {
+    ctx.log('daemon: it was not running as a service; start it when you are ready')
     return
   }
-  await ctx.env.run({ argv: bootstrapArgv(ctx.env) })
+  try {
+    await service.start()
+  } catch (error: unknown) {
+    ctx.log(`warning: the ${service.label} did not start (${errorMessage(error)})`)
+  }
   ctx.log((await waitForHealth(ctx.env, true, HEALTH_WAIT_MS)) ? 'daemon: started again' : 'warning: the daemon did not answer /health after the restart; see its log')
 }
 
 async function stopDaemon(ctx: Context): Promise<Daemon> {
-  const loaded = await isAgentLoaded(ctx.env)
+  const service = serviceOf(ctx.env)
+  const loaded = service !== null && (await service.isRunning())
   if (loaded) {
-    await ctx.env.run({ argv: bootoutArgv(ctx.env.uid) })
-    ctx.log('daemon: stopped the LaunchAgent')
+    await service.stop()
+    ctx.log(`daemon: stopped the ${service.label}`)
   }
   if (!(await waitForHealth(ctx.env, false, HEALTH_WAIT_MS))) {
     if (loaded) await startDaemon(ctx, { restart: true })
@@ -128,11 +133,7 @@ async function stopDaemon(ctx: Context): Promise<Daemon> {
 
 /** Who still holds memory.db, for the "another process" refusal: pids and command names only. */
 async function holders(ctx: Context): Promise<string> {
-  const listed = await ctx.env.run({ argv: [LSOF, '-t', ctx.path], timeoutMs: 5_000 })
-  const pids = listed.stdout.split('\n').map((line) => line.trim()).filter((line) => /^\d+$/.test(line) && Number(line) !== process.pid)
-  if (pids.length === 0) return ''
-  const names = await ctx.env.run({ argv: ['/bin/ps', '-o', 'pid=,comm=', '-p', pids.join(',')], timeoutMs: 5_000 })
-  return names.stdout.trim().split('\n').map((line) => line.trim()).filter((line) => line !== '').join('; ')
+  return (await serviceOf(ctx.env)?.fileHolders(ctx.path)) ?? ''
 }
 
 /** Retries while another process holds the file: agent sessions let go of an idle reader within 30 s and cannot reopen past the marker. */
@@ -388,7 +389,8 @@ async function resume(ctx: Context): Promise<void> {
     throw new Refusal('memory.db opens with neither key; nothing was deleted. Run kinfold key recover with your recovery code')
   }
   rmSync(marker, { force: true })
-  if (!(await isAgentLoaded(ctx.env)) && existsSync(installPaths(ctx.env).launchAgentPlist)) await startDaemon(ctx, { restart: true })
+  const service = serviceOf(ctx.env)
+  if (service !== null && service.isConfigured() && !(await service.isRunning())) await startDaemon(ctx, { restart: true })
 }
 
 const RUN: Record<KeyCommand, (ctx: Context) => Promise<void>> = {

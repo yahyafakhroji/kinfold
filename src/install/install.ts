@@ -28,7 +28,8 @@ import { hmacMigrationActions } from './hmac-migration'
 import { hostHookInstallActions, hostVersionActions, opencodeInstallActions } from './host-wiring'
 import { claudeMcpInstallActions, claudeMcpState, opencodeMcpInstallActions } from './mcp-wiring'
 import { scanDataDirModes } from './permissions'
-import { type Action, HEALTH_WAIT_MS, runPlan, startAgent, stopCommand } from './plan'
+import { serviceOf } from './service/control'
+import { type Action, HEALTH_WAIT_MS, runPlan, stopCommand } from './plan'
 import { type ProgramCheck, checkProgram, programInstallActions } from './self-install'
 import { legacyClaudeMcpRemoval, legacyShimRemoval, migrationFailureNote, renameMigrationActions } from './rename-migration'
 import { sqlite3mcInstallActions } from './sqlite3mc-install'
@@ -355,9 +356,10 @@ async function migrate(env: InstallEnv, prepared: Prepared, options: InstallOpti
 async function restartService(env: InstallEnv): Promise<void> {
   let started = false
   let startError: unknown = null
+  const service = serviceOf(env)
   try {
-    if (!(await isAgentLoaded(env))) {
-      await startAgent(env)
+    if (service !== null && !(await service.isRunning())) {
+      await service.start()
       started = true
     }
   } catch (error: unknown) {

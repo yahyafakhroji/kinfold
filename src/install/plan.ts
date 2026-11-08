@@ -142,7 +142,7 @@ const BOOTSTRAP_BUSY_EXIT = 5
 export const BOOTSTRAP_ATTEMPTS = 10
 export const BOOTSTRAP_RETRY_MS = 300
 
-async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Promise<void> {
+export async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Promise<void> {
   const attempts = argv[1] === 'bootstrap' ? BOOTSTRAP_ATTEMPTS : 1
   let exitCode = 0
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -173,11 +173,6 @@ async function replaceClaudeMcp(env: InstallEnv, previous: Record<string, unknow
   if (await step(claudeAddArgv(next))) return
   if (await step(claudeAddArgv(previous))) throw new Error('the Claude Code MCP entry could not be replaced; the previous entry was put back')
   throw new Error(`the Claude Code MCP entry could not be replaced and the previous one could not be put back; add it again with: ${claudeAddArgv(previous).join(' ')}`)
-}
-
-/** Starts the LaunchAgent with the same retry as the plan step, for a failed step that left it stopped. */
-export async function startAgent(env: InstallEnv): Promise<void> {
-  await runLaunchctl(env, bootstrapArgv(env))
 }
 
 async function waitFor(env: InstallEnv, wantUp: boolean, timeoutMs: number, failure: string): Promise<void> {

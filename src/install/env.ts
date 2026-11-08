@@ -12,6 +12,7 @@ import { resolveCodexHome } from './codex-home'
 import type { InstallMode } from './entry'
 import type { CredentialProvider } from '../secrets/credentials'
 import type { SecurityRunner } from '../secrets/keychain-writer'
+import type { ServiceControl } from './service/control'
 import type { BuildInput } from '../sqlite/build'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
 import type { ObserverRunner, ObserverSettings } from '../observer/types'
@@ -80,6 +81,8 @@ export interface InstallEnv {
   renameDir?: (from: string, to: string) => void
   /** Where Codex.app and Cursor.app are looked for; default /Applications and ~/Applications. */
   applicationsDirs?: readonly string[]
+  /** The background service; default serviceFor(env). null: this platform has none. Tests inject a fake. */
+  service?: ServiceControl | null
   /** The installer's own environment variables, for the SAM_* deprecation checks; default none. Never printed. */
   envVars?: Readonly<Record<string, string | undefined>>
 }

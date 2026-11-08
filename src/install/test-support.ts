@@ -25,6 +25,7 @@ import type { CliObserverRunner } from '../observer/runners/cli-core'
 import type { ObserverRunner, ObserverSettings } from '../observer/types'
 import type { CommandRequest, CommandResult, InstallEnv } from './env'
 import { LAUNCHCTL } from './launch-agent'
+import type { ServiceControl } from './service/control'
 
 export interface WorldOptions {
   claudeVersion?: string | null
@@ -292,3 +293,29 @@ export function snapshotTree(dir: string): Record<string, TreeEntry> {
 }
 
 export const YES = { yes: true, dryRun: false, skipCheck: false, replaceCredential: false, credentialStdin: false, flags: [], hosts: null, takeover: false } as const
+
+export interface FakeService extends ServiceControl {
+  /** Every method called, in order. */
+  calls: string[]
+}
+
+/** A ServiceControl that records calls and touches nothing; each answer can be set. */
+export function fakeService(options: { running?: boolean; configured?: boolean; startError?: Error; holders?: string } = {}): FakeService {
+  const calls: string[] = []
+  let running = options.running ?? true
+  return {
+    label: 'FakeService',
+    calls,
+    isConfigured: () => (calls.push('isConfigured'), options.configured ?? true),
+    isRunning: async () => (calls.push('isRunning'), running),
+    start: async () => {
+      calls.push('start')
+      if (options.startError !== undefined) throw options.startError
+      running = true
+    },
+    stop: async () => (calls.push('stop'), void (running = false)),
+    configuredDataDir: () => null,
+    configuredPort: () => null,
+    fileHolders: async () => (calls.push('fileHolders'), options.holders ?? ''),
+  }
+}

@@ -10,7 +10,7 @@ import { installedProgramPath } from './entry'
 import { EXIT_OK, install } from './install'
 import { LAUNCHCTL } from './launch-agent'
 import { parseSha256Sums, releaseAssetName, releaseSumsUrl, verifyProgram } from './self-install'
-import { type FakeWorld, YES, createWorld, snapshotTree, startWorldDaemon } from './test-support'
+import { type FakeWorld, YES, createWorld, fakeService, snapshotTree, startWorldDaemon } from './test-support'
 import { uninstall } from './uninstall'
 
 const HEX = 'a'.repeat(64)
@@ -286,6 +286,23 @@ test('a failed copy starts the daemon again from the program still in place', as
   expect(w.launchd.loaded).toBe(true)
   expect((await checkHealth(w.env, readDaemonInfo(w.dataDir).port)).up).toBe(true)
   expect(w.out.join('\n')).toContain('the daemon was started again from the program in place')
+})
+
+test('a failed start after the plan stopped the service is reported and the step error stands', async () => {
+  const { w, source } = programWorld()
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  writeFileSync(source, 'kinfold program v2\n')
+  w.out.length = 0
+  const out = w.env.out
+  w.env.out = (line) => {
+    out(line)
+    if (line.startsWith('applying ')) rmSync(source)
+  }
+  w.env.service = fakeService({ running: false, startError: new Error('boom') })
+  expect(await install(w.env, installOptions(source))).toBe(1)
+  const lines = w.out.join('\n')
+  expect(lines).toContain('the daemon did not answer /health after restarting (boom)')
+  expect(lines).toContain('install failed:')
 })
 
 test('a failed rename removes the temp file it copied', async () => {
