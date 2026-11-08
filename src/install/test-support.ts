@@ -36,6 +36,8 @@ export interface WorldOptions {
   versionResults?: Record<string, (CommandResult & { timedOut?: boolean }) | 'throw'>
   /** Builds the CLI login runner for codex-cli and opencode-cli inputs; default answers OK, passes the planted test and lists no models. */
   cliRunner?: (settings: ObserverSettings) => CliObserverRunner
+  /** Answers a command before the built-in fakes do; return undefined to fall through. */
+  commandOverride?: (argv: readonly string[]) => CommandResult | undefined
   /** What `/usr/bin/which <binary>` prints; anything else is not found. */
   whichPaths?: Record<string, string>
   platform?: NodeJS.Platform
@@ -178,6 +180,8 @@ function fakeRun(world: FakeWorld, options: WorldOptions): (request: CommandRequ
   return async (request) => {
     world.commands.push(request)
     const [binary] = request.argv
+    const overridden = options.commandOverride?.(request.argv)
+    if (overridden !== undefined) return overridden
     if (binary === LAUNCHCTL) return launchctl(world, request.argv)
     if (binary === '/usr/bin/which') {
       const path = options.whichPaths?.[request.argv[1] ?? '']

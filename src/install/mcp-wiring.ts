@@ -6,6 +6,7 @@
 // into it with a backup, as claude-hooks.ts does for settings.json.
 
 import { join } from 'node:path'
+import { isRecord } from '../contract/event'
 import type { InstallEnv } from './env'
 import { entryCommand, entryPath } from './entry'
 import { plannedBackup, readJsonObject, serializeJson } from './files'
@@ -34,15 +35,30 @@ export function mcpTarget(env: Pick<InstallEnv, 'mode' | 'dataDir'>): McpTarget 
   return { bunPath: env.mode.kind === 'checkout' ? env.mode.bunPath : entry.command, serverScript: script, entry }
 }
 
+export const claudeAddArgv = (entry: Record<string, unknown>): string[] => ['claude', 'mcp', 'add-json', '--scope', 'user', MCP_SERVER_NAME, JSON.stringify(entry)]
+export const CLAUDE_MCP_REMOVE_ARGV: readonly string[] = ['claude', 'mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME]
+
 const claudeAdd = (target: McpTarget): Action => ({
   kind: 'command',
-  argv: ['claude', 'mcp', 'add-json', '--scope', 'user', MCP_SERVER_NAME, JSON.stringify(claudeMcpEntry(target))],
+  argv: claudeAddArgv(claudeMcpEntry(target)),
   summary: 'register the Kinfold MCP server with Claude Code (user scope)',
 })
 
+/** Our own entry as ~/.claude.json holds it now, or null when it cannot be read back. */
+function previousClaudeEntry(path: string): Record<string, unknown> | null {
+  try {
+    const file = readJsonObject(path)
+    const section = file.exists ? file.value.mcpServers : undefined
+    const entry = isRecord(section) ? section[MCP_SERVER_NAME] : undefined
+    return isRecord(entry) ? entry : null
+  } catch {
+    return null
+  }
+}
+
 const claudeRemove: Action = {
   kind: 'command',
-  argv: ['claude', 'mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME],
+  argv: CLAUDE_MCP_REMOVE_ARGV,
   summary: 'unregister the Kinfold MCP server from Claude Code',
 }
 
@@ -76,7 +92,14 @@ export function claudeMcpInstallActions(env: InstallEnv): Action[] {
     env.out(`claude-code: MCP server not registered (${why}); left alone`)
     return []
   }
-  return state === 'stale' ? [claudeRemove, claudeAdd(mcpTarget(env))] : [claudeAdd(mcpTarget(env))]
+  if (state !== 'stale') return [claudeAdd(mcpTarget(env))]
+  // The CLI has no overwrite for an existing name, so the swap is one step that puts the old entry back if the add fails.
+  const previous = previousClaudeEntry(where)
+  if (previous === null) {
+    env.out(`claude-code: MCP server entry in ${where} could not be read back; left alone`)
+    return []
+  }
+  return [{ kind: 'claude-mcp-replace', previous, next: claudeMcpEntry(mcpTarget(env)) }]
 }
 
 /**

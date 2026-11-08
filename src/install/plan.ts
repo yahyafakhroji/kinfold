@@ -18,6 +18,7 @@ import { BACKUP_REMOVAL_SUMMARY, removeHmacBackup, removeRedundantBackup, restor
 import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
 import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbeddedSqlite3mc, installSqlite3mc } from './sqlite3mc-install'
 import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from './vec0-install'
+import { CLAUDE_MCP_REMOVE_ARGV, claudeAddArgv } from './mcp-wiring'
 import { installProgram } from './self-install'
 import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describeMoveDataDir, describeRemoveLegacyEntry, moveDataDir, removeLegacyEntry, stopLegacyAgent } from './rename-migration'
 import { legacyBootoutArgv, bootstrapArgv } from './launch-agent'
@@ -37,6 +38,8 @@ export type Action =
   | { kind: 'launchctl'; argv: readonly string[] }
   /** A host CLI call such as `claude mcp add-json`; argv holds no secret, so it prints whole. */
   | { kind: 'command'; argv: readonly string[]; summary: string }
+  /** Swaps our Claude Code MCP entry: remove, add the new one, and put `previous` back if the add fails. Neither entry holds a secret. */
+  | { kind: 'claude-mcp-replace'; previous: Record<string, unknown>; next: Record<string, unknown> }
   | { kind: 'wait-takeover'; pid: number | null; port: number }
   | { kind: 'wait-health' }
   | { kind: 'settings-put'; input: ObserverSettingsInput }
@@ -94,6 +97,7 @@ export function describeAction(action: Action): string {
     case 'remove': return `remove ${action.path}${action.recursive === true ? '/' : ''}: ${action.summary}`
     case 'launchctl': return action.argv.join(' ')
     case 'command': return `${action.summary}: ${action.argv.join(' ')}`
+    case 'claude-mcp-replace': return `replace the Kinfold MCP server entry in Claude Code (user scope), putting the old one back if the new one fails: ${CLAUDE_MCP_REMOVE_ARGV.join(' ')}, then ${claudeAddArgv(action.next).join(' ')}`
     case 'wait-takeover': return `wait up to ${TAKEOVER_WAIT_MS / 1000} s for the running daemon on port ${action.port} to stop (you stop it: ${stopCommand(action.pid, action.port)})`
     case 'wait-health': return `wait up to ${HEALTH_WAIT_MS / 1000} s for GET /health`
     case 'settings-put': {
@@ -149,6 +153,20 @@ async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Promise<v
   if (exitCode !== 0) throw new Error(`${argv.slice(0, 2).join(' ')} failed (exit ${exitCode})`)
 }
 
+async function replaceClaudeMcp(env: InstallEnv, previous: Record<string, unknown>, next: Record<string, unknown>): Promise<void> {
+  const step = async (argv: readonly string[]): Promise<boolean> => {
+    try {
+      return (await env.run({ argv, timeoutMs: 15_000 })).exitCode === 0
+    } catch {
+      return false
+    }
+  }
+  if (!(await step(CLAUDE_MCP_REMOVE_ARGV))) throw new Error('claude mcp remove failed; the previous entry was left in place')
+  if (await step(claudeAddArgv(next))) return
+  if (await step(claudeAddArgv(previous))) throw new Error('the Claude Code MCP entry could not be replaced; the previous entry was put back')
+  throw new Error(`the Claude Code MCP entry could not be replaced and the previous one could not be put back; add it again with: ${claudeAddArgv(previous).join(' ')}`)
+}
+
 /** Starts the LaunchAgent with the same retry as the plan step, for a failed step that left it stopped. */
 export async function startAgent(env: InstallEnv): Promise<void> {
   await runLaunchctl(env, bootstrapArgv(env))
@@ -173,6 +191,7 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'remove': return rmSync(action.path, { force: true, recursive: action.recursive === true })
     case 'launchctl': return runLaunchctl(env, action.argv)
     case 'command': return runLaunchctl(env, action.argv)
+    case 'claude-mcp-replace': return replaceClaudeMcp(env, action.previous, action.next)
     case 'wait-takeover':
       env.out(`waiting for you to stop the running daemon: ${stopCommand(action.pid, action.port)}`)
       return waitFor(env, false, TAKEOVER_WAIT_MS, `the daemon on port ${action.port} is still running; nothing after this step ran`)
