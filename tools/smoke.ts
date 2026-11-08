@@ -1,7 +1,9 @@
 // Runs the built program through install, a hook, MCP search, encryption and
-// uninstall against a temporary HOME. It is the macOS smoke job's body: each
-// step prints as it passes, the first mismatch stops the run, and a finally
-// block always tries to uninstall and remove the temporary home.
+// uninstall against the home CI gives it. It is the macOS smoke job's body:
+// each step prints as it passes, the first mismatch stops the run, and a
+// finally block always tries to uninstall and remove the temporary folder.
+// A real home is refused unless GitHub Actions is running, so a local run
+// cannot install into a developer's home.
 //
 // The job installs the agent CLIs, but nothing can log in there, so the
 // observer stands in for a logged-in one: a small `claude` wrapper in front of
@@ -10,9 +12,9 @@
 //
 // Usage: bun tools/smoke.ts <program path>
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join, resolve } from 'node:path'
+import { delimiter, join, resolve, sep } from 'node:path'
 
 const DEFAULT_PORT = 37_811
 const LAUNCH_AGENT_LABEL = 'dev.kinfold.daemon'
@@ -25,6 +27,27 @@ export class SmokeError extends Error {
   override name = 'SmokeError'
   constructor(readonly step: string, message: string) {
     super(message)
+  }
+}
+
+/** A real home is only safe on an ephemeral CI runner. */
+export function homeForSmoke(env: NodeJS.ProcessEnv = process.env): string {
+  const home = env.HOME ?? ''
+  if (home === '') throw new SmokeError('setup', 'HOME is not set; the smoke needs a home to install into')
+  if (isTemporaryPath(home)) return home
+  if (env.GITHUB_ACTIONS !== 'true') {
+    throw new SmokeError('setup', `${home} is a real home; the smoke only runs there on GitHub Actions (set GITHUB_ACTIONS=true)`)
+  }
+  return home
+}
+
+function isTemporaryPath(path: string): boolean {
+  try {
+    const real = realpathSync(path)
+    const temp = realpathSync(tmpdir())
+    return real === temp || real.startsWith(`${temp}${sep}`)
+  } catch {
+    return false
   }
 }
 
@@ -122,7 +145,7 @@ function expectContains(step: string, text: string, needle: string | RegExp): vo
 }
 
 /** The job must not meet another daemon on the fixed port; silently moving ports would test a different program. */
-function ensurePortFree(port: number): void {
+export function ensurePortFree(port: number): void {
   let server: { stop(force?: boolean): void } | null = null
   try {
     server = Bun.listen({ hostname: '127.0.0.1', port, socket: { data() {} } })
@@ -320,45 +343,6 @@ const DECRYPT_EXPECT = [
   '',
 ].join('\n')
 
-/**
- * The workflow creates the throwaway keychain under the runner's home, but
- * every kinfold command runs with HOME set to the smoke's temporary home.
- * security reads the default keychain and the search list from that home, so
- * the throwaway has to be made the default there too, or writes fall back to
- * the locked login keychain.
- */
-function adoptKeychain(world: World): void {
-  const keychain = process.env.KINFOLD_SMOKE_KEYCHAIN
-  if (keychain === undefined || keychain === '') return
-  const password = process.env.KINFOLD_SMOKE_KEYCHAIN_PASSWORD
-  const commands: string[][] = []
-  if (password !== undefined && password !== '') commands.push(['unlock-keychain', '-p', password, keychain])
-  commands.push(['default-keychain', '-s', keychain], ['list-keychains', '-d', 'user', '-s', keychain])
-  for (const args of commands) {
-    const result = Bun.spawnSync(['/usr/bin/security', ...args], { env: world.env, stdout: 'ignore', stderr: 'ignore' })
-    if (result.exitCode !== 0) throw new SmokeError('setup', `security ${args[0]} failed with exit ${result.exitCode}`)
-  }
-  // The installer's security child gets only PATH and HOME, so prove the same
-  // child can write to this keychain before the install plans change anything.
-  const securityEnv = { PATH: '/usr/bin:/bin', HOME: world.home }
-  const probe = Bun.spawnSync(['/usr/bin/security', '-i'], {
-    env: securityEnv,
-    stdin: Buffer.from(`add-generic-password -U -s kinfold-smoke -a probe -w probe\n`),
-    stdout: 'ignore',
-    stderr: 'ignore',
-    timeout: 5_000,
-  })
-  if (probe.exitCode !== 0) {
-    throw new SmokeError('setup', `the throwaway keychain cannot be written with the installer's security environment (exit ${probe.exitCode ?? -1})`)
-  }
-  Bun.spawnSync(['/usr/bin/security', 'delete-generic-password', '-s', 'kinfold-smoke', '-a', 'probe'], {
-    env: securityEnv,
-    stdout: 'ignore',
-    stderr: 'ignore',
-    timeout: 5_000,
-  })
-}
-
 function launchAgentLoaded(world: World): boolean {
   const uid = process.getuid?.() ?? -1
   if (uid < 0) return true
@@ -444,7 +428,7 @@ async function cleanup(world: World, installStarted: boolean, uninstalled: boole
   try {
     rmSync(world.root, { recursive: true, force: true })
   } catch (error: unknown) {
-    problems.push(`the temporary home could not be removed (${error instanceof Error ? error.message : String(error)})`)
+    problems.push(`the temporary folder could not be removed (${error instanceof Error ? error.message : String(error)})`)
   }
   return { problems }
 }
@@ -452,11 +436,10 @@ async function cleanup(world: World, installStarted: boolean, uninstalled: boole
 async function smoke(programPath: string): Promise<void> {
   const program = resolve(programPath)
   if (!existsSync(program)) throw new SmokeError('setup', `${program} does not exist`)
+  const home = homeForSmoke()
   const root = mkdtempSync(join(tmpdir(), 'kinfold-smoke-'))
-  const home = join(root, 'home')
   const project = join(root, 'project')
   const fakeBin = join(root, 'bin')
-  mkdirSync(home, { recursive: true, mode: 0o700 })
   mkdirSync(project, { recursive: true, mode: 0o700 })
   const world: World = {
     program,
@@ -485,7 +468,6 @@ async function smoke(programPath: string): Promise<void> {
     ensurePortFree(DEFAULT_PORT)
     if (launchAgentLoaded(world)) throw new SmokeError('setup', `${LAUNCH_AGENT_LABEL} is already loaded; the smoke will not take over an existing install`)
     writeObserverShim(world, Bun.which('claude', { PATH: process.env.PATH ?? '' }))
-    adoptKeychain(world)
 
     installStarted = true
     await steps(world)

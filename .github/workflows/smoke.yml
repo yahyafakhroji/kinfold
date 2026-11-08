@@ -73,12 +73,12 @@ jobs:
         run: |
           keychain="$RUNNER_TEMP/kinfold-smoke.keychain-db"
           original="$(security default-keychain -d user | tr -d '"' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          security list-keychains -d user | tr -d '"' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' > "$RUNNER_TEMP/kinfold-original-keychains.txt"
           password="$(openssl rand -hex 24)"
           echo "::add-mask::$password"
           {
             echo "KINFOLD_SMOKE_KEYCHAIN=$keychain"
             echo "KINFOLD_SMOKE_ORIGINAL_KEYCHAIN=$original"
-            echo "KINFOLD_SMOKE_KEYCHAIN_PASSWORD=$password"
           } >> "$GITHUB_ENV"
           security create-keychain -p "$password" "$keychain"
           security set-keychain-settings -lut 21600 "$keychain"
@@ -96,13 +96,23 @@ jobs:
           test -f dist/SHA256SUMS
           KINFOLD_RELEASE_SUMS_URL="file://$PWD/dist/SHA256SUMS" bun tools/smoke.ts "$program"
 
-      - name: Delete the throwaway keychain
+      - name: Restore the original keychain
         if: always()
         shell: bash
         run: |
           if [ -n "${KINFOLD_SMOKE_ORIGINAL_KEYCHAIN:-}" ]; then
             security default-keychain -s "$KINFOLD_SMOKE_ORIGINAL_KEYCHAIN" || true
-            security list-keychains -d user -s "$KINFOLD_SMOKE_ORIGINAL_KEYCHAIN" || true
+          fi
+          if [ -f "$RUNNER_TEMP/kinfold-original-keychains.txt" ]; then
+            set --
+            while IFS= read -r keychain; do
+              if [ -n "$keychain" ]; then
+                set -- "$@" "$keychain"
+              fi
+            done < "$RUNNER_TEMP/kinfold-original-keychains.txt"
+            if [ "$#" -gt 0 ]; then
+              security list-keychains -d user -s "$@" || true
+            fi
           fi
           if [ -n "${KINFOLD_SMOKE_KEYCHAIN:-}" ] && [ -f "$KINFOLD_SMOKE_KEYCHAIN" ]; then
             security delete-keychain "$KINFOLD_SMOKE_KEYCHAIN" || true
