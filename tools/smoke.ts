@@ -333,11 +333,30 @@ function adoptKeychain(world: World): void {
   const password = process.env.KINFOLD_SMOKE_KEYCHAIN_PASSWORD
   const commands: string[][] = []
   if (password !== undefined && password !== '') commands.push(['unlock-keychain', '-p', password, keychain])
-  commands.push(['default-keychain', '-s', keychain], ['list-keychains', '-d', 'user', '-s', keychain])
+  commands.push(['default-keychain', '-s', keychain], ['login-keychain', '-s', keychain], ['list-keychains', '-d', 'user', '-s', keychain])
   for (const args of commands) {
     const result = Bun.spawnSync(['/usr/bin/security', ...args], { env: world.env, stdout: 'ignore', stderr: 'ignore' })
     if (result.exitCode !== 0) throw new SmokeError('setup', `security ${args[0]} failed with exit ${result.exitCode}`)
   }
+  // The installer's security child gets only PATH and HOME, so prove the same
+  // child can write to this keychain before the install plans change anything.
+  const securityEnv = { PATH: '/usr/bin:/bin', HOME: world.home }
+  const probe = Bun.spawnSync(['/usr/bin/security', '-i'], {
+    env: securityEnv,
+    stdin: Buffer.from(`add-generic-password -U -s kinfold-smoke -a probe -w probe\n`),
+    stdout: 'ignore',
+    stderr: 'ignore',
+    timeout: 5_000,
+  })
+  if (probe.exitCode !== 0) {
+    throw new SmokeError('setup', `the throwaway keychain cannot be written with the installer's security environment (exit ${probe.exitCode ?? -1})`)
+  }
+  Bun.spawnSync(['/usr/bin/security', 'delete-generic-password', '-s', 'kinfold-smoke', '-a', 'probe'], {
+    env: securityEnv,
+    stdout: 'ignore',
+    stderr: 'ignore',
+    timeout: 5_000,
+  })
 }
 
 function launchAgentLoaded(world: World): boolean {
