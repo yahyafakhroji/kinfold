@@ -133,3 +133,10 @@ jobs:
           name: kinfold-programs
           path: dist/
           if-no-files-found: error
+
+  # The same run's artifact, so the programs are the ones just built and the
+  # local SHA256SUMS is the list the self-check reads.
+  smoke:
+    name: smoke
+    needs: checksums
+    uses: ./.github/workflows/smoke.yml

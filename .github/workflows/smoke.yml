@@ -1,0 +1,98 @@
+name: smoke
+
+# Called by release-build after the checksums job, so the same run's artifact
+# is the program and SHA256SUMS under test.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Download the release programs
+        uses: actions/download-artifact@v8
+        with:
+          name: kinfold-programs
+          path: dist
+
+      - name: Install Claude Code
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          npm install --global --no-audit --no-fund @anthropic-ai/claude-code
+          echo "$(npm prefix --global)/bin" >> "$GITHUB_PATH"
+          "$(npm prefix --global)/bin/claude" --version
+
+      # npm's opencode-ai reports 1.x, and Kinfold refuses anything below 2.0.
+      # Homebrew's opencode formula is the 2.x CLI the author runs.
+      - name: Install OpenCode 2
+        timeout-minutes: 15
+        shell: bash
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: |
+          brew install opencode
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          "$(brew --prefix)/bin/opencode" --version | tee "$RUNNER_TEMP/opencode-version.txt"
+
+      - name: Check the agent CLIs
+        shell: bash
+        run: |
+          if ! grep -Eq '(^|[^0-9])2\.[0-9]+\.[0-9]+' "$RUNNER_TEMP/opencode-version.txt"; then
+            echo "opencode did not report a 2.x version; Kinfold will not wire it"
+            cat "$RUNNER_TEMP/opencode-version.txt"
+            exit 1
+          fi
+
+      # The commands write their keys to the default keychain. A throwaway one
+      # keeps the runner's login keychain untouched and goes away afterwards.
+      - name: Create a throwaway keychain
+        shell: bash
+        run: |
+          keychain="$RUNNER_TEMP/kinfold-smoke.keychain-db"
+          original="$(security default-keychain -d user | tr -d '"' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          echo "KINFOLD_SMOKE_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "KINFOLD_SMOKE_ORIGINAL_KEYCHAIN=$original" >> "$GITHUB_ENV"
+          password="$(openssl rand -hex 24)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security default-keychain -s "$keychain"
+          security list-keychains -d user -s "$keychain"
+
+      - name: Smoke the built program
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          program=dist/kinfold-darwin-arm64
+          if [ "$(uname -m)" = "x86_64" ]; then program=dist/kinfold-darwin-x64; fi
+          test -f "$program"
+          test -f dist/SHA256SUMS
+          KINFOLD_RELEASE_SUMS_URL="file://$PWD/dist/SHA256SUMS" bun tools/smoke.ts "$program"
+
+      - name: Delete the throwaway keychain
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${KINFOLD_SMOKE_ORIGINAL_KEYCHAIN:-}" ]; then
+            security default-keychain -s "$KINFOLD_SMOKE_ORIGINAL_KEYCHAIN" || true
+            security list-keychains -d user -s "$KINFOLD_SMOKE_ORIGINAL_KEYCHAIN" || true
+          fi
+          if [ -n "${KINFOLD_SMOKE_KEYCHAIN:-}" ] && [ -f "$KINFOLD_SMOKE_KEYCHAIN" ]; then
+            security delete-keychain "$KINFOLD_SMOKE_KEYCHAIN" || true
+          fi
