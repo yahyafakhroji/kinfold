@@ -285,3 +285,19 @@ test('show-recovery refuses when stdout is a pipe', async () => {
   const { env } = world(newDbKey())
   expect(await runKeyCommand({ ...env, io: { ...env.io, printsToTerminal: false } }, 'show-recovery')).toBe(EXIT_FAILED)
 })
+
+test('encrypt and rekey refuse when stdout is a pipe, before any code is shown or anything changes', async () => {
+  const plain = world(null)
+  const piped = { ...plain.env, io: { ...plain.env.io, printsToTerminal: false } }
+  expect(await runKeyCommand(piped, 'encrypt')).toBe(EXIT_FAILED)
+  expect(plain.w.out.at(-1)).toContain('needs a terminal on stdout, not a pipe or a file')
+  expect(plain.w.out).toHaveLength(1)
+  expect(fileState(plain.path)).toBe('plain')
+  expect(plain.w.keychain.has(DB_KEY_REF)).toBe(false)
+
+  const encrypted = world(newDbKey())
+  const pipedKey = { ...encrypted.env, io: { ...encrypted.env.io, printsToTerminal: false } }
+  expect(await runKeyCommand(pipedKey, 'rekey')).toBe(EXIT_FAILED)
+  expect(encrypted.w.out.at(-1)).toContain('needs a terminal on stdout, not a pipe or a file')
+  expect(fileState(encrypted.path)).toBe('encrypted')
+})

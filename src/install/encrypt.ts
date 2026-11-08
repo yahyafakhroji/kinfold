@@ -269,6 +269,12 @@ function requireInteractive(ctx: Context, why: string): void {
   if (!ctx.env.io.interactive) throw new Refusal(`${why} needs a terminal`)
 }
 
+/** A recovery code is a secret: it must reach a terminal, never a pipe or a file that stdout may point at. */
+function requireSecretOutput(ctx: Context, why: string): void {
+  requireInteractive(ctx, why)
+  if (ctx.env.io.printsToTerminal === false) throw new Refusal(`${why} needs a terminal on stdout, not a pipe or a file`)
+}
+
 function readKey(ctx: Context): string {
   const key = ctx.keys.read()
   if (key === null) throw new Refusal(`the Keychain has no ${DB_KEY_REF}; restore it with kinfold key recover`)
@@ -277,7 +283,7 @@ function readKey(ctx: Context): string {
 
 async function encrypt(ctx: Context): Promise<void> {
   requireState(ctx, 'plain')
-  requireInteractive(ctx, 'kinfold encrypt shows a recovery code and')
+  requireSecretOutput(ctx, 'kinfold encrypt shows a recovery code and')
   if (ctx.writer.exists(DB_KEY_REF)) {
     const typed = await ctx.env.io.ask(`The Keychain already holds ${DB_KEY_REF}, which may open an older encrypted copy of memory.db. Type replace to give this store a new key: `)
     if (typed.trim() !== 'replace') throw new Refusal(`nothing changed; ${DB_KEY_REF} is kept`)
@@ -292,7 +298,7 @@ async function encrypt(ctx: Context): Promise<void> {
 
 async function rekey(ctx: Context): Promise<void> {
   requireState(ctx, 'encrypted')
-  requireInteractive(ctx, 'kinfold rekey shows a new recovery code and')
+  requireSecretOutput(ctx, 'kinfold rekey shows a new recovery code and')
   const old = readKey(ctx)
   const key = newDbKey()
   ctx.log('kinfold rekey gives memory.db a new key. The old key and the old recovery code stop working.')
@@ -312,8 +318,7 @@ async function decrypt(ctx: Context): Promise<void> {
 }
 
 async function showRecovery(ctx: Context): Promise<void> {
-  requireInteractive(ctx, 'kinfold key show-recovery prints a secret, so it')
-  if (ctx.env.io.printsToTerminal === false) throw new Refusal('kinfold key show-recovery prints a secret, so it needs a terminal on stdout, not a pipe or a file')
+  requireSecretOutput(ctx, 'kinfold key show-recovery prints a secret, so it')
   if (fileState(ctx.path) !== 'encrypted') throw new Refusal('memory.db is not encrypted; there is no recovery code')
   ctx.log(`recovery code: ${encodeRecoveryCode(readKey(ctx))}`)
 }
