@@ -103,6 +103,8 @@ export function packNpm(distDir: string, version: string, root = join(import.met
           license: 'Apache-2.0',
           os: [target.os],
           cpu: [target.cpu],
+          // The Linux programs are built for glibc; npm 9.6.5 and later skips them on musl.
+          ...(target.os === 'linux' ? { libc: ['glibc'] } : {}),
           files: [target.file],
         },
         null,

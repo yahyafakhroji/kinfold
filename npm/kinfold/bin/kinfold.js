@@ -26,6 +26,24 @@ function packageName(platform, arch) {
   return PACKAGES[`${platform}-${arch}`] ?? null
 }
 
+/**
+ * True on a Linux whose C library is musl. Node reports the glibc version it
+ * runs on and leaves the field out on musl. Bun's report makes no such claim,
+ * so under Bun it is never taken for musl.
+ */
+function isMusl(platform, report, isBun) {
+  if (platform !== 'linux' || isBun === true || report === null || report === undefined) return false
+  return report.header !== undefined && report.header.glibcVersionRuntime === undefined
+}
+
+function currentReport() {
+  try {
+    return process.report !== undefined && typeof process.report.getReport === 'function' ? process.report.getReport() : null
+  } catch {
+    return null
+  }
+}
+
 function programName(platform) {
   return platform === 'win32' ? 'kinfold.exe' : 'kinfold'
 }
@@ -61,10 +79,11 @@ function ensureExecutable(program, platform) {
 function main() {
   const platform = process.platform
   const arch = process.arch
-  const pkg = packageName(platform, arch)
+  const musl = isMusl(platform, currentReport(), process.versions.bun !== undefined)
+  const pkg = musl ? null : packageName(platform, arch)
   const program = pkg === null ? null : resolveProgram(pkg, platform)
   if (program === null) {
-    process.stderr.write(`${unsupportedMessage(platform, arch)}\n`)
+    process.stderr.write(`${unsupportedMessage(musl ? 'linux-musl' : platform, arch)}\n`)
     process.exit(1)
   }
 
@@ -89,6 +108,6 @@ function main() {
   process.exit(result.status === null ? 1 : result.status)
 }
 
-module.exports = { main, packageName, programName, unsupportedMessage }
+module.exports = { main, isMusl, packageName, programName, unsupportedMessage }
 
 if (require.main === module) main()

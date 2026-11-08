@@ -10,6 +10,7 @@ const launcher = createRequire(import.meta.url)('./bin/kinfold.js') as {
   packageName(platform: string, arch: string): string | null
   programName(platform: string): string
   unsupportedMessage(platform: string, arch: string): string
+  isMusl(platform: string, report: unknown, isBun?: boolean): boolean
 }
 
 const LAUNCHER_FILE = join(import.meta.dir, 'bin', 'kinfold.js')
@@ -74,6 +75,8 @@ async function launch(options: {
   exitCode?: number
   signal?: string
   stdin?: string
+  /** Runs as Node would on Alpine: no Bun version, and a report that names no glibc. */
+  musl?: boolean
 }): Promise<Launched> {
   const root = temp('kinfold-launcher-')
   const program = installLauncher(root)
@@ -81,7 +84,9 @@ async function launch(options: {
   const preload = join(root, 'platform.js')
   writeFileSync(
     preload,
-    `Object.defineProperty(process, 'platform', { value: ${JSON.stringify(options.platform)} })\nObject.defineProperty(process, 'arch', { value: ${JSON.stringify(options.arch)} })\n`,
+    `Object.defineProperty(process, 'platform', { value: ${JSON.stringify(options.platform)} })\nObject.defineProperty(process, 'arch', { value: ${JSON.stringify(options.arch)} })\n${
+      options.musl === true ? "Object.defineProperty(process.versions, 'bun', { value: undefined, configurable: true })\nObject.defineProperty(process, 'report', { value: { getReport: () => ({ header: {} }) }, configurable: true })\n" : ''
+    }`,
   )
   const argsPath = join(root, 'args.txt')
   const child = Bun.spawn([process.execPath, '--preload', preload, program, ...options.argv], {
@@ -175,6 +180,21 @@ shellTest('a supported host with no platform package prints the same message', a
   expect(result.stderr).toBe(`kinfold: no build for darwin-x64. ${SUPPORTED}\n`)
 })
 
+test('only a Linux report with no glibc version is musl', () => {
+  expect(launcher.isMusl('linux', { header: {} })).toBe(true)
+  expect(launcher.isMusl('linux', { header: { glibcVersionRuntime: '2.39' } })).toBe(false)
+  expect(launcher.isMusl('linux', { header: {} }, true)).toBe(false)
+  expect(launcher.isMusl('linux', null)).toBe(false)
+  expect(launcher.isMusl('darwin', { header: {} })).toBe(false)
+})
+
+shellTest('linux musl prints the supported platforms and exits 1 even with the glibc package installed', async () => {
+  const result = await launch({ platform: 'linux', arch: 'x64', packages: ['@kinfold/cli-linux-x64'], argv: ['status'], musl: true })
+
+  expect(result.exitCode).toBe(1)
+  expect(result.stderr).toBe(`kinfold: no build for linux-musl-x64. ${SUPPORTED}\n`)
+})
+
 describe('pack-npm', () => {
   function distWithPrograms(): { dir: string; programs: Map<string, Uint8Array> } {
     const dir = temp('kinfold-pack-')
@@ -209,6 +229,7 @@ describe('pack-npm', () => {
       expect(manifest.version).toBe('1.4.0')
       expect(manifest.os).toEqual([target.os])
       expect(manifest.cpu).toEqual([target.cpu])
+      expect(manifest.libc).toEqual(target.os === 'linux' ? ['glibc'] : undefined)
       expect(manifest.files).toContain(target.file)
       expect(sha256(readFileSync(join(packageDir, target.file)))).toBe(sha256(programs.get(target.target)!))
     }
