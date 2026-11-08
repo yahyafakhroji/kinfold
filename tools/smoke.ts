@@ -333,7 +333,7 @@ function adoptKeychain(world: World): void {
   const password = process.env.KINFOLD_SMOKE_KEYCHAIN_PASSWORD
   const commands: string[][] = []
   if (password !== undefined && password !== '') commands.push(['unlock-keychain', '-p', password, keychain])
-  commands.push(['default-keychain', '-s', keychain], ['login-keychain', '-s', keychain], ['list-keychains', '-d', 'user', '-s', keychain])
+  commands.push(['default-keychain', '-s', keychain], ['list-keychains', '-d', 'user', '-s', keychain])
   for (const args of commands) {
     const result = Bun.spawnSync(['/usr/bin/security', ...args], { env: world.env, stdout: 'ignore', stderr: 'ignore' })
     if (result.exitCode !== 0) throw new SmokeError('setup', `security ${args[0]} failed with exit ${result.exitCode}`)
