@@ -18,6 +18,9 @@ const SUPPORTED = 'Supported: macOS (arm64, x64), Linux glibc (x64, arm64), Wind
 const PROGRAM = `#!/bin/sh
 printf '%s\\n' "$@" > "$KINFOLD_TEST_ARGS"
 cat > "$KINFOLD_TEST_STDIN"
+if [ -n "\${KINFOLD_TEST_SIGNAL:-}" ]; then
+  kill -s "$KINFOLD_TEST_SIGNAL" $$
+fi
 exit "$KINFOLD_TEST_EXIT"
 `
 
@@ -56,6 +59,7 @@ function addProgram(root: string, packageName: string): void {
 
 interface Launched {
   exitCode: number
+  signalCode: string | null
   stdout: string
   stderr: string
   argsPath: string
@@ -68,6 +72,7 @@ async function launch(options: {
   argv: string[]
   packages?: string[]
   exitCode?: number
+  signal?: string
   stdin?: string
 }): Promise<Launched> {
   const root = temp('kinfold-launcher-')
@@ -87,13 +92,14 @@ async function launch(options: {
       KINFOLD_TEST_ARGS: argsPath,
       KINFOLD_TEST_STDIN: join(root, 'stdin.txt'),
       KINFOLD_TEST_EXIT: String(options.exitCode ?? 0),
+      KINFOLD_TEST_SIGNAL: options.signal ?? '',
     },
     stdin: options.stdin === undefined ? 'ignore' : new TextEncoder().encode(options.stdin),
     stdout: 'pipe',
     stderr: 'pipe',
   })
   const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
-  return { exitCode, stdout, stderr, argsPath, root }
+  return { exitCode, signalCode: child.signalCode, stdout, stderr, argsPath, root }
 }
 
 function readLines(path: string): string[] {
@@ -139,6 +145,19 @@ shellTest('a bare launcher runs install', async () => {
 
   expect(result.exitCode).toBe(0)
   expect(readLines(result.argsPath)).toEqual(['install'])
+})
+
+shellTest('the launcher dies by the signal its program saw', async () => {
+  const result = await launch({
+    platform: 'linux',
+    arch: 'x64',
+    packages: ['@kinfold/cli-linux-x64'],
+    argv: [],
+    signal: 'TERM',
+  })
+
+  expect(result.signalCode).toBe('SIGTERM')
+  expect(result.stderr).toBe('')
 })
 
 shellTest('freebsd prints the unsupported message and exits 1', async () => {

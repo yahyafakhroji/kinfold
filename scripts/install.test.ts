@@ -1,12 +1,14 @@
 import { afterEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const INSTALL_SH = join(import.meta.dir, 'install.sh')
 const SH = process.platform === 'win32' ? null : Bun.which('sh')
 const shellTest = test.skipIf(SH === null)
+const BASE_REFUSAL =
+  'kinfold: KINFOLD_RELEASE_BASE must be http://127.0.0.1 with an optional port and path, or a file:// URL with an absolute path\n'
 
 let roots: string[] = []
 let servers: Array<{ stop(force?: boolean): void }> = []
@@ -48,18 +50,40 @@ exit ${exitCode}
 `)
 }
 
+/** Stands in for curl and wget so a refusal can be proven to make no network call. */
+function fakeNetworkCommand(logPath: string): string {
+  return `#!/bin/sh
+printf '%s\\n' "$*" >> "${logPath}"
+exit 1
+`
+}
+
 function sumsFor(entries: Record<string, Uint8Array>): string {
   return `${Object.entries(entries)
     .map(([name, bytes]) => `${sha256(bytes)}  ${name}`)
     .join('\n')}\n`
 }
 
+const REQUIRED_TOOLS = ['ls', 'mktemp', 'curl', 'tr', 'awk', 'cut', 'rm', 'chmod', 'cp']
+
+/** A PATH that has the shell tools the script needs but neither hash program. */
+function hashFreeTools(root: string): string {
+  const dir = join(root, 'tools')
+  mkdirSync(dir)
+  for (const name of REQUIRED_TOOLS) {
+    const real = Bun.which(name)
+    if (real !== null) symlinkSync(real, join(dir, name))
+  }
+  return dir
+}
+
 interface Release {
   url: string
+  origin: string
   requests: string[]
 }
 
-function releaseServer(files: Record<string, string | Uint8Array>): Release {
+function releaseServer(files: Record<string, string | Uint8Array>, prefix = '/release'): Release {
   const requests: string[] = []
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -72,7 +96,8 @@ function releaseServer(files: Record<string, string | Uint8Array>): Release {
     },
   })
   servers.push(server)
-  return { url: `http://127.0.0.1:${server.port}/release`, requests }
+  const origin = `http://127.0.0.1:${server.port}`
+  return { url: `${origin}${prefix}`, origin, requests }
 }
 
 interface InstallRun {
@@ -81,6 +106,8 @@ interface InstallRun {
   stderr: string
   argsPath: string
   received: string[] | null
+  root: string
+  networkCalls: string[]
 }
 
 async function runInstall(options: {
@@ -90,6 +117,8 @@ async function runInstall(options: {
   ldd?: string
   args?: string[]
   extraEnv?: Record<string, string>
+  fakeNetwork?: boolean
+  restrictedTools?: boolean
 }): Promise<InstallRun> {
   const root = temp('kinfold-install-')
   const bin = join(root, 'bin')
@@ -99,11 +128,20 @@ async function runInstall(options: {
     writeFileSync(path, body)
     chmodSync(path, 0o755)
   }
+  const networkLog = join(root, 'network.log')
+  if (options.fakeNetwork === true) {
+    for (const name of ['curl', 'wget']) {
+      const path = join(bin, name)
+      writeFileSync(path, fakeNetworkCommand(networkLog))
+      chmodSync(path, 0o755)
+    }
+  }
+  const path = options.restrictedTools === true ? `${bin}:${hashFreeTools(root)}` : `${bin}:${process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin'}`
   const argsPath = join(root, 'received.txt')
   const child = Bun.spawn([SH!, INSTALL_SH, ...(options.args ?? [])], {
     cwd: join(import.meta.dir, '..'),
     env: {
-      PATH: `${bin}:${process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin'}`,
+      PATH: path,
       HOME: root,
       TMPDIR: root,
       KINFOLD_TEST_OS: options.os ?? 'Linux',
@@ -125,7 +163,13 @@ async function runInstall(options: {
     stderr,
     argsPath,
     received: existsSync(argsPath) ? readFileSync(argsPath, 'utf8').trim().split('\n') : null,
+    root,
+    networkCalls: existsSync(networkLog) ? readFileSync(networkLog, 'utf8').trim().split('\n') : [],
   }
+}
+
+function leftoverTempDirs(root: string): string[] {
+  return readdirSync(root).filter((name) => name.startsWith('kinfold-install.'))
 }
 
 function unsupported(host: string): string {
@@ -162,6 +206,23 @@ shellTest('Darwin arm64 picks the darwin arm64 asset', async () => {
   expect(run.received).toEqual(['install'])
 })
 
+shellTest('a bare loopback origin with a port is accepted', async () => {
+  const program = fakeProgram()
+  const release = releaseServer(
+    {
+      '/SHA256SUMS': sumsFor({ 'kinfold-linux-x64': program }),
+      '/kinfold-linux-x64': program,
+    },
+    '',
+  )
+
+  const run = await runInstall({ base: release.origin })
+
+  expect(run.exitCode).toBe(0)
+  expect(release.requests).toEqual(['/SHA256SUMS', '/kinfold-linux-x64'])
+  expect(run.received).toEqual(['install'])
+})
+
 shellTest('a mismatched hash refuses before the program runs', async () => {
   const program = fakeProgram()
   const release = releaseServer({
@@ -176,6 +237,20 @@ shellTest('a mismatched hash refuses before the program runs', async () => {
   expect(run.received).toBeNull()
 })
 
+shellTest('a failed install removes its temporary folder', async () => {
+  const program = fakeProgram()
+  const release = releaseServer({
+    '/release/SHA256SUMS': sumsFor({ 'kinfold-linux-x64': new TextEncoder().encode('other') }),
+    '/release/kinfold-linux-x64': program,
+  })
+
+  const run = await runInstall({ base: release.url })
+
+  expect(run.exitCode).toBe(1)
+  expect(run.stderr).toBe('kinfold: the downloaded kinfold-linux-x64 does not match SHA256SUMS; nothing was installed\n')
+  expect(leftoverTempDirs(run.root)).toEqual([])
+})
+
 shellTest('a program missing from SHA256SUMS refuses before it runs', async () => {
   const program = fakeProgram()
   const release = releaseServer({
@@ -188,6 +263,22 @@ shellTest('a program missing from SHA256SUMS refuses before it runs', async () =
   expect(run.exitCode).toBe(1)
   expect(run.stderr).toContain('SHA256SUMS has no entry for kinfold-linux-x64')
   expect(run.received).toBeNull()
+})
+
+shellTest('a missing sha256 tool refuses instead of skipping the check', async () => {
+  const program = fakeProgram()
+  const release = releaseServer({
+    '/release/SHA256SUMS': sumsFor({ 'kinfold-linux-x64': program }),
+    '/release/kinfold-linux-x64': program,
+  })
+
+  const run = await runInstall({ base: release.url, restrictedTools: true })
+
+  expect(run.exitCode).toBe(1)
+  expect(run.stderr).toBe('kinfold: install needs sha256sum or shasum\n')
+  expect(run.received).toBeNull()
+  expect(release.requests).toEqual(['/release/SHA256SUMS', '/release/kinfold-linux-x64'])
+  expect(leftoverTempDirs(run.root)).toEqual([])
 })
 
 shellTest('Linux musl prints the same unsupported message and downloads nothing', async () => {
@@ -207,12 +298,42 @@ shellTest('an unsupported system prints the same message', async () => {
   expect(run.stderr).toBe(unsupported('freebsd-x64'))
 })
 
-shellTest('a base URL that is not local is refused', async () => {
-  const run = await runInstall({ base: 'https://example.invalid/releases' })
+shellTest('a base URL that is not loopback is refused once, before any request', async () => {
+  const release = releaseServer({})
+
+  const run = await runInstall({ base: 'https://example.invalid/releases', fakeNetwork: true })
 
   expect(run.exitCode).toBe(1)
-  expect(run.stderr).toContain('KINFOLD_RELEASE_BASE must start with http://127.0.0.1 or file://')
+  expect(run.stderr).toBe(BASE_REFUSAL)
+  expect(run.networkCalls).toEqual([])
+  expect(release.requests).toEqual([])
+  expect(leftoverTempDirs(run.root)).toEqual([])
+  expect(run.received).toBeNull()
 })
+
+const REFUSED_BASES = [
+  'http://127.0.0.1.evil.com',
+  'http://127.0.0.10',
+  'http://127.0.0.1@evil.com',
+  'http://127.0.0.1:99999.evil',
+  'https://127.0.0.1',
+  'http://localhost',
+]
+
+for (const base of REFUSED_BASES) {
+  shellTest(`the release base ${base} is refused without a network call`, async () => {
+    const release = releaseServer({})
+
+    const run = await runInstall({ base, fakeNetwork: true })
+
+    expect(run.exitCode).toBe(1)
+    expect(run.stderr).toBe(BASE_REFUSAL)
+    expect(run.networkCalls).toEqual([])
+    expect(release.requests).toEqual([])
+    expect(leftoverTempDirs(run.root)).toEqual([])
+    expect(run.received).toBeNull()
+  })
+}
 
 shellTest('a file URL release base is accepted', async () => {
   const root = temp('kinfold-install-file-')

@@ -3,9 +3,9 @@
 # `install`, which writes <dataDir>\bin\kinfold.exe and wires the hosts.
 #
 # KINFOLD_VERSION picks a release. Without it the latest release is used.
-# KINFOLD_RELEASE_BASE replaces the release folder, and is honoured only for a
-# loopback or file URL, so an environment variable cannot send an install to
-# another host and a test never reaches GitHub.
+# KINFOLD_RELEASE_BASE replaces the release folder, and is honoured only for an
+# exact loopback origin or a file URL, so an environment variable cannot send an
+# install to another host and a test never reaches GitHub.
 
 $ErrorActionPreference = 'Stop'
 
@@ -18,13 +18,22 @@ function Unsupported([string] $hostName) {
   Fail "no build for $hostName. Supported: macOS (arm64, x64), Linux glibc (x64, arm64), Windows x64."
 }
 
+# A prefix test would also admit http://127.0.0.1.evil.com, http://127.0.0.10 and
+# the userinfo form http://127.0.0.1@evil.com, so the whole origin is checked:
+# host exactly 127.0.0.1, an optional numeric port, then the end or a path.
+function Test-LocalBase([string] $candidate) {
+  if ($candidate -cmatch '^http://127\.0\.0\.1(?::[0-9]+)?(?:/[^\r\n]*)?\z') {
+    return $true
+  }
+  return $candidate -cmatch '^file:///[^\r\n]*\z'
+}
+
 function ReleaseBase {
   if (-not [string]::IsNullOrEmpty($env:KINFOLD_RELEASE_BASE)) {
-    $candidate = $env:KINFOLD_RELEASE_BASE.TrimEnd('/')
-    if ($candidate.StartsWith('http://127.0.0.1') -or $candidate.StartsWith('file://')) {
-      return $candidate
+    if (-not (Test-LocalBase $env:KINFOLD_RELEASE_BASE)) {
+      Fail 'KINFOLD_RELEASE_BASE must be http://127.0.0.1 with an optional port and path, or a file:// URL with an absolute path'
     }
-    Fail 'KINFOLD_RELEASE_BASE must start with http://127.0.0.1 or file://'
+    return $env:KINFOLD_RELEASE_BASE.TrimEnd('/')
   }
   if (-not [string]::IsNullOrEmpty($env:KINFOLD_VERSION)) {
     if ($env:KINFOLD_VERSION -notmatch '^[0-9A-Za-z][0-9A-Za-z.+-]*$') {
@@ -63,11 +72,12 @@ if ($arch -ne 'x64') {
   Unsupported "win32-$arch"
 }
 $asset = 'kinfold-windows-x64.exe'
+# Validate before touching the filesystem, so a refused base leaves no trace.
+$base = ReleaseBase
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("kinfold-install-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 try {
-  $base = ReleaseBase
   $sums = Join-Path $tmp 'SHA256SUMS'
   $program = Join-Path $tmp $asset
   Download "$base/SHA256SUMS" $sums

@@ -5,7 +5,7 @@
 #
 # KINFOLD_VERSION picks a release. Without it the latest release is used.
 # KINFOLD_RELEASE_BASE replaces the release folder. It is honoured only when it
-# starts with http://127.0.0.1 or file://, so an environment variable cannot
+# is an exact loopback origin or a file URL, so an environment variable cannot
 # point a real install at another host and a test never reaches GitHub.
 
 set -u
@@ -19,13 +19,32 @@ unsupported() {
   fail "no build for $1. Supported: macOS (arm64, x64), Linux glibc (x64, arm64), Windows x64."
 }
 
+# A prefix test would also admit http://127.0.0.1.evil.com, http://127.0.0.10 and
+# the userinfo form http://127.0.0.1@evil.com, so the whole origin is checked:
+# host exactly 127.0.0.1, an optional numeric port, then the end or a path.
+local_base() {
+  case "$1" in
+    http://127.0.0.1|http://127.0.0.1/*) return 0 ;;
+    http://127.0.0.1:*)
+      rest=${1#http://127.0.0.1:}
+      port=${rest%%/*}
+      case "$port" in
+        ''|*[!0-9]*) return 1 ;;
+      esac
+      case "$rest" in
+        "$port"|"$port"/*) return 0 ;;
+      esac
+      return 1
+      ;;
+    file:///*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 release_base() {
   if [ -n "${KINFOLD_RELEASE_BASE:-}" ]; then
-    case "$KINFOLD_RELEASE_BASE" in
-      http://127.0.0.1*) printf '%s\n' "${KINFOLD_RELEASE_BASE%/}" ;;
-      file://*) printf '%s\n' "${KINFOLD_RELEASE_BASE%/}" ;;
-      *) fail 'KINFOLD_RELEASE_BASE must start with http://127.0.0.1 or file://' ;;
-    esac
+    local_base "$KINFOLD_RELEASE_BASE" || fail 'KINFOLD_RELEASE_BASE must be http://127.0.0.1 with an optional port and path, or a file:// URL with an absolute path'
+    printf '%s\n' "${KINFOLD_RELEASE_BASE%/}"
     return
   fi
   if [ -n "${KINFOLD_VERSION:-}" ]; then
@@ -106,7 +125,9 @@ case "$platform-$arch" in
   *) unsupported "$platform-$arch" ;;
 esac
 
-base=$(release_base)
+# The validator exits in a subshell, so the parent has to stop on its status;
+# otherwise the script would report the refusal and then try to download anyway.
+base=$(release_base) || exit 1
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/kinfold-install.XXXXXX") || fail 'could not create a temporary folder'
 trap 'rm -rf "$tmp"' EXIT
 trap 'exit 130' INT
