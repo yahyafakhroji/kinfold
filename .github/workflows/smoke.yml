@@ -30,6 +30,12 @@ jobs:
           name: kinfold-programs
           path: dist
 
+      # The artifact archive keeps the bytes, not the mode, so the downloaded
+      # programs arrive without the executable bit.
+      - name: Make the programs executable
+        shell: bash
+        run: chmod +x dist/kinfold-*
+
       - name: Install Claude Code
         timeout-minutes: 10
         shell: bash
