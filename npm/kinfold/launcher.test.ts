@@ -19,6 +19,7 @@ const SUPPORTED = 'Supported: macOS (arm64, x64), Linux glibc (x64, arm64), Wind
 /** The fake platform program records what the launcher handed it. */
 const PROGRAM = `#!/bin/sh
 printf '%s\\n' "$@" > "$KINFOLD_TEST_ARGS"
+printf '%s\\n' "$KINFOLD_INSTALL_CHANNEL" > "$KINFOLD_TEST_ARGS.channel"
 cat > "$KINFOLD_TEST_STDIN"
 if [ -n "\${KINFOLD_TEST_SIGNAL:-}" ]; then
   kill -s "$KINFOLD_TEST_SIGNAL" $$
@@ -78,6 +79,8 @@ async function launch(options: {
   stdin?: string
   /** Runs as Node would on Alpine: no Bun version, and a report that names no glibc. */
   musl?: boolean
+  /** Runs as Node would: no Bun version, with the glibc report left alone. */
+  node?: boolean
 }): Promise<Launched> {
   const root = temp('kinfold-launcher-')
   const program = installLauncher(root)
@@ -87,7 +90,7 @@ async function launch(options: {
     preload,
     `Object.defineProperty(process, 'platform', { value: ${JSON.stringify(options.platform)} })\nObject.defineProperty(process, 'arch', { value: ${JSON.stringify(options.arch)} })\n${
       options.musl === true ? "Object.defineProperty(process.versions, 'bun', { value: undefined, configurable: true })\nObject.defineProperty(process, 'report', { value: { getReport: () => ({ header: {} }) }, configurable: true })\n" : ''
-    }`,
+    }${options.node === true ? "Object.defineProperty(process.versions, 'bun', { value: undefined, configurable: true })\n" : ''}`,
   )
   const argsPath = join(root, 'args.txt')
   const child = Bun.spawn([process.execPath, '--preload', preload, program, ...options.argv], {
@@ -144,6 +147,14 @@ shellTest('linux-arm64 runs its package with argv, stdin and the exit code', asy
   expect(result.stderr).toBe('')
   expect(readLines(result.argsPath)).toEqual(['--data-dir', '/tmp/a b', 'status'])
   expect(readFileSync(join(result.root, 'stdin.txt'), 'utf8')).toBe('hello')
+})
+
+shellTest('the launcher tells the program how it was installed', async () => {
+  const bun = await launch({ platform: 'linux', arch: 'x64', packages: ['@kinfold/cli-linux-x64'], argv: ['status'] })
+  expect(readFileSync(`${bun.argsPath}.channel`, 'utf8')).toBe('bunx\n')
+  // Darwin, because a Linux run without Bun's version would be read as musl.
+  const node = await launch({ platform: 'darwin', arch: 'arm64', packages: ['@kinfold/cli-darwin-arm64'], argv: ['status'], node: true })
+  expect(readFileSync(`${node.argsPath}.channel`, 'utf8')).toBe('npx\n')
 })
 
 shellTest('a bare launcher runs install', async () => {

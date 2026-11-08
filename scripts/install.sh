@@ -7,6 +7,8 @@
 # KINFOLD_RELEASE_BASE replaces the release folder. It is honoured only when it
 # is an exact loopback origin or a file URL, so an environment variable cannot
 # point a real install at another host and a test never reaches GitHub.
+# KINFOLD_TTY names the terminal the setup questions are read from; it defaults
+# to /dev/tty, which `curl | sh` needs because stdin is the script itself.
 
 set -u
 
@@ -154,5 +156,21 @@ if [ "$actual" != "$expected" ]; then
 fi
 
 chmod 0755 "$program" || fail "could not make $asset executable"
-"$program" install "$@"
+
+KINFOLD_INSTALL_CHANNEL=curl
+export KINFOLD_INSTALL_CHANNEL
+
+# Under `curl | sh` stdin is the script, so the wizard reads its answers from
+# the terminal. A caller that pipes a key in keeps its stdin, and so does a
+# run with no terminal at all (opening /dev/tty then fails).
+tty_path=${KINFOLD_TTY:-/dev/tty}
+use_tty=1
+for argument in "$@"; do
+  [ "$argument" = --credential-stdin ] && use_tty=0
+done
+if [ "$use_tty" -eq 1 ] && ( : < "$tty_path" ) 2>/dev/null; then
+  "$program" install "$@" < "$tty_path"
+else
+  "$program" install "$@"
+fi
 exit $?
