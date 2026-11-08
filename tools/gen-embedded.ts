@@ -107,12 +107,12 @@ async function generate(targetName: string): Promise<string> {
   ].join('\n')
 }
 
-/** The generated file is tracked as a stub, so a build in the working tree would need reverting before a commit. */
+/** The generated file is tracked as a stub, so a manual run needs reverting before a commit. The release build restores it on its own. */
 function warnIfTracked(): void {
   const path = relative(ROOT, OUT)
   const status = Bun.spawnSync(['git', 'status', '--porcelain', '--', path], { cwd: ROOT, stdout: 'pipe', stderr: 'ignore' })
   if (status.exitCode === 0 && status.stdout.toString().trim() !== '') {
-    console.warn(`warning: ${path} is tracked; revert it after compiling, because the generated build is never committed`)
+    console.warn(`warning: ${path} is tracked and was rewritten; tools/build-release.ts restores it after compiling, so revert it yourself only after a manual run`)
   }
 }
 
