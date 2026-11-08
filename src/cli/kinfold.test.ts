@@ -8,7 +8,10 @@ import { EXIT_USAGE } from '../install/install'
 import { type FakeWorld, createWorld } from '../install/test-support'
 import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
 import { VERSION } from '../version'
-import { type SubcommandRunners, dataDirFor, runKinfold } from './kinfold'
+import { mergeSamHooks } from '../install/claude-hooks'
+import { installPaths } from '../install/env'
+import { entryCommand } from '../install/entry'
+import { type SubcommandRunners, dataDirFor, envForDataDir, runKinfold } from './kinfold'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -84,6 +87,51 @@ test('with only the old data dir, install targets ~/.kinfold and every other com
   } finally {
     rmSync(home, { recursive: true, force: true })
   }
+})
+
+const HAND_RUN = { compiled: true, execPath: '/Users/me/My Memory/bin/kinfold', looksInstalled: () => true }
+
+test('the installed program run by hand finds its own folder', () => {
+  const home = '/Users/me'
+  expect(dataDirFor(['status'], {}, home, HAND_RUN)).toBe('/Users/me/My Memory')
+  expect(dataDirFor([], {}, home, HAND_RUN)).toBe('/Users/me/My Memory')
+  expect(dataDirFor(['install'], {}, home, HAND_RUN)).toBe('/Users/me/My Memory')
+  expect(dataDirFor(['status'], { KINFOLD_DATA_DIR: '/env/dir' }, home, HAND_RUN)).toBe('/env/dir')
+  expect(dataDirFor(['status'], { SAM_DATA_DIR: '/old/env' }, home, HAND_RUN)).toBe('/old/env')
+  expect(dataDirFor(['--data-dir', '/flag/dir', 'status'], { KINFOLD_DATA_DIR: '/env/dir' }, home, HAND_RUN)).toBe('/flag/dir')
+})
+
+test('a program that is not an installed one never claims its folder', () => {
+  const home = '/Users/me'
+  const unchanged = join(home, '.kinfold')
+  expect(dataDirFor(['install'], {}, home, { ...HAND_RUN, compiled: false })).toBe(unchanged)
+  expect(dataDirFor(['install'], {}, home, { ...HAND_RUN, looksInstalled: () => false })).toBe(unchanged)
+  expect(dataDirFor(['install'], {}, home, { ...HAND_RUN, execPath: '/tmp/kinfold-linux-x64' })).toBe(unchanged)
+  expect(dataDirFor(['install'], {}, home, { ...HAND_RUN, execPath: '/usr/local/sbin/kinfold' })).toBe(unchanged)
+  // The real check: a bin folder with nothing installed beside it.
+  const empty = mkdtempSync(join(tmpdir(), 'kinfold-cli-'))
+  try {
+    mkdirSync(join(empty, 'bin'))
+    expect(dataDirFor(['install'], {}, home, { compiled: true, execPath: join(empty, 'bin', 'kinfold') })).toBe(unchanged)
+    writeFileSync(join(empty, 'install.json'), '{}')
+    expect(dataDirFor(['install'], {}, home, { compiled: true, execPath: join(empty, 'bin', 'kinfold') })).toBe(empty)
+  } finally {
+    rmSync(empty, { recursive: true, force: true })
+  }
+})
+
+test('an injected env with --data-dir rebuilds the program path', async () => {
+  world = createWorld()
+  const program = (dir: string) => ({ kind: 'program', binPath: join(dir, 'bin', 'kinfold') }) as const
+  const env = { ...world.env, dataDir: '/a', mode: program('/a') }
+  expect(envForDataDir(env, '/b')).toMatchObject({ dataDir: '/b', mode: { kind: 'program', binPath: '/b/bin/kinfold' } })
+  expect(envForDataDir(world.env, '/b').mode).toEqual(world.env.mode)
+  // End to end: hooks wired for /b read as wired once status runs with --data-dir /b.
+  const paths = installPaths(world.env)
+  mkdirSync(paths.claudeDir, { recursive: true })
+  writeFileSync(paths.claudeSettings, JSON.stringify(mergeSamHooks({}, { entry: entryCommand(program('/b'), 'hook', '/b') }).settings))
+  expect(await runKinfold(['--data-dir', '/b', 'status'], env)).toBe(0)
+  expect(world.out.some((line) => line.startsWith('  claude-code:') && line.includes('wired: yes'))).toBe(true)
 })
 
 interface Routed {
