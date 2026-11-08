@@ -62,3 +62,30 @@ test('a timeout says the daemon may still be starting', async () => {
     `the daemon did not answer /health within 180 s; it may still be opening a large store. Run kinfold status in a minute; the log is ${installPaths(env).logFile}`,
   )
 })
+
+test('the plan step names the service when it stops running', async () => {
+  const { env, elapsed } = clockEnv(null)
+  const service = fakeService()
+  service.isRunning = async () => elapsed() < 10_000
+  await expect(applyAction({ ...env, service }, { kind: 'wait-health' })).rejects.toThrow(
+    `the FakeService stopped running before the daemon answered /health; the log is ${installPaths(env).logFile}`,
+  )
+})
+
+test('an isRunning that throws counts as running', async () => {
+  const { env, elapsed } = clockEnv(40_000)
+  const service = fakeService()
+  service.isRunning = async () => {
+    throw new Error('launchctl failed')
+  }
+  const result = await waitForStart(env, service)
+  expect(result.ok).toBe(true)
+  expect(elapsed()).toBeGreaterThanOrEqual(40_000)
+})
+
+test('isRunning is asked every 5 s, not every poll', async () => {
+  const { env } = clockEnv(20_000)
+  const service = fakeService()
+  await waitForStart(env, service)
+  expect(service.calls.filter((call) => call === 'isRunning')).toHaveLength(3)
+})

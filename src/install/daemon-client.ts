@@ -17,7 +17,7 @@ import type { ServiceControl } from './service/control'
 const HEALTH_TIMEOUT_MS = 1_000
 const REQUEST_TIMEOUT_MS = 5_000
 const HEALTH_POLL_MS = 250
-const RUNNING_CHECK_MS = 1_000
+const RUNNING_CHECK_MS = 5_000
 
 /** A large store keeps a started daemon from answering while it drains the spool, runs observers and rebuilds packs. */
 export const START_WAIT_MS = 180_000

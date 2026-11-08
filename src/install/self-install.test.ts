@@ -301,8 +301,44 @@ test('a failed start after the plan stopped the service is reported and the step
   w.env.service = fakeService({ running: false, startError: new Error('boom') })
   expect(await install(w.env, installOptions(source))).toBe(1)
   const lines = w.out.join('\n')
-  expect(lines).toContain('the daemon did not answer /health after restarting (boom)')
+  expect(lines).toContain('is not running after restarting (boom), so nothing will answer /health')
   expect(lines).toMatch(/install failed: .*(ENOENT|no such file)/i)
+})
+
+test('a restart that opens a large store says the daemon may still be starting', async () => {
+  const { w, source } = programWorld()
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  writeFileSync(source, 'kinfold program v2\n')
+  w.out.length = 0
+  const out = w.env.out
+  w.env.out = (line) => {
+    out(line)
+    if (line.startsWith('applying ')) rmSync(source)
+  }
+  // Stopped by the plan, started again here, then never answering /health, as a daemon busy with a large store.
+  const service = fakeService({ running: false })
+  w.env.service = service
+  expect(await install(w.env, installOptions(source))).toBe(1)
+  const lines = w.out.join('\n')
+  expect(service.calls.filter((call) => call === 'start')).toHaveLength(1)
+  expect(lines).toContain('the daemon did not answer /health after restarting; it may still be opening a large store. Run kinfold status in a minute')
+  expect(lines).not.toContain('is not running after restarting')
+})
+
+test('a service left loaded after a slow wait-health is not started again and the message does not contradict the plan error', async () => {
+  const { w, source } = programWorld()
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  writeFileSync(source, 'kinfold program v2\n')
+  w.out.length = 0
+  const service = fakeService({ running: true })
+  w.env.service = service
+  w.env.fetch = (async () => Promise.reject(new Error('refused'))) as unknown as typeof w.env.fetch
+  expect(await install(w.env, installOptions(source))).toBe(1)
+  const lines = w.out.join('\n')
+  expect(service.calls).not.toContain('start')
+  expect(lines).toContain('the daemon did not answer /health within 180 s; it may still be opening a large store')
+  expect(lines).toContain('it may still be opening a large store. Run kinfold status in a minute; see')
+  expect(lines).not.toContain('is not running after restarting')
 })
 
 test('a failed rename removes the temp file it copied', async () => {

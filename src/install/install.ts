@@ -15,7 +15,7 @@ import type { EmbeddedAssets } from '../runtime/embedded'
 import { DAEMON_INFO_FILE, DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
 import type { ObserverSettingsInput, ObserverSettingsRow } from '../store/observer-settings-store'
 import { mergeSamHooks } from './claude-hooks'
-import { type Health, checkHealth, getObserverSettings, readDaemonInfo, waitForHealth } from './daemon-client'
+import { type Health, checkHealth, getObserverSettings, readDaemonInfo, waitForStart } from './daemon-client'
 import { dbKeyActions } from './db-encryption'
 import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
@@ -29,7 +29,7 @@ import { hostHookInstallActions, hostVersionActions, opencodeInstallActions } fr
 import { claudeMcpInstallActions, claudeMcpState, opencodeMcpInstallActions } from './mcp-wiring'
 import { scanDataDirModes } from './permissions'
 import { serviceOf } from './service/control'
-import { type Action, HEALTH_WAIT_MS, runPlan, stopCommand } from './plan'
+import { type Action, runPlan, stopCommand } from './plan'
 import { type ProgramCheck, checkProgram, programInstallActions } from './self-install'
 import { legacyClaudeMcpRemoval, legacyShimRemoval, migrationFailureNote, renameMigrationActions } from './rename-migration'
 import { sqlite3mcInstallActions } from './sqlite3mc-install'
@@ -370,12 +370,15 @@ async function restartService(env: InstallEnv): Promise<void> {
   } catch (error: unknown) {
     startError = error
   }
-  if (await waitForHealth(env, true, HEALTH_WAIT_MS)) {
+  const result = await waitForStart(env, service)
+  if (result.ok) {
     if (started) env.out('the daemon was started again from the program in place')
     return
   }
   const reason = startError === null ? '' : ` (${errorMessage(startError)})`
-  env.out(`the daemon did not answer /health after restarting${reason}; see ${installPaths(env).logFile}`)
+  const logFile = installPaths(env).logFile
+  if (result.reason === 'not-running') env.out(`the ${service?.label ?? 'service'} is not running after restarting${reason}, so nothing will answer /health; see ${logFile}`)
+  else env.out(`the daemon did not answer /health after restarting${reason}; it may still be opening a large store. Run kinfold status in a minute; see ${logFile}`)
 }
 
 export async function install(env: InstallEnv, options: InstallOptions): Promise<number> {
