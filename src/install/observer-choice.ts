@@ -36,6 +36,8 @@ export interface ChoiceOptions {
   replaceCredential: boolean
   credentialStdin: boolean
   flags: readonly ObserverFlag[]
+  /** What each host has now (setup/prefill.ts); under --yes a host with no flag keeps its row instead of taking the built-in default. */
+  saved?: ReadonlyMap<InstallHost, ObserverSettingsInput>
 }
 
 export interface PendingCredential {
@@ -45,11 +47,11 @@ export interface PendingCredential {
 
 export interface ObserverChoice {
   input: ObserverSettingsInput
-  origin: 'default' | 'flag' | 'prompt'
+  origin: 'default' | 'flag' | 'prompt' | 'saved'
   /** A key entered this run, stored in the keychain only once the plan runs. */
   credential: PendingCredential | null
   credentialNote: string
-  check: 'ok' | 'skipped' | 'not run (dry run)'
+  check: 'ok' | 'skipped' | 'unchanged' | 'not run (dry run)'
 }
 
 /** Ends the install with a non-zero exit; the message carries no secret. */
@@ -145,6 +147,8 @@ async function promptCandidate(env: InstallEnv, host: InstallHost): Promise<Cand
 async function pickCandidate(env: InstallEnv, host: InstallHost, options: ChoiceOptions, retry: boolean): Promise<Candidate> {
   const flag = options.flags.find((entry) => entry.host === host)
   if (!retry && flag !== undefined) return { input: settingsInputFor(host, flag.provider, flag.model), origin: 'flag' }
+  const saved = options.saved?.get(host)
+  if (!retry && options.yes && saved !== undefined) return { input: saved, origin: 'saved' }
   if (!retry && options.yes) return { input: defaultInput(host), origin: 'default' }
   if (env.io.interactive && !options.yes) return promptCandidate(env, host)
   throw new ChoiceError(`cannot ask about the ${host} observer without a TTY; pass --yes or --observer ${host}=<provider>:<model>`)
@@ -223,6 +227,8 @@ async function chooseOne(env: InstallEnv, host: InstallHost, options: ChoiceOpti
     const state = await resolveCredential(env, candidate.input, options, session)
     const base = { ...candidate, credential: state.kind === 'entered' && ref !== null ? { ref, value: state.value } : null, credentialNote: credentialNote(state, ref) }
     if (options.dryRun) return { ...base, check: 'not run (dry run)' }
+    // A row that was already saved and is kept as it is was tested when it was chosen.
+    if (candidate.origin === 'saved') return { ...base, check: 'unchanged' }
     if (options.skipCheck) return { ...base, check: 'skipped' }
     const result = await runCheck(env, candidate.input, checkCredentials(env, session))
     if (result.ok) return { ...base, check: 'ok' }
