@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { newDbKey } from '../sqlite/keys'
@@ -157,6 +157,23 @@ test('an unchanged program plans no copy', async () => {
   w.out.length = 0
   expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
   expect(w.out.join('\n')).not.toContain(`install program ${binPath}`)
+})
+
+test('a second install never makes the program non-executable', async () => {
+  const { w, binPath, source } = programWorld()
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  w.out.length = 0
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  expect(statSync(binPath).mode & 0o777).toBe(0o755)
+  expect(w.out.join('\n')).not.toContain('chmod <dataDir>/bin/kinfold')
+})
+
+test('install restores 0755 on a program someone made 0600', async () => {
+  const { w, binPath, source } = programWorld()
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  chmodSync(binPath, 0o600)
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  expect(statSync(binPath).mode & 0o777).toBe(0o755)
 })
 
 test('a program whose hash is missing from SHA256SUMS stops before any change', async () => {

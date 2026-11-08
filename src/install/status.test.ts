@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from 'bun:test'
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { samHookGroup } from './claude-hooks'
+import { installedProgramPath } from './entry'
 import { installPaths } from './env'
 import { EXIT_OK, install } from './install'
 import { mcpPaths, mcpTarget } from './mcp-wiring'
@@ -104,4 +105,36 @@ test('status probes no keychain ref for codex-cli and opencode-cli observers', a
   expect(out).not.toContain('stale-ref')
   expect(out.match(/^keychain /gm)?.length).toBe(1)
   expect(out).toContain('keychain openrouter: present')
+})
+
+function programInstallWorld(): { w: FakeWorld; binPath: string; options: typeof YES & { programSource: string } } {
+  // No opencode here: installing its plugin needs release-build assets.
+  const w = make({ opencodeVersion: undefined, keychainRefs: [] })
+  const binPath = installedProgramPath(w.dataDir, w.env.platform)
+  w.env = { ...w.env, mode: { kind: 'program', binPath } }
+  const source = join(w.root, 'kinfold-build')
+  writeFileSync(source, 'kinfold program v1\n', { mode: 0o755 })
+  return { w, binPath, options: { ...YES, programSource: source } }
+}
+
+test('status reports modes ok after a program install', async () => {
+  const { w, options } = programInstallWorld()
+  expect(await install(w.env, options)).toBe(EXIT_OK)
+  w.out.length = 0
+  expect(await status(w.env)).toBe(EXIT_OK)
+  const text = w.out.join('\n')
+  expect(text).toContain('modes ok')
+  expect(text).toContain('program 0755')
+  expect(text).not.toContain('bin/kinfold 0755 -> 0600')
+})
+
+test('status shows the program-form wiring', async () => {
+  const { w, binPath, options } = programInstallWorld()
+  expect(await install(w.env, options)).toBe(EXIT_OK)
+  w.out.length = 0
+  expect(await status(w.env)).toBe(EXIT_OK)
+  const hosts = w.out.filter((line) => line.startsWith('  claude-code:') || line.startsWith('  opencode:'))
+  expect(hosts.length).toBeGreaterThan(0)
+  expect(w.out.join('\n')).toContain(binPath)
+  expect(statSync(binPath).mode & 0o777).toBe(0o755)
 })

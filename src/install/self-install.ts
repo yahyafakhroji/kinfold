@@ -20,7 +20,7 @@ export const SUMS_TIMEOUT_MS = 30_000
 /** The five release files take a few hundred bytes; a megabyte is not the checksum list. */
 export const MAX_SUMS_BYTES = 1_000_000
 
-const PROGRAM_MODE = 0o755
+export const PROGRAM_MODE = 0o755
 const PROGRAM_DIR_MODE = 0o700
 const SUMS_LINE = /^([0-9a-f]{64}) {2}([^\s/\\]+)$/
 const ASSET_NAMES: Readonly<Record<string, string>> = {

@@ -27,7 +27,7 @@ import { ChoiceError, type ChoiceOptions, type ObserverChoice, chooseObservers, 
 import { hmacMigrationActions } from './hmac-migration'
 import { hostHookInstallActions, hostVersionActions, opencodeInstallActions } from './host-wiring'
 import { claudeMcpInstallActions, claudeMcpState, opencodeMcpInstallActions } from './mcp-wiring'
-import { isInBinFolder, scanDataDirModes } from './permissions'
+import { scanDataDirModes } from './permissions'
 import { type Action, HEALTH_WAIT_MS, runPlan, startAgent, stopCommand } from './plan'
 import { type ProgramCheck, checkProgram, programInstallActions } from './self-install'
 import { legacyClaudeMcpRemoval, legacyShimRemoval, migrationFailureNote, renameMigrationActions } from './rename-migration'
@@ -97,13 +97,10 @@ function dataDirActions(env: InstallEnv): Action[] {
   const paths = installPaths(env)
   const scan = scanDataDirModes(env.dataDir)
   for (const link of scan.symlinks) env.out(`data dir: symlink ${link} left alone`)
-  // <dataDir>/bin holds the installed program, which has to stay executable;
-  // the 0600 rule belongs to the store and its keys, not to the program.
-  const changes = scan.changes.filter((change) => !isInBinFolder(change.path))
   const touchLog: Action[] = existsSync(paths.logFile) ? [] : [{ kind: 'touch', path: paths.logFile, mode: DATA_FILE_MODE }]
   return [
     ...mkdirIfMissing(env.dataDir, DATA_DIR_MODE),
-    ...changes.map((change): Action => ({ kind: 'chmod', dataDir: env.dataDir, change })),
+    ...scan.changes.map((change): Action => ({ kind: 'chmod', dataDir: env.dataDir, change })),
     ...mkdirIfMissing(paths.logsDir, DATA_DIR_MODE),
     ...touchLog,
   ]

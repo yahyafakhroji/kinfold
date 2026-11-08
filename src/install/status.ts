@@ -90,7 +90,7 @@ function keychainLines(env: InstallEnv, refs: readonly string[]): string[] {
 function dataDirLines(env: InstallEnv): string[] {
   if (!existsSync(env.dataDir)) return [`data dir ${env.dataDir}: missing`]
   const scan = scanDataDirModes(env.dataDir)
-  if (scan.changes.length === 0) return [`data dir ${env.dataDir}: modes ok (${scan.checked} checked, dirs 0700, files 0600)`]
+  if (scan.changes.length === 0) return [`data dir ${env.dataDir}: modes ok (${scan.checked} checked, dirs 0700, files 0600, program 0755)`]
   return [`data dir ${env.dataDir}: ${scan.changes.length} of ${scan.checked} need fixing (install fixes them):`, ...scan.changes.map((change) => `  ${describeModeChange(change)}`)]
 }
 
