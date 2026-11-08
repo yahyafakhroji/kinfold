@@ -26,7 +26,7 @@ import { type DbKeyStore, credentialDbKeyStore, newDbKey } from '../sqlite/keys'
 import { fileState, maintenancePath, openEncrypted } from '../sqlite/open'
 import { RECOVERY_GROUP, RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../sqlite/recovery'
 import { DATA_FILE_MODE, DB_FILE } from '../store/data-dir'
-import { waitForHealth } from './daemon-client'
+import { waitForHealth, waitForStart } from './daemon-client'
 import { type InstallEnv, errorMessage } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
 import { HEALTH_WAIT_MS } from './plan'
@@ -114,7 +114,10 @@ async function startDaemon(ctx: Context, daemon: Daemon): Promise<void> {
   } catch (error: unknown) {
     ctx.log(`warning: the ${service.label} did not start (${errorMessage(error)})`)
   }
-  ctx.log((await waitForHealth(ctx.env, true, HEALTH_WAIT_MS)) ? 'daemon: started again' : 'warning: the daemon did not answer /health after the restart; see its log')
+  const started = await waitForStart(ctx.env, service)
+  if (started.ok) ctx.log('daemon: started again')
+  else if (started.reason === 'not-running') ctx.log(`warning: the ${service.label} stopped running before the daemon answered /health; see its log`)
+  else ctx.log('warning: the daemon did not answer /health after the restart; it may still be opening a large store, so check kinfold status in a minute')
 }
 
 async function stopDaemon(ctx: Context): Promise<Daemon> {

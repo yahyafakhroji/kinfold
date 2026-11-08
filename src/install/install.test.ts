@@ -168,3 +168,11 @@ test('the data dir permission fix reports each path with its old and new mode', 
   expect(statSync(join(w.dataDir, 'memory.db')).mode & 0o777).toBe(0o600)
   expect(statSync(join(w.dataDir, 'spool')).mode & 0o777).toBe(0o700)
 })
+
+test('the non-macOS line names the program', async () => {
+  const w = both({ opencodeVersion: undefined, keychainRefs: [] })
+  await install({ ...w.env, platform: 'linux' }, YES)
+  const line = w.out.find((l) => l.startsWith('LaunchAgent: macOS only'))
+  expect(line).toBe(`LaunchAgent: macOS only; start the daemon yourself with: ${BUN} ${join(w.projectRoot, 'src/daemon/main.ts')}`)
+  expect(line).not.toContain('bun run daemon')
+})

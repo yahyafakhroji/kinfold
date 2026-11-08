@@ -12,10 +12,16 @@ import type { ObserverSettingsView } from '../daemon/settings-route'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import { DAEMON_INFO_FILE } from '../store/data-dir'
 import type { InstallEnv } from './env'
+import type { ServiceControl } from './service/control'
 
 const HEALTH_TIMEOUT_MS = 1_000
 const REQUEST_TIMEOUT_MS = 5_000
 const HEALTH_POLL_MS = 250
+const RUNNING_CHECK_MS = 1_000
+
+/** A large store keeps a started daemon from answering while it drains the spool, runs observers and rebuilds packs. */
+export const START_WAIT_MS = 180_000
+export const START_PROGRESS_MS = 15_000
 
 export interface DaemonInfoFile {
   pid: number | null
@@ -63,6 +69,44 @@ export async function waitForHealth(env: InstallEnv, wantUp: boolean, timeoutMs:
     const health = await checkHealth(env, readDaemonInfo(env.dataDir).port)
     if (health.up === wantUp) return true
     if (env.now() >= deadline) return false
+    await env.sleep(HEALTH_POLL_MS)
+  }
+}
+
+export type StartWait = { ok: true; waitedMs: number } | { ok: false; reason: 'timeout' | 'not-running' }
+
+async function serviceStopped(service: ServiceControl | null): Promise<boolean> {
+  if (service === null) return false
+  try {
+    return !(await service.isRunning())
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Waits for /health after a start. A progress line every START_PROGRESS_MS says
+ * what the daemon is busy with. The wait ends early when the OS no longer has
+ * the service loaded, since nothing will answer then; the timeout stays as the
+ * backstop for a service that stays loaded but keeps exiting.
+ */
+export async function waitForStart(env: InstallEnv, service: ServiceControl | null, timeoutMs: number = START_WAIT_MS): Promise<StartWait> {
+  const startedAt = env.now()
+  let nextProgress = START_PROGRESS_MS
+  let nextRunningCheck = RUNNING_CHECK_MS
+  for (;;) {
+    const waitedMs = env.now() - startedAt
+    const health = await checkHealth(env, readDaemonInfo(env.dataDir).port)
+    if (health.up) return { ok: true, waitedMs: env.now() - startedAt }
+    if (waitedMs >= timeoutMs) return { ok: false, reason: 'timeout' }
+    if (waitedMs >= nextRunningCheck) {
+      nextRunningCheck = waitedMs + RUNNING_CHECK_MS
+      if (await serviceStopped(service)) return { ok: false, reason: 'not-running' }
+    }
+    if (waitedMs >= nextProgress) {
+      env.out(`still waiting for the daemon (${Math.floor(waitedMs / 1000)} s): it opens memory.db and reads the spool before it answers`)
+      nextProgress += START_PROGRESS_MS
+    }
     await env.sleep(HEALTH_POLL_MS)
   }
 }

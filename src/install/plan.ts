@@ -10,7 +10,7 @@ import { HMAC_LEGACY_REF } from '../secrets/hmac-keys'
 import { credentialWriterFor } from '../secrets/keychain-writer'
 import type { EmbeddedAssets } from '../runtime/embedded'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
-import { putObserverSettings, waitForHealth } from './daemon-client'
+import { START_WAIT_MS, putObserverSettings, waitForHealth, waitForStart } from './daemon-client'
 import { createDbKey, describeCreateDbKey } from './db-encryption'
 import { type InstallEnv, installPaths } from './env'
 import { writeBackup, writeFileAtomic } from './files'
@@ -99,7 +99,7 @@ export function describeAction(action: Action): string {
     case 'command': return `${action.summary}: ${action.argv.join(' ')}`
     case 'claude-mcp-replace': return `replace the Kinfold MCP server entry in Claude Code (user scope), putting the old one back if the new one fails: ${CLAUDE_MCP_REMOVE_ARGV.join(' ')}, then ${claudeAddArgv(action.next).join(' ')}`
     case 'wait-takeover': return `wait up to ${TAKEOVER_WAIT_MS / 1000} s for the running daemon on port ${action.port} to stop (you stop it: ${stopCommand(action.pid, action.port)})`
-    case 'wait-health': return `wait up to ${HEALTH_WAIT_MS / 1000} s for GET /health`
+    case 'wait-health': return `wait up to ${START_WAIT_MS / 1000} s for GET /health (a large store takes a while to open)`
     case 'settings-put': {
       const { host, provider, model, credentialRef } = action.input
       return `PUT /observer/settings host=${host} provider=${provider} model=${model} credentialRef=${credentialRef ?? 'none'}`
@@ -179,6 +179,17 @@ async function waitFor(env: InstallEnv, wantUp: boolean, timeoutMs: number, fail
   if (!(await waitForHealth(env, wantUp, timeoutMs))) throw new Error(failure)
 }
 
+async function waitForDaemonStart(env: InstallEnv): Promise<void> {
+  // Loaded on use: the service module imports this one for HEALTH_WAIT_MS at its top level.
+  const { serviceOf } = await import('./service/control')
+  const service = serviceOf(env)
+  const result = await waitForStart(env, service)
+  if (result.ok) return
+  const logFile = installPaths(env).logFile
+  if (result.reason === 'not-running') throw new Error(`the ${service?.label ?? 'service'} stopped running before the daemon answered /health; the log is ${logFile}`)
+  throw new Error(`the daemon did not answer /health within ${START_WAIT_MS / 1000} s; it may still be opening a large store. Run kinfold status in a minute; the log is ${logFile}`)
+}
+
 function touch(path: string, mode: number): void {
   closeSync(openSync(path, 'a', mode))
   chmodSync(path, mode)
@@ -198,7 +209,7 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'wait-takeover':
       env.out(`waiting for you to stop the running daemon: ${stopCommand(action.pid, action.port)}`)
       return waitFor(env, false, TAKEOVER_WAIT_MS, `the daemon on port ${action.port} is still running; nothing after this step ran`)
-    case 'wait-health': return waitFor(env, true, HEALTH_WAIT_MS, `the daemon did not answer /health; see ${installPaths(env).logFile}`)
+    case 'wait-health': return waitForDaemonStart(env)
     case 'settings-put': return putObserverSettings(env, action.input)
     case 'keychain-put': return writer(env).put(action.ref, action.value)
     case 'keychain-delete': return void writer(env).remove(action.ref)

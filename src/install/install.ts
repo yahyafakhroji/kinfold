@@ -134,6 +134,11 @@ function claudeActions(env: InstallEnv): Action[] {
   ]
 }
 
+function daemonCommandLine(env: InstallEnv): string {
+  const entry = entryCommand(env.mode, 'daemon', env.dataDir)
+  return [entry.command, ...entry.args].join(' ')
+}
+
 /**
  * `restart`: a loaded daemon is reloaded even with an unchanged plist, so it
  * reads a new HMAC master. An unchanged plist plans no write, but a loaded
@@ -144,7 +149,7 @@ function claudeActions(env: InstallEnv): Action[] {
  */
 function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeover: boolean, restart: boolean): Action[] {
   if (env.platform !== 'darwin') {
-    env.out('LaunchAgent: macOS only; start the daemon yourself with `bun run daemon`')
+    env.out(`LaunchAgent: macOS only; start the daemon yourself with: ${daemonCommandLine(env)}`)
     return [{ kind: 'wait-health' }]
   }
   const paths = installPaths(env)

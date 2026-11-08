@@ -308,7 +308,8 @@ test('encrypt stops and starts through the service', async () => {
   const { w, env } = world(null)
   const service = fakeService()
   expect(await runKeyCommand({ ...env, service }, 'encrypt')).toBe(EXIT_OK)
-  expect(service.calls).toEqual(['isRunning', 'stop', 'start'])
+  // After the start, the wait polls isRunning while nothing answers /health.
+  expect(service.calls.slice(0, 3)).toEqual(['isRunning', 'stop', 'start'])
   expect(w.commands.filter((c) => c.argv[0] === LAUNCHCTL || c.argv[0] === LSOF)).toEqual([])
 })
 
@@ -339,7 +340,7 @@ test('a service that fails to stop is started again and the store and marker are
   const { w, env, path } = world(null)
   const service = fakeService({ stopError: new Error('still loaded') })
   expect(await runKeyCommand({ ...env, service }, 'encrypt')).toBe(EXIT_FAILED)
-  expect(service.calls.at(-1)).toBe('start')
+  expect(service.calls.filter((call) => call !== 'isRunning').at(-1)).toBe('start')
   expect(w.out.join('\n')).toContain('did not stop (still loaded); it was started again; nothing was changed')
   expect(fileState(path)).toBe('plain')
   expect(existsSync(maintenancePath(path))).toBe(false)
