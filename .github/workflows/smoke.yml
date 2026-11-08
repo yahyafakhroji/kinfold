@@ -73,13 +73,11 @@ jobs:
         run: |
           keychain="$RUNNER_TEMP/kinfold-smoke.keychain-db"
           original="$(security default-keychain -d user | tr -d '"' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-          original_login="$(security login-keychain 2>/dev/null | tr -d '"' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
           password="$(openssl rand -hex 24)"
           echo "::add-mask::$password"
           {
             echo "KINFOLD_SMOKE_KEYCHAIN=$keychain"
             echo "KINFOLD_SMOKE_ORIGINAL_KEYCHAIN=$original"
-            echo "KINFOLD_SMOKE_ORIGINAL_LOGIN_KEYCHAIN=$original_login"
             echo "KINFOLD_SMOKE_KEYCHAIN_PASSWORD=$password"
           } >> "$GITHUB_ENV"
           security create-keychain -p "$password" "$keychain"
@@ -87,7 +85,6 @@ jobs:
           security unlock-keychain -p "$password" "$keychain"
           security default-keychain -s "$keychain"
           security list-keychains -d user -s "$keychain"
-          security login-keychain -s "$keychain" || { echo "could not make the throwaway the login keychain"; exit 1; }
 
       - name: Smoke the built program
         timeout-minutes: 25
@@ -103,9 +100,6 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [ -n "${KINFOLD_SMOKE_ORIGINAL_LOGIN_KEYCHAIN:-}" ]; then
-            security login-keychain -s "$KINFOLD_SMOKE_ORIGINAL_LOGIN_KEYCHAIN" || true
-          fi
           if [ -n "${KINFOLD_SMOKE_ORIGINAL_KEYCHAIN:-}" ]; then
             security default-keychain -s "$KINFOLD_SMOKE_ORIGINAL_KEYCHAIN" || true
             security list-keychains -d user -s "$KINFOLD_SMOKE_ORIGINAL_KEYCHAIN" || true
