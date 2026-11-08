@@ -29,6 +29,9 @@ jobs:
           bun-version-file: .bun-version
 
       - name: Build sqlite3mc
+        env:
+          # Lets the API asset fallback authenticate; anonymous calls hit a shared rate limit.
+          GH_TOKEN: ${{ github.token }}
         run: bun tools/build-sqlite3mc.ts
 
       - name: Compile the driver check

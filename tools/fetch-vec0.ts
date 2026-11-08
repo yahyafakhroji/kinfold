@@ -26,7 +26,7 @@ if (asset === null) {
 }
 
 if (asset.apiUrl === undefined) throw new Error(`no API asset URL is pinned for ${asset.member}`)
-const tarball = await downloadPinned({ label: 'sqlite-vec', releaseUrl: asset.url, apiUrl: asset.apiUrl, sha256: asset.tarballSha256, maxBytes: MAX_VEC0_TARBALL_BYTES, timeoutMs: DOWNLOAD_TIMEOUT_MS })
+const tarball = await downloadPinned({ label: 'sqlite-vec', releaseUrl: asset.url, apiUrl: asset.apiUrl, sha256: asset.tarballSha256, maxBytes: MAX_VEC0_TARBALL_BYTES, timeoutMs: DOWNLOAD_TIMEOUT_MS, token: process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN })
 const member = tarMember(Bun.gunzipSync(tarball), asset.member)
 if (member === null) throw new Error(`the sqlite-vec tarball has no ${asset.member}; nothing was written`)
 if (sha256(member) !== asset.fileSha256) throw new Error(`${asset.member} does not match the pinned sha256; nothing was written`)

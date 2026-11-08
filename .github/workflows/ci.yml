@@ -35,6 +35,9 @@ jobs:
 
       - name: Build sqlite3mc for the test preload
         timeout-minutes: 8
+        env:
+          # Lets the API asset fallback authenticate; anonymous calls hit a shared rate limit.
+          GH_TOKEN: ${{ github.token }}
         run: bun tools/build-sqlite3mc.ts
 
       # Fetches the pinned build for the runner's platform and exports
@@ -42,6 +45,9 @@ jobs:
       # extension instead of skipping. Every Kinfold target has a pinned build.
       - name: Fetch the pinned sqlite-vec build
         timeout-minutes: 3
+        env:
+          # Lets the API asset fallback authenticate; anonymous calls hit a shared rate limit.
+          GH_TOKEN: ${{ github.token }}
         run: bun tools/fetch-vec0.ts
 
       # 20 s per test: the 5 s default trips timing-sensitive daemon tests on

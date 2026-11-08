@@ -18,7 +18,7 @@ function fakeFetch(replies: Record<string, Reply>) {
   }) as unknown as typeof fetch
   return { impl, calls }
 }
-const download = (impl: typeof fetch) => downloadPinned({ label: 'test asset', releaseUrl: RELEASE, apiUrl: API, sha256: sha, maxBytes: 1000, fetch: impl })
+const download = (impl: typeof fetch, token?: string) => downloadPinned({ label: 'test asset', releaseUrl: RELEASE, apiUrl: API, sha256: sha, maxBytes: 1000, fetch: impl, token })
 
 test('takes the release URL when it answers', async () => {
   const { impl, calls } = fakeFetch({ [RELEASE]: new Response(GOOD) })
@@ -71,4 +71,16 @@ test('names both failures when both URLs fail', async () => {
 test('rejects an oversized download', async () => {
   const { impl } = fakeFetch({ [RELEASE]: new Response(new Uint8Array(2000)) })
   await expect(download(impl)).rejects.toThrow('far larger')
+})
+
+test('sends the token to the API asset URL and never to the release URL', async () => {
+  const warn = spyOn(console, 'warn').mockImplementation(() => {})
+  const auth: (string | null)[] = []
+  const impl = (async (url: string, init?: RequestInit) => {
+    auth.push(new Headers(init?.headers).get('authorization'))
+    return url === RELEASE ? new Response('', { status: 504 }) : new Response(GOOD)
+  }) as unknown as typeof fetch
+  await download(impl, 'tok')
+  expect(auth).toEqual([null, 'Bearer tok'])
+  warn.mockRestore()
 })

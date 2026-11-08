@@ -15,7 +15,7 @@ if (extension === null) throw new Error(`no local build for ${process.platform}`
 const zipPath = process.argv[2]
 const zip = zipPath !== undefined
   ? new Uint8Array(readFileSync(zipPath))
-  : await downloadPinned({ label: 'sqlite3mc', releaseUrl: SQLITE3MC_ZIP_URL, apiUrl: SQLITE3MC_ZIP_API_URL, sha256: SQLITE3MC_ZIP_SHA256, maxBytes: MAX_SQLITE3MC_ZIP_BYTES })
+  : await downloadPinned({ label: 'sqlite3mc', releaseUrl: SQLITE3MC_ZIP_URL, apiUrl: SQLITE3MC_ZIP_API_URL, sha256: SQLITE3MC_ZIP_SHA256, maxBytes: MAX_SQLITE3MC_ZIP_BYTES, token: process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN })
 const output = join(TEST_LIBRARY_DIR, `libsqlite3mc.${extension}`)
 mkdirSync(TEST_LIBRARY_DIR, { recursive: true, mode: 0o700 })
 const workDir = join(TEST_LIBRARY_DIR, `build-${process.pid}`)

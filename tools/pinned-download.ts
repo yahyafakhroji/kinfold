@@ -14,6 +14,8 @@ export interface PinnedDownload {
   maxBytes: number
   fetch?: typeof fetch
   timeoutMs?: number
+  /** Sent to the API asset URL only; anonymous API calls share a rate limit and answer 403. */
+  token?: string
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000
@@ -49,7 +51,7 @@ export async function downloadPinned(input: PinnedDownload): Promise<Uint8Array<
   }
   console.warn(`${input.label}: the release URL ${releaseFailure}; trying the API asset URL`)
   try {
-    return check(await fetchOnce(input.apiUrl, { Accept: 'application/octet-stream' }, input), input)
+    return check(await fetchOnce(input.apiUrl, { Accept: 'application/octet-stream', ...(input.token ? { Authorization: `Bearer ${input.token}` } : {}) }, input), input)
   } catch (error) {
     if (error instanceof Unavailable) throw new Error(`the ${input.label} download failed on both URLs (release URL ${releaseFailure}; API asset URL ${error.message}); nothing was written`)
     throw wrap(error, input.label, 'API asset URL')

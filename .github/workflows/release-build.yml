@@ -89,10 +89,16 @@ jobs:
 
       - name: Build sqlite3mc for this target
         timeout-minutes: 10
+        env:
+          # Lets the API asset fallback authenticate; anonymous calls hit a shared rate limit.
+          GH_TOKEN: ${{ github.token }}
         run: bun tools/build-sqlite3mc.ts
 
       - name: Download the pinned sqlite-vec member
         timeout-minutes: 3
+        env:
+          # Lets the API asset fallback authenticate; anonymous calls hit a shared rate limit.
+          GH_TOKEN: ${{ github.token }}
         run: bun tools/fetch-vec0.ts
 
       - name: Build the program
