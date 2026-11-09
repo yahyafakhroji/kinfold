@@ -88,6 +88,8 @@ export interface InstallEnv {
   applicationsDirs?: readonly string[]
   /** The background service; default serviceFor(env). null: this platform has none. Tests inject a fake. */
   service?: ServiceControl | null
+  /** Whether 127.0.0.1:<port> can be bound; default binds it and lets go at once. A port our own daemon holds counts as free whatever this says. */
+  portFree?: (port: number) => Promise<boolean>
   /** The installer's own environment variables, for the SAM_* deprecation checks; default none. Never printed. */
   envVars?: Readonly<Record<string, string | undefined>>
 }
