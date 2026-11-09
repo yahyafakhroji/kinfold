@@ -143,7 +143,9 @@ test('uninstall stops and removes the service config through the service', async
 })
 
 test('uninstall names what it had to leave behind and still exits 0', async () => {
-  const w = await installed()
+  // Only the bin folder is needed, so no install runs first.
+  const w = createWorld({ opencodeVersion: undefined, keychainRefs: [] })
+  world = w
   const bin = join(w.dataDir, 'bin')
   mkdirSync(bin, { recursive: true })
   w.out.length = 0

@@ -13,6 +13,7 @@ import type { ServiceControl } from './service/control'
 import { LaunchAgentService } from './service/launch-agent-service'
 import { PROGRAM_MODE, installProgram, parseSha256Sums, programInstallActions, releaseAssetName, releaseSumsUrl, verifyProgram } from './self-install'
 import { posixProgramFiles } from './program-files'
+import { currentPlatform } from '../platform/platform'
 import { type FakeWorld, YES, countingService, createWorld, fakeService, snapshotTree, startWorldDaemon } from './test-support'
 import { uninstall } from './uninstall'
 
@@ -475,9 +476,10 @@ test('the program is replaced through the platform\'s program files', async () =
   await installProgram(env, { kind: 'install-program', from: source, to: winBin, assetName: null, expectedSha256, check: false })
   expect(replaced).toEqual([[join(w.dataDir, 'bin', `.kinfold-tmp-${process.pid}`), winBin]])
 
+  // A darwin world on a Windows runner cannot fsync a folder, and its modes are not POSIX ones.
   const darwinBin = installedProgramPath(w.dataDir, 'darwin')
-  await installProgram(w.env, { kind: 'install-program', from: source, to: darwinBin, assetName: null, expectedSha256, check: false })
+  await installProgram({ ...w.env, fsyncDir: () => {} }, { kind: 'install-program', from: source, to: darwinBin, assetName: null, expectedSha256, check: false })
   expect(readFileSync(darwinBin, 'utf8')).toBe('kinfold program v1\n')
-  expect(statSync(darwinBin).mode & 0o777).toBe(PROGRAM_MODE)
+  if (currentPlatform().os !== 'windows') expect(statSync(darwinBin).mode & 0o777).toBe(PROGRAM_MODE)
   expect(readdirSync(join(w.dataDir, 'bin')).sort()).toEqual(['kinfold', 'kinfold.exe'])
 })
