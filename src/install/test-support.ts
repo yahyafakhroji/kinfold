@@ -267,6 +267,8 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
     runnerFor: (settings) => (world.checks.push(settings), (options.runner ?? (() => okRunner))(settings)),
     cliRunnerFor: (settings) => (world.checks.push(settings), (options.cliRunner ?? (() => okCliRunner))(settings)),
     applicationsDirs: [join(root, 'Applications')],
+    // Never binds a real port: 37811 may be the live daemon's on this machine.
+    portFree: async () => true,
   }
   if (options.withLibrary ?? true) placeBuiltLibrary(world.dataDir, world.env.platform)
   world.cleanup = async () => {

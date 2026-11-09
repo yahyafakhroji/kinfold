@@ -11,7 +11,7 @@ import { credentialWriterFor } from '../secrets/keychain-writer'
 import type { EmbeddedAssets } from '../runtime/embedded'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import { START_WAIT_MS, putObserverSettings, waitForHealth, waitForStart } from './daemon-client'
-import { createDbKey, describeCreateDbKey } from './db-encryption'
+import { createDbKey, createPlainStore, describeCreateDbKey, describeCreatePlainStore } from './db-encryption'
 import { type InstallEnv, installPaths } from './env'
 import { writeBackup, writeFileAtomic } from './files'
 import { BACKUP_REMOVAL_SUMMARY, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
@@ -63,8 +63,13 @@ export type Action =
   | { kind: 'install-sqlite3mc-embedded'; path: string; asset: EmbeddedAssets['sqlite3mc'] }
   /** The running program copied to <dataDir>/bin, after its release checksum was checked. */
   | { kind: 'install-program'; from: string; to: string; assetName: string | null; expectedSha256: string | null; check: boolean }
-  /** db-key for a store the daemon has yet to create, made at run time and added without replacing any entry. */
-  | { kind: 'create-db-key'; path: string }
+  /**
+   * db-key for a store the daemon has yet to create, added without replacing any entry: made at run time,
+   * or `key`, the one whose recovery code was shown (it prints as <hidden>).
+   */
+  | { kind: 'create-db-key'; path: string; key?: string }
+  /** --no-encrypt on a new store: an empty plaintext store, made before the daemon could create it encrypted. */
+  | { kind: 'create-plain-store'; path: string }
   /** Rename migration: bootout dev.shared-agent-memory.daemon when launchd has it loaded. */
   | { kind: 'stop-legacy-agent'; uid: number }
   /** Rename migration: stops here while any daemon answers /health; it would keep writing to the store being moved. */
@@ -118,7 +123,8 @@ export function describeAction(action: Action): string {
       const check = action.check ? ` after checking ${action.assetName ?? 'it'} against SHA256SUMS` : ' (checksum check skipped for the development version)'
       return `install program ${action.to} from ${action.from}${check}`
     }
-    case 'create-db-key': return describeCreateDbKey(action.path)
+    case 'create-db-key': return describeCreateDbKey(action.path, action.key)
+    case 'create-plain-store': return describeCreatePlainStore(action.path)
     case 'stop-legacy-agent': return `${legacyBootoutArgv(action.uid).join(' ')} (if loaded): stop the daemon installed under the old name`
     case 'migration-daemon-down': return `check that no daemon answers /health on port ${action.port}, waiting up to ${action.waitMs / 1000} s (one still running must be stopped first; nothing is moved while it runs)`
     case 'copy-keychain-entry': return describeCopyKeychainEntry(action.ref)
@@ -224,7 +230,8 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'install-sqlite3mc': return installSqlite3mc(env, action.path)
     case 'install-sqlite3mc-embedded': return installEmbeddedSqlite3mc(env, action.path, action.asset)
     case 'install-program': return installProgram(env, action)
-    case 'create-db-key': return createDbKey(env, action.path)
+    case 'create-db-key': return createDbKey(env, action.path, action.key)
+    case 'create-plain-store': return createPlainStore(env, action.path)
     case 'stop-legacy-agent': return stopLegacyAgent(env)
     case 'migration-daemon-down': return checkDaemonDown(env, action.port, action.waitMs)
     case 'copy-keychain-entry': return copyKeychainEntry(env, action.ref)

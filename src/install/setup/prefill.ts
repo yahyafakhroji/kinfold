@@ -8,6 +8,7 @@
 
 import { existsSync, realpathSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { DEFAULT_PORT } from '../../daemon/daemon'
 import { OBSERVER_PROVIDERS } from '../../observer/types'
 import { DB_KEY_REF } from '../../secrets/credentials'
 import { createKeychainProvider } from '../../secrets/keychain'
@@ -147,7 +148,8 @@ export async function readSetupState(env: InstallEnv): Promise<SetupState> {
     observers: observers.map,
     observersError: observers.error,
     encryption: ({ plain: 'off', encrypted: 'on', new: 'new' } as const)[fileState(join(dataDir, DB_FILE))],
-    port: service?.configuredPort() ?? readDaemonInfo(dataDir).port,
+    // A configured service without the port key runs the daemon on its default port.
+    port: service !== null && service.isConfigured() ? (service.configuredPort() ?? DEFAULT_PORT) : readDaemonInfo(dataDir).port,
     updateCheck: record?.updateCheck ?? true,
     channel: currentChannel(env, record),
     firstInstalledAt: record?.firstInstalledAt ?? null,

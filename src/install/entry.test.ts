@@ -4,6 +4,7 @@ import { inspectSamHooks, mergeSamHooks } from './claude-hooks'
 import { entryCommand, entryIdentity, entryRole, installedProgramPath, isCompiledProgram, isOurEntry } from './entry'
 import { serializeJson } from './files'
 import { samCommand, samCommandScript } from './host-hooks'
+import { DEFAULT_PORT } from '../daemon/daemon'
 import { plistContent } from './launch-agent'
 import { MCP_SERVER_NAME, claudeMcpEntry, inspectMcpEntry, openCodeMcpEntry } from './mcp-config'
 
@@ -98,7 +99,7 @@ describe('a data folder with spaces', () => {
     const opencode = JSON.parse(serializeJson({ mcp: { [MCP_SERVER_NAME]: openCodeMcpEntry({ entry: mcp }) } }, null))
     expect(inspectMcpEntry(opencode, 'opencode', { entry: mcp })).toBe('yes')
 
-    const plist = plistContent({ mode, dataDir: DATA_DIR, homeDir: HOME, pathEnv: '/usr/bin:/bin' })
+    const plist = plistContent({ mode, dataDir: DATA_DIR, homeDir: HOME, pathEnv: '/usr/bin:/bin' }, DEFAULT_PORT)
     expect(plist).toContain(`<array><string>${PROGRAM}</string><string>--data-dir</string><string>${DATA_DIR}</string><string>daemon</string></array>`)
     expect(plist).toContain(`<key>KINFOLD_DATA_DIR</key><string>${DATA_DIR}</string>`)
 

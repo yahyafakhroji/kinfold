@@ -243,6 +243,8 @@ test('the move plans no key, data folder or database action, and a real move app
     expect(line).not.toMatch(/hmac-legacy|hmac-master/)
     expect(line).not.toMatch(/move .* -> /)
     expect(line).not.toMatch(/^  \d+\. chmod <dataDir>/)
+    // install.json records how this copy was installed, so moving from the checkout to the program rewrites it.
+    if (line.includes(`${w.dataDir}/install.json:`)) continue
     if (/^  \d+\. (mkdir|create|touch|write|remove|backup|chmod|move|link) /.test(line)) expect(line).not.toContain(w.dataDir)
   }
   expect(keychainWrites(w.securityCalls, securityCalls)).toEqual([])
@@ -260,7 +262,7 @@ test('the move plans no key, data folder or database action, and a real move app
   // keeps its bytes and mode, none appears or disappears, and the store file
   // itself is the same file rather than a new one.
   const dataAfter = snapshotTree(w.dataDir)
-  const runtime = new Set([DAEMON_INFO_FILE, DB_FILE, `${DB_FILE}-shm`, `${DB_FILE}-wal`])
+  const runtime = new Set([DAEMON_INFO_FILE, DB_FILE, `${DB_FILE}-shm`, `${DB_FILE}-wal`, 'install.json'])
   const outsideBin = Object.keys({ ...dataBefore, ...dataAfter }).filter((path) => path !== '.' && path !== 'bin' && !path.startsWith('bin/'))
   expect(outsideBin.filter((path) => dataAfter[path] === undefined)).toEqual([])
   for (const path of outsideBin) {

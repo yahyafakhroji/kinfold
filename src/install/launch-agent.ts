@@ -7,6 +7,7 @@
 // `#!/usr/bin/env node` shebang runs on) and `opencode`.
 
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
+import { DEFAULT_PORT } from '../daemon/daemon'
 import { envName } from '../env-names'
 import { LEGACY_LAUNCH_AGENT_LABEL } from '../names'
 import { type InstallEnv, LAUNCH_AGENT_LABEL, installPaths } from './env'
@@ -53,9 +54,15 @@ export function launchdPath(env: { bunPath: string; pathEnv: string }, which: Wh
   return [...new Set(entries.filter((entry) => entry !== '' && isAbsolute(entry)))].join(delimiter)
 }
 
-export function plistContent(env: Pick<InstallEnv, 'mode' | 'pathEnv' | 'homeDir' | 'dataDir'>): string {
+/**
+ * The port goes in only when it is not the default, so an install that keeps
+ * 37811 writes the same plist it always did; a changed port changes the file,
+ * and the install's reload of a changed plist restarts the daemon on it.
+ */
+export function plistContent(env: Pick<InstallEnv, 'mode' | 'pathEnv' | 'homeDir' | 'dataDir'>, port: number): string {
   const daemon = entryCommand(env.mode, 'daemon', env.dataDir)
   const logFile = join(env.dataDir, 'logs', 'daemon.log')
+  const portEntry = port === DEFAULT_PORT ? [] : [`    <key>${envName('PORT')}</key>${str(String(port))}`]
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -76,6 +83,7 @@ export function plistContent(env: Pick<InstallEnv, 'mode' | 'pathEnv' | 'homeDir
     `    <key>${envName('DATA_DIR')}</key>${str(env.dataDir)}`,
     `    <key>PATH</key>${str(launchdPath({ bunPath: daemon.command, pathEnv: env.pathEnv }))}`,
     `    <key>HOME</key>${str(env.homeDir)}`,
+    ...portEntry,
     '  </dict>',
     '</dict>',
     '</plist>',

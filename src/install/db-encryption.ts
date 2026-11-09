@@ -7,15 +7,19 @@
 // spool, logs and host transcripts sit outside memory.db.
 
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { DB_KEY_NEXT_REF, DB_KEY_REF, KEYCHAIN_SERVICE } from '../secrets/credentials'
+import { createKeychainProvider } from '../secrets/keychain'
 import { credentialWriterFor } from '../secrets/keychain-writer'
-import { newDbKey } from '../sqlite/keys'
+import { NO_DB_KEYS, newDbKey } from '../sqlite/keys'
 import { foundBackupPath } from '../sqlite/convert'
 import { fileState, maintenancePath } from '../sqlite/open'
 import { DB_FILE } from '../store/data-dir'
+import { openStore } from '../store/db'
 import { type InstallEnv, errorMessage } from './env'
+import { ChoiceError } from './observer-choice'
 import type { Action } from './plan'
+import type { EncryptionAnswer } from './setup/wizard'
 
 export const FDESETUP = '/usr/bin/fdesetup'
 
@@ -41,23 +45,102 @@ export function dbKeyActions(env: InstallEnv): Action[] {
   return [{ kind: 'create-db-key', path }]
 }
 
-export function describeCreateDbKey(path: string): string {
+export const DB_KEY_MISMATCH = `the Keychain already holds ${DB_KEY_REF}, so the recovery code shown does not open this store; run kinfold key show-recovery`
+export const STALE_DB_KEY =
+  'the Keychain already holds a database key (db-key) that no memory.db uses, and its recovery code cannot be recomputed; run kinfold key show-recovery to look at it before installing'
+
+const HEX_KEY = /^[0-9a-f]{64}$/
+
+export type StoredDbKey = { kind: 'none' } | { kind: 'usable'; key: string } | { kind: 'unreadable' }
+
+/** The db-key already in the Keychain, if any; its recovery code can be recomputed only from a well-formed key. */
+export function storedDbKey(env: InstallEnv): StoredDbKey {
+  try {
+    const writer = credentialWriterFor(env.platform, env.security)
+    if (writer === null || !writer.exists(DB_KEY_REF)) return { kind: 'none' }
+    const value = createKeychainProvider((args) => env.security({ args })).get(DB_KEY_REF)
+    return value !== null && HEX_KEY.test(value) ? { kind: 'usable', key: value } : { kind: 'unreadable' }
+  } catch {
+    return { kind: 'unreadable' }
+  }
+}
+
+/**
+ * The store's key as the setup answered it. A new encrypted store takes the
+ * key whose code was shown, or under --yes a key made at run time; a usable
+ * db-key already in the Keychain is used again rather than replaced, since
+ * a second key would orphan whatever it opens. A new plaintext store is
+ * created before the daemon starts, because the daemon creates a missing
+ * store encrypted wherever a key store exists. An existing store keeps its
+ * key here; the encrypt and decrypt flows change it after the plan.
+ */
+export function setupDbKeyActions(env: InstallEnv, encryption: EncryptionAnswer): Action[] {
+  if (encryption.kind === 'keep') return dbKeyActions(env)
+  if (encryption.kind === 'encrypt-existing' || encryption.kind === 'decrypt-existing') return []
+  const path = join(env.dataDir, DB_FILE)
+  if (fileState(path) !== 'new') return dbKeyActions(env)
+  if (credentialWriterFor(env.platform, env.security) === null) return dbKeyActions(env)
+  if (encryption.kind === 'new-plain') {
+    env.out('database: the new store is created plaintext (--no-encrypt)')
+    return [{ kind: 'create-plain-store', path }]
+  }
+  const stored = storedDbKey(env)
+  if (encryption.key === null) {
+    if (stored.kind === 'unreadable') throw new ChoiceError(STALE_DB_KEY)
+    if (stored.kind === 'usable') {
+      env.out(`database: keychain entry ${DB_KEY_REF} found; the new store is created encrypted with it`)
+      return []
+    }
+    env.out('database: the new store is created encrypted; its key goes in the Keychain')
+    return [{ kind: 'create-db-key', path }]
+  }
+  if (stored.kind === 'usable' && stored.key === encryption.key) {
+    env.out(`database: keychain entry ${DB_KEY_REF} found; the new store is created encrypted with it`)
+    return []
+  }
+  env.out('database: the new store is created encrypted with the key whose recovery code you confirmed')
+  return [{ kind: 'create-db-key', path, key: encryption.key }]
+}
+
+export function describeCreateDbKey(path: string, key?: string): string {
+  if (key !== undefined) return `keychain: create ${DB_KEY_REF} (<hidden>, the key whose recovery code was shown) for the new store ${path}; stops if another entry is there`
   return `keychain: create ${DB_KEY_REF} (32 random bytes, never shown) for the new store ${path}, unless an entry exists already`
 }
 
 /**
  * Run time, not plan time: the store must still be new (downloads ran in
  * between), and the add never replaces an entry, so a key that some store
- * already uses is never lost.
+ * already uses is never lost. A given key is one whose recovery code was
+ * shown; an entry already there under another key makes that code useless,
+ * so the step fails before the daemon can create the store under it.
  */
-export function createDbKey(env: InstallEnv, path: string): void {
+export function createDbKey(env: InstallEnv, path: string, key?: string): void {
   if (fileState(path) !== 'new') {
     env.out(`database: ${path} appeared while install ran; no key was created`)
     return
   }
   const writer = credentialWriterFor(env.platform, env.security)
   if (writer === null) throw new Error(`no key store on ${env.platform}`)
-  if (!writer.create(DB_KEY_REF, newDbKey())) env.out(`database: keychain entry ${DB_KEY_REF} exists already; kept it`)
+  if (key === undefined) {
+    if (!writer.create(DB_KEY_REF, newDbKey())) env.out(`database: keychain entry ${DB_KEY_REF} exists already; kept it`)
+    return
+  }
+  if (writer.create(DB_KEY_REF, key)) return
+  const stored = storedDbKey(env)
+  if (stored.kind !== 'usable' || stored.key !== key) throw new Error(DB_KEY_MISMATCH)
+}
+
+export function describeCreatePlainStore(path: string): string {
+  return `create ${path} as a plaintext store (mode 0600), so the daemon does not create it encrypted`
+}
+
+/** Run time: only while the store is still missing; one that appeared meanwhile is left as it is. */
+export function createPlainStore(env: InstallEnv, path: string): void {
+  if (fileState(path) !== 'new') {
+    env.out(`database: ${path} appeared while install ran; left as it is`)
+    return
+  }
+  openStore(dirname(path), { keys: NO_DB_KEYS }).db.close()
 }
 
 function keyPresence(env: InstallEnv): string {

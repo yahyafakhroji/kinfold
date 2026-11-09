@@ -1,8 +1,8 @@
-// `kinfold install`: detect the hosts, choose and check each observer, then build
-// one plan (data dir modes, the HMAC key migration, the pinned
-// sqlite-vec build, keychain, Claude Code hooks, the OpenCode shim,
-// the LaunchAgent, settings through the daemon)
-// and print or apply it. A daemon
+// `kinfold install`: read the machine as it is, ask the setup questions (or take
+// the flags and saved values), then build one plan from the answers (data dir
+// modes, the HMAC key migration, the pinned sqlite-vec build, keychain, the
+// agents' wiring and unwiring, the LaunchAgent, settings through the daemon,
+// install.json) and print or apply it (setup/apply.ts). A daemon
 // that answers /health but was not started by our LaunchAgent stops the
 // install before anything changes, so there are never two writers; under
 // --takeover the install waits for the user to stop it and never kills it.
@@ -10,30 +10,38 @@
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { deprecationLines, envName, legacyName, readEnv } from '../env-names'
+import { DEFAULT_PORT } from '../daemon/daemon'
 import { LEGACY_LAUNCH_AGENT_LABEL } from '../names'
 import type { EmbeddedAssets } from '../runtime/embedded'
 import { DAEMON_INFO_FILE, DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
 import type { ObserverSettingsInput, ObserverSettingsRow } from '../store/observer-settings-store'
 import { mergeSamHooks } from './claude-hooks'
 import { type Health, checkHealth, getObserverSettings, readDaemonInfo, waitForStart } from './daemon-client'
-import { dbKeyActions } from './db-encryption'
+import { setupDbKeyActions } from './db-encryption'
 import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
 import { type InstallEnv, errorMessage, installPaths } from './env'
 import { entryCommand } from './entry'
 import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import { bootoutArgv, bootstrapArgv, isAgentLoaded, legacyPrintArgv, plistContent } from './launch-agent'
-import { ChoiceError, type ChoiceOptions, type ObserverChoice, chooseObservers, describeInput } from './observer-choice'
+import { ChoiceError, type ChoiceOptions, type ObserverChoice } from './observer-choice'
 import { hmacMigrationActions } from './hmac-migration'
 import { hostHookInstallActions, hostVersionActions, opencodeInstallActions } from './host-wiring'
 import { claudeMcpInstallActions, claudeMcpState, opencodeMcpInstallActions } from './mcp-wiring'
 import { scanDataDirModes } from './permissions'
 import { serviceOf } from './service/control'
 import { type Action, runPlan, stopCommand } from './plan'
+import { askHidden, createPrompts, PromptCancelled } from './prompt/prompts'
 import { type ProgramCheck, checkProgram, programInstallActions } from './self-install'
 import { legacyClaudeMcpRemoval, legacyShimRemoval, migrationFailureNote, renameMigrationActions } from './rename-migration'
+import { applySetup } from './setup/apply'
+import { type SetupState, readSetupState } from './setup/prefill'
+import { installRecordAction, readInstallRecord } from './setup/record'
+import { type FolderTarget, type SetupAnswers, type SetupFlags, runWizard } from './setup/wizard'
 import { sqlite3mcInstallActions } from './sqlite3mc-install'
+import { hostUnwireActions } from './uninstall'
 import { vec0InstallActions } from './vec0-install'
+import { envForDataDir } from '../cli/kinfold'
 
 export const EXIT_OK = 0
 export const EXIT_FAILED = 1
@@ -53,6 +61,11 @@ export interface InstallOptions extends ChoiceOptions {
   releaseVersion?: string
   /** The build's OpenCode plugin bundle; tests inject one because a checkout carries no embedded assets. */
   opencodeAssets?: EmbeddedAssets | null
+  /** --data-dir as given; on an installed machine only the installed folder is accepted. */
+  dataDirFlag?: string | null
+  noEncrypt?: boolean
+  port?: number | null
+  noUpdateCheck?: boolean
 }
 
 export interface DaemonSituation {
@@ -147,13 +160,14 @@ function daemonCommandLine(env: InstallEnv): string {
  * the daemon is already down at plan time the plan restarts it first, because
  * a bare health wait would only report the failure.
  */
-function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeover: boolean, restart: boolean): Action[] {
+function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeover: boolean, restart: boolean, port: number): Action[] {
   if (env.platform !== 'darwin') {
-    env.out(`LaunchAgent: macOS only; start the daemon yourself with: ${daemonCommandLine(env)}`)
+    const portEnv = port === DEFAULT_PORT ? '' : `${envName('PORT')}=${port} `
+    env.out(`LaunchAgent: macOS only; start the daemon yourself with: ${portEnv}${daemonCommandLine(env)}`)
     return [{ kind: 'wait-health' }]
   }
   const paths = installPaths(env)
-  const content = plistContent(env)
+  const content = plistContent(env, port)
   const change = describeTextChange(readTextOrNull(paths.launchAgentPlist), content)
   if (change === null && situation.loaded && !restart) {
     if (situation.health.up) {
@@ -188,16 +202,21 @@ async function agentWiringActions(env: InstallEnv, hosts: readonly InstallHost[]
   ]
 }
 
-function reportDetections(env: InstallEnv, detections: readonly HostDetection[]): void {
+/** Each host as found, and whether this install wires it: a host found but not chosen is skipped as not chosen. */
+export function reportDetections(env: InstallEnv, detections: readonly HostDetection[], chosen: readonly InstallHost[]): void {
   for (const detection of detections) {
     const version = detection.version !== null ? ` ${detection.version}` : ''
-    env.out(`host ${detection.host}${version}: ${detection.selected ? 'install' : 'skip'} (${detection.note})`)
+    const wired = chosen.includes(detection.host)
+    const note = wired || !detection.selected ? detection.note : 'not chosen'
+    env.out(`host ${detection.host}${version}: ${wired ? 'install' : 'skip'} (${note})`)
   }
 }
 
-interface Prepared {
-  hosts: InstallHost[]
-  detections: HostDetection[]
+export interface Prepared {
+  /** The hosts to wire; every other host wired now is unwired. */
+  hosts: readonly InstallHost[]
+  /** Found hosts among them, for the host_version record. */
+  detections: readonly HostDetection[]
   situation: DaemonSituation
 }
 
@@ -229,20 +248,36 @@ async function settingsActions(env: InstallEnv, choices: readonly ObserverChoice
   })
 }
 
-interface InstallPlan {
+export interface InstallPlan {
   actions: Action[]
   /** The plan stops the loaded LaunchAgent to replace the running program. */
   stopsService: boolean
 }
 
-async function buildPlan(
+/** install.json, written only when what it holds would change; the first install's time is kept. */
+function recordActions(env: InstallEnv, state: SetupState, answers: SetupAnswers): Action[] {
+  const record = { channel: state.channel, updateCheck: answers.updateCheck, firstInstalledAt: state.firstInstalledAt ?? env.now() }
+  const saved = readInstallRecord(env.dataDir)
+  const same = saved !== null && saved.channel === record.channel && saved.updateCheck === record.updateCheck && saved.firstInstalledAt === record.firstInstalledAt
+  return same ? [] : [installRecordAction(env.dataDir, record)]
+}
+
+/**
+ * The plan for one answer set. A host wired now but not among the answers is
+ * unwired after every kept host is wired, so no step leaves a kept agent
+ * without memory. install.json goes last: it records an install that ran.
+ */
+export async function buildPlan(
   env: InstallEnv,
   prepared: Prepared,
-  choices: readonly ObserverChoice[],
+  answers: SetupAnswers,
+  state: SetupState,
   options: InstallOptions,
   check: ProgramCheck | null,
 ): Promise<InstallPlan> {
   const { hosts, detections, situation } = prepared
+  const choices = answers.observers
+  const dropped = state.wiredHosts.filter((host) => !hosts.includes(host))
   const hmac = hmacMigrationActions(env)
   const sqlite3mc = sqlite3mcInstallActions(env)
   const vec0 = vec0InstallActions(env, situation.health)
@@ -261,7 +296,7 @@ async function buildPlan(
       ...dataDirActions(env),
       ...hmac.actions,
       ...sqlite3mc.actions,
-      ...dbKeyActions(env),
+      ...setupDbKeyActions(env, answers.encryption),
       ...vec0.actions,
       ...(stopped ? [{ kind: 'launchctl', argv: bootoutArgv(env.uid) } satisfies Action] : []),
       ...program.actions,
@@ -270,9 +305,11 @@ async function buildPlan(
       ...(await agentWiringActions(env, hosts, options.opencodeAssets)),
       ...(hosts.includes('codex') ? hostHookInstallActions(env, 'codex') : []),
       ...(hosts.includes('cursor') ? hostHookInstallActions(env, 'cursor') : []),
-      ...launchAgentActions(env, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon),
+      ...dropped.flatMap((host) => hostUnwireActions(env, host)),
+      ...launchAgentActions(env, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon, answers.port),
       ...(await settingsActions(env, choices)),
       ...hmac.cleanup,
+      ...recordActions(env, state, answers),
     ],
     stopsService: stopped,
   }
@@ -301,14 +338,7 @@ function legacyEnvProblem(env: InstallEnv): string | null {
   return `${name} points at ${legacy}, so the move to the Kinfold data dir would be skipped; unset ${legacyName('DATA_DIR')} and rerun. Nothing was changed`
 }
 
-async function prepare(env: InstallEnv, options: InstallOptions): Promise<Prepared | number> {
-  const detections = await detectHosts(env, options.hosts)
-  reportDetections(env, detections)
-  const hosts = selectedHosts(detections)
-  if (hosts.length === 0) {
-    env.out('no supported host to install into (Claude Code, OpenCode 2.x, Codex or Cursor)')
-    return EXIT_FAILED
-  }
+async function prepare(env: InstallEnv, options: InstallOptions): Promise<DaemonSituation | number> {
   for (const line of duplicateWarning(findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings]))) env.out(line)
   const situation = await daemonSituation(env)
   env.out(`daemon: ${situation.health.up ? `answers on port ${situation.port}` : 'not running'}; ${agentState(situation)}`)
@@ -316,7 +346,7 @@ async function prepare(env: InstallEnv, options: InstallOptions): Promise<Prepar
     for (const line of foreignDaemonMessage(situation)) env.out(line)
     return EXIT_BLOCKED
   }
-  return { hosts, detections, situation }
+  return situation
 }
 
 /**
@@ -327,9 +357,9 @@ async function prepare(env: InstallEnv, options: InstallOptions): Promise<Prepar
  * agent wiring (which reads host config files only), then stops.
  * Returns the situation to plan with, or null when a dry run stopped here.
  */
-async function migrate(env: InstallEnv, prepared: Prepared, options: InstallOptions, check: ProgramCheck | null): Promise<Prepared | null> {
+async function migrate(env: InstallEnv, situation: DaemonSituation, options: InstallOptions, check: ProgramCheck | null): Promise<{ situation: DaemonSituation; migrated: boolean } | null> {
   const actions = renameMigrationActions(env, { takeover: options.takeover })
-  if (actions.length === 0) return prepared
+  if (actions.length === 0) return { situation, migrated: false }
   env.out('migration: an install under the old name Shared Agent Memory was found; it moves to the Kinfold names first')
   await runPlan(env, actions, options.dryRun, (index) => migrationFailureNote(actions, index))
   if (options.dryRun) {
@@ -344,12 +374,13 @@ async function migrate(env: InstallEnv, prepared: Prepared, options: InstallOpti
     env.out(program.actions.length > 0
       ? 'then, among the install steps, the program copy and the agent wiring (old entries go only after the kinfold ones are written):'
       : 'then, among the install steps, the agent wiring (old entries go only after the kinfold ones are written):')
-    await runPlan(env, [...program.actions, ...(await agentWiringActions(env, prepared.hosts, options.opencodeAssets))], true)
+    const hosts = selectedHosts(await detectHosts(env, options.hosts))
+    await runPlan(env, [...program.actions, ...(await agentWiringActions(env, hosts, options.opencodeAssets))], true)
     env.out(`the other install steps are planned once the migration has run, against ${env.dataDir}; run kinfold install --dry-run again then to see them`)
     return null
   }
   env.out('migration: done')
-  return { ...prepared, situation: await daemonSituation(env) }
+  return { situation: await daemonSituation(env), migrated: true }
 }
 
 /**
@@ -358,7 +389,7 @@ async function migrate(env: InstallEnv, prepared: Prepared, options: InstallOpti
  * place. A service that is still loaded is running and is left alone. Health,
  * not the bootstrap exit code, decides whether the service came back.
  */
-async function restartService(env: InstallEnv): Promise<void> {
+export async function restartService(env: InstallEnv): Promise<void> {
   let started = false
   let startError: unknown = null
   const service = serviceOf(env)
@@ -381,15 +412,49 @@ async function restartService(env: InstallEnv): Promise<void> {
   else env.out(`the daemon did not answer /health after restarting${reason}; it may still be opening a large store. Run kinfold status in a minute; see ${logFile}`)
 }
 
+function setupFlags(options: InstallOptions): SetupFlags {
+  return {
+    dataDir: options.dataDirFlag ?? null,
+    hosts: options.hosts === null ? null : [...options.hosts],
+    observers: options.flags,
+    noEncrypt: options.noEncrypt ?? false,
+    port: options.port ?? null,
+    noUpdateCheck: options.noUpdateCheck ?? false,
+    yes: options.yes,
+  }
+}
+
+/**
+ * With a terminal, a key is typed through the same raw session as the
+ * questions around it, so two readers never take turns on stdin.
+ */
+function withTerminalSecrets(env: InstallEnv): InstallEnv {
+  const terminal = env.terminal
+  if (terminal === null) return env
+  return { ...env, io: { ...env.io, askSecret: (question) => askHidden(terminal, question) } }
+}
+
+async function folderTarget(env: InstallEnv, dataDir: string): Promise<FolderTarget> {
+  const next = envForDataDir(env, dataDir)
+  return { env: next, state: await readSetupState(next) }
+}
+
+/**
+ * A Ctrl-C or a closed stdin during the questions is said once and thrown on
+ * as PromptCancelled, so the caller exits 130; nothing has been written by
+ * then (only the rename migration of an install under the old name runs
+ * before the questions).
+ */
 export async function install(env: InstallEnv, options: InstallOptions): Promise<number> {
+  let migrated = false
   try {
     const envProblem = legacyEnvProblem(env)
     if (envProblem !== null) {
       env.out(`install failed: ${envProblem}`)
       return EXIT_FAILED
     }
-    const found = await prepare(env, options)
-    if (typeof found === 'number') return found
+    const situation = await prepare(env, options)
+    if (typeof situation === 'number') return situation
     // A release build is checked before the migration or any plan can change the
     // machine, so a bad or unreachable SHA256SUMS stops with nothing changed.
     const check = await checkProgram(env, {
@@ -397,42 +462,27 @@ export async function install(env: InstallEnv, options: InstallOptions): Promise
       dryRun: options.dryRun,
       version: options.releaseVersion,
     })
-    const prepared = await migrate(env, found, options, check)
-    if (prepared === null) {
-      if (!found.situation.foreign || options.takeover) return EXIT_OK
-      for (const line of foreignDaemonMessage(found.situation)) env.out(line)
+    const moved = await migrate(env, situation, options, check)
+    if (moved === null) {
+      if (!situation.foreign || options.takeover) return EXIT_OK
+      for (const line of foreignDaemonMessage(situation)) env.out(line)
       env.out('a real install would stop here, before step 1.')
       return EXIT_BLOCKED
     }
-    const choices = await chooseObservers(env, prepared.hosts, options)
-    for (const choice of choices) {
-      env.out(`observer ${choice.input.host}: ${describeInput(choice.input)} (${choice.origin}); ${choice.credentialNote}; check ${choice.check}`)
-    }
-    const plan = await buildPlan(env, prepared, choices, options, check)
-    try {
-      await runPlan(env, plan.actions, options.dryRun)
-    } catch (error: unknown) {
-      if (!options.dryRun && plan.stopsService) await restartService(env)
+    migrated = moved.migrated
+    const asking = withTerminalSecrets(env)
+    const state = await readSetupState(asking)
+    let target: FolderTarget = { env: asking, state }
+    const prompts = env.terminal === null ? null : createPrompts(env.terminal)
+    const answers = await runWizard(asking, prompts, state, setupFlags(options), options, async (dataDir) => (target = await folderTarget(asking, dataDir)))
+    const planned = target.env === asking ? moved.situation : await daemonSituation(target.env)
+    return await applySetup(target.env, target.state, answers, options, { check, situation: planned })
+  } catch (error: unknown) {
+    if (error instanceof PromptCancelled) {
+      env.out(`install cancelled; ${migrated ? 'only the move to the Kinfold names had run' : 'nothing was changed'}`)
       throw error
     }
-    if (options.dryRun && prepared.situation.foreign && !options.takeover) {
-      for (const line of foreignDaemonMessage(prepared.situation)) env.out(line)
-      env.out('a real install would stop here, before step 1.')
-      return EXIT_BLOCKED
-    }
-    if (!options.dryRun) env.out(`installed. Check it with: ${statusCommand(env)}`)
-    return EXIT_OK
-  } catch (error: unknown) {
     env.out(`install failed: ${error instanceof ChoiceError ? error.message : errorMessage(error)}`)
     return EXIT_FAILED
   }
-}
-
-/** What a user types to see the install: the installed program, or the checkout's script. */
-function statusCommand(env: InstallEnv): string {
-  if (env.mode.kind === 'checkout') return 'bun src/cli/kinfold.ts status'
-  const quote = (value: string): string => (/\s/.test(value) ? JSON.stringify(value) : value)
-  // Run by hand, the program reads ~/.kinfold unless told otherwise.
-  const folder = env.dataDir === join(env.homeDir, '.kinfold') ? '' : ` --data-dir ${quote(env.dataDir)}`
-  return `${quote(env.mode.binPath)}${folder} status`
 }

@@ -292,8 +292,41 @@ async function encrypt(ctx: Context): Promise<void> {
   ctx.log('The plaintext backup it takes is deleted afterwards, but an SSD, APFS snapshots or Time Machine may keep old blocks; full-disk encryption (FileVault) covers those.')
   const key = newDbKey()
   if (!(await confirmCode(ctx, encodeRecoveryCode(key)))) throw new Refusal('those were not the last two groups; nothing changed')
+  await encryptingWith(ctx, key)
+}
+
+async function encryptingWith(ctx: Context, key: string): Promise<void> {
   await converting(ctx, 'encrypt', null, key, () => storeKey(ctx, DB_KEY_REF, key))
   ctx.log('memory.db is encrypted.')
+}
+
+export const ENCRYPT_KEY_EXISTS = `the Keychain already holds ${DB_KEY_REF}, which may open an older encrypted copy of memory.db; nothing changed. Run kinfold encrypt, which asks before replacing it`
+
+/**
+ * The install's encrypt: the recovery code of `key` was shown and confirmed
+ * already. An entry already in the Keychain may open an older encrypted copy,
+ * and replacing it was never asked here, so that is refused, pointing to
+ * `kinfold encrypt`, which asks. Throws with the reason; nothing is printed
+ * that holds the key or its code.
+ */
+export async function encryptWithKey(env: InstallEnv, key: string): Promise<void> {
+  const ctx = context(env)
+  requireState(ctx, 'plain')
+  if (ctx.writer.exists(DB_KEY_REF)) throw new Refusal(ENCRYPT_KEY_EXISTS)
+  await encryptingWith(ctx, key)
+}
+
+
+/** The install's decrypt: the person confirmed it already. */
+export async function decryptConfirmed(env: InstallEnv): Promise<void> {
+  const ctx = context(env)
+  requireState(ctx, 'encrypted')
+  await decryptingWith(ctx, readKey(ctx))
+}
+
+async function decryptingWith(ctx: Context, key: string): Promise<void> {
+  await converting(ctx, 'decrypt', key, null, () => {})
+  ctx.log('memory.db is plaintext.')
 }
 
 async function rekey(ctx: Context): Promise<void> {
@@ -313,8 +346,7 @@ async function decrypt(ctx: Context): Promise<void> {
   const key = readKey(ctx)
   const typed = await ctx.env.io.ask('kinfold decrypt stores memory.db in plaintext again and deletes its Keychain key. Type decrypt to go on: ')
   if (typed.trim() !== 'decrypt') throw new Refusal('nothing changed')
-  await converting(ctx, 'decrypt', key, null, () => {})
-  ctx.log('memory.db is plaintext.')
+  await decryptingWith(ctx, key)
 }
 
 async function showRecovery(ctx: Context): Promise<void> {

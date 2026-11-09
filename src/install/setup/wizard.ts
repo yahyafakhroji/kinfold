@@ -7,12 +7,10 @@
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { OBSERVER_PROVIDERS, type ObserverProvider } from '../../observer/types'
-import { DB_KEY_REF } from '../../secrets/credentials'
-import { createKeychainProvider } from '../../secrets/keychain'
-import { credentialWriterFor } from '../../secrets/keychain-writer'
 import { encodeRecoveryCode } from '../../sqlite/recovery'
 import { newDbKey } from '../../sqlite/keys'
 import { checkHealth } from '../daemon-client'
+import { STALE_DB_KEY, storedDbKey } from '../db-encryption'
 import { type InstallHost, detectHosts, selectedHosts } from '../detect'
 import type { InstallEnv } from '../env'
 import {
@@ -63,8 +61,7 @@ export interface SetupAnswers {
 }
 
 export const NO_TTY_ENCRYPTION_CHANGE = 'changing encryption on an existing store needs a terminal; run kinfold encrypt or kinfold decrypt'
-export const STALE_DB_KEY =
-  'the Keychain already holds a database key (db-key) that no memory.db uses, and its recovery code cannot be recomputed; run kinfold key show-recovery to look at it before installing'
+export { STALE_DB_KEY }
 export const NO_AGENTS_NOTE = 'No supported agent was found on this machine, so none will be wired.'
 export const ENCRYPTION_IS_ON = 'Encryption is on. Run kinfold key show-recovery to see the recovery code.'
 
@@ -73,7 +70,6 @@ const MAX_PORT = 65_535
 const PORT_SCAN_LIMIT = 200
 const LSOF = '/usr/sbin/lsof'
 const HOLDER_TIMEOUT_MS = 3_000
-const HEX_KEY = /^[0-9a-f]{64}$/
 
 // ---- ports ------------------------------------------------------------------
 
@@ -222,20 +218,6 @@ async function observersStep(env: InstallEnv, ask: Prompts | null, state: SetupS
 
 // ---- encryption -------------------------------------------------------------
 
-type StoredKey = { kind: 'none' } | { kind: 'usable'; key: string } | { kind: 'unreadable' }
-
-/** The db-key already in the Keychain, if any; its recovery code can be recomputed only from a well-formed key. */
-function storedDbKey(env: InstallEnv): StoredKey {
-  try {
-    const writer = credentialWriterFor(env.platform, env.security)
-    if (writer === null || !writer.exists(DB_KEY_REF)) return { kind: 'none' }
-    const value = createKeychainProvider((args) => env.security({ args })).get(DB_KEY_REF)
-    return value !== null && HEX_KEY.test(value) ? { kind: 'usable', key: value } : { kind: 'unreadable' }
-  } catch {
-    return { kind: 'unreadable' }
-  }
-}
-
 /** The key for a store about to be encrypted, its code shown on the terminal and retyped. Never a second key beside one that exists. */
 async function keyWithConfirmedCode(env: InstallEnv, ask: Prompts, reuseStored: boolean): Promise<string> {
   let key = newDbKey()
@@ -307,12 +289,31 @@ async function updateCheckStep(ask: Prompts | null, state: SetupState, flags: Se
   return ask === null ? state.updateCheck : ask.confirm('Check for updates once a day?', state.updateCheck)
 }
 
-export async function runWizard(env: InstallEnv, prompts: Prompts | null, state: SetupState, flags: SetupFlags, choice: ChoiceOptions): Promise<SetupAnswers> {
+/** The machine as seen from another folder: the env aimed there and the state read from it. */
+export interface FolderTarget {
+  env: InstallEnv
+  state: SetupState
+}
+
+/**
+ * `retarget` is called when a first install names a folder other than the one
+ * the state was read from: every later step (wiring, observers, the store's
+ * encryption, the port) is about that folder, not the default one.
+ */
+export async function runWizard(
+  first: InstallEnv,
+  prompts: Prompts | null,
+  firstState: SetupState,
+  flags: SetupFlags,
+  choice: ChoiceOptions,
+  retarget?: (dataDir: string) => Promise<FolderTarget>,
+): Promise<SetupAnswers> {
   // --yes never asks, even on a terminal: a child `install --yes` must not stop at a question.
   const ask = flags.yes ? null : prompts
-  const problem = lockedFolderProblem(state, flags.dataDir)
+  const problem = lockedFolderProblem(firstState, flags.dataDir)
   if (problem !== null) throw new ChoiceError(problem)
-  const dataDir = await folderStep(env, ask, state, flags)
+  const dataDir = await folderStep(first, ask, firstState, flags)
+  const { env, state } = retarget !== undefined && resolve(dataDir) !== resolve(firstState.dataDir) ? await retarget(dataDir) : { env: first, state: firstState }
   const hosts = await agentsStep(env, ask, state, flags)
   const observers = await observersStep(env, ask, state, flags, choice, hosts)
   const encryption = await encryptionStep(env, ask, state, flags)

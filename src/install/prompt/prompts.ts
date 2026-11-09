@@ -120,6 +120,28 @@ function startIndex<T extends string>(choices: readonly Choice<T>[], initial: T 
   return wanted >= 0 ? wanted : (enabled[0] as number)
 }
 
+/**
+ * A line typed without echo, for a key. It runs in the same raw session as
+ * every other prompt, so a credential question between two of them never
+ * reads stdin through a second reader; Ctrl-C cancels it like any prompt.
+ */
+export function askHidden(io: TerminalIO, question: string): Promise<string> {
+  return session(io, false, async (next) => {
+    let typed = ''
+    io.write(`${BOLD}${clean(question)}${RESET} `)
+    for (;;) {
+      const key = await next()
+      if (key.name === 'char') typed += key.char
+      else if (key.name === 'space') typed += ' '
+      else if (key.name === 'backspace') typed = [...typed].slice(0, -1).join('')
+      else if (key.name === 'enter') {
+        io.write('\r\n')
+        return typed
+      }
+    }
+  })
+}
+
 export function createPrompts(io: TerminalIO): Prompts {
   const answered = (question: string, answer: string): string => `${clean(question)} ${DIM}${clean(answer)}${RESET}\r\n`
 

@@ -147,7 +147,7 @@ test('a development version copies the program without a checksum and says so', 
   expect(readFileSync(binPath, 'utf8')).toBe(readFileSync(source, 'utf8'))
   expect(statSync(binPath).mode & 0o777).toBe(0o755)
   expect(w.out).toContain('program: the release checksum check is skipped for the development version')
-  expect(w.out.at(-1)).toBe(`installed. Check it with: ${binPath} status`)
+  expect(w.out).toContain(`installed. Check it with: ${binPath} status`)
   expect(readdirSync(join(w.dataDir, 'bin')).filter((name) => name.startsWith('.kinfold-tmp-'))).toEqual([])
 })
 

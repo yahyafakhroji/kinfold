@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DB_KEY_REF } from '../../secrets/credentials'
 import { type DbKeyStore, NO_DB_KEYS, newDbKey } from '../../sqlite/keys'
@@ -11,6 +11,7 @@ import { putObserverSettings } from '../daemon-client'
 import { type InstallEnv, installPaths } from '../env'
 import { entryCommand } from '../entry'
 import { hostHookInstallActions } from '../host-wiring'
+import { DEFAULT_PORT } from '../../daemon/daemon'
 import { plistContent } from '../launch-agent'
 import { ChoiceError, chooseObservers } from '../observer-choice'
 import { runPlan } from '../plan'
@@ -51,7 +52,7 @@ function seedPlainStore(w: FakeWorld, input: ObserverSettingsInput): void {
 function writePlist(w: FakeWorld, edit: (text: string) => string = (text) => text): void {
   const paths = installPaths(w.env)
   mkdirSync(paths.launchAgentsDir, { recursive: true })
-  writeFileSync(paths.launchAgentPlist, edit(plistContent(w.env)))
+  writeFileSync(paths.launchAgentPlist, edit(plistContent(w.env, DEFAULT_PORT)))
 }
 
 test('pre-fill reads hosts from wiring', async () => {
@@ -184,14 +185,16 @@ test('a missing Keychain key refuses the same way', async () => {
   expect(state.observersError).toBe(UNREADABLE_OBSERVERS)
 })
 
-test('the port comes from the plist, then daemon.json', async () => {
+test('the port comes from the plist, its default when the plist names none, else daemon.json', async () => {
   const w = make()
   const withPort = (text: string): string => text.replace('    <key>HOME</key>', '    <key>KINFOLD_PORT</key><string>4511</string>\n    <key>HOME</key>')
   writePlist(w, withPort)
   expect((await readSetupState(w.env)).port).toBe(4511)
-  writePlist(w)
   mkdirSync(w.dataDir, { recursive: true })
   writeFileSync(join(w.dataDir, DAEMON_INFO_FILE), JSON.stringify({ pid: 1, port: 4242 }))
+  writePlist(w)
+  expect((await readSetupState(w.env)).port).toBe(DEFAULT_PORT)
+  rmSync(installPaths(w.env).launchAgentPlist)
   expect((await readSetupState(w.env)).port).toBe(4242)
 })
 

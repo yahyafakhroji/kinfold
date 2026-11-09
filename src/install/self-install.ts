@@ -158,6 +158,14 @@ export interface ProgramInstallPlan {
   actions: Action[]
 }
 
+async function sameFile(path: string, hash: string): Promise<boolean> {
+  try {
+    return existsSync(path) && (await fileSha256(path)) === hash
+  } catch {
+    return false
+  }
+}
+
 async function differs(path: string, expected: string): Promise<boolean> {
   try {
     return !existsSync(path) || (await fileSha256(path)) !== expected
@@ -180,8 +188,11 @@ export async function checkProgram(env: InstallEnv, options: ProgramCheckOptions
   const arch = env.arch ?? process.arch
   const assetName = releaseAssetName(env.platform, arch)
   const development = version === DEVELOPMENT_VERSION
-  if (!development && assetName === null) throw new Error(`no release build for ${env.platform}-${arch}`)
   const sourceHash = await fileSha256(options.source)
+  // The installed program running again: nothing will be copied, and the copy in
+  // place was checked when it was installed, so this run needs no network.
+  if (await sameFile(env.mode.binPath, sourceHash)) return { sourceHash, assetName, expectedSha256: sourceHash, check: !development }
+  if (!development && assetName === null) throw new Error(`no release build for ${env.platform}-${arch}`)
   if (development) {
     env.out('program: the release checksum check is skipped for the development version')
     return { sourceHash, assetName, expectedSha256: sourceHash, check: false }
