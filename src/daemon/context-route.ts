@@ -10,6 +10,7 @@
 // Logs carry ids, counts and durations; never the text, the prompt or the cwd.
 
 import { DAEMON_SHARE_MS } from '../context/client'
+import { DAEMON_ONLY_TIMEOUT_MS } from '../context/daemon'
 import { type LateMatches, createLateMatches } from '../context/late-matches'
 import { type PreparedContext, prepareContext, recordServed } from '../context/packs'
 import { type PromptContextDeps, createEmbedSlots, preparePromptContext } from '../context/prompt-context'
@@ -33,7 +34,7 @@ export interface ContextRouteDeps {
   /** Monotonic ms for the duration. */
   clock?: () => number
   /** Where update-check.json lives and which version is running; absent means no update notice. */
-  updates?: { dataDir: string; version: string }
+  updates?: { dataDir: string; version: string; envVars?: () => Readonly<Record<string, string | undefined>> }
 }
 
 /** Past this the hook has likely aborted (it waits DAEMON_SHARE_MS, connection included). */
@@ -43,13 +44,19 @@ type Prepared = PreparedContext & { promptDetail: string; relatedText: string; r
 
 /**
  * Session start and OpenCode's first request carry the notice; prompt deltas never do.
- * It is marked shown only when the answer beat the hook's wait: a slower one may
+ * It is marked shown only when the answer beat the host's wait: a slower one may
  * have been abandoned, and a notice nobody saw must come again next session.
  */
+/** How long a host waits for the answer; an answer inside that was seen. OpenCode's plugin waits longer than the hooks do. */
+export function shownBudgetMs(host: string): number {
+  return host === 'opencode' ? DAEMON_ONLY_TIMEOUT_MS : PROMPT_SERVE_BUDGET_MS
+}
+
 function updateNoticeFor(updates: ContextRouteDeps['updates'], request: ContextRequest, durationMs: number): UpdateNotice | null {
   if (updates === undefined || request.channel === 'prompt') return null
   try {
-    return durationMs <= PROMPT_SERVE_BUDGET_MS ? takeNotice(updates.dataDir, request.host, updates.version) : peekNotice(updates.dataDir, request.host, updates.version)
+    const env = updates.envVars?.() ?? process.env
+    return durationMs <= shownBudgetMs(request.host) ? takeNotice(updates.dataDir, request.host, updates.version, env) : peekNotice(updates.dataDir, request.host, updates.version, env)
   } catch {
     return null
   }

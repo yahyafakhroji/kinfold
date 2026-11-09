@@ -22,7 +22,7 @@ import { mcpStatusLines } from './mcp-wiring'
 import { inspectShim } from './opencode-shim'
 import { describeModeChange, scanDataDirModes } from './permissions'
 import { vectorStatusLine } from './vec0-install'
-import { readEnv } from '../env-names'
+import { updatesEnabled } from '../update/enabled'
 import { availableMessage, pendingNotice } from '../update/notice'
 import { readUpdateState } from '../update/state'
 import { VERSION } from '../version'
@@ -102,10 +102,10 @@ function dataDirLines(env: InstallEnv): string[] {
 /** The saved update state only: status never fetches. */
 export function updateLine(env: InstallEnv, running: string = VERSION): string {
   const record = readInstallRecord(env.dataDir)
-  const off = running === '0.0.0-dev' || record?.updateCheck === false || record?.channel === 'checkout' || readEnv(env.envVars ?? {}, 'NO_UPDATE_CHECK') === '1'
-  if (off) return 'update check: off'
+  const vars = env.envVars ?? {}
+  if (!updatesEnabled(running, record, vars)) return 'update check: off'
   const state = readUpdateState(env.dataDir)
-  const notice = pendingNotice(state, record, running)
+  const notice = pendingNotice(state, record, running, vars)
   if (notice !== null) return `update: ${availableMessage(notice)}`
   return `update: none known (${state.checkedAt === null ? 'never checked' : `last checked ${new Date(state.checkedAt).toISOString()}`})`
 }

@@ -3,8 +3,8 @@
 // recorded even when the request fails, so a broken network or a rate limit
 // is retried in a day, not on every tick.
 
-import { readEnv } from '../env-names'
 import { readInstallRecord } from '../install/setup/record'
+import { updatesEnabled } from './enabled'
 import { mergeUpdateState, readUpdateState } from './state'
 import { parseVersion } from './version-order'
 
@@ -14,7 +14,6 @@ export const CHECK_INTERVAL_MS = 86_400_000
 export const CHECK_TICK_MS = 3_600_000
 export const CHECK_TIMEOUT_MS = 10_000
 export const MAX_RELEASE_BYTES = 1_000_000
-const DEV_VERSION = '0.0.0-dev'
 
 export interface UpdateCheckDeps {
   dataDir: string
@@ -89,10 +88,7 @@ export async function fetchLatestRelease(fetchFn: UpdateCheckDeps['fetch'], now:
 }
 
 export function checkEnabled(deps: UpdateCheckDeps): boolean {
-  if (deps.version === DEV_VERSION || parseVersion(deps.version) === null) return false
-  if (readEnv(deps.envVars(), 'NO_UPDATE_CHECK') === '1') return false
-  const record = readInstallRecord(deps.dataDir)
-  return record === null || (record.updateCheck && record.channel !== 'checkout')
+  return updatesEnabled(deps.version, readInstallRecord(deps.dataDir), deps.envVars())
 }
 
 export async function runUpdateCheck(deps: UpdateCheckDeps): Promise<'disabled' | 'not-due' | 'checked' | 'failed'> {

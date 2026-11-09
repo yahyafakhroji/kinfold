@@ -19,7 +19,6 @@ let generation = 0
 function navigate(state) {
   const hash = formatHash(state)
   if (location.hash === hash) render()
-showUpdateBanner(document.getElementById('update-banner'))
   else location.hash = hash
 }
 

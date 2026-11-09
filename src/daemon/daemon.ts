@@ -288,14 +288,14 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     semanticSearch: vectors.search,
     onNudge: () => scheduler.request(),
     listSessions: (projectKey) => listRecentSessions(store.db, projectKey),
-    context: contextHandler({ db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, updates: { dataDir, version: options.version ?? VERSION } }),
+    context: contextHandler({ db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, updates: { dataDir, version: options.version ?? VERSION, envVars: options.updateCheck?.envVars ?? (() => process.env) } }),
     retryFailed: (target) => retryFailed(store.db, target, observer, log),
     // Read at request time: `observing` starts after the server, and no request is served before then.
     observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? []),
     data: dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log }),
     memory: memoryHandlers(store.db, log),
     updateBanner: () => {
-      const notice = pendingNotice(readUpdateState(dataDir), readInstallRecord(dataDir), options.version ?? VERSION)
+      const notice = pendingNotice(readUpdateState(dataDir), readInstallRecord(dataDir), options.version ?? VERSION, (options.updateCheck?.envVars ?? (() => process.env))())
       return notice === null ? null : { version: notice.version, message: availableMessage(notice) }
     },
     metrics: (window) => metricsRoute(store.db, window),

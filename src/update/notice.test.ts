@@ -29,30 +29,30 @@ test('the wording follows the install channel', () => {
 })
 
 test('an absent record reads as a curl install', () => {
-  expect(pendingNotice(state('0.2.0'), null, '0.1.0')).toEqual({ version: '0.2.0', channel: 'curl' })
-  expect(pendingNotice(state('0.2.0'), record('npx'), '0.1.0')).toEqual({ version: '0.2.0', channel: 'npx' })
+  expect(pendingNotice(state('0.2.0'), null, '0.1.0', {})).toEqual({ version: '0.2.0', channel: 'curl' })
+  expect(pendingNotice(state('0.2.0'), record('npx'), '0.1.0', {})).toEqual({ version: '0.2.0', channel: 'npx' })
 })
 
 test('no notice when the running version is current or newer', () => {
-  expect(pendingNotice(state('0.2.0'), null, '0.2.0')).toBeNull()
-  expect(pendingNotice(state('0.2.0'), null, '0.3.0')).toBeNull()
-  expect(pendingNotice(state('0.2.0'), null, '0.2.0-rc.1')).not.toBeNull()
-  expect(pendingNotice(state(null), null, '0.1.0')).toBeNull()
-  expect(pendingNotice(state('0.2.0'), null, '0.0.0-dev')).toBeNull()
+  expect(pendingNotice(state('0.2.0'), null, '0.2.0', {})).toBeNull()
+  expect(pendingNotice(state('0.2.0'), null, '0.3.0', {})).toBeNull()
+  expect(pendingNotice(state('0.2.0'), null, '0.2.0-rc.1', {})).not.toBeNull()
+  expect(pendingNotice(state(null), null, '0.1.0', {})).toBeNull()
+  expect(pendingNotice(state('0.2.0'), null, '0.0.0-dev', {})).toBeNull()
 })
 
 test('no notice when the check is off or this is a checkout', () => {
-  expect(pendingNotice(state('0.2.0'), record('curl', false), '0.1.0')).toBeNull()
-  expect(pendingNotice(state('0.2.0'), record('checkout'), '0.1.0')).toBeNull()
+  expect(pendingNotice(state('0.2.0'), record('curl', false), '0.1.0', {})).toBeNull()
+  expect(pendingNotice(state('0.2.0'), record('checkout'), '0.1.0', {})).toBeNull()
 })
 
 test('each host sees a version once', () => {
   writeUpdateState(dir, state('0.2.0'))
-  expect(takeNotice(dir, 'claude-code', '0.1.0')).toEqual({ version: '0.2.0', channel: 'curl' })
-  expect(takeNotice(dir, 'claude-code', '0.1.0')).toBeNull()
-  expect(takeNotice(dir, 'codex', '0.1.0')).not.toBeNull()
+  expect(takeNotice(dir, 'claude-code', '0.1.0', {})).toEqual({ version: '0.2.0', channel: 'curl' })
+  expect(takeNotice(dir, 'claude-code', '0.1.0', {})).toBeNull()
+  expect(takeNotice(dir, 'codex', '0.1.0', {})).not.toBeNull()
   writeUpdateState(dir, { ...readUpdateState(dir), latestVersion: '0.3.0' })
-  expect(takeNotice(dir, 'claude-code', '0.1.0')?.version).toBe('0.3.0')
+  expect(takeNotice(dir, 'claude-code', '0.1.0', {})?.version).toBe('0.3.0')
   expect(readUpdateState(dir).notified).toEqual({ 'claude-code': '0.3.0', codex: '0.2.0' })
 })
 
@@ -82,7 +82,7 @@ test('a notice marked during a slow check and the check result both survive', as
 test('a record on disk picks the channel for the notice', () => {
   writeUpdateState(dir, state('0.2.0'))
   writeRecord(record('bunx'))
-  expect(takeNotice(dir, 'cursor', '0.1.0')).toEqual({ version: '0.2.0', channel: 'bunx' })
+  expect(takeNotice(dir, 'cursor', '0.1.0', {})).toEqual({ version: '0.2.0', channel: 'bunx' })
 })
 
 test('parseContextResult keeps a valid notice and ignores a malformed one', () => {
@@ -93,4 +93,12 @@ test('parseContextResult keeps a valid notice and ignores a malformed one', () =
     expect(parsed).not.toBeNull()
     expect(parsed?.updateNotice).toBeUndefined()
   }
+})
+
+test('KINFOLD_NO_UPDATE_CHECK=1 silences the notice even with a newer version cached', () => {
+  writeUpdateState(dir, state('0.2.0'))
+  const off = { KINFOLD_NO_UPDATE_CHECK: '1' }
+  expect(pendingNotice(state('0.2.0'), null, '0.1.0', off)).toBeNull()
+  expect(takeNotice(dir, 'claude-code', '0.1.0', off)).toBeNull()
+  expect(readUpdateState(dir).notified).toEqual({})
 })
