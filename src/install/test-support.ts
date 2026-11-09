@@ -28,6 +28,7 @@ import type { ObserverRunner, ObserverSettings } from '../observer/types'
 import type { CommandRequest, CommandResult, InstallEnv } from './env'
 import { LAUNCHCTL } from './launch-agent'
 import type { ServiceControl } from './service/control'
+import { currentPlatform } from '../platform/platform'
 
 export interface WorldOptions {
   claudeVersion?: string | null
@@ -269,6 +270,9 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
     applicationsDirs: [join(root, 'Applications')],
     // Never binds a real port: 37811 may be the live daemon's on this machine.
     portFree: async () => true,
+    // The world installs for macOS on this machine's disk. A Windows host cannot
+    // fsync a folder handle, so there the folder flush after a rename is skipped.
+    ...(currentPlatform().os === 'windows' ? { fsyncDir: () => {} } : {}),
   }
   if (options.withLibrary ?? true) placeBuiltLibrary(world.dataDir, world.env.platform)
   world.cleanup = async () => {
