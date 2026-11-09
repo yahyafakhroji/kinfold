@@ -11,6 +11,7 @@ import * as ingest from './ingest'
 import * as readRoutes from './read-routes'
 import * as server from './server'
 import { openStore } from '../store/db'
+import { type DbKeyStore, newDbKey } from '../sqlite/keys'
 import { PROJECT_A, seedMcpObservation, seedMcpSession } from '../mcp/test-support'
 import { LATEST_SCHEMA_VERSION } from '../store/schema'
 import { VERSION } from '../version'
@@ -156,4 +157,27 @@ test('the daemon hands the read routes its reader and resolver', async () => {
     drain.mockRestore()
     await other.stop()
   }
+})
+
+test("the daemon's reader opens an encrypted store with the daemon's keys and asks the store once", async () => {
+  const serve = spyOn(server, 'startServer')
+  const encryptedDir = join(root, 'encrypted')
+  const key = newDbKey()
+  let reads = 0
+  const keys: DbKeyStore = { name: 'counting', read: () => (reads++, key), exists: () => true }
+  const writer = openStore(encryptedDir, { keys: { ...keys, read: () => key } })
+  const sessionId = seedMcpSession(writer, PROJECT_A, 'claude-code', 'r-1')
+  const id = seedMcpObservation(writer, { sessionId, projectKey: PROJECT_A, title: 'Read with the daemon key', at: Date.now() })
+  writer.db.close()
+  const other = startDaemon({ dataDir: encryptedDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, dbKeys: keys })
+  try {
+    const routes = serve.mock.calls[0]![0].reads!
+    expect(routes.reader()?.observation(id, null)?.title).toBe('Read with the daemon key')
+    // The writer and the reader both opened the file; the store was read once.
+    expect(reads).toBe(1)
+  } finally {
+    serve.mockRestore()
+    await other.stop()
+  }
+  expect(reads).toBe(1)
 })

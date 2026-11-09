@@ -71,6 +71,23 @@ export function dbKeyStoreFor(dataDir: string, env: Readonly<Record<string, stri
   return dbKeyStoreOf(resolveKeyStore(dataDir, deps))
 }
 
+/**
+ * Keeps the first key the store hands back, so a process that opens the same
+ * database again (the daemon's reader after a close) asks the store once. A
+ * missing key is not kept: it may be stored later.
+ */
+export function rememberedDbKeys(keys: DbKeyStore): DbKeyStore {
+  let key: string | null = null
+  return {
+    name: keys.name,
+    read: () => {
+      key ??= keys.read()
+      return key
+    },
+    exists: () => key !== null || keys.exists(),
+  }
+}
+
 export function newDbKey(): string {
   return randomBytes(32).toString('hex')
 }

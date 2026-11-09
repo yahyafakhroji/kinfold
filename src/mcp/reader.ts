@@ -5,6 +5,7 @@
 // it, and every query is prepared up front so a search is one bound call.
 // A null project means "all projects" (the tools' `project: "*"`).
 
+import type { DbKeyStore } from '../sqlite/keys'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { openReadOnly } from '../context/fallback'
@@ -258,10 +259,10 @@ export function databasePath(dataDir: string): string {
  * Null while there is no database file, or when it cannot be opened read-only
  * (for example a file from before the schema had these tables).
  */
-export function openMemoryReader(dataDir: string): MemoryReader | null {
+export function openMemoryReader(dataDir: string, keys?: DbKeyStore): MemoryReader | null {
   const path = databasePath(dataDir)
   if (!existsSync(path)) return null
-  const db = openReadOnly(path)
+  const db = openReadOnly(path, undefined, keys)
   if (db === null) return null
   try {
     return createReader(db)

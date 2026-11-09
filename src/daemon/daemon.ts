@@ -21,7 +21,7 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { envName } from '../env-names'
-import type { DbKeyStore } from '../sqlite/keys'
+import { type DbKeyStore, dbKeyStoreFor, rememberedDbKeys } from '../sqlite/keys'
 import { plaintextBesideKey } from '../sqlite/open'
 import type { Database } from '../sqlite/types'
 import { DAEMON_INFO_FILE, SPOOL_DIR, TOKEN_FILE, ensureDataDir, readOrCreateSecret, writePrivateFile } from '../store/data-dir'
@@ -249,15 +249,16 @@ interface DaemonReads {
 /**
  * The /read/ routes' deps. The reader is a second, read-only connection over
  * the daemon's own memory.db, opened on first use (and asked again while the
- * file cannot be opened), so it never shares the writer's statements.
+ * file cannot be opened), so it never shares the writer's statements. It
+ * reads through the writer's keys, so a reopen asks no key store again.
  */
-function daemonReads(dataDir: string, projectKeyFor: ReadRouteDeps['projectKeyFor'], vectors: Vectors): DaemonReads {
+function daemonReads(dataDir: string, keys: DbKeyStore, projectKeyFor: ReadRouteDeps['projectKeyFor'], vectors: Vectors): DaemonReads {
   let reader: MemoryReader | null = null
   const semantic: SemanticClient = (query) => vectors.search({ ...query, deadlineMs: MCP_SEMANTIC_TIMEOUT_MS })
   return {
     deps: {
       reader: () => {
-        reader ??= openMemoryReader(dataDir)
+        reader ??= openMemoryReader(dataDir, keys)
         return reader
       },
       projectKeyFor,
@@ -291,15 +292,17 @@ function warnIfPlaintextBesideKey(path: string, log: (line: string) => void, key
 export function startDaemon(options: DaemonOptions): RunningDaemon {
   const dataDir = ensureDataDir(options.dataDir)
   const log = options.log ?? ((line: string) => process.stderr.write(logLine(line)))
-  const store = openStore(dataDir, { keys: options.dbKeys })
+  // One key lookup for the writer and the /read/ reader alike.
+  const dbKeys = rememberedDbKeys(options.dbKeys ?? dbKeyStoreFor(dataDir))
+  const store = openStore(dataDir, { keys: dbKeys })
   // Decrypted pages stay here between requests; with SQLite's 2 MB default every prompt decrypted its pages again.
   store.db.run(`PRAGMA cache_size = -${DAEMON_CACHE_KIB}`)
-  warnIfPlaintextBesideKey(store.path, log, options.dbKeys)
+  warnIfPlaintextBesideKey(store.path, log, dbKeys)
   const token = readOrCreateSecret(join(dataDir, TOKEN_FILE))
   const hmacKeys = createHmacKeys({ dataDir, keychain: options.keychain ?? NO_CREDENTIALS, now: options.hmac?.now ?? Date.now, log })
   const vectors = startVectors(store.db, dataDir, options.vectors, log)
   const projectKeyFor = createProjectKeyResolver(gitRunnerWithTimeout(DAEMON_GIT_TIMEOUT_MS))
-  const reads = daemonReads(dataDir, projectKeyFor, vectors)
+  const reads = daemonReads(dataDir, dbKeys, projectKeyFor, vectors)
   const drainOptions = (): DrainOptions => ({ spoolDir: join(dataDir, SPOOL_DIR), ...hmacKeys.marker(), projectKeyFor })
 
   let observer: ObserverScheduler | null = null
