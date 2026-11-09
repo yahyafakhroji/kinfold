@@ -9,6 +9,7 @@ import { upsertProject } from '../store/writes'
 import { ConvertError, backupPath, convertStore } from './convert'
 import { type DbKeyStore, NO_DB_KEYS, newDbKey } from './keys'
 import { fileState, maintenancePath, openEncrypted, openPlain, openStoreFile } from './open'
+import { posixOnly } from '../../test/platform-guards'
 
 let dataDir: string
 let path: string
@@ -51,7 +52,7 @@ const count = (open: () => ReturnType<typeof openPlain>): number => {
   }
 }
 
-test('plaintext to encrypted keeps every row, leaves no plaintext and no backup, and opens only with the key', () => {
+posixOnly('file modes')('plaintext to encrypted keeps every row, leaves no plaintext and no backup, and opens only with the key', () => {
   seed(NO_DB_KEYS)
   const key = newDbKey()
   const result = inMaintenance(() => convertStore({ path, from: null, to: key, log: (line) => logs.push(line), freeBytes: PLENTY }))

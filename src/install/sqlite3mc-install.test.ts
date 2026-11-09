@@ -8,6 +8,7 @@ import { SQLITE3MC_ZIP_URL } from '../sqlite/release'
 import type { InstallEnv } from './env'
 import { hasBuiltLibrary, installSqlite3mc, sqlite3mcInstallActions } from './sqlite3mc-install'
 import { type FakeWorld, createWorld, placeBuiltLibrary } from './test-support'
+import { posixOnly } from '../../test/platform-guards'
 
 let w: FakeWorld
 beforeEach(() => {
@@ -56,7 +57,7 @@ test('a platform with no build plans nothing and says so', () => {
   expect(w.out.some((line) => line.includes('no sqlite3mc build for aix'))).toBe(true)
 })
 
-test('the build lands 0600 under its own hash, the manifest names it, and old builds and build directories go', async () => {
+posixOnly('file modes')('the build lands 0600 under its own hash, the manifest names it, and old builds and build directories go', async () => {
   const { env, urls, builds, dir } = world()
   mkdirSync(join(dir, '.sqlite3mc-build-999', 'src'), { recursive: true })
   writeFileSync(join(dir, 'libsqlite3mc-0000000000000000.dylib'), 'an older build')

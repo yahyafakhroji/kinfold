@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { type RunningDaemon, startDaemon } from '../daemon/daemon'
 import { CHECK_INTERVAL_MS, LATEST_RELEASE_URL, MAX_RELEASE_BYTES, type UpdateCheckDeps, latestFromRelease, runUpdateCheck } from './check'
 import { UPDATE_STATE_FILE, readUpdateState, writeUpdateState } from './state'
+import { posixOnly } from '../../test/platform-guards'
 
 const HOUR = 3_600_000
 const T0 = 1_800_000_000_000
@@ -51,7 +52,7 @@ test('the request carries only the user agent', async () => {
   expect(calls[0]!.init.body).toBeUndefined()
 })
 
-test('a successful check records the version', async () => {
+posixOnly('file modes')('a successful check records the version', async () => {
   expect(await runUpdateCheck(deps())).toBe('checked')
   const state = readUpdateState(dir)
   expect(state).toMatchObject({ latestVersion: '0.2.0', checkedAt: T0, lastAttemptAt: T0 })

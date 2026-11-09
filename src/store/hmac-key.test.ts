@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { UNKEYED_EPOCH } from '../redaction/redact'
 import { listSubKeyEpochs, loadMarkerKey, pickEpoch, readSubKey, subKeyDir, subKeyPath, writeSubKey } from './hmac-key'
+import { posixOnly } from '../../test/platform-guards'
 
 const OCT = Date.UTC(2026, 9, 26)
 const key = (byte: string): string => byte.repeat(32)
@@ -13,7 +14,7 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
-test('a sub-key file is written atomically, 0600 in a 0700 dir, and read back', () => {
+posixOnly('file modes')('a sub-key file is written atomically, 0600 in a 0700 dir, and read back', () => {
   writeSubKey(dir, 202610, key('1a'))
   expect(readSubKey(dir, 202610)).toBe(key('1a'))
   expect(statSync(subKeyPath(dir, 202610)).mode & 0o777).toBe(0o600)
@@ -49,7 +50,7 @@ test('capture reads the current epoch\'s file, and the newest earlier one when t
   expect(existsSync(join(dir, 'hmac.key'))).toBe(false)
 })
 
-test('never migrated (no hmac.d): hmac.key is created and used as epoch 0, as before key rotation', () => {
+posixOnly('file modes')('never migrated (no hmac.d): hmac.key is created and used as epoch 0, as before key rotation', () => {
   const first = loadMarkerKey(dir, OCT)
   expect(first.epoch).toBe(0)
   expect(statSync(join(dir, 'hmac.key')).mode & 0o777).toBe(0o600)

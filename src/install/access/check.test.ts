@@ -6,6 +6,7 @@ import { status } from '../status'
 import { type FakeWorld, YES, createWorld } from '../test-support'
 import type { DataDirAccess } from './check'
 import { dataDirAccessFor } from './check'
+import { posixOnly } from '../../../test/platform-guards'
 
 // The real factories, kept so the spies below can be undone: mock.module lasts for
 // the whole process, and other test files use the real modules.
@@ -47,7 +48,7 @@ test('an access check with no fixes plans no chmod', async () => {
   expect(world.out.some((line) => line.includes('need fixing'))).toBe(false)
 })
 
-test('the mode check still plans the chmod on a linux world', async () => {
+posixOnly('file modes')('the mode check still plans the chmod on a linux world', async () => {
   world = createWorld({ platform: 'linux', withLibrary: false, opencodeVersion: undefined, keychainRefs: [] })
   looseDataDir(world)
   await status(world.env)

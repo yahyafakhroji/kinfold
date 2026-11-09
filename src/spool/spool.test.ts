@@ -7,6 +7,7 @@ import type { NormalizedEvent } from '../contract/event'
 import { ulid } from '../contract/ulid'
 import { ALL_SECRET_VALUES, FAKE_SECRETS, leakyOutput } from '../../test/fixtures/secrets'
 import { DIR_MODE, FILE_MODE, QUARANTINE_DIR, readSpool, removeSpoolEntry, writeSpoolEntry } from './spool'
+import { posixOnly } from '../../test/platform-guards'
 
 const options = { hmacKey: 'test-hmac-key' }
 let root: string
@@ -33,7 +34,7 @@ const prepared = (e: NormalizedEvent): RedactedEvent => prepareForSpool(e, optio
 const mode = (path: string): number => statSync(path).mode & 0o777
 
 describe('writeSpoolEntry', () => {
-  test('writes an owner-only file in an owner-only directory', () => {
+  posixOnly('file modes')('writes an owner-only file in an owner-only directory', () => {
     const path = writeSpoolEntry(dir, prepared(event(1_792_839_465_000)))
     expect(mode(dir)).toBe(DIR_MODE)
     expect(mode(path)).toBe(FILE_MODE)

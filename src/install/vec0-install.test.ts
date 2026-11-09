@@ -6,6 +6,7 @@ import type { Vec0Asset } from '../vectors/vec0-release'
 import type { InstallEnv } from './env'
 import { type FakeWorld, createWorld, placeBuiltLibrary } from './test-support'
 import { installVec0, tarMember, vec0InstallActions, vectorStatusLine } from './vec0-install'
+import { posixOnly } from '../../test/platform-guards'
 
 let w: FakeWorld
 beforeEach(() => {
@@ -51,7 +52,7 @@ test('tarMember finds the member by base name and refuses what is not there', ()
   expect(tarMember(new Uint8Array(1024), 'vec0.dylib')).toBeNull()
 })
 
-test('a matching download is unpacked and written 0600 into <dataDir>/lib', async () => {
+posixOnly('file modes')('a matching download is unpacked and written 0600 into <dataDir>/lib', async () => {
   const { env, urls } = envServing(TARBALL)
   const path = vec0Path(w.dataDir)
   await installVec0(env, path, ASSET)

@@ -13,6 +13,7 @@ import { openTestDatabase } from '../sqlite/test-support'
 import { listSubKeyEpochs, readSubKey, subKeyDir, subKeyPath, writeSubKey } from '../store/hmac-key'
 import { startDaemon } from './daemon'
 import { WRITE_AHEAD_MS, createHmacKeys, rotateSubKeys, wantedEpochs } from './hmac-rotation'
+import { posixOnly } from '../../test/platform-guards'
 
 const MASTER = '3c'.repeat(32)
 const LEGACY = '7d'.repeat(32)
@@ -50,7 +51,7 @@ const noKeyBytes = () => {
   for (const secret of [MASTER, LEGACY, markerSubKey(MASTER, 202610), markerSubKey(MASTER, 202611)]) expect(text).not.toContain(secret)
 }
 
-test('rotation mid-month writes the current epoch only, derived from the master, 0600 in 0700', () => {
+posixOnly('file modes')('rotation mid-month writes the current epoch only, derived from the master, 0600 in 0700', () => {
   expect(rotateSubKeys(dir, MASTER, MID_OCT)).toEqual({ current: 202610, written: [202610], deleted: [] })
   expect(readSubKey(dir, 202610)).toBe(markerSubKey(MASTER, 202610))
   expect(statSync(subKeyPath(dir, 202610)).mode & 0o777).toBe(0o600)

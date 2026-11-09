@@ -11,6 +11,7 @@ import { VERSION } from '../version'
 import { status } from './status'
 import { writeUpdateState } from '../update/state'
 import { BUN, type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
+import { posixOnly } from '../../test/platform-guards'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -71,7 +72,7 @@ test('after install: wired, loaded, healthy, observers with their source, modes 
   expect(out).toMatch(/data dir .*: modes ok/)
 })
 
-test('stale paths, loose modes and duplicate project wiring are each reported', async () => {
+posixOnly('file modes')('stale paths, loose modes and duplicate project wiring are each reported', async () => {
   const w = make({ withLibrary: false })
   const paths = installPaths(w.env)
   mkdirSync(paths.claudeDir, { recursive: true })

@@ -8,6 +8,7 @@ import { type FakeService, type FakeWorld, countingService, createWorld, fakeSer
 import { StubService } from '../install/service/stub-service'
 import { LATEST_RELEASE_URL } from './check'
 import { programUrl, runUpdate } from './update'
+import { posixOnly } from '../../test/platform-guards'
 
 const ARCH = 'arm64'
 const ASSET = releaseAssetName('darwin', ARCH)!
@@ -150,7 +151,7 @@ test('the folder is flushed after the program rename', async () => {
   expect(synced).toEqual([])
 })
 
-test('a verified program is handed install --yes with the saved channel', async () => {
+posixOnly('file modes')('a verified program is handed install --yes with the saved channel', async () => {
   const { w, binPath, service } = updateWorld()
   writeFileSync(join(w.dataDir, 'install.json'), JSON.stringify({ channel: 'npx', updateCheck: true, firstInstalledAt: 1 }))
   const calls: { path: string; argv: readonly string[]; env: Readonly<Record<string, string>>; bytes: string; mode: number }[] = []
