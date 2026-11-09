@@ -15,6 +15,7 @@ import type { CredentialProvider } from '../secrets/credentials'
 import type { KeyStore } from '../secrets/key-store'
 import type { SecurityRunner } from '../secrets/stores/keychain'
 import type { ServiceControl } from './service/control'
+import type { DiskEncryptionCheck } from './disk/check'
 import type { BuildInput } from '../sqlite/build'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
 import type { ObserverRunner, ObserverSettings } from '../observer/types'
@@ -103,6 +104,8 @@ export interface InstallEnv {
    * (key-store-choice.ts). null: none, so credentials are not stored. install sets it once, before the questions.
    */
   keyStore?: KeyStore | null
+  /** The disk-encryption check status runs; default this platform's (disk/check.ts). Tests inject a stub. */
+  diskCheck?: DiskEncryptionCheck
 }
 
 export { LAUNCH_AGENT_LABEL, PLUGIN_FILE_NAME }

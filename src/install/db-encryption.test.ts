@@ -4,7 +4,9 @@ import { DB_KEY_REF } from '../secrets/credentials'
 import { type DbKeyStore, NO_DB_KEYS, newDbKey } from '../sqlite/keys'
 import { openStore } from '../store/db'
 import { DB_FILE } from '../store/data-dir'
-import { FDESETUP, createDbKey, dbKeyActions, dbStatusLines, describeCreateDbKey } from './db-encryption'
+import { createDbKey, dbKeyActions, dbStatusLines, describeCreateDbKey } from './db-encryption'
+import { FDESETUP } from './disk/filevault'
+import { stubDiskCheck } from './disk/stub-check'
 import type { InstallEnv } from './env'
 import { type FakeWorld, createWorld } from './test-support'
 
@@ -90,5 +92,5 @@ test('FileVault off is a warning; a failed check says so; other platforms print 
   const { env } = world()
   expect((await dbStatusLines(withFdesetup(env, 'FileVault is Off.\n'))).at(-1)).toMatch(/^warning: FileVault is off; the spool, logs and agent transcripts are unencrypted/)
   expect((await dbStatusLines(withFdesetup(env, '', 1))).at(-1)).toBe('disk encryption: could not check (fdesetup exit 1)')
-  expect(await dbStatusLines({ ...env, platform: 'linux' })).toEqual(['database: not created yet (no key store)'])
+  expect(await dbStatusLines({ ...env, platform: 'linux', diskCheck: stubDiskCheck('Test') })).toEqual(['database: not created yet (no key store)'])
 })

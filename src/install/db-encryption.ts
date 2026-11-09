@@ -3,7 +3,7 @@
 // key store (db-key), so the daemon creates the store encrypted
 // (src/sqlite/open.ts). An existing store is never touched here: `kinfold
 // encrypt` converts it (E3). Status reads the file's header and key store
-// metadata only, never the key, and warns when FileVault is off, since the
+// metadata only, never the key, and warns when disk encryption is off, since the
 // spool, logs and host transcripts sit outside memory.db.
 
 import { existsSync } from 'node:fs'
@@ -16,13 +16,12 @@ import { foundBackupPath } from '../sqlite/convert'
 import { fileState, maintenancePath } from '../sqlite/open'
 import { DB_FILE } from '../store/data-dir'
 import { openStore } from '../store/db'
-import { type InstallEnv, errorMessage, platformOf } from './env'
+import { diskCheckOf, diskEncryptionLine } from './disk/check'
+import { type InstallEnv, errorMessage } from './env'
 import { keyStoreOf, readKeyStore } from './key-store-choice'
 import { ChoiceError } from './observer-choice'
 import type { Action } from './plan'
 import type { EncryptionAnswer } from './setup/wizard'
-
-export const FDESETUP = '/usr/bin/fdesetup'
 
 const foundLine = (store: KeyStore): string => `database: ${store.label} entry ${DB_KEY_REF} found; the new store is created encrypted with it`
 const newKeyLine = (store: KeyStore): string => `database: the new store is created encrypted; its key goes in ${store.place}`
@@ -174,15 +173,9 @@ function keyPresence(store: KeyStore | null): string {
   }
 }
 
-async function diskEncryptionLine(env: InstallEnv): Promise<string | null> {
-  if (platformOf(env).os !== 'macos') return null
-  const result = await env.run({ argv: [FDESETUP, 'status'], timeoutMs: 5_000 })
-  if (result.exitCode !== 0) return `disk encryption: could not check (fdesetup exit ${result.exitCode})`
-  if (result.stdout.includes('FileVault is On')) return 'disk encryption: FileVault on'
-  if (result.stdout.includes('FileVault is Off')) {
-    return 'warning: FileVault is off; the spool, logs and agent transcripts are unencrypted on disk. Turn it on in System Settings > Privacy & Security'
-  }
-  return 'disk encryption: FileVault state unknown'
+async function diskLine(env: InstallEnv): Promise<string | null> {
+  const check = diskCheckOf(env)
+  return diskEncryptionLine(check.name, await check.check(env))
 }
 
 /**
@@ -220,6 +213,6 @@ export async function dbStatusLines(env: InstallEnv): Promise<string[]> {
     const service = store.kind === 'keychain' ? ` under ${KEYCHAIN_SERVICE}` : ''
     lines.push(`warning: memory.db is encrypted and ${store.place} has no ${DB_KEY_REF}${service}; restore it with kinfold key recover`)
   }
-  const disk = await diskEncryptionLine(env)
+  const disk = await diskLine(env)
   return disk === null ? lines : [...lines, disk]
 }
