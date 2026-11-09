@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, mock, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { CLAUDE_HOOK_EVENTS, samHookGroup } from './claude-hooks'
@@ -16,6 +16,13 @@ import { NO_DB_KEYS } from '../sqlite/keys'
 import { openStore } from '../store/db'
 import { recordSafety } from '../store/observer-safety-store'
 import { upsertObserverSettings } from '../store/observer-settings-store'
+import { status } from './status'
+import { uninstall } from './uninstall'
+import type { WslStatus } from '../wsl/entry'
+
+// The real hooks, put back after each swap: mock.module lasts for the whole
+// process, and other test files use the real module.
+const realWsl = { ...(await import('../wsl/entry')) }
 
 const CLAUDE = '2.1.310 (Claude Code)'
 const OPENCODE = 'opencode v2.1.4'
@@ -288,4 +295,78 @@ test('with an unavailable service a running daemon still gets the settings', asy
   } finally {
     await daemon.stop()
   }
+})
+
+interface WslCalls {
+  install: number
+  status: number
+  uninstall: number
+}
+
+/** Stand-ins for the three WSL hooks that count their calls and answer what they are given. */
+function countingWslHooks(answers: { install?: number | null; status?: WslStatus | null; uninstall?: number | null } = {}): WslCalls {
+  const calls = { install: 0, status: 0, uninstall: 0 }
+  mock.module('../wsl/entry', () => ({
+    ...realWsl,
+    wslInstall: async () => (calls.install += 1, answers.install ?? null),
+    wslStatus: async () => (calls.status += 1, answers.status ?? null),
+    wslUninstall: async () => (calls.uninstall += 1, answers.uninstall ?? null),
+  }))
+  return calls
+}
+
+async function runAllThree(w: FakeWorld): Promise<void> {
+  await install(w.env, { ...YES, dryRun: true })
+  await status(w.env)
+  await uninstall(w.env, { dryRun: true, removeCredentials: false })
+}
+
+test('the WSL hooks run first only inside WSL', async () => {
+  try {
+    for (const [platform, wsl, expected] of [['linux', true, 1], ['darwin', false, 0], ['linux', false, 0], ['darwin', true, 0]] as const) {
+      const calls = countingWslHooks()
+      const w = both({ platform })
+      w.env = { ...w.env, wsl }
+      await runAllThree(w)
+      expect(calls).toEqual({ install: expected, status: expected, uninstall: expected })
+      await w.cleanup()
+      world = null
+    }
+
+    countingWslHooks({ install: 3, uninstall: 4, status: { lines: ['WSL (preview): x'], replaces: true } })
+    const w = both({ platform: 'linux' })
+    w.env = { ...w.env, wsl: true }
+    expect(await install(w.env, YES)).toBe(3)
+    expect(w.out).toEqual([])
+    expect(existsSync(w.dataDir) ? readdirSync(w.dataDir).sort() : []).toEqual(['lib'])
+    expect(await status(w.env)).toBe(EXIT_OK)
+    expect(w.out).toEqual(['WSL (preview): x'])
+    w.out.length = 0
+    expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(4)
+    expect(w.out).toEqual([])
+
+    countingWslHooks({ status: { lines: ['WSL (preview): y'], replaces: false } })
+    expect(await status(w.env)).toBe(EXIT_OK)
+    expect(w.out[0]).toBe('WSL (preview): y')
+    expect(w.out).toContain('hosts:')
+  } finally {
+    mock.module('../wsl/entry', () => realWsl)
+  }
+})
+
+test('the stub WSL hooks change nothing', async () => {
+  const outputs: string[][] = []
+  const codes: number[][] = []
+  for (const wsl of [false, true]) {
+    const w = both({ platform: 'linux' })
+    w.env = { ...w.env, wsl }
+    const run = [await install(w.env, YES), await status(w.env), await uninstall(w.env, { dryRun: false, removeCredentials: false })]
+    codes.push(run)
+    outputs.push(w.out.map((line) => line.replaceAll(w.root, '<root>').replace(/\b(port|pid) \d+/g, '$1 <n>').replace(/127\.0\.0\.1:\d+/g, '127.0.0.1:<port>')))
+    await w.cleanup()
+    world = null
+  }
+  expect(outputs[1]).toEqual(outputs[0])
+  expect(codes[1]).toEqual(codes[0])
+  expect(outputs[0]?.length).toBeGreaterThan(0)
 })

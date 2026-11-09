@@ -22,6 +22,7 @@ import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbe
 import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from './vec0-install'
 import { CLAUDE_MCP_REMOVE_ARGV, claudeAddArgv, rollbackSafe } from './mcp-wiring'
 import { installProgram } from './self-install'
+import { leftBehindLine, programFilesOf } from './program-files'
 import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describeMoveDataDir, describeRemoveLegacyEntry, moveDataDir, removeLegacyEntry, stopLegacyAgent } from './rename-migration'
 import { legacyBootoutArgv } from './launch-agent'
 import type { Vec0Asset } from '../vectors/vec0-release'
@@ -38,6 +39,8 @@ export type Action =
   | { kind: 'write'; path: string; content: string; mode: number; summary: string }
   /** recursive: a directory and everything in it (hmac.d/ on --remove-hmac-keys). */
   | { kind: 'remove'; path: string; summary: string; recursive?: boolean }
+  /** <dataDir>/bin, through the platform's program files: a file a running program holds is named and left. */
+  | { kind: 'remove-program-dir'; path: string; summary: string }
   /** A start or stop through the platform's service; description is its dry-run line, filled at plan time. */
   | { kind: 'service'; step: ServiceStep; description: string }
   /** A host CLI call such as `claude mcp add-json`; argv holds no secret, so it prints whole. */
@@ -107,6 +110,7 @@ export function describeAction(action: Action): string {
     case 'backup': return `back up ${action.from} -> ${action.to} (mode 0600)`
     case 'write': return `write ${action.path}: ${action.summary}`
     case 'remove': return `remove ${action.path}${action.recursive === true ? '/' : ''}: ${action.summary}`
+    case 'remove-program-dir': return `remove ${action.path}/: ${action.summary}`
     case 'service': return action.description
     case 'command': return `${action.summary}: ${action.argv.join(' ')}`
     case 'claude-mcp-replace': return `replace the Kinfold MCP server entry in Claude Code (user scope), putting the old one back if the new one fails: ${CLAUDE_MCP_REMOVE_ARGV.join(' ')}, then ${claudeAddArgv(action.next).join(' ')}`
@@ -221,6 +225,12 @@ async function waitForDaemonStart(env: InstallEnv): Promise<void> {
   throw new Error(`the daemon did not answer /health within ${START_WAIT_MS / 1000} s; it may still be opening a large store. Run kinfold status in a minute; the log is ${logFile}`)
 }
 
+// A file left behind does not fail the step: the agents are unwired by now, so
+// it goes once the sessions still running it close.
+function removeProgramDir(env: InstallEnv, path: string): void {
+  for (const left of programFilesOf(env).removeBinDir(path)) env.out(leftBehindLine(left))
+}
+
 function touch(path: string, mode: number): void {
   closeSync(openSync(path, 'a', mode))
   chmodSync(path, mode)
@@ -234,6 +244,7 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'backup': return writeBackup(action.from, action.to)
     case 'write': return writeFileAtomic(action.path, action.content, action.mode)
     case 'remove': return rmSync(action.path, { force: true, recursive: action.recursive === true })
+    case 'remove-program-dir': return removeProgramDir(env, action.path)
     case 'service': return runServiceStep(env, action.step)
     case 'command': return runCommand(env, action)
     case 'claude-mcp-replace': return replaceClaudeMcp(env, action.previous, action.next)

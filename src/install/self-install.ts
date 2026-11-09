@@ -7,7 +7,7 @@
 // folder is then fsynced so the rename itself survives a power loss.
 
 import { createHash } from 'node:crypto'
-import { chmodSync, closeSync, copyFileSync, createReadStream, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
+import { chmodSync, closeSync, copyFileSync, createReadStream, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readEnv } from '../env-names'
@@ -15,6 +15,7 @@ import { fsyncDirectory } from '../fs/atomic'
 import { compareVersions, parseVersion } from '../update/version-order'
 import { VERSION } from '../version'
 import type { InstallEnv } from './env'
+import { programFilesOf } from './program-files'
 import type { Action } from './plan'
 
 export const DEVELOPMENT_VERSION = '0.0.0-dev'
@@ -256,7 +257,7 @@ export async function programInstallActions(env: InstallEnv, options: ProgramIns
 
 /**
  * Copy the running program into place through a temp file: fsync makes the
- * bytes durable before the rename, and the rename is the only step that
+ * bytes durable before the replace, and the replace is the only step that
  * replaces the old program, so a failure before it leaves that program as it was.
  * The temp file is hashed after the copy, so a source replaced in between is
  * refused rather than installed unchecked.
@@ -284,7 +285,7 @@ export async function installProgram(env: InstallEnv, action: Extract<Action, { 
       throw new Error(action.check ? 'program does not match the release checksums' : 'the running program changed while install ran')
     }
     chmodSync(temp, PROGRAM_MODE)
-    renameSync(temp, action.to)
+    programFilesOf(env).replace(temp, action.to)
   } catch (error: unknown) {
     rmSync(temp, { force: true })
     throw error

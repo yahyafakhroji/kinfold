@@ -9,6 +9,7 @@ import { mcpPaths, mcpTarget } from './mcp-wiring'
 import { pluginFileContent } from './opencode-shim'
 import { type FakeWorld, UID, YES, createWorld, snapshotTree } from './test-support'
 import { uninstall } from './uninstall'
+import { leftBehindLine } from './program-files'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -139,4 +140,21 @@ test('uninstall stops and removes the service config through the service', async
   expect(await uninstall(w.env, { dryRun: true, removeCredentials: false })).toBe(EXIT_OK)
   const plan = w.out.filter((line) => /^ {2}\d+\. /.test(line)).map((line) => line.replace(/^ {2}\d+\. /, ''))
   expect(plan.slice(0, 2)).toEqual([bootoutArgv(UID).join(' '), `remove ${paths.launchAgentPlist}: the LaunchAgent`])
+})
+
+test('uninstall names what it had to leave behind and still exits 0', async () => {
+  const w = await installed()
+  const bin = join(w.dataDir, 'bin')
+  mkdirSync(bin, { recursive: true })
+  w.out.length = 0
+  expect(await uninstall(w.env, { dryRun: true, removeCredentials: false })).toBe(EXIT_OK)
+  // The same line the recursive remove printed, so the macOS dry run reads as it did.
+  expect(w.out.filter((line) => line.endsWith(`. remove ${bin}/: the installed kinfold program`))).toHaveLength(1)
+  w.out.length = 0
+  const removed: string[] = []
+  w.env = { ...w.env, programFiles: { replace: () => {}, removeBinDir: (dir) => (removed.push(dir), ['/d/bin/.kinfold-old-1']) } }
+  expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
+  expect(removed).toEqual([bin])
+  expect(w.out).toContain(leftBehindLine('/d/bin/.kinfold-old-1'))
+  expect(w.out.find((line) => line.includes(`remove ${bin}/`))).toEndWith('[done]')
 })

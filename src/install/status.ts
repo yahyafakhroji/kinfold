@@ -10,7 +10,7 @@ import { getObserverSettings } from './daemon-client'
 import { dbStatusLines } from './db-encryption'
 import { detectHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
-import { type InstallEnv, errorMessage, installPaths } from './env'
+import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
 import { keyStoreStatusLine, readKeyStore } from './key-store-choice'
 import { entryCommand } from './entry'
 import { readJsonObject, readTextOrNull } from './files'
@@ -27,6 +27,7 @@ import { availableMessage, pendingNotice } from '../update/notice'
 import { readUpdateState } from '../update/state'
 import { VERSION } from '../version'
 import { readInstallRecord } from './setup/record'
+import { wslStatus } from '../wsl/entry'
 
 function claudeWiring(env: InstallEnv): string {
   const paths = installPaths(env)
@@ -115,6 +116,9 @@ export function updateLine(env: InstallEnv, running: string = VERSION): string {
 }
 
 export async function status(env: InstallEnv, running: string = VERSION): Promise<number> {
+  const wsl = platformOf(env).wsl ? await wslStatus(env) : null
+  for (const line of wsl?.lines ?? []) env.out(line)
+  if (wsl?.replaces === true) return EXIT_OK
   const observer = await observerLines(env)
   const duplicates = findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings])
   const lines = [

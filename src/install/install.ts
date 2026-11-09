@@ -44,6 +44,7 @@ import { sqlite3mcInstallActions } from './sqlite3mc-install'
 import { hostUnwireActions } from './uninstall'
 import { vec0InstallActions } from './vec0-install'
 import { envForDataDir } from '../cli/data-dir-env'
+import { wslInstall } from '../wsl/entry'
 
 export const EXIT_OK = 0
 export const EXIT_FAILED = 1
@@ -226,7 +227,7 @@ export function serviceActions(env: InstallEnv, service: ServiceControl | null, 
  * failed step never leaves an agent without a memory server. Reads host
  * config files only, never the data dir or the Keychain.
  */
-async function agentWiringActions(env: InstallEnv, hosts: readonly InstallHost[], opencodeAssets?: EmbeddedAssets | null): Promise<Action[]> {
+export async function agentWiringActions(env: InstallEnv, hosts: readonly InstallHost[], opencodeAssets?: EmbeddedAssets | null): Promise<Action[]> {
   const claudeState = hosts.includes('claude-code') ? claudeMcpState(env) : null
   const claudeLegacy = claudeState === 'yes' || claudeState === 'no' || claudeState === 'stale' ? legacyClaudeMcpRemoval(env) : []
   const opencode = hosts.includes('opencode') ? [...(await opencodeInstallActions(env, opencodeAssets)), ...opencodeMcpInstallActions(env), ...legacyShimRemoval(env)] : []
@@ -523,6 +524,10 @@ async function folderTarget(env: InstallEnv, dataDir: string, options: InstallOp
 export async function install(env: InstallEnv, options: InstallOptions): Promise<number> {
   let migrated = false
   try {
+    if (platformOf(env).wsl) {
+      const code = await wslInstall(env, options)
+      if (code !== null) return code
+    }
     const envProblem = legacyEnvProblem(env)
     if (envProblem !== null) {
       env.out(`install failed: ${envProblem}`)

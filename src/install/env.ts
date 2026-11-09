@@ -17,6 +17,7 @@ import type { SecurityRunner } from '../secrets/stores/keychain'
 import type { ServiceControl } from './service/control'
 import type { DiskEncryptionCheck } from './disk/check'
 import type { DataDirAccess } from './access/check'
+import type { ProgramFiles } from './program-files'
 import type { BuildInput } from '../sqlite/build'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
 import type { ObserverRunner, ObserverSettings } from '../observer/types'
@@ -109,6 +110,8 @@ export interface InstallEnv {
   diskCheck?: DiskEncryptionCheck
   /** The data dir access check install and status run; default this platform's (access/check.ts). Tests inject a stub. */
   dataDirAccess?: DataDirAccess
+  /** How the program is put in place and its bin folder removed; default this platform's (program-files.ts). Tests inject a recorder. */
+  programFiles?: ProgramFiles
 }
 
 export { LAUNCH_AGENT_LABEL, PLUGIN_FILE_NAME }

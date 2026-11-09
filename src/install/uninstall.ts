@@ -19,7 +19,7 @@ import type { KeyStore } from '../secrets/key-store'
 import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
 import { removeSamHooks } from './claude-hooks'
 import { getObserverSettings } from './daemon-client'
-import { type InstallEnv, errorMessage, installPaths } from './env'
+import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
 import { plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import { EXIT_FAILED, EXIT_OK } from './install'
 import { INSTALL_HOSTS, type InstallHost } from './detect'
@@ -31,6 +31,7 @@ import { readKeyStore, secretDeleteAction } from './key-store-choice'
 import { inspectShim } from './opencode-shim'
 import { type Action, runPlan } from './plan'
 import { managedServiceOf } from './service/control'
+import { wslUninstall } from '../wsl/entry'
 
 export interface UninstallOptions {
   dryRun: boolean
@@ -54,7 +55,7 @@ function installedFilesActions(env: InstallEnv): Action[] {
   const bin = join(env.dataDir, 'bin')
   const lib = join(env.dataDir, 'lib')
   return [
-    ...(existsSync(bin) ? [{ kind: 'remove', path: bin, summary: 'the installed kinfold program', recursive: true } as const] : []),
+    ...(existsSync(bin) ? [{ kind: 'remove-program-dir', path: bin, summary: 'the installed kinfold program' } as const] : []),
     ...(existsSync(lib) ? [{ kind: 'remove', path: lib, summary: 'the installed sqlite libraries', recursive: true } as const] : []),
   ]
 }
@@ -125,6 +126,10 @@ function unknownStoreNote(reason: string, options: UninstallOptions): string[] {
 
 export async function uninstall(env: InstallEnv, options: UninstallOptions): Promise<number> {
   try {
+    if (platformOf(env).wsl) {
+      const code = await wslUninstall(env, options)
+      if (code !== null) return code
+    }
     const refs = await ourRefs(env, options.dryRun)
     const read = readKeyStore(env)
     const store = read.ok ? read.store : null
