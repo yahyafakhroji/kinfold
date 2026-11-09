@@ -5,12 +5,14 @@
 // and restart are the same steps a fresh install takes. Until that hand-off
 // nothing but the temp file exists, and the temp file is removed on every path,
 // so a cut-off or tampered download leaves the running program and its
-// service as they were.
+// service as they were. A run killed outright (SIGKILL, a crash, a power loss)
+// cannot clean up, so each run first removes the temp files of runs no longer alive.
 
-import { closeSync, fsyncSync, mkdirSync, openSync, rmSync, writeSync } from 'node:fs'
+import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, rmSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { envName } from '../env-names'
 import type { InstallEnv } from '../install/env'
+import { serviceOf } from '../install/service/control'
 import { installedProgramPath } from '../install/entry'
 import { RELEASE_BASE, fetchReleaseSums, fileSha256, parseSha256Sums, releaseAssetName, releaseSumsUrl } from '../install/self-install'
 import { currentChannel, readInstallRecord } from '../install/setup/record'
@@ -23,7 +25,10 @@ export const DOWNLOAD_TIMEOUT_MS = 300_000
 
 const EXIT_OK = 0
 const EXIT_FAILED = 1
-const TEMP_MODE = 0o700
+/** Not executable until its hash matches. */
+const DOWNLOAD_MODE = 0o600
+const VERIFIED_MODE = 0o700
+const TEMP_NAME = /^\.kinfold-update-(\d+)(?:\.exe)?$/
 const BIN_DIR_MODE = 0o700
 const PREFIX = 'kinfold update:'
 
@@ -57,9 +62,48 @@ function childEnv(env: InstallEnv): Record<string, string> {
   return vars
 }
 
+function binDir(env: InstallEnv): string {
+  return dirname(installedProgramPath(env.dataDir, env.platform))
+}
+
 function tempPath(env: InstallEnv): string {
   const suffix = env.platform === 'win32' ? '.exe' : ''
-  return join(dirname(installedProgramPath(env.dataDir, env.platform)), `.kinfold-update-${process.pid}${suffix}`)
+  return join(binDir(env), `.kinfold-update-${process.pid}${suffix}`)
+}
+
+/** EPERM means the pid exists under another user, so only ESRCH counts as gone. */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error: unknown) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
+  }
+}
+
+/**
+ * Removes the temp programs of update runs that are gone. A live run's file is
+ * left alone, since its install may still be copying from it; this run's own
+ * name is left to the exclusive create, which refuses whatever is there.
+ */
+function sweepLeftovers(env: InstallEnv): void {
+  const dir = binDir(env)
+  if (!existsSync(dir)) return
+  for (const name of readdirSync(dir)) {
+    const pid = Number(TEMP_NAME.exec(name)?.[1] ?? Number.NaN)
+    if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid || pidAlive(pid)) continue
+    rmSync(join(dir, name), { force: true })
+  }
+}
+
+/** Whether this run created the temp file, so cleanup never removes a file someone else put at that name. */
+interface TempFile {
+  path: string
+  created: boolean
+}
+
+function removeTemp(temp: TempFile): void {
+  if (temp.created) rmSync(temp.path, { force: true })
 }
 
 function tooLarge(): UpdateStop {
@@ -67,7 +111,7 @@ function tooLarge(): UpdateStop {
 }
 
 /** Streams the body to `path` and stops at the cap; a longer body is refused, not truncated. */
-async function download(env: InstallEnv, url: string, path: string, cap: number): Promise<void> {
+async function download(env: InstallEnv, url: string, temp: TempFile, cap: number): Promise<void> {
   let response: Response
   try {
     response = await env.fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
@@ -84,8 +128,16 @@ async function download(env: InstallEnv, url: string, path: string, cap: number)
   }
   const reader = response.body?.getReader()
   if (reader === undefined) throw new UpdateStop('the program download was empty; nothing was changed')
-  mkdirSync(dirname(path), { recursive: true, mode: BIN_DIR_MODE })
-  const fd = openSync(path, 'w', TEMP_MODE)
+  mkdirSync(dirname(temp.path), { recursive: true, mode: BIN_DIR_MODE })
+  let fd: number
+  try {
+    // Exclusive: never follow a file or link already at this name.
+    fd = openSync(temp.path, 'wx', DOWNLOAD_MODE)
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    throw new UpdateStop(`${temp.path} already exists; remove it and run kinfold update again; nothing was changed`)
+  }
+  temp.created = true
   try {
     let size = 0
     for (;;) {
@@ -130,7 +182,7 @@ function describeDryRun(env: InstallEnv, running: string, latest: string, assetN
   const binPath = installedProgramPath(env.dataDir, env.platform)
   const channel = currentChannel(env, readInstallRecord(env.dataDir))
   return [
-    `kinfold update: ${running} -> ${latest} (dry run; nothing is downloaded or changed)`,
+    `kinfold update: ${running} -> ${latest} (dry run; nothing is downloaded or installed)`,
     `  1. download ${releaseSumsUrl(env.envVars ?? {}, latest)}`,
     `  2. download ${programUrl(latest, assetName)} to ${temp} (mode 0700, at most ${MAX_PROGRAM_BYTES} bytes)`,
     `  3. check its sha256 against the ${assetName} line of SHA256SUMS; a mismatch stops here with nothing changed`,
@@ -140,19 +192,20 @@ function describeDryRun(env: InstallEnv, running: string, latest: string, assetN
   ]
 }
 
-const SIGNAL_EXITS: Readonly<Record<'SIGINT' | 'SIGTERM', number>> = { SIGINT: 130, SIGTERM: 143 }
+/** 128 + the signal number, as a shell reports it; SIGHUP is a closed terminal. */
+const SIGNAL_EXITS: Readonly<Record<'SIGHUP' | 'SIGINT' | 'SIGTERM', number>> = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 }
 
 /**
  * A Ctrl-C mid-download would skip the finally below; this removes the temp
  * file first. During the hand-off the child gets the same Ctrl-C and decides,
  * so this process only waits for it and cleans up afterwards.
  */
-function guardSignals(temp: string): { handingOff(): void; release(): void } {
+function guardSignals(temp: TempFile): { handingOff(): void; release(): void } {
   let waiting = false
   const handlers = Object.entries(SIGNAL_EXITS).map(([signal, code]) => {
     const handler = (): void => {
       if (waiting) return
-      rmSync(temp, { force: true })
+      removeTemp(temp)
       process.exit(code)
     }
     process.on(signal, handler)
@@ -177,6 +230,17 @@ async function hashOrNull(path: string): Promise<string | null> {
   }
 }
 
+/** The child may have stopped the service before it failed, so say what it is now. */
+async function serviceState(env: InstallEnv): Promise<string> {
+  const service = serviceOf(env)
+  if (service === null) return 'this platform has no background service'
+  try {
+    return (await service.isRunning()) ? 'the service is running' : 'the service is stopped; kinfold install starts it again'
+  } catch (error: unknown) {
+    return `could not tell whether the service is running (${error instanceof Error ? error.name : 'error'})`
+  }
+}
+
 async function handOff(env: InstallEnv, temp: string, running: string, latest: string, run: NonNullable<UpdateDeps['runProgram']>): Promise<number> {
   const binPath = installedProgramPath(env.dataDir, env.platform)
   const before = await hashOrNull(binPath)
@@ -192,9 +256,10 @@ async function handOff(env: InstallEnv, temp: string, running: string, latest: s
     return EXIT_OK
   }
   const unchanged = before !== null && (await hashOrNull(binPath)) === before
-  env.out(unchanged
+  const program = unchanged
     ? `${PREFIX} the new program's install stopped (exit ${code}); ${binPath} is still ${running}`
-    : `${PREFIX} the new program's install stopped (exit ${code}) after replacing ${binPath}; run kinfold install to finish`)
+    : `${PREFIX} the new program's install stopped (exit ${code}) after replacing ${binPath}; run kinfold install to finish`
+  env.out(`${program}; ${await serviceState(env)}`)
   return EXIT_FAILED
 }
 
@@ -203,6 +268,7 @@ export async function runUpdate(env: InstallEnv, options: { dryRun: boolean }, d
     env.out(`${PREFIX} this is a checkout install; update it with git pull and bun src/cli/kinfold.ts install`)
     return EXIT_FAILED
   }
+  sweepLeftovers(env)
   const running = deps.version ?? VERSION
   let latest: string
   try {
@@ -221,25 +287,28 @@ export async function runUpdate(env: InstallEnv, options: { dryRun: boolean }, d
     env.out(`${PREFIX} no release build for ${env.platform}-${arch}`)
     return EXIT_FAILED
   }
-  const temp = tempPath(env)
+  const temp: TempFile = { path: tempPath(env), created: false }
   if (options.dryRun) {
-    for (const line of describeDryRun(env, running, latest, assetName, temp)) env.out(line)
+    for (const line of describeDryRun(env, running, latest, assetName, temp.path)) env.out(line)
     return EXIT_OK
   }
   const signals = guardSignals(temp)
   try {
     const expected = await fetchExpectedHash(env, latest, assetName)
     await download(env, programUrl(latest, assetName), temp, deps.maxProgramBytes ?? MAX_PROGRAM_BYTES)
-    if ((await fileSha256(temp)) !== expected) throw new UpdateStop('the downloaded program does not match the release checksums; nothing was changed')
+    if ((await fileSha256(temp.path)) !== expected) throw new UpdateStop('the downloaded program does not match the release checksums; nothing was changed')
+    chmodSync(temp.path, VERIFIED_MODE)
     env.out(`kinfold update: ${latest} downloaded and checked; installing it`)
     signals.handingOff()
-    return await handOff(env, temp, running, latest, deps.runProgram ?? spawnProgram)
+    return await handOff(env, temp.path, running, latest, deps.runProgram ?? spawnProgram)
   } catch (error: unknown) {
-    if (!(error instanceof UpdateStop)) throw error
-    env.out(`${PREFIX} ${error.message}`)
+    // handOff catches its own failures, so anything here came before it: a full
+    // disk or a permission error while writing the download.
+    const message = error instanceof UpdateStop ? error.message : `could not write the download (${(error as NodeJS.ErrnoException).code ?? (error instanceof Error ? error.name : 'error')}); nothing was changed`
+    env.out(`${PREFIX} ${message}`)
     return EXIT_FAILED
   } finally {
-    rmSync(temp, { force: true })
+    removeTemp(temp)
     signals.release()
   }
 }

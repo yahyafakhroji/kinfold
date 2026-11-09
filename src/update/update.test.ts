@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { existsSync, fstatSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, fstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { installedProgramPath } from '../install/entry'
 import { installProgram, releaseAssetName } from '../install/self-install'
@@ -118,7 +118,7 @@ test('a cut-off download leaves the old program running', async () => {
   expect(w.out.at(-1)).toBe('kinfold update: the program download was cut off (TypeError); nothing was changed')
   expect(tempFiles(binPath)).toEqual([])
   expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
-  expect(service.calls).not.toContain('stop')
+  expect(service.calls).toEqual([])
 })
 
 test('a truncated download leaves the old program running', async () => {
@@ -127,7 +127,7 @@ test('a truncated download leaves the old program running', async () => {
   expect(w.out.at(-1)).toBe('kinfold update: the downloaded program does not match the release checksums; nothing was changed')
   expect(tempFiles(binPath)).toEqual([])
   expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
-  expect(service.calls).not.toContain('stop')
+  expect(service.calls).toEqual([])
 })
 
 test('the folder is flushed after the program rename', async () => {
@@ -182,7 +182,7 @@ test('a failed hand-off says the old program is still in place', async () => {
   const { w, binPath } = updateWorld()
   const code = await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: async () => 3 })
   expect(code).toBe(1)
-  expect(w.out.at(-1)).toBe(`kinfold update: the new program's install stopped (exit 3); ${binPath} is still 0.1.0`)
+  expect(w.out.at(-1)).toBe(`kinfold update: the new program's install stopped (exit 3); ${binPath} is still 0.1.0; the service is running`)
   expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
   expect(tempFiles(binPath)).toEqual([])
 })
@@ -240,4 +240,65 @@ test('an unreachable release API says why and changes nothing', async () => {
   expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: noRun })).toBe(1)
   expect(w.out.at(-1)).toBe('kinfold update: could not ask GitHub for the latest release (403)')
   expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
+})
+
+test('a failed hand-off that left the service stopped says so', async () => {
+  const { w, binPath } = updateWorld()
+  const stopped = fakeService({ running: false })
+  w.env = { ...w.env, service: stopped }
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: async () => 4 })).toBe(1)
+  expect(w.out.at(-1)).toBe(`kinfold update: the new program's install stopped (exit 4); ${binPath} is still 0.1.0; the service is stopped; kinfold install starts it again`)
+  expect(stopped.calls).toEqual(['isRunning'])
+})
+
+/** A pid that existed and has exited: a short child, waited for. */
+async function deadPid(): Promise<number> {
+  const child = Bun.spawn(['/bin/sh', '-c', 'exit 0'], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
+  await child.exited
+  return child.pid
+}
+
+for (const dryRun of [false, true]) {
+  test(`leftovers of dead update runs are swept, a live run's file is kept${dryRun ? ' (dry run)' : ''}`, async () => {
+    const { w, binPath } = updateWorld({ tag: 'v0.1.0' })
+    const bin = dirname(binPath)
+    const dead = join(bin, `.kinfold-update-${await deadPid()}`)
+    const deadExe = join(bin, `.kinfold-update-${await deadPid()}.exe`)
+    const live = join(bin, `.kinfold-update-${process.ppid}`)
+    const other = join(bin, '.kinfold-update-notapid')
+    for (const path of [dead, deadExe, live, other]) writeFileSync(path, 'partial program')
+    expect(await runUpdate(w.env, { dryRun }, { version: '0.1.0', runProgram: noRun })).toBe(0)
+    expect(existsSync(dead)).toBe(false)
+    expect(existsSync(deadExe)).toBe(false)
+    expect(existsSync(live)).toBe(true)
+    expect(existsSync(other)).toBe(true)
+    expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
+  })
+}
+
+test('a file or link already at the temp name is refused, not followed or removed', async () => {
+  const { w, binPath } = updateWorld()
+  const target = join(w.root, 'elsewhere')
+  writeFileSync(target, 'not kinfold')
+  const temp = join(dirname(binPath), `.kinfold-update-${process.pid}`)
+  symlinkSync(target, temp)
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: noRun })).toBe(1)
+  expect(w.out.at(-1)).toBe(`kinfold update: ${temp} already exists; remove it and run kinfold update again; nothing was changed`)
+  expect(readFileSync(target, 'utf8')).toBe('not kinfold')
+  expect(readlinkSync(temp)).toBe(target)
+  expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
+})
+
+test('a write error before the hand-off says nothing was changed', async () => {
+  const { w, binPath, service } = updateWorld()
+  chmodSync(dirname(binPath), 0o500)
+  try {
+    expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: noRun })).toBe(1)
+  } finally {
+    chmodSync(dirname(binPath), 0o700)
+  }
+  expect(w.out.at(-1)).toBe('kinfold update: could not write the download (EACCES); nothing was changed')
+  expect(tempFiles(binPath)).toEqual([])
+  expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
+  expect(service.calls).toEqual([])
 })
