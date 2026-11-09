@@ -234,11 +234,13 @@ function sameSettings(row: ObserverSettingsRow | undefined, input: ObserverSetti
  * still gets a PUT: saving the row is what clears it in the daemon. A probe
  * failure lives in the daemon's memory and only a successful probe clears it,
  * so the PUT does not clear it; it is planned anyway so a reinstall does not
- * hide the failure.
+ * hide the failure. With the daemon unreadable, a saved choice gets no PUT: its
+ * row came from memory.db itself, so the PUT could only repeat it or, from a
+ * read that missed newer rows, put an older one back.
  */
 async function settingsActions(env: InstallEnv, choices: readonly ObserverChoice[]): Promise<Action[]> {
   const read = await getObserverSettings(env)
-  if (!read.ok) return choices.map((choice): Action => ({ kind: 'settings-put', input: choice.input }))
+  if (!read.ok) return choices.filter((choice) => choice.origin !== 'saved').map((choice): Action => ({ kind: 'settings-put', input: choice.input }))
   const rows = new Map(read.view.rows.map((row) => [row.host, row]))
   const failed = new Set<string>(read.view.safety.filter((row) => row.status === 'failed').map((row) => row.provider))
   for (const probe of read.view.probe) failed.add(probe.provider)

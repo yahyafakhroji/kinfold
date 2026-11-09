@@ -6,7 +6,7 @@
 // deliberate: when the saved observers cannot be read, the caller is told so
 // and never gets the built-in defaults in their place.
 
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, realpathSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { DEFAULT_PORT } from '../../daemon/daemon'
 import { OBSERVER_PROVIDERS } from '../../observer/types'
@@ -14,8 +14,7 @@ import { DB_KEY_REF } from '../../secrets/credentials'
 import { createKeychainProvider } from '../../secrets/keychain'
 import { credentialWriterFor } from '../../secrets/keychain-writer'
 import { credentialDbKeyStore } from '../../sqlite/keys'
-import { openReadOnly } from '../../context/fallback'
-import { fileState } from '../../sqlite/open'
+import { fileState, openStoreFile } from '../../sqlite/open'
 import { DB_FILE } from '../../store/data-dir'
 import { type ObserverSettingsInput, listObserverSettings } from '../../store/observer-settings-store'
 import { type WiringState, inspectSamHooks } from '../claude-hooks'
@@ -96,27 +95,49 @@ function toMap(rows: readonly RowLike[]): Map<InstallHost, ObserverSettingsInput
   return map
 }
 
+const READ_BUSY_TIMEOUT_MS = 1000
+
+function immutableUri(path: string): string {
+  return `file:${path.split('/').map(encodeURIComponent).join('/')}?mode=ro&immutable=1`
+}
+
+function nonEmpty(path: string): boolean {
+  try {
+    return statSync(path).size > 0
+  } catch {
+    return false
+  }
+}
+
 /**
- * The store opened read-only with the platform key; throws when the key or the
- * file will not open. A plain read-only open of a WAL store creates -wal and
- * -shm beside it when they are missing, so it is used only when both are
- * there; otherwise the file opens with immutable=1, which writes nothing.
- * immutable cannot misread a store in use: every connection to a WAL store
- * creates and keeps both side files while it is open, so their absence means
- * nothing has the store open, and a writer that opens meanwhile only appends
- * to its new -wal; the main file changes only at a checkpoint. What immutable
- * can miss is a -wal a crashed daemon left without its -shm.
+ * How to open the store so the rows read are the committed ones; throws when
+ * no open can promise that. Both side files: a plain read-only open, which
+ * reads the WAL, and nothing else, because immutable would skip it. A
+ * non-empty -wal without its -shm (a daemon that died, or one recovering it
+ * right now) may hold committed rows immutable cannot see, so it is refused.
+ * Otherwise immutable, which writes nothing: a plain read-only open of a WAL
+ * store would create the side files, and with no -shm and no non-empty -wal
+ * nothing has the store open and nothing is left to replay.
  */
+function storeTarget(path: string): string {
+  const wal = existsSync(`${path}-wal`)
+  const shm = existsSync(`${path}-shm`)
+  if (wal && shm) return path
+  if (nonEmpty(`${path}-wal`)) throw new Error('memory.db has a -wal without its -shm')
+  return immutableUri(path)
+}
+
+/** The store's rows, read with the platform key; throws when the key or the file will not open. */
 function readStoreRows(env: InstallEnv, dataDir: string): RowLike[] {
   const writer = credentialWriterFor(env.platform, env.security)
   const keychain = createKeychainProvider((args) => env.security({ args }))
   const keys = credentialDbKeyStore('keychain', keychain, () => writer?.exists(DB_KEY_REF) ?? false)
-  let failure: unknown = null
-  const db = openReadOnly(join(dataDir, DB_FILE), (error) => {
-    failure = error
-  }, keys)
-  if (db === null) throw failure ?? new Error('memory.db did not open')
+  const path = join(dataDir, DB_FILE)
+  const target = storeTarget(path)
+  const db = openStoreFile(path, { readonly: true, target, keys })
   try {
+    // A daemon starting up may hold the WAL briefly while it recovers it.
+    if (target === path) db.exec(`PRAGMA busy_timeout = ${READ_BUSY_TIMEOUT_MS}`)
     return listObserverSettings(db)
   } finally {
     db.close()

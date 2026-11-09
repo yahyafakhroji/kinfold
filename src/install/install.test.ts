@@ -9,6 +9,9 @@ import { LAUNCHCTL, launchdPath } from './launch-agent'
 import { entryCommand } from './entry'
 import { shimContent } from './opencode-shim'
 import { BUN, type FakeWorld, UID, YES, createWorld } from './test-support'
+import { NO_DB_KEYS } from '../sqlite/keys'
+import { openStore } from '../store/db'
+import { upsertObserverSettings } from '../store/observer-settings-store'
 
 const CLAUDE = '2.1.310 (Claude Code)'
 const OPENCODE = 'opencode v2.1.4'
@@ -175,4 +178,16 @@ test('the non-macOS line names the program', async () => {
   const line = w.out.find((l) => l.startsWith('LaunchAgent: macOS only'))
   expect(line).toBe(`LaunchAgent: macOS only; start the daemon yourself with: ${BUN} ${join(w.projectRoot, 'src/daemon/main.ts')}`)
   expect(line).not.toContain('bun run daemon')
+})
+
+test('with the daemon down, a saved observer read from the store gets no PUT, so a stale read can never overwrite newer settings', async () => {
+  const w = both()
+  const store = openStore(w.dataDir, { keys: NO_DB_KEYS })
+  upsertObserverSettings(store.db, { host: 'opencode', provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: true }, 1)
+  store.db.close()
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  const plan = w.out.join('\n')
+  expect(plan).not.toContain('PUT /observer/settings host=opencode')
+  // A host with no saved row still gets its default saved.
+  expect(plan).toContain('PUT /observer/settings host=claude-code provider=claude-cli')
 })
