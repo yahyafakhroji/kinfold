@@ -13,7 +13,7 @@ import { dbStatusLines } from './db-encryption'
 import { detectHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
 import { type InstallEnv, errorMessage, installPaths } from './env'
-import { entryIdentity } from './entry'
+import { entryCommand } from './entry'
 import { readJsonObject, readTextOrNull } from './files'
 import { EXIT_OK, daemonSituation } from './install'
 import { hmacStatusLines } from './hmac-migration'
@@ -22,12 +22,17 @@ import { mcpStatusLines } from './mcp-wiring'
 import { inspectShim } from './opencode-shim'
 import { describeModeChange, scanDataDirModes } from './permissions'
 import { vectorStatusLine } from './vec0-install'
+import { updatesEnabled } from '../update/enabled'
+import { availableMessage, pendingNotice } from '../update/notice'
+import { readUpdateState } from '../update/state'
+import { VERSION } from '../version'
+import { readInstallRecord } from './setup/record'
 
 function claudeWiring(env: InstallEnv): string {
   const paths = installPaths(env)
   try {
     const file = readJsonObject(paths.claudeSettings)
-    return file.exists ? inspectSamHooks(file.value, entryIdentity(env.mode, 'hook', env.dataDir)) : 'no (no settings.json)'
+    return file.exists ? inspectSamHooks(file.value, entryCommand(env.mode, 'hook', env.dataDir)) : 'no (no settings.json)'
   } catch (error: unknown) {
     return `unknown (${errorMessage(error)})`
   }
@@ -35,7 +40,7 @@ function claudeWiring(env: InstallEnv): string {
 
 function opencodeWiring(env: InstallEnv): string {
   const paths = installPaths(env)
-  const state = inspectShim(readTextOrNull(paths.opencodePlugin), paths.pluginEntry)
+  const state = inspectShim(readTextOrNull(paths.opencodePlugin), { pluginEntry: paths.pluginEntry, dataDir: env.dataDir })
   return state === 'foreign' ? 'no (a file by our name exists but is not our shim)' : state === 'stale' ? 'stale path' : state
 }
 
@@ -90,11 +95,22 @@ function keychainLines(env: InstallEnv, refs: readonly string[]): string[] {
 function dataDirLines(env: InstallEnv): string[] {
   if (!existsSync(env.dataDir)) return [`data dir ${env.dataDir}: missing`]
   const scan = scanDataDirModes(env.dataDir)
-  if (scan.changes.length === 0) return [`data dir ${env.dataDir}: modes ok (${scan.checked} checked, dirs 0700, files 0600)`]
+  if (scan.changes.length === 0) return [`data dir ${env.dataDir}: modes ok (${scan.checked} checked, dirs 0700, files 0600, program 0755)`]
   return [`data dir ${env.dataDir}: ${scan.changes.length} of ${scan.checked} need fixing (install fixes them):`, ...scan.changes.map((change) => `  ${describeModeChange(change)}`)]
 }
 
-export async function status(env: InstallEnv): Promise<number> {
+/** The saved update state only: status never fetches. */
+export function updateLine(env: InstallEnv, running: string = VERSION): string {
+  const record = readInstallRecord(env.dataDir)
+  const vars = env.envVars ?? {}
+  if (!updatesEnabled(running, record, vars)) return 'update check: off'
+  const state = readUpdateState(env.dataDir)
+  const notice = pendingNotice(state, record, running, vars)
+  if (notice !== null) return `update: ${availableMessage(notice)}`
+  return `update: none known (${state.checkedAt === null ? 'never checked' : `last checked ${new Date(state.checkedAt).toISOString()}`})`
+}
+
+export async function status(env: InstallEnv, running: string = VERSION): Promise<number> {
   const observer = await observerLines(env)
   const duplicates = findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings])
   const lines = [
@@ -107,6 +123,7 @@ export async function status(env: InstallEnv): Promise<number> {
     ...keychainLines(env, observer.refs),
     ...hmacStatusLines(env),
     ...dataDirLines(env),
+    updateLine(env, running),
     ...(duplicates.length === 0 ? ['duplicate wiring: none in this directory'] : duplicateWarning(duplicates)),
   ]
   for (const line of lines) env.out(line)

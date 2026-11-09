@@ -1,11 +1,13 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { seedObservation } from '../context/test-support'
 import { type TempStore, T0, fakeRunner, openTempStore, seedEvent } from '../observer/test-support'
 import { MAX_OBSERVER_ATTEMPTS } from '../store/observer-store'
 import { upsertProject, upsertSession } from '../store/writes'
-import { PROMPT_SERVE_BUDGET_MS, contextHandler } from './context-route'
+import { DAEMON_ONLY_TIMEOUT_MS } from '../context/daemon'
+import { PROMPT_SERVE_BUDGET_MS, contextHandler, shownBudgetMs } from './context-route'
+import { readUpdateState, writeUpdateState } from '../update/state'
 import { type RunningDaemon, startDaemon } from './daemon'
 
 let temp: TempStore
@@ -156,4 +158,66 @@ test('a prompt answer that took longer than the hook waits is returned but not r
   expect(answer.observationIds.length).toBeGreaterThan(0)
   expect(rows("SELECT id FROM injections WHERE channel = 'prompt'")).toEqual([])
   expect(logs.some((line) => line.includes('injection=skipped_late'))).toBe(true)
+})
+
+describe('update notices', () => {
+  const NOTICE_HOME = (): string => temp.dataDir
+  const seedState = (notified: Record<string, string> = {}): void => writeUpdateState(NOTICE_HOME(), { lastAttemptAt: 1, latestVersion: '0.2.0', checkedAt: 1, notified })
+  const handler = (ticks: number[] = [], envVars: () => Record<string, string> = () => ({})) => contextHandler({
+    db: temp.store.db, projectKeyFor: () => ({ key: projectKey, kind: 'path', displayName: 'route-repo' }) as never, log: () => undefined, now: () => T0,
+    clock: () => ticks.shift() ?? 0, updates: { dataDir: NOTICE_HOME(), version: '0.1.0', envVars },
+  })
+  const ask = (h: ReturnType<typeof handler>, channel: 'session_start' | 'request' | 'prompt', host = 'claude-code') =>
+    h({ host, cwd: projectKey, hostSessionId: 'cc-1', channel, ...(channel === 'prompt' ? { prompt: 'hello there' } : {}) })
+
+  test('session start and the first request carry the notice, prompt deltas never', async () => {
+    seedState()
+    const h = handler()
+    expect((await ask(h, 'prompt')).updateNotice).toBeUndefined()
+    expect((await ask(h, 'session_start')).updateNotice).toEqual({ version: '0.2.0', channel: 'curl' })
+    expect((await ask(h, 'session_start')).updateNotice).toBeUndefined()
+    expect((await ask(h, 'request', 'opencode')).updateNotice?.version).toBe('0.2.0')
+  })
+
+  test('a slow answer does not mark the notice shown', async () => {
+    seedState()
+    const h = handler([0, 0, PROMPT_SERVE_BUDGET_MS + 50])
+    const slow = await ask(h, 'session_start')
+    expect(slow.updateNotice?.version).toBe('0.2.0')
+    expect(readUpdateState(NOTICE_HOME()).notified).toEqual({})
+    expect((await ask(h, 'session_start')).updateNotice?.version).toBe('0.2.0')
+    expect(readUpdateState(NOTICE_HOME()).notified).toEqual({ 'claude-code': '0.2.0' })
+  })
+
+  test('a 500 ms answer is shown to OpenCode, which waits that long, but not to Claude Code', async () => {
+    seedState()
+    const h = handler([0, 0, 500, 0, 0, 500])
+    expect((await ask(h, 'session_start', 'claude-code')).updateNotice?.version).toBe('0.2.0')
+    expect(readUpdateState(NOTICE_HOME()).notified).toEqual({})
+    expect((await ask(h, 'request', 'opencode')).updateNotice?.version).toBe('0.2.0')
+    expect(readUpdateState(NOTICE_HOME()).notified).toEqual({ opencode: '0.2.0' })
+    expect(shownBudgetMs('opencode')).toBe(DAEMON_ONLY_TIMEOUT_MS)
+    expect(shownBudgetMs('codex')).toBe(PROMPT_SERVE_BUDGET_MS)
+  })
+
+  test('KINFOLD_NO_UPDATE_CHECK=1 gives no session-start notice and no banner', async () => {
+    seedState()
+    const h = handler([], () => ({ KINFOLD_NO_UPDATE_CHECK: '1' }))
+    expect((await ask(h, 'session_start')).updateNotice).toBeUndefined()
+    expect(readUpdateState(NOTICE_HOME()).notified).toEqual({})
+    daemon = startDaemon({ dataDir: temp.dataDir, port: 0, version: '0.1.0', fallbackDrainMs: 60_000, log: () => undefined, updateCheck: { fetch: () => new Promise<Response>(() => undefined), envVars: () => ({ KINFOLD_NO_UPDATE_CHECK: '1' }) } })
+    const banner = await fetch(url('/update'), { headers: { authorization: `Bearer ${token()}` } })
+    expect(await banner.json()).toEqual({ notice: null })
+  })
+
+  test('GET /update answers the banner and never marks anything shown', async () => {
+    writeUpdateState(NOTICE_HOME(), { lastAttemptAt: 1, latestVersion: '0.2.0', checkedAt: 1, notified: {} })
+    daemon = startDaemon({ dataDir: temp.dataDir, port: 0, version: '0.1.0', fallbackDrainMs: 60_000, log: () => undefined, updateCheck: { fetch: () => new Promise<Response>(() => undefined), envVars: () => ({}) } })
+    const response = await fetch(url('/update'), { headers: { authorization: `Bearer ${token()}` } })
+    expect(await response.json()).toEqual({ notice: { version: '0.2.0', message: 'Kinfold 0.2.0 is available. Run `kinfold update`.' } })
+    expect(readUpdateState(NOTICE_HOME()).notified).toEqual({})
+    expect((await fetch(url('/update'))).status).toBe(401)
+    const viaContext = (await (await post('/context', contextBody())).json()) as { updateNotice?: unknown }
+    expect(viaContext.updateNotice).toEqual({ version: '0.2.0', channel: 'curl' })
+  })
 })

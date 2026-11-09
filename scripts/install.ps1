@@ -99,6 +99,7 @@ try {
     Fail "the downloaded $asset does not match SHA256SUMS; nothing was installed"
   }
 
+  $env:KINFOLD_INSTALL_CHANNEL = 'powershell'
   & $program install @args
   $code = $LASTEXITCODE
   if ($null -eq $code) {

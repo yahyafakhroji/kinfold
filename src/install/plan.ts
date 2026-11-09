@@ -10,15 +10,15 @@ import { HMAC_LEGACY_REF } from '../secrets/hmac-keys'
 import { credentialWriterFor } from '../secrets/keychain-writer'
 import type { EmbeddedAssets } from '../runtime/embedded'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
-import { putObserverSettings, waitForHealth } from './daemon-client'
-import { createDbKey, describeCreateDbKey } from './db-encryption'
+import { START_WAIT_MS, putObserverSettings, waitForHealth, waitForStart } from './daemon-client'
+import { createDbKey, createPlainStore, describeCreateDbKey, describeCreatePlainStore } from './db-encryption'
 import { type InstallEnv, installPaths } from './env'
 import { writeBackup, writeFileAtomic } from './files'
 import { BACKUP_REMOVAL_SUMMARY, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
 import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
 import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbeddedSqlite3mc, installSqlite3mc } from './sqlite3mc-install'
 import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from './vec0-install'
-import { CLAUDE_MCP_REMOVE_ARGV, claudeAddArgv } from './mcp-wiring'
+import { CLAUDE_MCP_REMOVE_ARGV, claudeAddArgv, rollbackSafe } from './mcp-wiring'
 import { installProgram } from './self-install'
 import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describeMoveDataDir, describeRemoveLegacyEntry, moveDataDir, removeLegacyEntry, stopLegacyAgent } from './rename-migration'
 import { legacyBootoutArgv, bootstrapArgv } from './launch-agent'
@@ -37,7 +37,7 @@ export type Action =
   | { kind: 'remove'; path: string; summary: string; recursive?: boolean }
   | { kind: 'launchctl'; argv: readonly string[] }
   /** A host CLI call such as `claude mcp add-json`; argv holds no secret, so it prints whole. */
-  | { kind: 'command'; argv: readonly string[]; summary: string }
+  | { kind: 'command'; argv: readonly string[]; summary: string; whenMissing?: string }
   /** Swaps our Claude Code MCP entry: remove, add the new one, and put `previous` back if the add fails. Neither entry holds a secret. */
   | { kind: 'claude-mcp-replace'; previous: Record<string, unknown>; next: Record<string, unknown> }
   | { kind: 'wait-takeover'; pid: number | null; port: number }
@@ -63,8 +63,13 @@ export type Action =
   | { kind: 'install-sqlite3mc-embedded'; path: string; asset: EmbeddedAssets['sqlite3mc'] }
   /** The running program copied to <dataDir>/bin, after its release checksum was checked. */
   | { kind: 'install-program'; from: string; to: string; assetName: string | null; expectedSha256: string | null; check: boolean }
-  /** db-key for a store the daemon has yet to create, made at run time and added without replacing any entry. */
-  | { kind: 'create-db-key'; path: string }
+  /**
+   * db-key for a store the daemon has yet to create, added without replacing any entry: made at run time,
+   * or `key`, the one whose recovery code was shown (it prints as <hidden>).
+   */
+  | { kind: 'create-db-key'; path: string; key?: string }
+  /** --no-encrypt on a new store: an empty plaintext store, made before the daemon could create it encrypted. */
+  | { kind: 'create-plain-store'; path: string }
   /** Rename migration: bootout dev.shared-agent-memory.daemon when launchd has it loaded. */
   | { kind: 'stop-legacy-agent'; uid: number }
   /** Rename migration: stops here while any daemon answers /health; it would keep writing to the store being moved. */
@@ -99,7 +104,7 @@ export function describeAction(action: Action): string {
     case 'command': return `${action.summary}: ${action.argv.join(' ')}`
     case 'claude-mcp-replace': return `replace the Kinfold MCP server entry in Claude Code (user scope), putting the old one back if the new one fails: ${CLAUDE_MCP_REMOVE_ARGV.join(' ')}, then ${claudeAddArgv(action.next).join(' ')}`
     case 'wait-takeover': return `wait up to ${TAKEOVER_WAIT_MS / 1000} s for the running daemon on port ${action.port} to stop (you stop it: ${stopCommand(action.pid, action.port)})`
-    case 'wait-health': return `wait up to ${HEALTH_WAIT_MS / 1000} s for GET /health`
+    case 'wait-health': return `wait up to ${START_WAIT_MS / 1000} s for GET /health (a large store takes a while to open)`
     case 'settings-put': {
       const { host, provider, model, credentialRef } = action.input
       return `PUT /observer/settings host=${host} provider=${provider} model=${model} credentialRef=${credentialRef ?? 'none'}`
@@ -118,7 +123,8 @@ export function describeAction(action: Action): string {
       const check = action.check ? ` after checking ${action.assetName ?? 'it'} against SHA256SUMS` : ' (checksum check skipped for the development version)'
       return `install program ${action.to} from ${action.from}${check}`
     }
-    case 'create-db-key': return describeCreateDbKey(action.path)
+    case 'create-db-key': return describeCreateDbKey(action.path, action.key)
+    case 'create-plain-store': return describeCreatePlainStore(action.path)
     case 'stop-legacy-agent': return `${legacyBootoutArgv(action.uid).join(' ')} (if loaded): stop the daemon installed under the old name`
     case 'migration-daemon-down': return `check that no daemon answers /health on port ${action.port}, waiting up to ${action.waitMs / 1000} s (one still running must be stopped first; nothing is moved while it runs)`
     case 'copy-keychain-entry': return describeCopyKeychainEntry(action.ref)
@@ -142,7 +148,7 @@ const BOOTSTRAP_BUSY_EXIT = 5
 export const BOOTSTRAP_ATTEMPTS = 10
 export const BOOTSTRAP_RETRY_MS = 300
 
-async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Promise<void> {
+export async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Promise<void> {
   const attempts = argv[1] === 'bootstrap' ? BOOTSTRAP_ATTEMPTS : 1
   let exitCode = 0
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -153,27 +159,58 @@ async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Promise<v
   if (exitCode !== 0) throw new Error(`${argv.slice(0, 2).join(' ')} failed (exit ${exitCode})`)
 }
 
+const NOT_FOUND_EXIT = 127
+
+/**
+ * A host CLI call. One with `whenMissing` is skipped, with that note, when its
+ * binary is not installed: removing an agent is the likeliest reason to have
+ * dropped its CLI, and every later run would fail the same way otherwise.
+ */
+async function runCommand(env: InstallEnv, action: Extract<Action, { kind: 'command' }>): Promise<void> {
+  if (action.whenMissing === undefined) return runLaunchctl(env, action.argv)
+  const { exitCode } = await env.run({ argv: action.argv, timeoutMs: 15_000 })
+  if (exitCode === NOT_FOUND_EXIT) {
+    env.out(action.whenMissing)
+    return
+  }
+  if (exitCode !== 0) throw new Error(`${action.argv.slice(0, 2).join(' ')} failed (exit ${exitCode})`)
+}
+
 async function replaceClaudeMcp(env: InstallEnv, previous: Record<string, unknown>, next: Record<string, unknown>): Promise<void> {
+  if (!rollbackSafe(previous)) throw new Error('the previous Claude Code MCP entry carries env values Kinfold did not write; it was left alone')
+  let timedOut = false
   const step = async (argv: readonly string[]): Promise<boolean> => {
     try {
-      return (await env.run({ argv, timeoutMs: 15_000 })).exitCode === 0
+      const result = await env.run({ argv, timeoutMs: 15_000 })
+      timedOut = result.timedOut === true
+      return result.exitCode === 0
     } catch {
+      timedOut = false
       return false
     }
   }
-  if (!(await step(CLAUDE_MCP_REMOVE_ARGV))) throw new Error('claude mcp remove failed; the previous entry was left in place')
+  if (!(await step(CLAUDE_MCP_REMOVE_ARGV))) {
+    // A killed remove may or may not have taken effect, so the entry's state is unknown.
+    throw new Error(timedOut ? 'claude mcp remove did not finish; check the entry with claude mcp list --scope user' : 'claude mcp remove failed; the previous entry was left in place')
+  }
   if (await step(claudeAddArgv(next))) return
   if (await step(claudeAddArgv(previous))) throw new Error('the Claude Code MCP entry could not be replaced; the previous entry was put back')
   throw new Error(`the Claude Code MCP entry could not be replaced and the previous one could not be put back; add it again with: ${claudeAddArgv(previous).join(' ')}`)
 }
 
-/** Starts the LaunchAgent with the same retry as the plan step, for a failed step that left it stopped. */
-export async function startAgent(env: InstallEnv): Promise<void> {
-  await runLaunchctl(env, bootstrapArgv(env))
-}
-
 async function waitFor(env: InstallEnv, wantUp: boolean, timeoutMs: number, failure: string): Promise<void> {
   if (!(await waitForHealth(env, wantUp, timeoutMs))) throw new Error(failure)
+}
+
+async function waitForDaemonStart(env: InstallEnv): Promise<void> {
+  // Loaded on use: the service module imports this one for HEALTH_WAIT_MS at its top level.
+  const { serviceOf } = await import('./service/control')
+  const service = serviceOf(env)
+  const result = await waitForStart(env, service)
+  if (result.ok) return
+  const logFile = installPaths(env).logFile
+  if (result.reason === 'not-running') throw new Error(`the ${service?.label ?? 'service'} stopped running before the daemon answered /health; the log is ${logFile}`)
+  throw new Error(`the daemon did not answer /health within ${START_WAIT_MS / 1000} s; it may still be opening a large store. Run kinfold status in a minute; the log is ${logFile}`)
 }
 
 function touch(path: string, mode: number): void {
@@ -190,12 +227,12 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'write': return writeFileAtomic(action.path, action.content, action.mode)
     case 'remove': return rmSync(action.path, { force: true, recursive: action.recursive === true })
     case 'launchctl': return runLaunchctl(env, action.argv)
-    case 'command': return runLaunchctl(env, action.argv)
+    case 'command': return runCommand(env, action)
     case 'claude-mcp-replace': return replaceClaudeMcp(env, action.previous, action.next)
     case 'wait-takeover':
       env.out(`waiting for you to stop the running daemon: ${stopCommand(action.pid, action.port)}`)
       return waitFor(env, false, TAKEOVER_WAIT_MS, `the daemon on port ${action.port} is still running; nothing after this step ran`)
-    case 'wait-health': return waitFor(env, true, HEALTH_WAIT_MS, `the daemon did not answer /health; see ${installPaths(env).logFile}`)
+    case 'wait-health': return waitForDaemonStart(env)
     case 'settings-put': return putObserverSettings(env, action.input)
     case 'keychain-put': return writer(env).put(action.ref, action.value)
     case 'keychain-delete': return void writer(env).remove(action.ref)
@@ -210,7 +247,8 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'install-sqlite3mc': return installSqlite3mc(env, action.path)
     case 'install-sqlite3mc-embedded': return installEmbeddedSqlite3mc(env, action.path, action.asset)
     case 'install-program': return installProgram(env, action)
-    case 'create-db-key': return createDbKey(env, action.path)
+    case 'create-db-key': return createDbKey(env, action.path, action.key)
+    case 'create-plain-store': return createPlainStore(env, action.path)
     case 'stop-legacy-agent': return stopLegacyAgent(env)
     case 'migration-daemon-down': return checkDaemonDown(env, action.port, action.waitMs)
     case 'copy-keychain-entry': return copyKeychainEntry(env, action.ref)

@@ -48,6 +48,8 @@ export interface ServerDeps {
   data: DataHandlers
   /** GET /memory/observations, /memory/observations/:id, /memory/facets (the dashboard's memory browser). */
   memory: MemoryHandlers
+  /** GET /update: the banner the dashboard shows; absent or null means none. Reads only, never marks a notice shown. */
+  updateBanner?: () => { version: string; message: string } | null
   /** GET /metrics/summary. */
   metrics: (window: string | null) => RouteAnswer
   /** POST /metrics/mcp-read: one MCP tool call reported by the read-only MCP server (token only). */
@@ -169,6 +171,7 @@ async function panelRoute(request: Request, url: URL, deps: ServerDeps): Promise
   if (path.startsWith('/memory/')) return memoryRoute(request.method, url, deps.memory)
   if (path === '/observer/models') return deps.observerModels(request.method, url)
   if (path === '/observer/test') return deps.observerTest(request.method, () => readJson(request))
+  if (path === '/update') return request.method === 'GET' ? { status: 200, body: { notice: deps.updateBanner?.() ?? null } } : { status: 405, body: { error: 'method not allowed' } }
   if (path === '/metrics/summary') return request.method === 'GET' ? deps.metrics(url.searchParams.get('window')) : { status: 405, body: { error: 'method not allowed' } }
   return null
 }

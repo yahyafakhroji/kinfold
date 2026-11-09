@@ -10,10 +10,12 @@
 // Logs carry ids, counts and durations; never the text, the prompt or the cwd.
 
 import { DAEMON_SHARE_MS } from '../context/client'
+import { DAEMON_ONLY_TIMEOUT_MS } from '../context/daemon'
 import { type LateMatches, createLateMatches } from '../context/late-matches'
 import { type PreparedContext, prepareContext, recordServed } from '../context/packs'
 import { type PromptContextDeps, createEmbedSlots, preparePromptContext } from '../context/prompt-context'
-import type { ContextRequest, ContextResult } from '../context/types'
+import type { ContextRequest, ContextResult, UpdateNotice } from '../context/types'
+import { peekNotice, takeNotice } from '../update/notice'
 import type { Database } from '../sqlite/types'
 import type { ProjectKeyResolver } from '../store/project-key'
 import { type ServedRelated, recordRelatedServed } from '../store/related-served-store'
@@ -31,12 +33,34 @@ export interface ContextRouteDeps {
   now?: () => number
   /** Monotonic ms for the duration. */
   clock?: () => number
+  /** Where update-check.json lives and which version is running; absent means no update notice. */
+  updates?: { dataDir: string; version: string; envVars?: () => Readonly<Record<string, string | undefined>> }
 }
 
 /** Past this the hook has likely aborted (it waits DAEMON_SHARE_MS, connection included). */
 export const PROMPT_SERVE_BUDGET_MS = DAEMON_SHARE_MS - 20
 
 type Prepared = PreparedContext & { promptDetail: string; relatedText: string; relatedServed: ServedRelated[] }
+
+/**
+ * Session start and OpenCode's first request carry the notice; prompt deltas never do.
+ * It is marked shown only when the answer beat the host's wait: a slower one may
+ * have been abandoned, and a notice nobody saw must come again next session.
+ */
+/** How long a host waits for the answer; an answer inside that was seen. OpenCode's plugin waits longer than the hooks do. */
+export function shownBudgetMs(host: string): number {
+  return host === 'opencode' ? DAEMON_ONLY_TIMEOUT_MS : PROMPT_SERVE_BUDGET_MS
+}
+
+function updateNoticeFor(updates: ContextRouteDeps['updates'], request: ContextRequest, durationMs: number): UpdateNotice | null {
+  if (updates === undefined || request.channel === 'prompt') return null
+  try {
+    const env = updates.envVars?.() ?? process.env
+    return durationMs <= shownBudgetMs(request.host) ? takeNotice(updates.dataDir, request.host, updates.version, env) : peekNotice(updates.dataDir, request.host, updates.version, env)
+  } catch {
+    return null
+  }
+}
 
 export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest) => Promise<ContextResult> {
   const now = deps.now ?? Date.now
@@ -71,6 +95,7 @@ export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest
     if (typeof injectionId === 'number') recordRelatedServed(deps.db, prepared.relatedServed, { projectKey, host: request.host, occurredAt: at })
     deps.log(`context host=${request.host} channel=${request.channel} injection=${injectionId ?? 'none'} ids=${prepared.observationIds.length}`
       + ` tokens=${prepared.tokens} rebuilt=${prepared.rebuilt}${prepared.promptDetail} key_ms=${keyMs} ms=${durationMs}`)
-    return { text: prepared.text, observationIds: prepared.observationIds, tokens: prepared.tokens, ...(prepared.relatedText !== '' ? { relatedText: prepared.relatedText } : {}) }
+    const notice = updateNoticeFor(deps.updates, request, durationMs)
+    return { text: prepared.text, observationIds: prepared.observationIds, tokens: prepared.tokens, ...(prepared.relatedText !== '' ? { relatedText: prepared.relatedText } : {}), ...(notice !== null ? { updateNotice: notice } : {}) }
   }
 }

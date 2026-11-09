@@ -12,6 +12,8 @@ export type EnvKey =
   | 'SQLITE3MC_LIB'
   | 'TEST_VEC0'
   | 'RELEASE_SUMS_URL'
+  | 'INSTALL_CHANNEL'
+  | 'NO_UPDATE_CHECK'
 
 type Env = Readonly<Record<string, string | undefined>>
 
@@ -25,10 +27,14 @@ export function legacyName(key: EnvKey): string {
   return `SAM_${key}`
 }
 
+/** These names never existed under SAM_, so no legacy fallback and no deprecation line. */
+const NEW_ONLY_KEYS: readonly EnvKey[] = ['INSTALL_CHANNEL', 'NO_UPDATE_CHECK']
+
 /** The KINFOLD_ value, else the legacy SAM_ one; an empty KINFOLD_ value counts as unset. */
 export function readEnv(env: Env, key: EnvKey): string | undefined {
   const value = env[envName(key)]
-  return value !== undefined && value !== '' ? value : env[legacyName(key)]
+  if (value !== undefined && value !== '') return value
+  return NEW_ONLY_KEYS.includes(key) ? undefined : env[legacyName(key)]
 }
 
 /** One line per SAM_ variable read in place of an unset KINFOLD_ one. Names only, never values. */

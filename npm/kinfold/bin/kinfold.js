@@ -8,7 +8,7 @@
 'use strict'
 
 const { spawnSync } = require('node:child_process')
-const { accessSync, chmodSync, constants } = require('node:fs')
+const { accessSync, chmodSync, constants, existsSync } = require('node:fs')
 const { dirname, join } = require('node:path')
 
 /** npm's platform and architecture names, beside the package that carries each program. */
@@ -26,19 +26,35 @@ function packageName(platform, arch) {
   return PACKAGES[`${platform}-${arch}`] ?? null
 }
 
+/** The musl loaders, which exist on Alpine-style systems and not on glibc ones. */
+const MUSL_LOADERS = ['/lib/ld-musl-x86_64.so.1', '/lib/ld-musl-aarch64.so.1']
+
 /**
  * True on a Linux whose C library is musl. Node reports the glibc version it
- * runs on and leaves the field out on musl. Bun's report makes no such claim,
- * so under Bun it is never taken for musl.
+ * runs on and leaves the field out on musl, so a report settles it. Bun's
+ * report never names glibc, so under Bun there is no report and the musl loader
+ * files decide.
  */
-function isMusl(platform, report, isBun) {
-  if (platform !== 'linux' || isBun === true || report === null || report === undefined) return false
-  return report.header !== undefined && report.header.glibcVersionRuntime === undefined
+function isMusl(platform, report, probe) {
+  if (platform !== 'linux') return false
+  if (report !== null && report !== undefined && report.header !== undefined) {
+    return report.header.glibcVersionRuntime === undefined
+  }
+  return MUSL_LOADERS.some((path) => probe(path))
 }
 
-function currentReport() {
+/**
+ * The diagnostic report, read only on Linux, the one platform whose answer
+ * depends on it, and never under Bun, whose report says nothing about the C
+ * library. Generating it costs time on every launch, and the network interface
+ * listing it would otherwise include is not needed.
+ */
+function currentReport(platform) {
+  if (platform !== 'linux' || process.versions.bun !== undefined) return null
   try {
-    return process.report !== undefined && typeof process.report.getReport === 'function' ? process.report.getReport() : null
+    if (process.report === undefined || typeof process.report.getReport !== 'function') return null
+    process.report.excludeNetwork = true
+    return process.report.getReport()
   } catch {
     return null
   }
@@ -79,7 +95,7 @@ function ensureExecutable(program, platform) {
 function main() {
   const platform = process.platform
   const arch = process.arch
-  const musl = isMusl(platform, currentReport(), process.versions.bun !== undefined)
+  const musl = isMusl(platform, currentReport(platform), existsSync)
   const pkg = musl ? null : packageName(platform, arch)
   const program = pkg === null ? null : resolveProgram(pkg, platform)
   if (program === null) {
@@ -91,7 +107,13 @@ function main() {
   const argv = process.argv.slice(2)
   // `npx kinfold` with no subcommand opens the installer.
   const args = argv.length === 0 ? ['install'] : argv
-  const result = spawnSync(program, args, { stdio: 'inherit' })
+  // The program records how it was installed. bunx follows the `node` shebang
+  // when Node is installed, so Bun's version alone misses it; the user agent
+  // bunx gives its child says `bun/`.
+  const agent = process.env.npm_config_user_agent
+  const underBun = process.versions.bun !== undefined || (typeof agent === 'string' && agent.startsWith('bun/'))
+  const channel = underBun ? 'bunx' : 'npx'
+  const result = spawnSync(program, args, { stdio: 'inherit', env: { ...process.env, KINFOLD_INSTALL_CHANNEL: channel } })
   if (result.error !== undefined) {
     process.stderr.write(`kinfold: could not run ${program}: ${result.error.message}\n`)
     process.exit(1)
@@ -108,6 +130,6 @@ function main() {
   process.exit(result.status === null ? 1 : result.status)
 }
 
-module.exports = { main, isMusl, packageName, programName, unsupportedMessage }
+module.exports = { main, isMusl, currentReport, packageName, programName, unsupportedMessage }
 
 if (require.main === module) main()

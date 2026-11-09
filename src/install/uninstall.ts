@@ -21,6 +21,7 @@ import { type InstallEnv, errorMessage, installPaths } from './env'
 import { plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import { EXIT_FAILED, EXIT_OK } from './install'
 import { bootoutArgv, isAgentLoaded } from './launch-agent'
+import { INSTALL_HOSTS, type InstallHost } from './detect'
 import { claudeMcpUninstallActions, opencodeMcpUninstallActions } from './mcp-wiring'
 import { hmacRemoval } from './hmac-cleanup'
 import { hmacKeptNotes } from './hmac-migration'
@@ -67,9 +68,23 @@ function claudeActions(env: InstallEnv): Action[] {
 
 function opencodeActions(env: InstallEnv): Action[] {
   const paths = installPaths(env)
-  const state = inspectShim(readTextOrNull(paths.opencodePlugin), paths.pluginEntry)
+  const state = inspectShim(readTextOrNull(paths.opencodePlugin), { pluginEntry: paths.pluginEntry, dataDir: env.dataDir })
   if (state === 'foreign') env.out(`opencode: ${paths.opencodePlugin} is not a Kinfold plugin file; left alone`)
   return state === 'yes' || state === 'stale' ? [{ kind: 'remove', path: paths.opencodePlugin, summary: 'the Kinfold OpenCode plugin file' }] : []
+}
+
+/**
+ * One host's Kinfold wiring out: its hooks, MCP entry or plugin file, each
+ * config backed up beside itself first. Uninstall runs this for every host;
+ * install runs it for a host that was wired and is no longer chosen.
+ */
+export function hostUnwireActions(env: InstallEnv, host: InstallHost): Action[] {
+  switch (host) {
+    case 'claude-code': return [...claudeActions(env), ...claudeMcpUninstallActions(env)]
+    case 'opencode': return [...opencodeActions(env), ...opencodeMcpUninstallActions(env)]
+    case 'codex': return codexHookUninstallActions(env)
+    case 'cursor': return hostHookUninstallActions(env, 'cursor')
+  }
 }
 
 /** The default ref plus any ref a stored setting names. A dry run asks the daemon nothing (only /health is allowed). */
@@ -97,12 +112,7 @@ export async function uninstall(env: InstallEnv, options: UninstallOptions): Pro
     const hmac = options.removeHmacKeys === true ? hmacRemoval(env, options.dryRun) : null
     const actions = [
       ...(await launchAgentActions(env)),
-      ...claudeActions(env),
-      ...claudeMcpUninstallActions(env),
-      ...opencodeActions(env),
-      ...opencodeMcpUninstallActions(env),
-      ...codexHookUninstallActions(env),
-      ...hostHookUninstallActions(env, 'cursor'),
+      ...INSTALL_HOSTS.flatMap((host) => hostUnwireActions(env, host)),
       ...(options.removeCredentials ? credentialActions(env, refs) : []),
       ...(hmac?.actions ?? []),
       // Last: until every host entry is gone, each of them still names this program.

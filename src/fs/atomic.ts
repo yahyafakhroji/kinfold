@@ -6,7 +6,30 @@
 import { chmodSync, closeSync, fsyncSync, openSync, renameSync, rmSync, writeSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
-export function writeFileAtomic(path: string, content: string | Uint8Array, mode: number): void {
+export interface DirSyncOptions {
+  /** Default: this process's. Windows cannot open a folder for fsync, so nothing is done there. */
+  platform?: NodeJS.Platform
+  /** Test seam; default fs.fsyncSync. */
+  fsyncDir?: (fd: number) => void
+}
+
+export interface AtomicWriteOptions extends DirSyncOptions {
+  /** Also fsync the folder after the rename, so the new name survives a power loss. Off by default: most writes can be redone. */
+  syncDir?: boolean
+}
+
+/** Makes a rename in `dir` durable; the file's own fsync covers only its bytes, not the folder entry. */
+export function fsyncDirectory(dir: string, options: DirSyncOptions = {}): void {
+  if ((options.platform ?? process.platform) === 'win32') return
+  const fd = openSync(dir, 'r')
+  try {
+    ;(options.fsyncDir ?? fsyncSync)(fd)
+  } finally {
+    closeSync(fd)
+  }
+}
+
+export function writeFileAtomic(path: string, content: string | Uint8Array, mode: number, options: AtomicWriteOptions = {}): void {
   const temp = join(dirname(path), `.${basename(path)}.kinfold-tmp-${process.pid}`)
   const fd = openSync(temp, 'w', mode)
   try {
@@ -23,4 +46,5 @@ export function writeFileAtomic(path: string, content: string | Uint8Array, mode
     rmSync(temp, { force: true })
     throw error
   }
+  if (options.syncDir === true) fsyncDirectory(dirname(path), options)
 }

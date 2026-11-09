@@ -67,7 +67,7 @@ test('bad data flags are usage errors, and install/uninstall/status still parse 
   expect(errorOf(['findings', 'all'])).toStartWith('unknown argument "all"')
   expect(errorOf(['status'])).toBe('not a data command')
   expect(parseArgs(['status']).ok).toBe(true)
-  expect(parseArgs(['size'])).toEqual({ ok: false, error: expect.stringContaining('usage: kinfold <install|uninstall|status|size|') })
+  expect(parseArgs(['size'])).toEqual({ ok: false, error: expect.stringContaining('usage: kinfold <install|uninstall|status|update|size|') })
 })
 
 test('runKinfold sends each data command to the running daemon and prints its answer', async () => {

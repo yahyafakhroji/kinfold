@@ -10,8 +10,10 @@ import { HOST_VERSIONS_FILE } from '../adapters/host-version'
 import { LAUNCH_AGENT_LABEL, LEGACY_DATA_DIR_NAME, LEGACY_LAUNCH_AGENT_LABEL, LEGACY_PLUGIN_FILE_NAME, PLUGIN_FILE_NAME } from '../names'
 import { resolveCodexHome } from './codex-home'
 import type { InstallMode } from './entry'
+import type { TerminalIO } from './prompt/terminal'
 import type { CredentialProvider } from '../secrets/credentials'
 import type { SecurityRunner } from '../secrets/keychain-writer'
+import type { ServiceControl } from './service/control'
 import type { BuildInput } from '../sqlite/build'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
 import type { ObserverRunner, ObserverSettings } from '../observer/types'
@@ -50,6 +52,8 @@ export type RunnerBuilder = (settings: ObserverSettings, credentials: Credential
 export interface InstallEnv {
   homeDir: string
   dataDir: string
+  /** The folder this run would use without --data-dir; the installed one is looked for there too, since --data-dir replaces dataDir. */
+  unflaggedDataDir?: string
   platform: NodeJS.Platform
   /** The checkout or installed program every host entry runs (entry.ts). */
   mode: InstallMode
@@ -66,6 +70,8 @@ export interface InstallEnv {
   sleep: (ms: number) => Promise<void>
   fetch: HttpFetch
   io: PromptIO
+  /** Raw-key terminal for the setup wizard; null unless stdin and stdout are both TTYs. */
+  terminal: TerminalIO | null
   out: (line: string) => void
   runnerFor: RunnerBuilder
   /** The only way the installer builds a codex-cli or opencode-cli runner (createCliRunner). */
@@ -80,6 +86,12 @@ export interface InstallEnv {
   renameDir?: (from: string, to: string) => void
   /** Where Codex.app and Cursor.app are looked for; default /Applications and ~/Applications. */
   applicationsDirs?: readonly string[]
+  /** The background service; default serviceFor(env). null: this platform has none. Tests inject a fake. */
+  service?: ServiceControl | null
+  /** Whether 127.0.0.1:<port> can be bound; default binds it and lets go at once. A port our own daemon holds counts as free whatever this says. */
+  portFree?: (port: number) => Promise<boolean>
+  /** Test seam for the bin folder's fsync after the program rename; default fs.fsyncSync. */
+  fsyncDir?: (fd: number) => void
   /** The installer's own environment variables, for the SAM_* deprecation checks; default none. Never printed. */
   envVars?: Readonly<Record<string, string | undefined>>
 }
@@ -96,9 +108,7 @@ export interface InstallPaths {
   launchAgentPlist: string
   /** The plist an install under the old name left behind; migration removes it. */
   legacyLaunchAgentPlist: string
-  hookScript: string
   pluginEntry: string
-  daemonMain: string
   logsDir: string
   logFile: string
   codexDir: string
@@ -133,9 +143,7 @@ export function installPaths(env: Pick<InstallEnv, 'homeDir' | 'dataDir' | 'proj
     launchAgentsDir,
     launchAgentPlist: join(launchAgentsDir, `${LAUNCH_AGENT_LABEL}.plist`),
     legacyLaunchAgentPlist: join(launchAgentsDir, `${LEGACY_LAUNCH_AGENT_LABEL}.plist`),
-    hookScript: join(env.projectRoot, 'src', 'cli', 'hook.ts'),
     pluginEntry: join(env.projectRoot, 'src', 'plugins', 'opencode.ts'),
-    daemonMain: join(env.projectRoot, 'src', 'daemon', 'main.ts'),
     logsDir,
     logFile: join(logsDir, 'daemon.log'),
     codexDir,

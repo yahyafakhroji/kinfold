@@ -6,7 +6,7 @@
 //     converted store checks out);
 //   - encrypt and rekey show the recovery code first, and go on only once the
 //     person types its last two groups back;
-//   - the LaunchAgent's daemon is stopped and started again around the change,
+//   - the background service's daemon is stopped and started again around the change,
 //     a hand-started one makes the command refuse, and the maintenance marker
 //     keeps hooks and MCP servers off the file meanwhile;
 //   - the marker is also the journal: it names the operation and the Keychain
@@ -24,18 +24,18 @@ import { type CredentialWriter, credentialWriterFor } from '../secrets/keychain-
 import { ConvertError, checkedCounts, convertStore, foundBackupPath, restoreBackup, sameCounts } from '../sqlite/convert'
 import { type DbKeyStore, credentialDbKeyStore, newDbKey } from '../sqlite/keys'
 import { fileState, maintenancePath, openEncrypted } from '../sqlite/open'
-import { RECOVERY_GROUP, RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../sqlite/recovery'
+import { RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../sqlite/recovery'
 import { DATA_FILE_MODE, DB_FILE } from '../store/data-dir'
-import { waitForHealth } from './daemon-client'
-import { type InstallEnv, errorMessage, installPaths } from './env'
+import { waitForHealth, waitForStart } from './daemon-client'
+import { type InstallEnv, errorMessage } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
-import { bootoutArgv, bootstrapArgv, isAgentLoaded } from './launch-agent'
 import { HEALTH_WAIT_MS } from './plan'
+import { confirmRecoveryCode, recoverySinkFromEnv } from './recovery-confirm'
+import { serviceOf } from './service/control'
 
 export const KEY_COMMANDS = ['encrypt', 'decrypt', 'rekey', 'show-recovery', 'recover', 'resume'] as const
 export type KeyCommand = (typeof KEY_COMMANDS)[number]
 
-export const LSOF = '/usr/sbin/lsof'
 /** MCP servers close an idle reader after READER_TTL_MS (30 s); the marker stops them reopening, so a few seconds past that the file is free. */
 export const LOCK_ATTEMPTS = 36
 export const LOCK_RETRY_MS = 1_000
@@ -85,39 +85,43 @@ function keyAt(ctx: Context, ref: string | null): string | null {
   return key
 }
 
-const normalize = (text: string): string => text.toUpperCase().replace(/[\s-]/g, '').replace(/[IL]/g, '1').replace(/O/g, '0')
-
 /** Prints the code and waits for its last two groups; false when the person typed something else. */
-async function confirmCode(ctx: Context, code: string): Promise<boolean> {
-  ctx.log('')
-  ctx.log('Recovery code for memory.db. Write it down or put it in a password manager, away from this machine:')
-  ctx.log('')
-  ctx.log(`    ${code}`)
-  ctx.log('')
-  ctx.log('Without the key or this code, the memory cannot be read again. Anyone with the code can read it.')
-  const tail = code.split('-').slice(-2).join('')
-  const typed = await ctx.env.io.ask(`Type the last two groups (${'*'.repeat(RECOVERY_GROUP)}-${'*'.repeat(RECOVERY_GROUP)}) to confirm you saved it: `)
-  return normalize(typed) === tail
-}
+const confirmCode = (ctx: Context, code: string): Promise<boolean> => confirmRecoveryCode(recoverySinkFromEnv(ctx.env), code)
 
 interface Daemon {
   restart: boolean
 }
 
 async function startDaemon(ctx: Context, daemon: Daemon): Promise<void> {
-  if (!daemon.restart) {
-    ctx.log('daemon: it was not running from the LaunchAgent; start it when you are ready')
+  const service = serviceOf(ctx.env)
+  if (!daemon.restart || service === null) {
+    ctx.log('daemon: it was not running as a service; start it when you are ready')
     return
   }
-  await ctx.env.run({ argv: bootstrapArgv(ctx.env) })
-  ctx.log((await waitForHealth(ctx.env, true, HEALTH_WAIT_MS)) ? 'daemon: started again' : 'warning: the daemon did not answer /health after the restart; see its log')
+  try {
+    await service.start()
+  } catch (error: unknown) {
+    ctx.log(`warning: the ${service.label} did not start (${errorMessage(error)})`)
+  }
+  const started = await waitForStart(ctx.env, service)
+  if (started.ok) ctx.log('daemon: started again')
+  else if (started.reason === 'not-running') ctx.log(`warning: the ${service.label} stopped running before the daemon answered /health; see its log`)
+  else ctx.log('warning: the daemon did not answer /health after the restart; it may still be opening a large store, so check kinfold status in a minute')
 }
 
 async function stopDaemon(ctx: Context): Promise<Daemon> {
-  const loaded = await isAgentLoaded(ctx.env)
+  const service = serviceOf(ctx.env)
+  const loaded = service !== null && (await service.isRunning())
   if (loaded) {
-    await ctx.env.run({ argv: bootoutArgv(ctx.env.uid) })
-    ctx.log('daemon: stopped the LaunchAgent')
+    try {
+      await service.stop()
+    } catch (error: unknown) {
+      // bootout was already sent: unless the service is still up, put it back before refusing.
+      const stillUp = await service.isRunning()
+      if (!stillUp) await startDaemon(ctx, { restart: true })
+      throw new Refusal(`the ${service.label} did not stop (${errorMessage(error)}); ${stillUp ? 'it is still running' : 'it was started again'}; nothing was changed`)
+    }
+    ctx.log(`daemon: stopped the ${service.label}`)
   }
   if (!(await waitForHealth(ctx.env, false, HEALTH_WAIT_MS))) {
     if (loaded) await startDaemon(ctx, { restart: true })
@@ -128,11 +132,7 @@ async function stopDaemon(ctx: Context): Promise<Daemon> {
 
 /** Who still holds memory.db, for the "another process" refusal: pids and command names only. */
 async function holders(ctx: Context): Promise<string> {
-  const listed = await ctx.env.run({ argv: [LSOF, '-t', ctx.path], timeoutMs: 5_000 })
-  const pids = listed.stdout.split('\n').map((line) => line.trim()).filter((line) => /^\d+$/.test(line) && Number(line) !== process.pid)
-  if (pids.length === 0) return ''
-  const names = await ctx.env.run({ argv: ['/bin/ps', '-o', 'pid=,comm=', '-p', pids.join(',')], timeoutMs: 5_000 })
-  return names.stdout.trim().split('\n').map((line) => line.trim()).filter((line) => line !== '').join('; ')
+  return (await serviceOf(ctx.env)?.fileHolders(ctx.path)) ?? ''
 }
 
 /** Retries while another process holds the file: agent sessions let go of an idle reader within 30 s and cannot reopen past the marker. */
@@ -292,8 +292,41 @@ async function encrypt(ctx: Context): Promise<void> {
   ctx.log('The plaintext backup it takes is deleted afterwards, but an SSD, APFS snapshots or Time Machine may keep old blocks; full-disk encryption (FileVault) covers those.')
   const key = newDbKey()
   if (!(await confirmCode(ctx, encodeRecoveryCode(key)))) throw new Refusal('those were not the last two groups; nothing changed')
+  await encryptingWith(ctx, key)
+}
+
+async function encryptingWith(ctx: Context, key: string): Promise<void> {
   await converting(ctx, 'encrypt', null, key, () => storeKey(ctx, DB_KEY_REF, key))
   ctx.log('memory.db is encrypted.')
+}
+
+export const ENCRYPT_KEY_EXISTS = `the Keychain already holds ${DB_KEY_REF}, which may open an older encrypted copy of memory.db; nothing changed. Run kinfold encrypt, which asks before replacing it`
+
+/**
+ * The install's encrypt: the recovery code of `key` was shown and confirmed
+ * already. An entry already in the Keychain may open an older encrypted copy,
+ * and replacing it was never asked here, so that is refused, pointing to
+ * `kinfold encrypt`, which asks. Throws with the reason; nothing is printed
+ * that holds the key or its code.
+ */
+export async function encryptWithKey(env: InstallEnv, key: string): Promise<void> {
+  const ctx = context(env)
+  requireState(ctx, 'plain')
+  if (ctx.writer.exists(DB_KEY_REF)) throw new Refusal(ENCRYPT_KEY_EXISTS)
+  await encryptingWith(ctx, key)
+}
+
+
+/** The install's decrypt: the person confirmed it already. */
+export async function decryptConfirmed(env: InstallEnv): Promise<void> {
+  const ctx = context(env)
+  requireState(ctx, 'encrypted')
+  await decryptingWith(ctx, readKey(ctx))
+}
+
+async function decryptingWith(ctx: Context, key: string): Promise<void> {
+  await converting(ctx, 'decrypt', key, null, () => {})
+  ctx.log('memory.db is plaintext.')
 }
 
 async function rekey(ctx: Context): Promise<void> {
@@ -313,8 +346,7 @@ async function decrypt(ctx: Context): Promise<void> {
   const key = readKey(ctx)
   const typed = await ctx.env.io.ask('kinfold decrypt stores memory.db in plaintext again and deletes its Keychain key. Type decrypt to go on: ')
   if (typed.trim() !== 'decrypt') throw new Refusal('nothing changed')
-  await converting(ctx, 'decrypt', key, null, () => {})
-  ctx.log('memory.db is plaintext.')
+  await decryptingWith(ctx, key)
 }
 
 async function showRecovery(ctx: Context): Promise<void> {
@@ -388,7 +420,8 @@ async function resume(ctx: Context): Promise<void> {
     throw new Refusal('memory.db opens with neither key; nothing was deleted. Run kinfold key recover with your recovery code')
   }
   rmSync(marker, { force: true })
-  if (!(await isAgentLoaded(ctx.env)) && existsSync(installPaths(ctx.env).launchAgentPlist)) await startDaemon(ctx, { restart: true })
+  const service = serviceOf(ctx.env)
+  if (service !== null && service.isConfigured() && !(await service.isRunning())) await startDaemon(ctx, { restart: true })
 }
 
 const RUN: Record<KeyCommand, (ctx: Context) => Promise<void>> = {

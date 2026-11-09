@@ -65,7 +65,6 @@ test('detected Codex (CLI) and Cursor (app): wired with backups, foreign entries
   seedForeignFiles(w)
   seedCursorApp(w, '2.4.21')
   const paths = installPaths(w.env)
-  const hookScript = paths.hookScript
   expect(await install(w.env, YES)).toBe(EXIT_OK)
 
   const codex = JSON.parse(readFileSync(paths.codexHooks, 'utf8')) as { hooks: Record<string, unknown[]> }
@@ -158,7 +157,7 @@ test('program mode replaces a checkout shim with the bundle it carries, then pla
   w.env.mode = { kind: 'program', binPath: join(w.dataDir, 'bin', 'kinfold') }
   const paths = installPaths(w.env)
   mkdirSync(paths.opencodePluginsDir, { recursive: true })
-  writeFileSync(paths.opencodePlugin, shimContent('/old/checkout/src/plugins/opencode.ts'))
+  writeFileSync(paths.opencodePlugin, shimContent('/old/checkout/src/plugins/opencode.ts', w.dataDir))
 
   await runPlan(w.env, await opencodeInstallActions(w.env, fakeAssets(BUNDLE)), false)
   const text = readFileSync(paths.opencodePlugin, 'utf8')
@@ -194,7 +193,7 @@ test('program mode upgrades an existing bundle whose bytes or data folder change
   expect(text).not.toContain('old-data')
   expect(text).toContain('setup() { return 2 }')
   expect(text).not.toContain('setup() {};')
-  expect(inspectShim(text, paths.pluginEntry)).toBe('yes')
+  expect(inspectShim(text, { pluginEntry: paths.pluginEntry, dataDir: w.dataDir })).toBe('yes')
 })
 
 test('program mode refuses to write a plugin when the build carries none, and leaves the old file alone', async () => {
@@ -202,7 +201,7 @@ test('program mode refuses to write a plugin when the build carries none, and le
   world = w
   w.env.mode = { kind: 'program', binPath: join(w.dataDir, 'bin', 'kinfold') }
   const paths = installPaths(w.env)
-  const before = shimContent(paths.pluginEntry)
+  const before = shimContent(paths.pluginEntry, w.dataDir)
   mkdirSync(paths.opencodePluginsDir, { recursive: true })
   writeFileSync(paths.opencodePlugin, before)
   await expect(opencodeInstallActions(w.env, null)).rejects.toThrow('this build carries no OpenCode plugin')

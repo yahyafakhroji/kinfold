@@ -14,7 +14,9 @@ import { upsertProject } from '../store/writes'
 import { type Journal, runKeyCommand } from './encrypt'
 import type { InstallEnv } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
-import { type FakeWorld, createWorld } from './test-support'
+import { type FakeWorld, createWorld, fakeService, startWorldDaemon } from './test-support'
+import { LAUNCHCTL } from './launch-agent'
+import { LSOF } from './service/launch-agent-service'
 
 const worlds: FakeWorld[] = []
 afterEach(async () => {
@@ -300,4 +302,47 @@ test('encrypt and rekey refuse when stdout is a pipe, before any code is shown o
   expect(await runKeyCommand(pipedKey, 'rekey')).toBe(EXIT_FAILED)
   expect(encrypted.w.out.at(-1)).toContain('needs a terminal on stdout, not a pipe or a file')
   expect(fileState(encrypted.path)).toBe('encrypted')
+})
+
+test('encrypt stops and starts through the service', async () => {
+  const { w, env } = world(null)
+  const service = fakeService()
+  expect(await runKeyCommand({ ...env, service }, 'encrypt')).toBe(EXIT_OK)
+  // After the start, the wait polls isRunning while nothing answers /health.
+  expect(service.calls.slice(0, 3)).toEqual(['isRunning', 'stop', 'start'])
+  expect(w.commands.filter((c) => c.argv[0] === LAUNCHCTL || c.argv[0] === LSOF)).toEqual([])
+})
+
+test('encrypt with no service refuses only when a daemon still answers', async () => {
+  const quiet = world(null)
+  expect(await runKeyCommand({ ...quiet.env, service: null }, 'encrypt')).toBe(EXIT_OK)
+  expect(quiet.w.commands.filter((c) => c.argv[0] === LAUNCHCTL || c.argv[0] === LSOF)).toEqual([])
+
+  const answering = world(null)
+  const daemon = startWorldDaemon(answering.w, answering.w.dataDir)
+  try {
+    expect(await runKeyCommand({ ...answering.env, service: null }, 'encrypt')).toBe(EXIT_FAILED)
+    expect(answering.w.out.join('\n')).toContain('a daemon still answers /health')
+    expect(fileState(answering.path)).toBe('plain')
+  } finally {
+    await daemon.stop()
+  }
+})
+
+test('a service that was not running is not started after encrypt', async () => {
+  const { env } = world(null)
+  const service = fakeService({ running: false })
+  expect(await runKeyCommand({ ...env, service }, 'encrypt')).toBe(EXIT_OK)
+  expect(service.calls).toEqual(['isRunning'])
+})
+
+test('a service that fails to stop is started again and the store and marker are untouched', async () => {
+  const { w, env, path } = world(null)
+  const service = fakeService({ stopError: new Error('still loaded') })
+  expect(await runKeyCommand({ ...env, service }, 'encrypt')).toBe(EXIT_FAILED)
+  expect(service.calls.filter((call) => call !== 'isRunning').at(-1)).toBe('start')
+  expect(w.out.join('\n')).toContain('did not stop (still loaded); it was started again; nothing was changed')
+  expect(fileState(path)).toBe('plain')
+  expect(existsSync(maintenancePath(path))).toBe(false)
+  expect(w.keychainValues.has(DB_KEY_REF)).toBe(false)
 })

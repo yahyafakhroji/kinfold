@@ -7,7 +7,11 @@ import { installPaths } from './env'
 import { EXIT_OK, install } from './install'
 import { LAUNCHCTL, launchdPath } from './launch-agent'
 import { entryCommand } from './entry'
+import { shimContent } from './opencode-shim'
 import { BUN, type FakeWorld, UID, YES, createWorld } from './test-support'
+import { NO_DB_KEYS } from '../sqlite/keys'
+import { openStore } from '../store/db'
+import { upsertObserverSettings } from '../store/observer-settings-store'
 
 const CLAUDE = '2.1.310 (Claude Code)'
 const OPENCODE = 'opencode v2.1.4'
@@ -37,7 +41,7 @@ test('a fresh install wires both hosts, starts the LaunchAgent and saves both ob
 
   const settings = JSON.parse(readFileSync(paths.claudeSettings, 'utf8'))
   for (const event of CLAUDE_HOOK_EVENTS) expect(settings.hooks[event]).toEqual([samHookGroup(event, { entry: entryCommand(w.env.mode, 'hook', w.dataDir) })])
-  expect(readFileSync(paths.opencodePlugin, 'utf8')).toContain(`export { default } from ${JSON.stringify(join(w.projectRoot, 'src/plugins/opencode.ts'))};`)
+  expect(readFileSync(paths.opencodePlugin, 'utf8')).toBe(shimContent(join(w.projectRoot, 'src/plugins/opencode.ts'), w.dataDir))
   expect(launchctlCalls(w)).toEqual([
     [LAUNCHCTL, 'print', `gui/${UID}/dev.kinfold.daemon`],
     [LAUNCHCTL, 'bootstrap', `gui/${UID}`, join(w.home, 'Library/LaunchAgents/dev.kinfold.daemon.plist')],
@@ -104,7 +108,7 @@ test('a stale hook path and a stale plugin path from a moved checkout are replac
   const w = both()
   const paths = installPaths(w.env)
   mkdirSync(paths.claudeDir, { recursive: true })
-  const old = { bunPath: BUN, hookScript: '/old/checkout/src/cli/hook.ts' }
+  const old = { entry: { command: BUN, args: ['/old/checkout/src/cli/hook.ts'] } }
   writeFileSync(paths.claudeSettings, JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', old)] } }))
   mkdirSync(paths.opencodePluginsDir, { recursive: true })
   writeFileSync(paths.opencodePlugin, 'export { default } from "/old/checkout/src/plugins/opencode.ts";\n')
@@ -166,4 +170,24 @@ test('the data dir permission fix reports each path with its old and new mode', 
   }
   expect(statSync(join(w.dataDir, 'memory.db')).mode & 0o777).toBe(0o600)
   expect(statSync(join(w.dataDir, 'spool')).mode & 0o777).toBe(0o700)
+})
+
+test('the non-macOS line names the program', async () => {
+  const w = both({ opencodeVersion: undefined, keychainRefs: [] })
+  await install({ ...w.env, platform: 'linux' }, YES)
+  const line = w.out.find((l) => l.startsWith('LaunchAgent: macOS only'))
+  expect(line).toBe(`LaunchAgent: macOS only; start the daemon yourself with: ${BUN} ${join(w.projectRoot, 'src/daemon/main.ts')}`)
+  expect(line).not.toContain('bun run daemon')
+})
+
+test('with the daemon down, a saved observer read from the store gets no PUT, so a stale read can never overwrite newer settings', async () => {
+  const w = both()
+  const store = openStore(w.dataDir, { keys: NO_DB_KEYS })
+  upsertObserverSettings(store.db, { host: 'opencode', provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: true }, 1)
+  store.db.close()
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  const plan = w.out.join('\n')
+  expect(plan).not.toContain('PUT /observer/settings host=opencode')
+  // A host with no saved row still gets its default saved.
+  expect(plan).toContain('PUT /observer/settings host=claude-code provider=claude-cli')
 })

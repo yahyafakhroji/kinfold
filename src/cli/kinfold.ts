@@ -10,18 +10,21 @@
 // argv and removed before the command runs: it is the path every command then
 // resolves, so nothing can fall back to another store mid-run.
 
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isAbsolute, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import type { Parsed } from '../context/types'
-import { envName } from '../env-names'
+import { envName, readEnv } from '../env-names'
 import type { InstallEnv } from '../install/env'
 import type { InstallMode } from '../install/entry'
-import { resolveDataDir, resolveInstallDataDir } from '../store/data-dir'
+import { DAEMON_INFO_FILE, DB_FILE, resolveDataDir, resolveInstallDataDir } from '../store/data-dir'
 import { VERSION } from '../version'
 
 /** Repeated rather than imported from the installer, which the hook path must not load. */
 const EXIT_FAILED = 1
 const EXIT_USAGE = 2
+/** 128 + SIGINT, as a shell reports a Ctrl-C. */
+export const EXIT_CANCELLED = 130
 
 export type SubcommandName = 'hook' | 'mcp' | 'daemon' | 'observe'
 
@@ -117,7 +120,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     return 0
   }
   const base = env ?? (await systemEnv(args, global.value.dataDir))
-  const effective = global.value.dataDir === null ? base : { ...base, dataDir: global.value.dataDir }
+  const effective = global.value.dataDir === null ? base : envForDataDir(base, global.value.dataDir)
   const { parseArgs, parseDashboardArgs, parseDataArgs, parseKeyArgs } = await import('../install/args')
   const dashboard = parseDashboardArgs(args)
   if (dashboard !== null) {
@@ -156,21 +159,35 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     const { status } = await import('../install/status')
     return status(effective)
   }
+  if (installArgs.command === 'update') {
+    const { runUpdate } = await import('../update/update')
+    return runUpdate(effective, { dryRun: installArgs.dryRun })
+  }
   if (installArgs.command === 'uninstall') {
     const { uninstall } = await import('../install/uninstall')
     return uninstall(effective, { dryRun: installArgs.dryRun, removeCredentials: installArgs.removeCredentials, removeHmacKeys: installArgs.removeHmacKeys })
   }
   const { install } = await import('../install/install')
-  return install(effective, {
-    dryRun: installArgs.dryRun,
-    yes: installArgs.yes,
-    skipCheck: installArgs.skipCheck,
-    replaceCredential: installArgs.replaceCredential,
-    credentialStdin: installArgs.credentialStdin,
-    takeover: installArgs.takeover,
-    hosts: installArgs.hosts,
-    flags: installArgs.observers,
-  })
+  try {
+    return await install(effective, {
+      dryRun: installArgs.dryRun,
+      yes: installArgs.yes,
+      skipCheck: installArgs.skipCheck,
+      replaceCredential: installArgs.replaceCredential,
+      credentialStdin: installArgs.credentialStdin,
+      takeover: installArgs.takeover,
+      hosts: installArgs.hosts,
+      flags: installArgs.observers,
+      dataDirFlag: global.value.dataDir,
+      noEncrypt: installArgs.noEncrypt,
+      port: installArgs.port,
+      noUpdateCheck: installArgs.noUpdateCheck,
+    })
+  } catch (error: unknown) {
+    // Ctrl-C or a closed stdin at a question; install has said so and written nothing.
+    if (error instanceof Error && error.name === 'PromptCancelled') return EXIT_CANCELLED
+    throw error
+  }
 }
 
 /**
@@ -194,32 +211,79 @@ async function withDataDir(dataDir: string | null, run: () => Promise<void>): Pr
   }
 }
 
+/**
+ * The same environment aimed at another data folder. An installed program
+ * lives in the folder it serves (<dataDir>/bin), so its path follows the
+ * folder; a checkout run keeps pointing at the checkout. The path is spelled
+ * as installedProgramPath does (entry.ts), repeated because the hook path must
+ * not load the installer.
+ */
+export function envForDataDir(env: InstallEnv, dataDir: string): InstallEnv {
+  const mode: InstallMode = env.mode.kind === 'program' ? { kind: 'program', binPath: join(dataDir, 'bin', env.platform === 'win32' ? 'kinfold.exe' : 'kinfold') } : env.mode
+  return { ...env, dataDir, mode, unflaggedDataDir: env.unflaggedDataDir ?? env.dataDir }
+}
+
+/** What tells the program run by hand which folder it was installed into. */
+export interface ProgramLocation {
+  compiled: boolean
+  execPath: string
+  /** Whether a folder holds a Kinfold install; default looks for install.json, daemon.json or memory.db. */
+  looksInstalled?: (dir: string) => boolean
+}
+
+const INSTALL_MARKERS = ['install.json', DAEMON_INFO_FILE, DB_FILE]
+
+function holdsInstall(dir: string): boolean {
+  return INSTALL_MARKERS.some((name) => existsSync(join(dir, name)))
+}
+
+/**
+ * The folder an installed program sits in, <dataDir>/bin/kinfold, when this is
+ * a compiled program there and the folder holds an install. A binary copied
+ * to /usr/local/bin has no install beside it, so it never claims that folder.
+ */
+function ownDataDir(program: ProgramLocation): string | null {
+  if (!program.compiled) return null
+  const name = basename(program.execPath)
+  const bin = dirname(program.execPath)
+  if ((name !== 'kinfold' && name !== 'kinfold.exe') || basename(bin) !== 'bin') return null
+  const dir = dirname(bin)
+  return (program.looksInstalled ?? holdsInstall)(dir) ? dir : null
+}
+
 /** `install` (and the migration it runs) targets ~/.kinfold; every other command finds a store not yet migrated. */
-export function dataDirFor(argv: readonly string[], env: Readonly<Record<string, string | undefined>>, home: string): string {
+export function dataDirFor(argv: readonly string[], env: Readonly<Record<string, string | undefined>>, home: string, program?: ProgramLocation): string {
   const global = parseGlobalArgs(argv)
   if (!global.ok) throw new Error(global.error)
-  return dataDirForCommand(global.value.argv[0], global.value.dataDir, env, home)
+  return dataDirForCommand(global.value.argv[0], global.value.dataDir, env, home, program)
 }
 
 /**
  * A bare program runs install, so an undefined command targets the install
- * data folder just as the explicit command does.
+ * data folder just as the explicit command does. Without --data-dir or
+ * KINFOLD_DATA_DIR, an installed program run by hand uses its own folder.
  */
-function dataDirForCommand(command: string | undefined, configured: string | null, env: Readonly<Record<string, string | undefined>>, home: string): string {
+export function dataDirForCommand(command: string | undefined, configured: string | null, env: Readonly<Record<string, string | undefined>>, home: string, program?: ProgramLocation): string {
+  const named = configured ?? readEnv(env, 'DATA_DIR')
+  const own = named === undefined || named === '' ? (program === undefined ? null : ownDataDir(program)) : null
+  if (own !== null) return own
   const effective = configured === null ? env : { ...env, [envName('DATA_DIR')]: configured }
   return command === undefined || command === 'install' ? resolveInstallDataDir(effective, home) : resolveDataDir(effective, home)
 }
 
 async function systemEnv(args: readonly string[], configuredDataDir: string | null): Promise<InstallEnv> {
-  const [{ createCliRunner, createRunner }, { NO_CREDENTIALS }, { createSecurityRunner }, { createCommandRunner, createPromptIO }, { installedProgramPath, isCompiledProgram }] = await Promise.all([
+  const [{ createCliRunner, createRunner }, { NO_CREDENTIALS }, { createSecurityRunner }, { createCommandRunner, createPromptIO }, { installedProgramPath, isCompiledProgram }, { nodeTerminal }] = await Promise.all([
     import('../observer/runners'),
     import('../secrets/credentials'),
     import('../secrets/keychain-writer'),
     import('../install/system'),
     import('../install/entry'),
+    import('../install/prompt/terminal'),
   ])
   const homeDir = homedir()
-  const dataDir = dataDirForCommand(args[0], configuredDataDir, process.env, homeDir)
+  const program = { compiled: isCompiledProgram(), execPath: process.execPath }
+  const dataDir = dataDirForCommand(args[0], configuredDataDir, process.env, homeDir, program)
+  const unflaggedDataDir = dataDirForCommand(args[0], null, process.env, homeDir, program)
   const pathEnv = process.env.PATH ?? '/usr/bin:/bin'
   const projectRoot = resolve(import.meta.dir, '..', '..')
   // A compiled program wires hosts to the program installed in the data
@@ -231,6 +295,7 @@ async function systemEnv(args: readonly string[], configuredDataDir: string | nu
   return {
     homeDir,
     dataDir,
+    unflaggedDataDir,
     platform: process.platform,
     mode,
     projectRoot,
@@ -245,6 +310,7 @@ async function systemEnv(args: readonly string[], configuredDataDir: string | nu
     sleep: (ms) => Bun.sleep(ms),
     fetch: (url, init) => fetch(url, init),
     io: createPromptIO(),
+    terminal: nodeTerminal(),
     out: (line) => process.stdout.write(`${line}\n`),
     runnerFor: (settings, credentials) => createRunner(settings, { dataDir, credentials, parentEnv: process.env }),
     cliRunnerFor: (settings) => createCliRunner(settings, { dataDir, credentials: NO_CREDENTIALS, parentEnv: process.env }),

@@ -10,7 +10,8 @@ const launcher = createRequire(import.meta.url)('./bin/kinfold.js') as {
   packageName(platform: string, arch: string): string | null
   programName(platform: string): string
   unsupportedMessage(platform: string, arch: string): string
-  isMusl(platform: string, report: unknown, isBun?: boolean): boolean
+  isMusl(platform: string, report: unknown, probe: (path: string) => boolean): boolean
+  currentReport(platform: string): unknown
 }
 
 const LAUNCHER_FILE = join(import.meta.dir, 'bin', 'kinfold.js')
@@ -18,6 +19,7 @@ const SUPPORTED = 'Supported: macOS (arm64, x64), Linux glibc (x64, arm64), Wind
 /** The fake platform program records what the launcher handed it. */
 const PROGRAM = `#!/bin/sh
 printf '%s\\n' "$@" > "$KINFOLD_TEST_ARGS"
+printf '%s\\n' "$KINFOLD_INSTALL_CHANNEL" > "$KINFOLD_TEST_ARGS.channel"
 cat > "$KINFOLD_TEST_STDIN"
 if [ -n "\${KINFOLD_TEST_SIGNAL:-}" ]; then
   kill -s "$KINFOLD_TEST_SIGNAL" $$
@@ -77,6 +79,10 @@ async function launch(options: {
   stdin?: string
   /** Runs as Node would on Alpine: no Bun version, and a report that names no glibc. */
   musl?: boolean
+  /** Runs as Node would: no Bun version, with the glibc report left alone. */
+  node?: boolean
+  /** npm_config_user_agent for the launcher; default unset. */
+  userAgent?: string
 }): Promise<Launched> {
   const root = temp('kinfold-launcher-')
   const program = installLauncher(root)
@@ -86,7 +92,7 @@ async function launch(options: {
     preload,
     `Object.defineProperty(process, 'platform', { value: ${JSON.stringify(options.platform)} })\nObject.defineProperty(process, 'arch', { value: ${JSON.stringify(options.arch)} })\n${
       options.musl === true ? "Object.defineProperty(process.versions, 'bun', { value: undefined, configurable: true })\nObject.defineProperty(process, 'report', { value: { getReport: () => ({ header: {} }) }, configurable: true })\n" : ''
-    }`,
+    }${options.node === true ? "Object.defineProperty(process.versions, 'bun', { value: undefined, configurable: true })\n" : ''}`,
   )
   const argsPath = join(root, 'args.txt')
   const child = Bun.spawn([process.execPath, '--preload', preload, program, ...options.argv], {
@@ -98,6 +104,7 @@ async function launch(options: {
       KINFOLD_TEST_STDIN: join(root, 'stdin.txt'),
       KINFOLD_TEST_EXIT: String(options.exitCode ?? 0),
       KINFOLD_TEST_SIGNAL: options.signal ?? '',
+      ...(options.userAgent === undefined ? {} : { npm_config_user_agent: options.userAgent }),
     },
     stdin: options.stdin === undefined ? 'ignore' : new TextEncoder().encode(options.stdin),
     stdout: 'pipe',
@@ -145,6 +152,26 @@ shellTest('linux-arm64 runs its package with argv, stdin and the exit code', asy
   expect(readFileSync(join(result.root, 'stdin.txt'), 'utf8')).toBe('hello')
 })
 
+shellTest('the launcher tells the program how it was installed', async () => {
+  const bun = await launch({ platform: 'linux', arch: 'x64', packages: ['@kinfold/cli-linux-x64'], argv: ['status'] })
+  expect(readFileSync(`${bun.argsPath}.channel`, 'utf8')).toBe('bunx\n')
+  // Darwin, because a Linux run without Bun's version would be read as musl.
+  const node = await launch({ platform: 'darwin', arch: 'arm64', packages: ['@kinfold/cli-darwin-arm64'], argv: ['status'], node: true })
+  expect(readFileSync(`${node.argsPath}.channel`, 'utf8')).toBe('npx\n')
+})
+
+const DARWIN = { platform: 'darwin', arch: 'arm64', packages: ['@kinfold/cli-darwin-arm64'], argv: ['status'], node: true }
+
+shellTest('bunx that follows the node shebang is still bunx, by its user agent', async () => {
+  const run = await launch({ ...DARWIN, userAgent: 'bun/1.4.4 npm/? node/v22.0.0 darwin arm64' })
+  expect(readFileSync(`${run.argsPath}.channel`, 'utf8')).toBe('bunx\n')
+})
+
+shellTest('a node run with an npm user agent is npx', async () => {
+  const run = await launch({ ...DARWIN, userAgent: 'npm/10.8.0 node/v22.0.0 darwin arm64' })
+  expect(readFileSync(`${run.argsPath}.channel`, 'utf8')).toBe('npx\n')
+})
+
 shellTest('a bare launcher runs install', async () => {
   const result = await launch({ platform: 'linux', arch: 'x64', packages: ['@kinfold/cli-linux-x64'], argv: [] })
 
@@ -180,12 +207,52 @@ shellTest('a supported host with no platform package prints the same message', a
   expect(result.stderr).toBe(`kinfold: no build for darwin-x64. ${SUPPORTED}\n`)
 })
 
+const NO_LOADER = (): boolean => false
+
 test('only a Linux report with no glibc version is musl', () => {
-  expect(launcher.isMusl('linux', { header: {} })).toBe(true)
-  expect(launcher.isMusl('linux', { header: { glibcVersionRuntime: '2.39' } })).toBe(false)
-  expect(launcher.isMusl('linux', { header: {} }, true)).toBe(false)
-  expect(launcher.isMusl('linux', null)).toBe(false)
-  expect(launcher.isMusl('darwin', { header: {} })).toBe(false)
+  expect(launcher.isMusl('linux', { header: {} }, NO_LOADER)).toBe(true)
+  expect(launcher.isMusl('linux', { header: { glibcVersionRuntime: '2.39' } }, NO_LOADER)).toBe(false)
+  expect(launcher.isMusl('linux', null, NO_LOADER)).toBe(false)
+  expect(launcher.isMusl('darwin', { header: {} }, NO_LOADER)).toBe(false)
+})
+
+test('musl is found under Bun too', () => {
+  expect(launcher.isMusl('linux', null, (p) => p === '/lib/ld-musl-x86_64.so.1')).toBe(true)
+  expect(launcher.isMusl('linux', null, (p) => p === '/lib/ld-musl-aarch64.so.1')).toBe(true)
+  expect(launcher.isMusl('linux', { header: { glibcVersionRuntime: '2.39' } }, () => false)).toBe(false)
+  expect(launcher.isMusl('darwin', null, () => true)).toBe(false)
+})
+
+test('the report is read only on Linux', () => {
+  const original = Object.getOwnPropertyDescriptor(process, 'report')
+  const bun = Object.getOwnPropertyDescriptor(process.versions, 'bun')
+  let calls = 0
+  let excludedAtCall: unknown
+  const fake = {
+    excludeNetwork: false,
+    getReport() {
+      calls++
+      excludedAtCall = fake.excludeNetwork
+      return { header: {} }
+    },
+  }
+  Object.defineProperty(process, 'report', { value: fake, configurable: true })
+  // Run as Node would: Bun's own report is deliberately never read.
+  Object.defineProperty(process.versions, 'bun', { value: undefined, configurable: true })
+  try {
+    expect(launcher.currentReport('darwin')).toBeNull()
+    expect(calls).toBe(0)
+    expect(launcher.currentReport('linux')).toEqual({ header: {} })
+    expect(calls).toBe(1)
+    expect(excludedAtCall).toBe(true)
+    Object.defineProperty(process.versions, 'bun', { value: '1.4.4', configurable: true })
+    expect(launcher.currentReport('linux')).toBeNull()
+    expect(calls).toBe(1)
+  } finally {
+    if (bun !== undefined) Object.defineProperty(process.versions, 'bun', bun)
+    if (original !== undefined) Object.defineProperty(process, 'report', original)
+    else delete (process as { report?: unknown }).report
+  }
 })
 
 shellTest('linux musl prints the supported platforms and exits 1 even with the glibc package installed', async () => {

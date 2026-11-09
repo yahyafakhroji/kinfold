@@ -102,7 +102,7 @@ test('dry run changes nothing in the temp home: same tree, modes and mtimes; onl
 test('project-level Kinfold wiring in the current directory is reported and left untouched', async () => {
   const w = make({ keychainRefs: ['openrouter'] })
   mkdirSync(join(w.cwd, '.claude'), { recursive: true })
-  const local = JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { bunPath: BUN, hookScript: '/x/src/cli/hook.ts' })] } })
+  const local = JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { entry: { command: BUN, args: ['/x/src/cli/hook.ts'] } })] } })
   writeFileSync(join(w.cwd, '.claude', 'settings.local.json'), local)
   mkdirSync(join(w.cwd, '.opencode', 'plugins'), { recursive: true })
   writeFileSync(join(w.cwd, '.opencode', 'plugins', 'shared-agent-memory.js'), 'export { default } from "../../src/plugins/opencode.ts";\n')

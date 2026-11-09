@@ -45,6 +45,7 @@ printf '%s\\n' "\${KINFOLD_TEST_LDD:-glibc}"
 function fakeProgram(exitCode = 0): Uint8Array {
   return new TextEncoder().encode(`#!/bin/sh
 printf '%s\\n' "$@" > "$KINFOLD_TEST_ARGS"
+printf '%s\\n' "\${KINFOLD_INSTALL_CHANNEL:-}" > "$KINFOLD_TEST_ARGS.channel"
 cat > "$KINFOLD_TEST_STDIN"
 exit ${exitCode}
 `)
@@ -150,6 +151,8 @@ async function runInstall(options: {
       KINFOLD_TEST_ARGS: argsPath,
       KINFOLD_TEST_STDIN: join(root, 'stdin.txt'),
       KINFOLD_RELEASE_BASE: options.base ?? 'http://127.0.0.1:1',
+      // A test never reads the terminal of whoever runs it.
+      KINFOLD_TTY: join(root, 'no-terminal'),
       ...options.extraEnv,
     },
     stdin: 'ignore',
@@ -190,6 +193,50 @@ shellTest('Linux x64 picks the asset from uname, checks the hash and runs instal
   expect(run.stderr).toBe('')
   expect(release.requests).toEqual(['/release/SHA256SUMS', '/release/kinfold-linux-x64'])
   expect(run.received).toEqual(['install', '--dry-run', '--yes'])
+})
+
+shellTest('curl | sh gives the wizard the terminal', async () => {
+  const program = fakeProgram()
+  const release = releaseServer({
+    '/release/SHA256SUMS': sumsFor({ 'kinfold-linux-x64': program }),
+    '/release/kinfold-linux-x64': program,
+  })
+  const terminal = join(temp('kinfold-tty-'), 'tty')
+  writeFileSync(terminal, 'typed at the terminal\n')
+
+  const run = await runInstall({ base: release.url, extraEnv: { KINFOLD_TTY: terminal } })
+
+  expect(run.exitCode).toBe(0)
+  expect(readFileSync(join(run.root, 'stdin.txt'), 'utf8')).toBe('typed at the terminal\n')
+  expect(readFileSync(`${run.argsPath}.channel`, 'utf8')).toBe('curl\n')
+})
+
+shellTest('with no readable terminal the program keeps the stdin it was given', async () => {
+  const program = fakeProgram()
+  const release = releaseServer({
+    '/release/SHA256SUMS': sumsFor({ 'kinfold-linux-x64': program }),
+    '/release/kinfold-linux-x64': program,
+  })
+
+  const run = await runInstall({ base: release.url })
+
+  expect(run.exitCode).toBe(0)
+  expect(readFileSync(join(run.root, 'stdin.txt'), 'utf8')).toBe('')
+})
+
+shellTest('--credential-stdin keeps the caller stdin even when a terminal is readable', async () => {
+  const program = fakeProgram()
+  const release = releaseServer({
+    '/release/SHA256SUMS': sumsFor({ 'kinfold-linux-x64': program }),
+    '/release/kinfold-linux-x64': program,
+  })
+  const terminal = join(temp('kinfold-tty-'), 'tty')
+  writeFileSync(terminal, 'typed at the terminal\n')
+
+  const run = await runInstall({ base: release.url, args: ['--credential-stdin'], extraEnv: { KINFOLD_TTY: terminal } })
+
+  expect(run.exitCode).toBe(0)
+  expect(readFileSync(join(run.root, 'stdin.txt'), 'utf8')).toBe('')
 })
 
 shellTest('Darwin arm64 picks the darwin arm64 asset', async () => {

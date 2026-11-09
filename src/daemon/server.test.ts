@@ -8,6 +8,7 @@ import { ulid } from '../contract/ulid'
 import { loadHmacKey } from '../store/hmac-key'
 import { type RunningDaemon, startDaemon } from './daemon'
 import { LATEST_SCHEMA_VERSION } from '../store/schema'
+import { VERSION } from '../version'
 
 let root: string
 let dataDir: string
@@ -41,7 +42,7 @@ function spoolFixture(output: string): string {
 test('GET /health answers without a token', async () => {
   const response = await fetch(url('/health'))
   expect(response.status).toBe(200)
-  expect(await response.json()).toEqual({ ok: true, version: '0.0.1', schemaVersion: LATEST_SCHEMA_VERSION, hmacMode: 'legacy', vectorSearch: 'off' })
+  expect(await response.json()).toEqual({ ok: true, version: VERSION, schemaVersion: LATEST_SCHEMA_VERSION, hmacMode: 'legacy', vectorSearch: 'off' })
 })
 
 test('every other route is 401 without the token or with a wrong one', async () => {

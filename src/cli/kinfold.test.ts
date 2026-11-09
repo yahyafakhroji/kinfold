@@ -5,10 +5,15 @@ import { join } from 'node:path'
 import { USAGE, parseArgs } from '../install/args'
 import { HOOK_TIMEOUT_S } from '../install/claude-hooks'
 import { EXIT_USAGE } from '../install/install'
-import { type FakeWorld, createWorld } from '../install/test-support'
+import { fakeTerminal } from '../install/prompt/fake-terminal'
+import { LOCKED_FOLDER_NOTE } from '../install/setup/prefill'
+import { type FakeWorld, createWorld, snapshotTree } from '../install/test-support'
 import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
 import { VERSION } from '../version'
-import { type SubcommandRunners, dataDirFor, runKinfold } from './kinfold'
+import { mergeSamHooks } from '../install/claude-hooks'
+import { installPaths } from '../install/env'
+import { entryCommand } from '../install/entry'
+import { EXIT_CANCELLED, type SubcommandRunners, dataDirFor, envForDataDir, runKinfold } from './kinfold'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -21,7 +26,7 @@ test('--yes, --hosts and repeated --observer parse into one value', () => {
   expect(parsed).toEqual({
     ok: true,
     value: {
-      command: 'install', dryRun: false, yes: true, skipCheck: true, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false,
+      command: 'install', dryRun: false, yes: true, skipCheck: true, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, noEncrypt: false, noUpdateCheck: false, port: null,
       hosts: ['claude-code', 'opencode'],
       observers: [
         { host: 'claude-code', provider: 'claude-cli', model: 'sonnet' },
@@ -86,6 +91,51 @@ test('with only the old data dir, install targets ~/.kinfold and every other com
   }
 })
 
+const HAND_RUN = { compiled: true, execPath: '/Users/me/My Memory/bin/kinfold', looksInstalled: () => true }
+
+test('the installed program run by hand finds its own folder', () => {
+  const home = '/Users/me'
+  expect(dataDirFor(['status'], {}, home, HAND_RUN)).toBe('/Users/me/My Memory')
+  expect(dataDirFor([], {}, home, HAND_RUN)).toBe('/Users/me/My Memory')
+  expect(dataDirFor(['install'], {}, home, HAND_RUN)).toBe('/Users/me/My Memory')
+  expect(dataDirFor(['status'], { KINFOLD_DATA_DIR: '/env/dir' }, home, HAND_RUN)).toBe('/env/dir')
+  expect(dataDirFor(['status'], { SAM_DATA_DIR: '/old/env' }, home, HAND_RUN)).toBe('/old/env')
+  expect(dataDirFor(['--data-dir', '/flag/dir', 'status'], { KINFOLD_DATA_DIR: '/env/dir' }, home, HAND_RUN)).toBe('/flag/dir')
+})
+
+test('a program that is not an installed one never claims its folder', () => {
+  const home = '/Users/me'
+  const unchanged = join(home, '.kinfold')
+  expect(dataDirFor(['install'], {}, home, { ...HAND_RUN, compiled: false })).toBe(unchanged)
+  expect(dataDirFor(['install'], {}, home, { ...HAND_RUN, looksInstalled: () => false })).toBe(unchanged)
+  expect(dataDirFor(['install'], {}, home, { ...HAND_RUN, execPath: '/tmp/kinfold-linux-x64' })).toBe(unchanged)
+  expect(dataDirFor(['install'], {}, home, { ...HAND_RUN, execPath: '/usr/local/sbin/kinfold' })).toBe(unchanged)
+  // The real check: a bin folder with nothing installed beside it.
+  const empty = mkdtempSync(join(tmpdir(), 'kinfold-cli-'))
+  try {
+    mkdirSync(join(empty, 'bin'))
+    expect(dataDirFor(['install'], {}, home, { compiled: true, execPath: join(empty, 'bin', 'kinfold') })).toBe(unchanged)
+    writeFileSync(join(empty, 'install.json'), '{}')
+    expect(dataDirFor(['install'], {}, home, { compiled: true, execPath: join(empty, 'bin', 'kinfold') })).toBe(empty)
+  } finally {
+    rmSync(empty, { recursive: true, force: true })
+  }
+})
+
+test('an injected env with --data-dir rebuilds the program path', async () => {
+  world = createWorld()
+  const program = (dir: string) => ({ kind: 'program', binPath: join(dir, 'bin', 'kinfold') }) as const
+  const env = { ...world.env, dataDir: '/a', mode: program('/a') }
+  expect(envForDataDir(env, '/b')).toMatchObject({ dataDir: '/b', mode: { kind: 'program', binPath: '/b/bin/kinfold' } })
+  expect(envForDataDir(world.env, '/b').mode).toEqual(world.env.mode)
+  // End to end: hooks wired for /b read as wired once status runs with --data-dir /b.
+  const paths = installPaths(world.env)
+  mkdirSync(paths.claudeDir, { recursive: true })
+  writeFileSync(paths.claudeSettings, JSON.stringify(mergeSamHooks({}, { entry: entryCommand(program('/b'), 'hook', '/b') }).settings))
+  expect(await runKinfold(['--data-dir', '/b', 'status'], env)).toBe(0)
+  expect(world.out.some((line) => line.startsWith('  claude-code:') && line.includes('wired: yes'))).toBe(true)
+})
+
 interface Routed {
   name: string
   argv: readonly string[]
@@ -132,12 +182,12 @@ test('a bare kinfold installs, and --help prints usage without installing', asyn
   world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', interactive: true })
 
   expect(await runKinfold([], world.env)).toBe(0)
-  expect(world.out.at(-1)).toBe('installed. Check it with: bun src/cli/kinfold.ts status')
+  expect(world.out).toContain('installed. Check it with: bun src/cli/kinfold.ts status')
 
   world.out.length = 0
   expect(await runKinfold(['--help'], world.env)).toBe(0)
   expect(world.out[0]).toStartWith('usage: kinfold ')
-  expect(world.out.at(-1)).not.toBe('installed. Check it with: bun src/cli/kinfold.ts status')
+  expect(world.out).not.toContain('installed. Check it with: bun src/cli/kinfold.ts status')
 })
 
 test('--data-dir before the subcommand wins over the environment and reaches the subcommand', async () => {
@@ -239,6 +289,39 @@ test('install --data-dir uses the given folder for a dry run', async () => {
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test('Ctrl-C at a setup question exits 130 with the terminal cooked and nothing done', async () => {
+  const term = fakeTerminal(['\u0003'])
+  world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', keychainRefs: ['openrouter'], interactive: true, terminal: term })
+  const before = snapshotTree(world.home)
+  expect(await runKinfold(['install'], world.env)).toBe(EXIT_CANCELLED)
+  expect(term.rawStates()).toEqual([true, false])
+  expect(world.out.some((line) => line.startsWith('applying') || /^ {2}\d+\. /.test(line))).toBe(false)
+  expect(world.out.at(-1)).toBe('install cancelled; nothing was changed')
+  expect(snapshotTree(world.home)).toEqual(before)
+})
+
+test('a closed stdin at a setup question exits 130 too', async () => {
+  const term = fakeTerminal([])
+  world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', keychainRefs: ['openrouter'], interactive: true, terminal: term })
+  expect(await runKinfold(['install'], world.env)).toBe(EXIT_CANCELLED)
+  expect(term.rawStates().at(-1)).toBe(false)
+})
+
+test('--data-dir elsewhere on an installed machine is refused with the locked-folder note, writing nothing', async () => {
+  world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', keychainRefs: ['openrouter'] })
+  expect(await runKinfold(['install', '--yes'], world.env)).toBe(0)
+  const other = join(world.root, 'elsewhere')
+  const before = snapshotTree(world.root)
+  world.out.length = 0
+  expect(await runKinfold(['install', '--data-dir', other, '--yes'], world.env)).toBe(1)
+  expect(world.out.at(-1)).toBe(`install failed: the memory folder is ${world.dataDir}, not ${other}. ${LOCKED_FOLDER_NOTE}`)
+  expect(existsSync(other)).toBe(false)
+  const after = snapshotTree(world.root)
+  // Only the running daemon's own store files may change meanwhile.
+  const changed = Object.keys({ ...before, ...after }).filter((path) => JSON.stringify(before[path]) !== JSON.stringify(after[path]))
+  expect(changed.filter((path) => !/^home\/\.kinfold\/memory\.db(-wal|-shm)?$/.test(path))).toEqual([])
 })
 
 test('the daemon subcommand stays up and stops cleanly on SIGTERM', async () => {
@@ -348,4 +431,13 @@ test('a fatal mcp error logs only its name, not the message', async () => {
   } finally {
     rmSync(home, { recursive: true, force: true })
   }
+})
+
+test('`kinfold update` dispatches to the updater, which refuses a checkout', async () => {
+  world = createWorld()
+  const fetched: string[] = []
+  world.env = { ...world.env, fetch: async (url) => (fetched.push(url), new Response('', { status: 500 })) }
+  expect(await runKinfold(['update', '--dry-run'], world.env)).toBe(1)
+  expect(world.out.at(-1)).toBe('kinfold update: this is a checkout install; update it with git pull and bun src/cli/kinfold.ts install')
+  expect(fetched).toEqual([])
 })

@@ -24,6 +24,7 @@
 // Logs carry session ids, counts and durations only, never prompt text.
 
 import { type ContextRequest, type ContextResult, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
+import { agentLine } from '../update/notice-text'
 
 export const MAX_CACHED_SESSIONS = 256
 export const DELTA_INTERVAL_MS = 30_000
@@ -167,7 +168,9 @@ export function createContextInjector(options: ContextInjectorOptions): ContextI
     const pack = await packFor(sessionId)
     await refreshDelta(sessionId)
     const session = cache.get(sessionId)
-    const texts = [pack?.text ?? '', ...(session?.deltas ?? []), session?.related ?? ''].filter((text) => text !== '')
+    // The daemon sends the notice once per version per host, so the line lives only in the pack of the session that got it.
+    const packText = pack === null ? '' : pack.updateNotice === undefined ? pack.text : [pack.text.replace(/\n$/, ''), agentLine(pack.updateNotice)].filter((part) => part !== '').join('\n')
+    const texts = [packText, ...(session?.deltas ?? []), session?.related ?? ''].filter((text) => text !== '')
     for (const text of texts) {
       if (system.some((part) => isRecord(part) && part.text === text)) continue
       // OpenCode's context hook takes additions by mutating event.system; appending is the only change made.

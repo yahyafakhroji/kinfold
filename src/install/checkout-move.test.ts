@@ -243,6 +243,8 @@ test('the move plans no key, data folder or database action, and a real move app
     expect(line).not.toMatch(/hmac-legacy|hmac-master/)
     expect(line).not.toMatch(/move .* -> /)
     expect(line).not.toMatch(/^  \d+\. chmod <dataDir>/)
+    // install.json records how this copy was installed, so moving from the checkout to the program rewrites it.
+    if (line.includes(`${w.dataDir}/install.json:`)) continue
     if (/^  \d+\. (mkdir|create|touch|write|remove|backup|chmod|move|link) /.test(line)) expect(line).not.toContain(w.dataDir)
   }
   expect(keychainWrites(w.securityCalls, securityCalls)).toEqual([])
@@ -260,7 +262,7 @@ test('the move plans no key, data folder or database action, and a real move app
   // keeps its bytes and mode, none appears or disappears, and the store file
   // itself is the same file rather than a new one.
   const dataAfter = snapshotTree(w.dataDir)
-  const runtime = new Set([DAEMON_INFO_FILE, DB_FILE, `${DB_FILE}-shm`, `${DB_FILE}-wal`])
+  const runtime = new Set([DAEMON_INFO_FILE, DB_FILE, `${DB_FILE}-shm`, `${DB_FILE}-wal`, 'install.json'])
   const outsideBin = Object.keys({ ...dataBefore, ...dataAfter }).filter((path) => path !== '.' && path !== 'bin' && !path.startsWith('bin/'))
   expect(outsideBin.filter((path) => dataAfter[path] === undefined)).toEqual([])
   for (const path of outsideBin) {
@@ -287,12 +289,12 @@ test('a checkout install afterwards moves the wiring back', async () => {
   expect(JSON.parse(readFileSync(paths.claudeSettings, 'utf8')).hooks.SessionStart).toEqual([FOREIGN_CLAUDE_HOOK, samHookGroup('SessionStart', hookTarget)])
   expect(JSON.parse(readFileSync(paths.codexHooks, 'utf8')).hooks.SessionStart).toEqual([FOREIGN_CODEX_HOOK, samItem(CODEX_HOOK_SPEC, 'SessionStart', { entry: entryCommand(checkout, 'hook', w.dataDir, 'codex') })])
   expect(JSON.parse(readFileSync(paths.cursorHooks, 'utf8')).hooks.beforeSubmitPrompt).toEqual([FOREIGN_CURSOR_HOOK, samItem(CURSOR_HOOK_SPEC, 'beforeSubmitPrompt', { entry: entryCommand(checkout, 'hook', w.dataDir, 'cursor') })])
-  expect(readFileSync(paths.opencodePlugin, 'utf8')).toBe(shimContent(paths.pluginEntry))
+  expect(readFileSync(paths.opencodePlugin, 'utf8')).toBe(shimContent(paths.pluginEntry, w.dataDir))
   expect(JSON.parse(readFileSync(config.opencodeConfig, 'utf8')).mcp[MCP_SERVER_NAME]).toEqual(openCodeMcpEntry(mcpTarget(w.env)))
   const claudeUser = JSON.parse(readFileSync(config.claudeUserConfig, 'utf8')) as { mcpServers: Record<string, unknown> }
   expect(claudeUser.mcpServers['other-tool']).toEqual(FOREIGN_CLAUDE_MCP)
   expect(claudeUser.mcpServers[MCP_SERVER_NAME]).toEqual(claudeMcpEntry(mcpTarget(w.env)))
-  expect(readFileSync(paths.launchAgentPlist, 'utf8')).toContain(`<array><string>${checkout.bunPath}</string><string>${paths.daemonMain}</string></array>`)
+  expect(readFileSync(paths.launchAgentPlist, 'utf8')).toContain(`<array><string>${checkout.bunPath}</string><string>${join(checkout.projectRoot, 'src', 'daemon', 'main.ts')}</string></array>`)
   expect(planLines(w).some((line) => line.includes('install program'))).toBe(false)
 })
 
@@ -311,7 +313,7 @@ test('a second program install writes nothing but still checks the daemon', asyn
   expect(await install(w.env, programOptions(move))).toBe(EXIT_OK)
   const lines = planLines(w)
   expect(lines).toHaveLength(1)
-  expect(lines[0]).toContain('wait up to 15 s for GET /health')
+  expect(lines[0]).toContain('wait up to 180 s for GET /health (a large store takes a while to open)')
   expect(lines[0]).toEndWith('[done]')
   expect(w.out).not.toContain('plan: nothing to change')
   expect(launchctlVerbs(w)).toEqual(['print'])

@@ -1,11 +1,12 @@
 // The data dir rules from the Security section: the dir and every directory in
-// it 0700, every file 0600. The daemon's umask covers files it creates; this
+// it 0700, every file 0600, except the installed program, which is 0755. The daemon's umask covers files it creates; this
 // fixes what something else created looser (claude-mem's DB was 0644 inside a
 // 0700 dir). Symlinks are reported and left alone, never followed.
 
 import { chmodSync, existsSync, lstatSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
+import { PROGRAM_MODE } from './self-install'
 
 export interface ModeChange {
   /** Relative to the data dir; "." is the dir itself. */
@@ -35,10 +36,26 @@ function walk(root: string, dir: string, scan: ModeScan): void {
   }
 }
 
+const PROGRAM_PATHS: ReadonlySet<string> = new Set(['bin/kinfold', 'bin/kinfold.exe'])
+/** Temp copies of the program made while updating; the running install must not chmod its own. */
+const UPDATE_TEMP_PREFIX = 'bin/.kinfold-update-'
+
+/** The mode a path under the data dir must have. `relative` uses backslashes on Windows. */
+export function expectedMode(relativePath: string, kind: 'dir' | 'file'): number {
+  if (kind === 'dir') return DATA_DIR_MODE
+  return PROGRAM_PATHS.has(relativePath.replaceAll('\\', '/')) ? PROGRAM_MODE : DATA_FILE_MODE
+}
+
+function isUpdateTemp(relativePath: string): boolean {
+  return relativePath.replaceAll('\\', '/').startsWith(UPDATE_TEMP_PREFIX)
+}
+
 function visit(root: string, path: string, kind: 'dir' | 'file', mode: number, scan: ModeScan): void {
+  const rel = relative(root, path) || '.'
+  if (isUpdateTemp(rel)) return
   scan.checked += 1
-  const to = kind === 'dir' ? DATA_DIR_MODE : DATA_FILE_MODE
-  if (mode !== to) scan.changes.push({ path: relative(root, path) || '.', kind, from: mode, to })
+  const to = expectedMode(rel, kind)
+  if (mode !== to) scan.changes.push({ path: rel, kind, from: mode, to })
 }
 
 /** Read-only: what would change. A missing data dir has nothing to fix. */
@@ -52,15 +69,6 @@ export function scanDataDirModes(dataDir: string): ModeScan {
 
 export function applyModeChange(dataDir: string, change: ModeChange): void {
   chmodSync(join(dataDir, change.path), change.to)
-}
-
-/**
- * The installed program's folder, which must keep its execute bit. `relative`
- * returns backslashes on Windows, so compare the first segment rather than a
- * `bin/` prefix.
- */
-export function isInBinFolder(relativePath: string): boolean {
-  return relativePath.split(/[\\/]/, 1)[0] === 'bin'
 }
 
 export function formatMode(mode: number): string {

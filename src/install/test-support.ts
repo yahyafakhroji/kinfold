@@ -7,6 +7,7 @@
 // its HMAC master from those values, never from a real Keychain.
 // Tests only; nothing in the installer imports it.
 
+import type { TerminalIO } from './prompt/terminal'
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -25,6 +26,7 @@ import type { CliObserverRunner } from '../observer/runners/cli-core'
 import type { ObserverRunner, ObserverSettings } from '../observer/types'
 import type { CommandRequest, CommandResult, InstallEnv } from './env'
 import { LAUNCHCTL } from './launch-agent'
+import type { ServiceControl } from './service/control'
 
 export interface WorldOptions {
   claudeVersion?: string | null
@@ -46,6 +48,8 @@ export interface WorldOptions {
   secrets?: string[]
   stdin?: string
   interactive?: boolean
+  /** A scripted terminal for wizard tests; default null (no terminal). */
+  terminal?: TerminalIO | null
   keychainRefs?: string[]
   /** Refs held under the pre-rename service shared-agent-memory. */
   legacyKeychainRefs?: string[]
@@ -259,9 +263,12 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
       askSecret: async () => secrets.shift() ?? '',
       readStdin: async () => options.stdin ?? '',
     },
+    terminal: options.terminal ?? null,
     runnerFor: (settings) => (world.checks.push(settings), (options.runner ?? (() => okRunner))(settings)),
     cliRunnerFor: (settings) => (world.checks.push(settings), (options.cliRunner ?? (() => okCliRunner))(settings)),
     applicationsDirs: [join(root, 'Applications')],
+    // Never binds a real port: 37811 may be the live daemon's on this machine.
+    portFree: async () => true,
   }
   if (options.withLibrary ?? true) placeBuiltLibrary(world.dataDir, world.env.platform)
   world.cleanup = async () => {
@@ -292,3 +299,33 @@ export function snapshotTree(dir: string): Record<string, TreeEntry> {
 }
 
 export const YES = { yes: true, dryRun: false, skipCheck: false, replaceCredential: false, credentialStdin: false, flags: [], hosts: null, takeover: false } as const
+
+export interface FakeService extends ServiceControl {
+  /** Every method called, in order. */
+  calls: string[]
+}
+
+/** A ServiceControl that records calls and touches nothing; each answer can be set. */
+export function fakeService(options: { running?: boolean; configured?: boolean; startError?: Error; stopError?: Error; holders?: string; dataDir?: string; port?: number } = {}): FakeService {
+  const calls: string[] = []
+  let running = options.running ?? true
+  return {
+    label: 'FakeService',
+    calls,
+    isConfigured: () => (calls.push('isConfigured'), options.configured ?? true),
+    isRunning: async () => (calls.push('isRunning'), running),
+    start: async () => {
+      calls.push('start')
+      if (options.startError !== undefined) throw options.startError
+      running = true
+    },
+    stop: async () => {
+      calls.push('stop')
+      running = false
+      if (options.stopError !== undefined) throw options.stopError
+    },
+    configuredDataDir: () => options.dataDir ?? null,
+    configuredPort: () => options.port ?? null,
+    fileHolders: async () => (calls.push('fileHolders'), options.holders ?? ''),
+  }
+}

@@ -36,6 +36,8 @@ export interface ChoiceOptions {
   replaceCredential: boolean
   credentialStdin: boolean
   flags: readonly ObserverFlag[]
+  /** What each host has now (setup/prefill.ts); under --yes a host with no flag keeps its row instead of taking the built-in default. */
+  saved?: ReadonlyMap<InstallHost, ObserverSettingsInput>
 }
 
 export interface PendingCredential {
@@ -45,11 +47,11 @@ export interface PendingCredential {
 
 export interface ObserverChoice {
   input: ObserverSettingsInput
-  origin: 'default' | 'flag' | 'prompt'
+  origin: 'default' | 'flag' | 'prompt' | 'saved'
   /** A key entered this run, stored in the keychain only once the plan runs. */
   credential: PendingCredential | null
   credentialNote: string
-  check: 'ok' | 'skipped' | 'not run (dry run)'
+  check: 'ok' | 'skipped' | 'unchanged' | 'not run (dry run)'
 }
 
 /** Ends the install with a non-zero exit; the message carries no secret. */
@@ -84,17 +86,17 @@ export function describeInput(input: ObserverSettingsInput): string {
   return `${input.provider}/${input.model}`
 }
 
-interface Candidate {
+export interface Candidate {
   input: ObserverSettingsInput
   origin: ObserverChoice['origin']
 }
 
-function isCliLoginProvider(provider: string): provider is CliLoginProvider {
+export function isCliLoginProvider(provider: string): provider is CliLoginProvider {
   return (CLI_LOGIN_PROVIDERS as readonly string[]).includes(provider)
 }
 
 /** Up to 20 names the CLI reports, as plain lines; or the error class when it cannot list. Names are never interpreted; a name with a control or format character (an escape, a bidi override, a zero-width) is dropped. */
-function showModels(env: InstallEnv, provider: CliLoginProvider, models: readonly string[] | { errorClass: string }): void {
+export function showModels(env: InstallEnv, provider: CliLoginProvider, models: readonly string[] | { errorClass: string }): void {
   if ('errorClass' in models) {
     env.out(`model list unavailable (${models.errorClass}); type a model name`)
     return
@@ -108,7 +110,7 @@ function showModels(env: InstallEnv, provider: CliLoginProvider, models: readonl
   for (const name of names) env.out(`  ${name}`)
 }
 
-async function listModelsFor(env: InstallEnv, provider: CliLoginProvider): Promise<string[] | { errorClass: string }> {
+export async function listModelsFor(env: InstallEnv, provider: CliLoginProvider): Promise<string[] | { errorClass: string }> {
   try {
     return await env.cliRunnerFor({ provider, model: '-', credentialRef: null, enabled: true, source: 'host' }).listModels()
   } catch (error: unknown) {
@@ -145,6 +147,8 @@ async function promptCandidate(env: InstallEnv, host: InstallHost): Promise<Cand
 async function pickCandidate(env: InstallEnv, host: InstallHost, options: ChoiceOptions, retry: boolean): Promise<Candidate> {
   const flag = options.flags.find((entry) => entry.host === host)
   if (!retry && flag !== undefined) return { input: settingsInputFor(host, flag.provider, flag.model), origin: 'flag' }
+  const saved = options.saved?.get(host)
+  if (!retry && options.yes && saved !== undefined) return { input: saved, origin: 'saved' }
   if (!retry && options.yes) return { input: defaultInput(host), origin: 'default' }
   if (env.io.interactive && !options.yes) return promptCandidate(env, host)
   throw new ChoiceError(`cannot ask about the ${host} observer without a TTY; pass --yes or --observer ${host}=<provider>:<model>`)
@@ -152,7 +156,7 @@ async function pickCandidate(env: InstallEnv, host: InstallHost, options: Choice
 
 type CredentialState = { kind: 'none' } | { kind: 'keychain' } | { kind: 'entered'; value: string } | { kind: 'dry-run' }
 
-interface CredentialSession {
+export interface CredentialSession {
   entered: Map<string, string>
   stdinUsed: boolean
 }
@@ -163,6 +167,9 @@ async function readCredentialValue(env: InstallEnv, ref: string, options: Choice
     if (session.stdinUsed) throw new ChoiceError(`stdin was already read; cannot read another key for ${ref}`)
     session.stdinUsed = true
     value = await env.io.readStdin()
+  } else if (options.yes) {
+    // --yes never asks, even on a terminal: a child `install --yes` must not stop at a question.
+    throw new ChoiceError(`the ${ref} key is not in the keychain and --yes asks nothing; pass --credential-stdin`)
   } else if (env.io.interactive) {
     value = await env.io.askSecret(`Key for ${ref} (stored in the macOS Keychain, not shown) > `)
   } else {
@@ -216,25 +223,48 @@ export async function runCheck(env: InstallEnv, input: ObserverSettingsInput, cr
   }
 }
 
+export function newCredentialSession(): CredentialSession {
+  return { entered: new Map(), stdinUsed: false }
+}
+
+/** The check ran and the provider did not pass it; only the error class, never the reply. */
+export interface CheckFailure {
+  failed: string
+}
+
+/** One candidate through the credential step and the test. A failure is reported and returned so the caller can ask again. */
+export async function chooseObserverWith(
+  env: InstallEnv,
+  host: InstallHost,
+  candidate: Candidate,
+  options: ChoiceOptions,
+  session: CredentialSession = newCredentialSession(),
+): Promise<ObserverChoice | CheckFailure> {
+  const ref = credentialRefFor(asSettings(candidate.input))
+  const state = await resolveCredential(env, candidate.input, options, session)
+  const base = { ...candidate, credential: state.kind === 'entered' && ref !== null ? { ref, value: state.value } : null, credentialNote: credentialNote(state, ref) }
+  if (options.dryRun) return { ...base, check: 'not run (dry run)' }
+  // A row that was already saved and is kept as it is was tested when it was chosen.
+  if (candidate.origin === 'saved') return { ...base, check: 'unchanged' }
+  if (options.skipCheck) return { ...base, check: 'skipped' }
+  const result = await runCheck(env, candidate.input, checkCredentials(env, session))
+  if (result.ok) return { ...base, check: 'ok' }
+  env.out(`observer check for ${host} (${describeInput(candidate.input)}) failed: ${result.errorClass}`)
+  if (ref !== null) session.entered.delete(ref)
+  return { failed: result.errorClass }
+}
+
 async function chooseOne(env: InstallEnv, host: InstallHost, options: ChoiceOptions, session: CredentialSession): Promise<ObserverChoice> {
   for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
-    const candidate = await pickCandidate(env, host, options, attempt > 0)
-    const ref = credentialRefFor(asSettings(candidate.input))
-    const state = await resolveCredential(env, candidate.input, options, session)
-    const base = { ...candidate, credential: state.kind === 'entered' && ref !== null ? { ref, value: state.value } : null, credentialNote: credentialNote(state, ref) }
-    if (options.dryRun) return { ...base, check: 'not run (dry run)' }
-    if (options.skipCheck) return { ...base, check: 'skipped' }
-    const result = await runCheck(env, candidate.input, checkCredentials(env, session))
-    if (result.ok) return { ...base, check: 'ok' }
-    env.out(`observer check for ${host} (${describeInput(candidate.input)}) failed: ${result.errorClass}`)
-    if (ref !== null) session.entered.delete(ref)
-    if (options.yes || !env.io.interactive) throw new ChoiceError(`observer check for ${host} failed: ${result.errorClass}`)
+    const result = await chooseObserverWith(env, host, await pickCandidate(env, host, options, attempt > 0), options, session)
+    if (!('failed' in result)) return result
+    if (options.yes || !env.io.interactive) throw new ChoiceError(`observer check for ${host} failed: ${result.failed}`)
   }
   throw new ChoiceError(`no working observer for ${host} after ${MAX_CHOICE_ATTEMPTS} tries`)
 }
 
 export async function chooseObservers(env: InstallEnv, hosts: readonly InstallHost[], options: ChoiceOptions): Promise<ObserverChoice[]> {
-  const session: CredentialSession = { entered: new Map(), stdinUsed: false }
+  const session = newCredentialSession()
   const choices: ObserverChoice[] = []
   for (const host of hosts) choices.push(await chooseOne(env, host, options, session))
   return choices

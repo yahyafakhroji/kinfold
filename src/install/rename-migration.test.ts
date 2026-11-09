@@ -17,6 +17,9 @@ import { claudeMcpEntry, openCodeMcpEntry, removeMcpEntryNamed } from './mcp-con
 import { isOwnShim, shimContent } from './opencode-shim'
 import { mcpPaths, mcpTarget } from './mcp-wiring'
 import { renameMigrationActions } from './rename-migration'
+import { fakeTerminal } from './prompt/fake-terminal'
+import { PromptCancelled } from './prompt/prompts'
+import { LOCKED_FOLDER_NOTE } from './setup/prefill'
 import { type FakeWorld, UID, YES, createWorld, placeBuiltLibrary, snapshotTree, startWorldDaemon } from './test-support'
 
 const CLAUDE = '2.1.310 (Claude Code)'
@@ -272,8 +275,8 @@ test('the dry run lists every step and shows no Keychain value', async () => {
 
 test('a shim is ours under either marker; one without a marker, or not re-exporting the plugin, is not', () => {
   const entry = '/repo/src/plugins/opencode.ts'
-  expect(isOwnShim(shimContent(entry))).toBe(true)
-  expect(shimContent(entry)).toStartWith('// kinfold: ')
+  expect(isOwnShim(shimContent(entry, '/data'))).toBe(true)
+  expect(shimContent(entry, '/data')).toStartWith('// kinfold: ')
   expect(isOwnShim(legacyShim(entry))).toBe(true)
   expect(isOwnShim(`export { default } from ${JSON.stringify(entry)};\n`)).toBe(false)
   expect(isOwnShim('// shared-agent-memory: but something else\nexport const x = 1\n')).toBe(false)
@@ -291,7 +294,7 @@ test('a foreign file under the old shim name stays, and the rest still migrates'
 })
 
 test('removeMcpEntryNamed takes only our entry under that name', () => {
-  const target = { bunPath: '/b/bun', serverScript: '/r/src/mcp/server.ts' }
+  const target = { entry: { command: '/b/bun', args: ['/r/src/mcp/server.ts'] } }
   const config = { mcp: { [LEGACY_MCP_SERVER_NAME]: openCodeMcpEntry(target), [MCP_SERVER_NAME]: openCodeMcpEntry(target) } }
   expect(removeMcpEntryNamed(config, 'opencode', LEGACY_MCP_SERVER_NAME)).toEqual({ config: { mcp: { [MCP_SERVER_NAME]: openCodeMcpEntry(target) } }, removed: true })
   const foreign = { mcp: { [LEGACY_MCP_SERVER_NAME]: { type: 'local', command: ['node', 'x.js'] } } }
@@ -422,4 +425,16 @@ test('the daemon line names the old LaunchAgent when that is the one loaded', as
   const line = w.out.find((l) => l.startsWith('daemon: '))
   expect(line).toContain(`LaunchAgent ${LEGACY_LAUNCH_AGENT_LABEL} (the old name) loaded; the migration stops it`)
   expect(line).not.toContain('not loaded')
+})
+
+test('after the move, the wizard sees an installed machine and shows the folder locked', async () => {
+  const w = legacyWorld()
+  const term = fakeTerminal(['\u0003'])
+  w.env = { ...w.env, terminal: term, io: { ...w.env.io, interactive: true } }
+  w.env.portFree = async () => true
+  await expect(install(w.env, { ...YES, yes: false })).rejects.toBeInstanceOf(PromptCancelled)
+  expect(existsSync(join(w.dataDir, 'memory.db'))).toBe(true)
+  expect(term.output()).toContain(LOCKED_FOLDER_NOTE)
+  expect(term.output()).toContain(w.dataDir)
+  expect(term.output()).not.toContain('Memory folder:')
 })

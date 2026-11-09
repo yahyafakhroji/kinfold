@@ -1,16 +1,16 @@
 import { afterEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { newDbKey } from '../sqlite/keys'
 import { checkHealth, readDaemonInfo } from './daemon-client'
-import { installPaths } from './env'
+import { type CommandResult, installPaths } from './env'
 import { installedProgramPath } from './entry'
 import { EXIT_OK, install } from './install'
 import { LAUNCHCTL } from './launch-agent'
-import { parseSha256Sums, releaseAssetName, releaseSumsUrl, verifyProgram } from './self-install'
-import { type FakeWorld, YES, createWorld, snapshotTree, startWorldDaemon } from './test-support'
+import { parseSha256Sums, programInstallActions, releaseAssetName, releaseSumsUrl, verifyProgram } from './self-install'
+import { type FakeWorld, YES, createWorld, fakeService, snapshotTree, startWorldDaemon } from './test-support'
 import { uninstall } from './uninstall'
 
 const HEX = 'a'.repeat(64)
@@ -147,7 +147,7 @@ test('a development version copies the program without a checksum and says so', 
   expect(readFileSync(binPath, 'utf8')).toBe(readFileSync(source, 'utf8'))
   expect(statSync(binPath).mode & 0o777).toBe(0o755)
   expect(w.out).toContain('program: the release checksum check is skipped for the development version')
-  expect(w.out.at(-1)).toBe(`installed. Check it with: ${binPath} status`)
+  expect(w.out).toContain(`installed. Check it with: ${binPath} status`)
   expect(readdirSync(join(w.dataDir, 'bin')).filter((name) => name.startsWith('.kinfold-tmp-'))).toEqual([])
 })
 
@@ -157,6 +157,23 @@ test('an unchanged program plans no copy', async () => {
   w.out.length = 0
   expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
   expect(w.out.join('\n')).not.toContain(`install program ${binPath}`)
+})
+
+test('a second install never makes the program non-executable', async () => {
+  const { w, binPath, source } = programWorld()
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  w.out.length = 0
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  expect(statSync(binPath).mode & 0o777).toBe(0o755)
+  expect(w.out.join('\n')).not.toContain('chmod <dataDir>/bin/kinfold')
+})
+
+test('install restores 0755 on a program someone made 0600', async () => {
+  const { w, binPath, source } = programWorld()
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  chmodSync(binPath, 0o600)
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  expect(statSync(binPath).mode & 0o777).toBe(0o755)
 })
 
 test('a program whose hash is missing from SHA256SUMS stops before any change', async () => {
@@ -271,6 +288,59 @@ test('a failed copy starts the daemon again from the program still in place', as
   expect(w.out.join('\n')).toContain('the daemon was started again from the program in place')
 })
 
+test('a failed start after the plan stopped the service is reported and the step error stands', async () => {
+  const { w, source } = programWorld()
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  writeFileSync(source, 'kinfold program v2\n')
+  w.out.length = 0
+  const out = w.env.out
+  w.env.out = (line) => {
+    out(line)
+    if (line.startsWith('applying ')) rmSync(source)
+  }
+  w.env.service = fakeService({ running: false, startError: new Error('boom') })
+  expect(await install(w.env, installOptions(source))).toBe(1)
+  const lines = w.out.join('\n')
+  expect(lines).toContain('is not running after restarting (boom), so nothing will answer /health')
+  expect(lines).toMatch(/install failed: .*(ENOENT|no such file)/i)
+})
+
+test('a restart that opens a large store says the daemon may still be starting', async () => {
+  const { w, source } = programWorld()
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  writeFileSync(source, 'kinfold program v2\n')
+  w.out.length = 0
+  const out = w.env.out
+  w.env.out = (line) => {
+    out(line)
+    if (line.startsWith('applying ')) rmSync(source)
+  }
+  // Stopped by the plan, started again here, then never answering /health, as a daemon busy with a large store.
+  const service = fakeService({ running: false })
+  w.env.service = service
+  expect(await install(w.env, installOptions(source))).toBe(1)
+  const lines = w.out.join('\n')
+  expect(service.calls.filter((call) => call === 'start')).toHaveLength(1)
+  expect(lines).toContain('the daemon did not answer /health after restarting; it may still be opening a large store. Run kinfold status in a minute')
+  expect(lines).not.toContain('is not running after restarting')
+})
+
+test('a service left loaded after a slow wait-health is not started again and the message does not contradict the plan error', async () => {
+  const { w, source } = programWorld()
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  writeFileSync(source, 'kinfold program v2\n')
+  w.out.length = 0
+  const service = fakeService({ running: true })
+  w.env.service = service
+  w.env.fetch = (async () => Promise.reject(new Error('refused'))) as unknown as typeof w.env.fetch
+  expect(await install(w.env, installOptions(source))).toBe(1)
+  const lines = w.out.join('\n')
+  expect(service.calls).not.toContain('start')
+  expect(lines).toContain('the daemon did not answer /health within 180 s; it may still be opening a large store')
+  expect(lines).toContain('it may still be opening a large store. Run kinfold status in a minute; see')
+  expect(lines).not.toContain('is not running after restarting')
+})
+
 test('a failed rename removes the temp file it copied', async () => {
   const { w, binPath, source } = programWorld()
   // A directory at the destination makes the rename fail after the copy ran.
@@ -308,4 +378,56 @@ test('uninstall removes the program and library folders and keeps the rest of th
   expect(existsSync(join(w.dataDir, 'lib'))).toBe(false)
   expect(existsSync(w.dataDir)).toBe(true)
   expect(existsSync(join(w.dataDir, 'logs', 'daemon.log'))).toBe(true)
+})
+
+// A release candidate that is not a development build, so the version comparison applies.
+const RUNNING = '0.2.0-rc.1'
+
+/** A program world whose installed program answers `--version` with `answer`, and the plan for installing `source` over it. */
+async function planOver(answer: CommandResult): Promise<{ w: FakeWorld; binPath: string; source: string; actions: string[] }> {
+  const { w, binPath, source } = programWorld()
+  mkdirSync(join(w.dataDir, 'bin'), { recursive: true, mode: 0o700 })
+  writeFileSync(binPath, 'installed program\n', { mode: 0o755 })
+  const run = w.env.run
+  w.env = { ...w.env, run: async (request) => (request.argv[0] === binPath ? (w.commands.push(request), answer) : run(request)) }
+  const sourceHash = sha(readFileSync(source))
+  const check = { sourceHash, assetName: ASSET, expectedSha256: sourceHash, check: true }
+  const plan = await programInstallActions(w.env, { source, dryRun: false, version: RUNNING, check })
+  return { w, binPath, source, actions: plan.actions.map((action) => action.kind) }
+}
+
+test('an installed program newer than the running one is kept, said in one line', async () => {
+  const { w, binPath, actions } = await planOver({ exitCode: 0, stdout: '0.3.0\n' })
+  expect(actions).toEqual([])
+  expect(w.out).toEqual([`program: ${binPath} is 0.3.0, newer than this one (${RUNNING}); kept it. Run npx kinfold@latest to use the newest`])
+  const version = w.commands.filter((c) => c.argv[0] === binPath)
+  expect(version.map((c) => c.argv)).toEqual([[binPath, '--version']])
+  expect(version[0]?.timeoutMs).toBeGreaterThan(0)
+})
+
+for (const [name, answer] of [
+  ['older', { exitCode: 0, stdout: '0.1.0\n' }],
+  ['equal', { exitCode: 0, stdout: `${RUNNING}\n` }],
+  ['unreadable', { exitCode: 0, stdout: 'kinfold, some version\n' }],
+  ['failed', { exitCode: 1, stdout: '0.3.0\n' }],
+  ['timed out', { exitCode: 143, stdout: '0.3.0\n', timedOut: true }],
+  ['not found', { exitCode: 127, stdout: '' }],
+] as const) {
+  test(`an installed program whose version is ${name} is replaced as before`, async () => {
+    const { w, actions } = await planOver(answer)
+    expect(actions).toEqual(['install-program'])
+    expect(w.out.join('\n')).not.toContain('kept it')
+  })
+}
+
+test('a kept newer program leaves the rest of the install to run, pointed at it', async () => {
+  const { w, binPath, source } = programWorld()
+  mkdirSync(join(w.dataDir, 'bin'), { recursive: true, mode: 0o700 })
+  writeFileSync(binPath, 'installed program\n', { mode: 0o755 })
+  const run = w.env.run
+  w.env = { ...w.env, run: async (request) => (request.argv[0] === binPath ? { exitCode: 0, stdout: '9.0.0\n' } : run(request)) }
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  expect(readFileSync(binPath, 'utf8')).toBe('installed program\n')
+  expect(w.out.join('\n')).toContain('newer than this one (0.0.0-dev); kept it')
+  expect(w.out).toContain(`installed. Check it with: ${binPath} status`)
 })

@@ -3,13 +3,16 @@
 // SHA256SUMS of the release it came from before any other step can change the
 // machine; a development build skips that check and says so. The copy goes
 // through a temp file in the bin folder, is fsynced and made executable, then
-// renamed, so a failure never leaves the old program half replaced.
+// renamed, so a failure never leaves the old program half replaced; the bin
+// folder is then fsynced so the rename itself survives a power loss.
 
 import { createHash } from 'node:crypto'
 import { chmodSync, closeSync, copyFileSync, createReadStream, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readEnv } from '../env-names'
+import { fsyncDirectory } from '../fs/atomic'
+import { compareVersions, parseVersion } from '../update/version-order'
 import { VERSION } from '../version'
 import type { InstallEnv } from './env'
 import type { Action } from './plan'
@@ -20,7 +23,7 @@ export const SUMS_TIMEOUT_MS = 30_000
 /** The five release files take a few hundred bytes; a megabyte is not the checksum list. */
 export const MAX_SUMS_BYTES = 1_000_000
 
-const PROGRAM_MODE = 0o755
+export const PROGRAM_MODE = 0o755
 const PROGRAM_DIR_MODE = 0o700
 const SUMS_LINE = /^([0-9a-f]{64}) {2}([^\s/\\]+)$/
 const ASSET_NAMES: Readonly<Record<string, string>> = {
@@ -62,7 +65,7 @@ export function parseSha256Sums(text: string): Map<string, string> {
 }
 
 /** Streams the file, so a compiled program is never read whole into memory. */
-async function fileSha256(path: string): Promise<string> {
+export async function fileSha256(path: string): Promise<string> {
   const hash = createHash('sha256')
   for await (const chunk of createReadStream(path)) hash.update(chunk)
   return hash.digest('hex')
@@ -133,6 +136,11 @@ async function fetchSums(env: InstallEnv, url: string): Promise<string> {
   return new TextDecoder().decode(bytes)
 }
 
+/** The checksum list of a release, through releaseSumsUrl so a candidate's override still applies. */
+export async function fetchReleaseSums(env: InstallEnv, version: string): Promise<string> {
+  return fetchSums(env, releaseSumsUrl(env.envVars ?? {}, version))
+}
+
 export interface ProgramCheckOptions {
   source: string
   dryRun: boolean
@@ -158,6 +166,14 @@ export interface ProgramInstallPlan {
   actions: Action[]
 }
 
+async function sameFile(path: string, hash: string): Promise<boolean> {
+  try {
+    return existsSync(path) && (await fileSha256(path)) === hash
+  } catch {
+    return false
+  }
+}
+
 async function differs(path: string, expected: string): Promise<boolean> {
   try {
     return !existsSync(path) || (await fileSha256(path)) !== expected
@@ -180,17 +196,35 @@ export async function checkProgram(env: InstallEnv, options: ProgramCheckOptions
   const arch = env.arch ?? process.arch
   const assetName = releaseAssetName(env.platform, arch)
   const development = version === DEVELOPMENT_VERSION
-  if (!development && assetName === null) throw new Error(`no release build for ${env.platform}-${arch}`)
   const sourceHash = await fileSha256(options.source)
+  // The installed program running again: nothing will be copied, and the copy in
+  // place was checked when it was installed, so this run needs no network.
+  if (await sameFile(env.mode.binPath, sourceHash)) return { sourceHash, assetName, expectedSha256: sourceHash, check: !development }
+  if (!development && assetName === null) throw new Error(`no release build for ${env.platform}-${arch}`)
   if (development) {
     env.out('program: the release checksum check is skipped for the development version')
     return { sourceHash, assetName, expectedSha256: sourceHash, check: false }
   }
   if (options.dryRun) return { sourceHash, assetName, expectedSha256: null, check: true }
-  const text = await fetchSums(env, releaseSumsUrl(env.envVars ?? {}, version))
+  const text = await fetchReleaseSums(env, version)
   const expected = assetName === null ? undefined : parseSha256Sums(text).get(assetName)
   if (expected === undefined || sourceHash !== expected) throw new Error('program does not match the release checksums')
   return { sourceHash, assetName, expectedSha256: expected, check: true }
+}
+
+const INSTALLED_VERSION_TIMEOUT_MS = 5_000
+
+/** What the installed program says its version is; null when it does not answer with one. */
+async function installedVersion(env: InstallEnv, binPath: string): Promise<string | null> {
+  if (!existsSync(binPath)) return null
+  try {
+    const result = await env.run({ argv: [binPath, '--version'], timeoutMs: INSTALLED_VERSION_TIMEOUT_MS })
+    if (result.exitCode !== 0 || result.timedOut === true) return null
+    const text = result.stdout.trim()
+    return parseVersion(text) === null ? null : text
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -205,6 +239,14 @@ export async function programInstallActions(env: InstallEnv, options: ProgramIns
   const destination = env.mode.binPath
   const expected = check.expectedSha256 ?? check.sourceHash
   if (!(await differs(destination, expected))) return { actions: [] }
+  // npx and bunx reuse a cached package, so the running program can be older
+  // than one kinfold update put in place; copying it would be a downgrade.
+  const running = options.version ?? VERSION
+  const installed = await installedVersion(env, destination)
+  if (installed !== null && parseVersion(running) !== null && compareVersions(installed, running) > 0) {
+    env.out(`program: ${destination} is ${installed}, newer than this one (${running}); kept it. Run npx kinfold@latest to use the newest`)
+    return { actions: [] }
+  }
   return {
     actions: [{ kind: 'install-program', from: options.source, to: destination, assetName: check.assetName, expectedSha256: check.expectedSha256, check: check.check }],
   }
@@ -245,4 +287,7 @@ export async function installProgram(env: InstallEnv, action: Extract<Action, { 
     rmSync(temp, { force: true })
     throw error
   }
+  // The service starts this path next; without the folder flush a power loss
+  // could bring back the old name entry after the new program was reported in place.
+  fsyncDirectory(dir, { platform: env.platform, fsyncDir: env.fsyncDir })
 }

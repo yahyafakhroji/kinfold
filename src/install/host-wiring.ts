@@ -17,8 +17,9 @@ import { type EmbeddedAssets, embeddedAssets } from '../runtime/embedded'
 import { DATA_FILE_MODE } from '../store/data-dir'
 import type { HostDetection } from './detect'
 import { type InstallEnv, codexHomeProblem, errorMessage, installPaths } from './env'
-import { entryCommand, entryIdentity } from './entry'
+import { entryCommand } from './entry'
 import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
+import type { WiringState } from './claude-hooks'
 import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, type CommandHookHost, type CommandHookSpec, inspectHostHooks, mergeHostHooks, removeHostHooks } from './host-hooks'
 import { inspectShim, pluginFileContent } from './opencode-shim'
 import type { Action } from './plan'
@@ -45,7 +46,7 @@ function hostFiles(env: InstallEnv, host: CommandHookHost): { dir: string; file:
 export async function opencodeInstallActions(env: InstallEnv, assets: EmbeddedAssets | null = embeddedAssets()): Promise<Action[]> {
   const paths = installPaths(env)
   const before = readTextOrNull(paths.opencodePlugin)
-  const state = inspectShim(before, paths.pluginEntry)
+  const state = inspectShim(before, { pluginEntry: paths.pluginEntry, dataDir: env.dataDir })
   if (state === 'foreign') throw new Error(`${paths.opencodePlugin} exists and is not a Kinfold plugin file; move it away first`)
   const bundle = env.mode.kind === 'program' ? (assets === null ? null : await assets.opencodePlugin()) : ''
   if (bundle === null) throw new Error('this build carries no OpenCode plugin; reinstall from a release build')
@@ -110,6 +111,17 @@ export function codexHookUninstallActions(env: InstallEnv): Action[] {
   return [...here, ...hostHookUninstallActions(fallback, 'codex')]
 }
 
+/** The wiring state alone, read-only; 'unknown' when the file cannot be read or CODEX_HOME is unusable. */
+export function hostWiringState(env: InstallEnv, host: CommandHookHost): WiringState | 'unknown' {
+  if (host === 'codex' && codexHomeProblem(env) !== null) return 'unknown'
+  try {
+    const file = readJsonObject(hostFiles(env, host).file)
+    return file.exists ? inspectHostHooks(HOST_HOOK_SPECS[host], file.value, entryCommand(env.mode, 'hook', env.dataDir, host)) : 'no'
+  } catch {
+    return 'unknown'
+  }
+}
+
 /** For status: yes/no/stale/partial with the file, read-only. */
 export function hostWiringLine(env: InstallEnv, host: CommandHookHost): string {
   const { file: path } = hostFiles(env, host)
@@ -117,7 +129,7 @@ export function hostWiringLine(env: InstallEnv, host: CommandHookHost): string {
   if (problem !== null) return `unknown (${problem}) in ${path}`
   try {
     const file = readJsonObject(path)
-    return `${file.exists ? inspectHostHooks(HOST_HOOK_SPECS[host], file.value, entryIdentity(env.mode, 'hook', env.dataDir, host)) : 'no (no hooks.json)'} in ${path}`
+    return `${file.exists ? inspectHostHooks(HOST_HOOK_SPECS[host], file.value, entryCommand(env.mode, 'hook', env.dataDir, host)) : 'no (no hooks.json)'} in ${path}`
   } catch (error: unknown) {
     return `unknown (${errorMessage(error)}) in ${path}`
   }
