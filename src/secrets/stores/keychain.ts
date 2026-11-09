@@ -107,6 +107,11 @@ function presence(result: SecurityResult, action: string): boolean {
   throw new Error(`keychain ${action} failed (exit ${result.exitCode})`)
 }
 
+/** Dry-run text for the rename migration's delete of an entry under the pre-rename service. */
+export function describeLegacyDelete(ref: string): string {
+  return `keychain: ${SECURITY_BINARY} delete-generic-password -s ${LEGACY_KEYCHAIN_SERVICE} -a ${ref}, only once the ${KEYCHAIN_SERVICE} copy reads back equal`
+}
+
 /** The pre-rename service (shared-agent-memory), for the migration that copies entries to kinfold and deletes these. */
 export interface LegacyKeychain {
   exists(account: string): boolean

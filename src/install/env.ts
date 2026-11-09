@@ -12,7 +12,8 @@ import { resolveCodexHome } from './codex-home'
 import type { InstallMode } from './entry'
 import type { TerminalIO } from './prompt/terminal'
 import type { CredentialProvider } from '../secrets/credentials'
-import type { SecurityRunner } from '../secrets/keychain-writer'
+import type { KeyStore } from '../secrets/key-store'
+import type { SecurityRunner } from '../secrets/stores/keychain'
 import type { ServiceControl } from './service/control'
 import type { BuildInput } from '../sqlite/build'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
@@ -97,6 +98,11 @@ export interface InstallEnv {
   fsyncDir?: (fd: number) => void
   /** The installer's own environment variables, for the SAM_* deprecation checks; default none. Never printed. */
   envVars?: Readonly<Record<string, string | undefined>>
+  /**
+   * The key store every step of this run uses. Unset: the one key-store.json in dataDir names
+   * (key-store-choice.ts). null: none, so credentials are not stored. install sets it once, before the questions.
+   */
+  keyStore?: KeyStore | null
 }
 
 export { LAUNCH_AGENT_LABEL, PLUGIN_FILE_NAME }

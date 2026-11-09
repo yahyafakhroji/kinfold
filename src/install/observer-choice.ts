@@ -5,9 +5,8 @@
 // no silent fallback: a failed check is reported by its error class and asked
 // again, or under --yes ends the install with a non-zero exit.
 
-import { createKeychainProvider } from '../secrets/keychain'
-import { type CredentialProvider, isSystemCredentialRef } from '../secrets/credentials'
-import { assertStorableValue, credentialWriterFor } from '../secrets/keychain-writer'
+import { type CredentialProvider, NO_CREDENTIALS, assertStorableValue, isSystemCredentialRef } from '../secrets/credentials'
+import { credentialProviderOf } from '../secrets/key-store'
 import { CHECK_PROMPT } from '../observer/check-prompt'
 import { OPENROUTER_CREDENTIAL_REF, builtInSettings, credentialRefFor, providerTakesKey } from '../observer/settings'
 import { runPlantedCheck } from '../observer/planted-check'
@@ -15,6 +14,7 @@ import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, OBSERVER_PROVIDERS, type Ob
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import type { InstallHost } from './detect'
 import type { InstallEnv } from './env'
+import { keyStoreOf } from './key-store-choice'
 
 export const MAX_CHOICE_ATTEMPTS = 5
 
@@ -190,9 +190,9 @@ async function resolveCredential(env: InstallEnv, input: ObserverSettingsInput, 
   if (isSystemCredentialRef(ref)) throw new ChoiceError(`${ref} is a key Kinfold keeps for itself; choose another credential ref`)
   const known = session.entered.get(ref)
   if (known !== undefined) return { kind: 'entered', value: known }
-  const writer = credentialWriterFor(env.platform, env.security)
-  if (writer === null) throw new ChoiceError(`${input.provider} needs a key, and storing keys needs the macOS Keychain; ${env.platform} is not supported yet`)
-  if (writer.exists(ref) && !options.replaceCredential) return { kind: 'keychain' }
+  const store = keyStoreOf(env)
+  if (store === null) throw new ChoiceError(`${input.provider} needs a key, and storing keys needs the macOS Keychain; ${env.platform} is not supported yet`)
+  if (store.exists(ref) && !options.replaceCredential) return { kind: 'keychain' }
   if (options.dryRun) return { kind: 'dry-run' }
   const value = await readCredentialValue(env, ref, options, session)
   session.entered.set(ref, value)
@@ -207,8 +207,12 @@ function credentialNote(state: CredentialState, ref: string | null): string {
 }
 
 function checkCredentials(env: InstallEnv, session: CredentialSession): CredentialProvider {
-  const keychain = createKeychainProvider((args) => env.security({ args }))
-  return { get: (ref) => session.entered.get(ref) ?? keychain.get(ref) }
+  // Opened only when a stored key is asked for, so a check that needs none never touches the store.
+  const stored = (): CredentialProvider => {
+    const store = keyStoreOf(env)
+    return store === null ? NO_CREDENTIALS : credentialProviderOf(store)
+  }
+  return { get: (ref) => session.entered.get(ref) ?? stored().get(ref) }
 }
 
 /** ok, or the ObserverError class; never the reply or the payload. */

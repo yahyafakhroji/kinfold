@@ -42,6 +42,7 @@ test('before install: hosts detected but not wired, daemon down, nothing created
     'daemon /health: down (nothing answers on 127.0.0.1:37811 (TypeError))',
     'semantic search: off (no pinned sqlite-vec build for darwin-test-arch)',
     'database: not created yet (keychain db-key missing)',
+    'key store: keychain (not recorded yet; the next install records it)',
     'disk encryption: could not check (fdesetup exit 127)',
     'observer settings: unknown (daemon.json or daemon.token is missing; the daemon is not running)',
     'keychain openrouter: present',

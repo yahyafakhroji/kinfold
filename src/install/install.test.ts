@@ -11,6 +11,7 @@ import { shimContent } from './opencode-shim'
 import { BUN, type FakeWorld, UID, YES, createWorld } from './test-support'
 import { NO_DB_KEYS } from '../sqlite/keys'
 import { openStore } from '../store/db'
+import { recordSafety } from '../store/observer-safety-store'
 import { upsertObserverSettings } from '../store/observer-settings-store'
 
 const CLAUDE = '2.1.310 (Claude Code)'
@@ -190,4 +191,25 @@ test('with the daemon down, a saved observer read from the store gets no PUT, so
   expect(plan).not.toContain('PUT /observer/settings host=opencode')
   // A host with no saved row still gets its default saved.
   expect(plan).toContain('PUT /observer/settings host=claude-code provider=claude-cli')
+})
+
+test('a re-run with the daemon down still clears a failed safety row for a saved CLI observer', async () => {
+  const w = both()
+  const store = openStore(w.dataDir, { keys: NO_DB_KEYS })
+  upsertObserverSettings(store.db, { host: 'opencode', provider: 'codex-cli', model: 'gpt-5', credentialRef: null, enabled: true }, 1)
+  recordSafety(store.db, { provider: 'codex-cli', cliVersion: '1.0.0', binaryPath: '/opt/fake/bin/codex' }, 'failed', 'tool_attempt', 1)
+  store.db.close()
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  const plan = w.out.join('\n')
+  expect(plan).toContain('PUT /observer/settings host=opencode provider=codex-cli model=gpt-5')
+})
+
+test('a re-run with the daemon down gives a saved observer without a failed safety row no PUT', async () => {
+  const w = both()
+  const store = openStore(w.dataDir, { keys: NO_DB_KEYS })
+  upsertObserverSettings(store.db, { host: 'opencode', provider: 'codex-cli', model: 'gpt-5', credentialRef: null, enabled: true }, 1)
+  recordSafety(store.db, { provider: 'opencode-cli', cliVersion: '1.0.0', binaryPath: '/opt/fake/bin/opencode' }, 'failed', 'tool_attempt', 1)
+  store.db.close()
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  expect(w.out.join('\n')).not.toContain('PUT /observer/settings host=opencode')
 })

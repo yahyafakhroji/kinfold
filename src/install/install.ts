@@ -1,6 +1,6 @@
 // `kinfold install`: read the machine as it is, ask the setup questions (or take
 // the flags and saved values), then build one plan from the answers (data dir
-// modes, the HMAC key migration, the pinned sqlite-vec build, keychain, the
+// modes, the key store record, the HMAC key migration, the pinned sqlite-vec build, the key store, the
 // agents' wiring and unwiring, the LaunchAgent, settings through the daemon,
 // install.json) and print or apply it (setup/apply.ts). A daemon
 // that answers /health but was not started by our LaunchAgent stops the
@@ -13,6 +13,7 @@ import { deprecationLines, envName, legacyName, readEnv } from '../env-names'
 import { DEFAULT_PORT } from '../daemon/daemon'
 import { LEGACY_LAUNCH_AGENT_LABEL } from '../names'
 import type { EmbeddedAssets } from '../runtime/embedded'
+import type { KeyStore, KeyStoreKind, KeyStoreModule } from '../secrets/key-store'
 import { DAEMON_INFO_FILE, DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
 import type { ObserverSettingsInput, ObserverSettingsRow } from '../store/observer-settings-store'
 import { mergeSamHooks } from './claude-hooks'
@@ -22,6 +23,7 @@ import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
 import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
 import { entryCommand } from './entry'
+import { type InstallKeyStore, chooseInstallKeyStore, keyStoreOf, keyStoreRecordActions, secretSetAction } from './key-store-choice'
 import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import { bootoutArgv, bootstrapArgv, isAgentLoaded, legacyPrintArgv, plistContent } from './launch-agent'
 import { ChoiceError, type ChoiceOptions, type ObserverChoice } from './observer-choice'
@@ -61,6 +63,8 @@ export interface InstallOptions extends ChoiceOptions {
   releaseVersion?: string
   /** The build's OpenCode plugin bundle; tests inject one because a checkout carries no embedded assets. */
   opencodeAssets?: EmbeddedAssets | null
+  /** Test seam for the key store modules install probes and opens; default the real ones. */
+  keyStoreModules?: Readonly<Record<KeyStoreKind, KeyStoreModule>>
   /** --data-dir as given; on an installed machine only the installed folder is accepted. */
   dataDirFlag?: string | null
   noEncrypt?: boolean
@@ -120,10 +124,14 @@ function dataDirActions(env: InstallEnv): Action[] {
   ]
 }
 
-function credentialActions(choices: readonly ObserverChoice[]): Action[] {
+function credentialActions(env: InstallEnv, choices: readonly ObserverChoice[]): Action[] {
   const seen = new Map<string, string>()
   for (const choice of choices) if (choice.credential !== null) seen.set(choice.credential.ref, choice.credential.value)
-  return [...seen].map(([ref, value]): Action => ({ kind: 'keychain-put', ref, value }))
+  if (seen.size === 0) return []
+  // A credential was entered only after the observer step found a store, so one is here.
+  const store: KeyStore | null = keyStoreOf(env)
+  if (store === null) throw new ChoiceError(`no key store on ${env.platform}; credentials are not stored`)
+  return [...seen].map(([ref, value]): Action => secretSetAction(store, ref, value))
 }
 
 function claudeActions(env: InstallEnv): Action[] {
@@ -218,6 +226,8 @@ export interface Prepared {
   /** Found hosts among them, for the host_version record. */
   detections: readonly HostDetection[]
   situation: DaemonSituation
+  /** The store install chose for env.dataDir; 'chosen' plans the key-store.json write. Absent: nothing is recorded. */
+  keyStore?: InstallKeyStore
 }
 
 function sameSettings(row: ObserverSettingsRow | undefined, input: ObserverSettingsInput): boolean {
@@ -234,13 +244,20 @@ function sameSettings(row: ObserverSettingsRow | undefined, input: ObserverSetti
  * still gets a PUT: saving the row is what clears it in the daemon. A probe
  * failure lives in the daemon's memory and only a successful probe clears it,
  * so the PUT does not clear it; it is planned anyway so a reinstall does not
- * hide the failure. With the daemon unreadable, a saved choice gets no PUT: its
- * row came from memory.db itself, so the PUT could only repeat it or, from a
- * read that missed newer rows, put an older one back.
+ * hide the failure. With the daemon unreadable, a saved choice gets a PUT only
+ * when memory.db holds a failed safety row for its provider (`stored`, read
+ * with the saved rows): that PUT is what clears the row. Any other saved choice
+ * gets none, since its row came from memory.db itself, so the PUT could only
+ * repeat it or, from a read that missed newer rows, put an older one back.
  */
-async function settingsActions(env: InstallEnv, choices: readonly ObserverChoice[]): Promise<Action[]> {
+async function settingsActions(env: InstallEnv, choices: readonly ObserverChoice[], stored: Pick<SetupState, 'failedProviders'>): Promise<Action[]> {
   const read = await getObserverSettings(env)
-  if (!read.ok) return choices.filter((choice) => choice.origin !== 'saved').map((choice): Action => ({ kind: 'settings-put', input: choice.input }))
+  if (!read.ok) {
+    const failedInStore = new Set(stored.failedProviders)
+    return choices
+      .filter((choice) => choice.origin !== 'saved' || failedInStore.has(choice.input.provider))
+      .map((choice): Action => ({ kind: 'settings-put', input: choice.input }))
+  }
   const rows = new Map(read.view.rows.map((row) => [row.host, row]))
   const failed = new Set<string>(read.view.safety.filter((row) => row.status === 'failed').map((row) => row.provider))
   for (const probe of read.view.probe) failed.add(probe.provider)
@@ -296,6 +313,8 @@ export async function buildPlan(
   return {
     actions: [
       ...dataDirActions(env),
+      // Before any key is written, so every later process opens the store that holds them.
+      ...(prepared.keyStore === undefined ? [] : keyStoreRecordActions(env, prepared.keyStore, options.keyStoreModules)),
       ...hmac.actions,
       ...sqlite3mc.actions,
       ...setupDbKeyActions(env, answers.encryption),
@@ -303,13 +322,13 @@ export async function buildPlan(
       ...(stopped ? [{ kind: 'launchctl', argv: bootoutArgv(env.uid) } satisfies Action] : []),
       ...program.actions,
       ...hostVersionActions(env, detections),
-      ...credentialActions(choices),
+      ...credentialActions(env, choices),
       ...(await agentWiringActions(env, hosts, options.opencodeAssets)),
       ...(hosts.includes('codex') ? hostHookInstallActions(env, 'codex') : []),
       ...(hosts.includes('cursor') ? hostHookInstallActions(env, 'cursor') : []),
       ...dropped.flatMap((host) => hostUnwireActions(env, host)),
       ...launchAgentActions(env, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon, answers.port),
-      ...(await settingsActions(env, choices)),
+      ...(await settingsActions(env, choices, state)),
       ...hmac.cleanup,
       ...recordActions(env, state, answers),
     ],
@@ -436,9 +455,22 @@ function withTerminalSecrets(env: InstallEnv): InstallEnv {
   return { ...env, io: { ...env.io, askSecret: (question) => askHidden(terminal, question) } }
 }
 
-async function folderTarget(env: InstallEnv, dataDir: string): Promise<FolderTarget> {
-  const next = envForDataDir(env, dataDir)
-  return { env: next, state: await readSetupState(next) }
+/** The folder the run ends on, with the store chosen for that folder, so its record lands there. */
+interface InstallTarget extends FolderTarget {
+  keyStore: InstallKeyStore
+}
+
+/** env with the store chosen for its own dataDir, and that choice. */
+function withChosenStore(env: InstallEnv, options: InstallOptions): { env: InstallEnv; keyStore: InstallKeyStore } {
+  const keyStore = chooseInstallKeyStore(env, options.keyStoreModules)
+  return { env: { ...env, keyStore: keyStore.store }, keyStore }
+}
+
+async function folderTarget(env: InstallEnv, dataDir: string, options: InstallOptions): Promise<InstallTarget> {
+  // The store chosen for the first folder is dropped: the new folder's own record, or a fresh choice, decides.
+  const { keyStore: _dropped, ...base } = envForDataDir(env, dataDir)
+  const chosen = withChosenStore(base, options)
+  return { env: chosen.env, state: await readSetupState(chosen.env), keyStore: chosen.keyStore }
 }
 
 /**
@@ -472,13 +504,15 @@ export async function install(env: InstallEnv, options: InstallOptions): Promise
       return EXIT_BLOCKED
     }
     migrated = moved.migrated
-    const asking = withTerminalSecrets(env)
+    // One store for the whole run, picked before the questions so every step reads and writes the same one.
+    const chosen = withChosenStore(withTerminalSecrets(env), options)
+    const asking = chosen.env
     const state = await readSetupState(asking, { migrated })
-    let target: FolderTarget = { env: asking, state }
+    let target: InstallTarget = { env: asking, state, keyStore: chosen.keyStore }
     const prompts = env.terminal === null ? null : createPrompts(env.terminal)
-    const answers = await runWizard(asking, prompts, state, setupFlags(options), options, async (dataDir) => (target = await folderTarget(asking, dataDir)))
+    const answers = await runWizard(asking, prompts, state, setupFlags(options), options, async (dataDir) => (target = await folderTarget(asking, dataDir, options)))
     const planned = target.env === asking ? moved.situation : await daemonSituation(target.env)
-    return await applySetup(target.env, target.state, answers, options, { check, situation: planned })
+    return await applySetup(target.env, target.state, answers, options, { check, situation: planned, keyStore: target.keyStore })
   } catch (error: unknown) {
     if (error instanceof PromptCancelled) {
       env.out(`install cancelled; ${migrated ? 'only the move to the Kinfold names had run' : 'nothing was changed'}`)

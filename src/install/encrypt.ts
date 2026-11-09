@@ -1,7 +1,7 @@
 // `kinfold encrypt | decrypt | rekey | key show-recovery | key recover | key resume`
 // The database part is src/sqlite/convert.ts; this file
 // orders the rest so no step can strand the store without its key:
-//   - a new key goes into the Keychain, and is read back, before the store
+//   - a new key goes into the key store, and is read back, before the store
 //     changes (rekey writes db-key-next, and moves it to db-key only once the
 //     converted store checks out);
 //   - encrypt and rekey show the recovery code first, and go on only once the
@@ -9,7 +9,7 @@
 //   - the background service's daemon is stopped and started again around the change,
 //     a hand-started one makes the command refuse, and the maintenance marker
 //     keeps hooks and MCP servers off the file meanwhile;
-//   - the marker is also the journal: it names the operation and the Keychain
+//   - the marker is also the journal: it names the operation and the key store
 //     entry that opens the result, so `kinfold key resume` can finish or undo a run
 //     that was killed, from what is on disk (a backup left behind is always the
 //     original);
@@ -18,17 +18,18 @@
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { type CredentialProvider, DB_KEY_NEXT_REF, DB_KEY_REF } from '../secrets/credentials'
-import { createKeychainProvider } from '../secrets/keychain'
-import { type CredentialWriter, credentialWriterFor } from '../secrets/keychain-writer'
+import { DB_KEY_NEXT_REF, DB_KEY_REF } from '../secrets/credentials'
+import type { KeyStore } from '../secrets/key-store'
+import { createKeychainStore } from '../secrets/stores/keychain'
 import { ConvertError, checkedCounts, convertStore, foundBackupPath, restoreBackup, sameCounts } from '../sqlite/convert'
-import { type DbKeyStore, credentialDbKeyStore, newDbKey } from '../sqlite/keys'
+import { type DbKeyStore, dbKeyStoreOf, newDbKey } from '../sqlite/keys'
 import { fileState, maintenancePath, openEncrypted } from '../sqlite/open'
 import { RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../sqlite/recovery'
 import { DATA_FILE_MODE, DB_FILE } from '../store/data-dir'
 import { waitForHealth, waitForStart } from './daemon-client'
 import { type InstallEnv, errorMessage } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
+import { capitalized, keyStoreOf } from './key-store-choice'
 import { HEALTH_WAIT_MS } from './plan'
 import { confirmRecoveryCode, recoverySinkFromEnv } from './recovery-confirm'
 import { serviceOf } from './service/control'
@@ -50,7 +51,7 @@ export interface Journal {
   op: Op
   pid: number
   startedAt: number
-  /** The Keychain entry whose key opens the store before the change; null: plaintext. */
+  /** The key store entry whose key opens the store before the change; null: plaintext. */
   source: string | null
   /** The entry whose key opens it after; null: plaintext. */
   target: string | null
@@ -59,29 +60,32 @@ export interface Journal {
 interface Context {
   env: InstallEnv
   path: string
-  writer: CredentialWriter
-  keychain: CredentialProvider
+  store: KeyStore
   keys: DbKeyStore
   log: (line: string) => void
 }
 
-function context(env: InstallEnv): Context {
-  const writer = credentialWriterFor(env.platform, env.security)
-  if (writer === null) throw new Refusal(`encryption needs the macOS Keychain; ${env.platform} gets its key store in a later release`)
-  const keychain = createKeychainProvider((args) => env.security({ args }))
-  return { env, path: join(env.dataDir, DB_FILE), writer, keychain, keys: credentialDbKeyStore('keychain', keychain, () => writer.exists(DB_KEY_REF)), log: env.out }
+/** Today's refusal on a platform with no key store. */
+export function noKeyStoreRefusal(platform: string): string {
+  return `encryption needs the macOS Keychain; ${platform} gets its key store in a later release`
 }
 
-/** Writes the key and reads it back; the read is the same `security -w` a hook makes, so a Keychain prompt would show here first. */
+function context(env: InstallEnv): Context {
+  const store = keyStoreOf(env)
+  if (store === null) throw new Refusal(noKeyStoreRefusal(env.platform))
+  return { env, path: join(env.dataDir, DB_FILE), store, keys: dbKeyStoreOf(store), log: env.out }
+}
+
+/** Writes the key and reads it back; the read is the same one a hook makes, so a store prompt would show here first. */
 function storeKey(ctx: Context, ref: string, key: string): void {
-  ctx.writer.put(ref, key)
-  if (ctx.keychain.get(ref) !== key) throw new Refusal(`the Keychain entry ${ref} did not read back; nothing was converted`)
+  ctx.store.set(ref, key)
+  if (ctx.store.get(ref) !== key) throw new Refusal(`${ctx.store.place} entry ${ref} did not read back; nothing was converted`)
 }
 
 function keyAt(ctx: Context, ref: string | null): string | null {
   if (ref === null) return null
-  const key = ctx.keychain.get(ref)
-  if (key === null) throw new Refusal(`the Keychain has no ${ref}`)
+  const key = ctx.store.get(ref)
+  if (key === null) throw new Refusal(`${ctx.store.place} has no ${ref}`)
   return key
 }
 
@@ -154,21 +158,21 @@ async function convertWhenFree(ctx: Context, from: string | null, to: string | n
 function finish(ctx: Context, op: Op): void {
   if (op === 'rekey') {
     storeKey(ctx, DB_KEY_REF, keyAt(ctx, DB_KEY_NEXT_REF)!)
-    ctx.writer.remove(DB_KEY_NEXT_REF)
+    ctx.store.delete(DB_KEY_NEXT_REF)
   }
-  if (op === 'decrypt') ctx.writer.remove(DB_KEY_REF)
+  if (op === 'decrypt') ctx.store.delete(DB_KEY_REF)
 }
 
 /** Only when the store is as it was before: the key the run added goes again. */
 function undo(ctx: Context, op: Op): void {
-  if (op === 'encrypt') ctx.writer.remove(DB_KEY_REF)
-  if (op === 'rekey') ctx.writer.remove(DB_KEY_NEXT_REF)
+  if (op === 'encrypt') ctx.store.delete(DB_KEY_REF)
+  if (op === 'rekey') ctx.store.delete(DB_KEY_NEXT_REF)
 }
 
-const STRANDED: Record<Op, string> = {
-  encrypt: 'a last step failed',
-  rekey: `the new key is still under ${DB_KEY_NEXT_REF}, not ${DB_KEY_REF}; run kinfold key resume`,
-  decrypt: `the Keychain still holds ${DB_KEY_REF}; run kinfold key resume`,
+function stranded(ctx: Context, op: Op): string {
+  if (op === 'encrypt') return 'a last step failed'
+  if (op === 'rekey') return `the new key is still under ${DB_KEY_NEXT_REF}, not ${DB_KEY_REF}; run kinfold key resume`
+  return `${ctx.store.place} still holds ${DB_KEY_REF}; run kinfold key resume`
 }
 
 function journalFor(op: Op): Journal {
@@ -240,7 +244,7 @@ async function converting(ctx: Context, op: Op, from: string | null, to: string 
         finish(ctx, op)
       } catch (error: unknown) {
         keepMarker = true
-        throw new Refusal(`memory.db was converted, but ${STRANDED[op]} (${errorMessage(error)})`)
+        throw new Refusal(`memory.db was converted, but ${stranded(ctx, op)} (${errorMessage(error)})`)
       }
     })
   } finally {
@@ -277,18 +281,18 @@ function requireSecretOutput(ctx: Context, why: string): void {
 
 function readKey(ctx: Context): string {
   const key = ctx.keys.read()
-  if (key === null) throw new Refusal(`the Keychain has no ${DB_KEY_REF}; restore it with kinfold key recover`)
+  if (key === null) throw new Refusal(`${ctx.store.place} has no ${DB_KEY_REF}; restore it with kinfold key recover`)
   return key
 }
 
 async function encrypt(ctx: Context): Promise<void> {
   requireState(ctx, 'plain')
   requireSecretOutput(ctx, 'kinfold encrypt shows a recovery code and')
-  if (ctx.writer.exists(DB_KEY_REF)) {
-    const typed = await ctx.env.io.ask(`The Keychain already holds ${DB_KEY_REF}, which may open an older encrypted copy of memory.db. Type replace to give this store a new key: `)
+  if (ctx.store.exists(DB_KEY_REF)) {
+    const typed = await ctx.env.io.ask(`${capitalized(ctx.store.place)} already holds ${DB_KEY_REF}, which may open an older encrypted copy of memory.db. Type replace to give this store a new key: `)
     if (typed.trim() !== 'replace') throw new Refusal(`nothing changed; ${DB_KEY_REF} is kept`)
   }
-  ctx.log('kinfold encrypt converts memory.db to an encrypted file (ChaCha20-Poly1305), with its key in the Keychain.')
+  ctx.log(`kinfold encrypt converts memory.db to an encrypted file (ChaCha20-Poly1305), with its key in ${ctx.store.place}.`)
   ctx.log('The plaintext backup it takes is deleted afterwards, but an SSD, APFS snapshots or Time Machine may keep old blocks; full-disk encryption (FileVault) covers those.')
   const key = newDbKey()
   if (!(await confirmCode(ctx, encodeRecoveryCode(key)))) throw new Refusal('those were not the last two groups; nothing changed')
@@ -300,11 +304,21 @@ async function encryptingWith(ctx: Context, key: string): Promise<void> {
   ctx.log('memory.db is encrypted.')
 }
 
-export const ENCRYPT_KEY_EXISTS = `the Keychain already holds ${DB_KEY_REF}, which may open an older encrypted copy of memory.db; nothing changed. Run kinfold encrypt, which asks before replacing it`
+export function encryptKeyExists(store: Pick<KeyStore, 'place'>): string {
+  return `${store.place} already holds ${DB_KEY_REF}, which may open an older encrypted copy of memory.db; nothing changed. Run kinfold encrypt, which asks before replacing it`
+}
+
+// Describing never runs `security`, so this store only lends its wording.
+const KEYCHAIN_WORDS: Pick<KeyStore, 'place'> = createKeychainStore(() => {
+  throw new Error('the Keychain wording runs no command')
+})
+
+/** The Keychain's wording, which macOS prints. */
+export const ENCRYPT_KEY_EXISTS = encryptKeyExists(KEYCHAIN_WORDS)
 
 /**
  * The install's encrypt: the recovery code of `key` was shown and confirmed
- * already. An entry already in the Keychain may open an older encrypted copy,
+ * already. An entry already in the key store may open an older encrypted copy,
  * and replacing it was never asked here, so that is refused, pointing to
  * `kinfold encrypt`, which asks. Throws with the reason; nothing is printed
  * that holds the key or its code.
@@ -312,7 +326,7 @@ export const ENCRYPT_KEY_EXISTS = `the Keychain already holds ${DB_KEY_REF}, whi
 export async function encryptWithKey(env: InstallEnv, key: string): Promise<void> {
   const ctx = context(env)
   requireState(ctx, 'plain')
-  if (ctx.writer.exists(DB_KEY_REF)) throw new Refusal(ENCRYPT_KEY_EXISTS)
+  if (ctx.store.exists(DB_KEY_REF)) throw new Refusal(encryptKeyExists(ctx.store))
   await encryptingWith(ctx, key)
 }
 
@@ -344,7 +358,7 @@ async function decrypt(ctx: Context): Promise<void> {
   requireState(ctx, 'encrypted')
   requireInteractive(ctx, 'kinfold decrypt asks you to confirm and')
   const key = readKey(ctx)
-  const typed = await ctx.env.io.ask('kinfold decrypt stores memory.db in plaintext again and deletes its Keychain key. Type decrypt to go on: ')
+  const typed = await ctx.env.io.ask(`kinfold decrypt stores memory.db in plaintext again and deletes its ${ctx.store.label === 'keychain' ? 'Keychain key' : `key from ${ctx.store.place}`}. Type decrypt to go on: `)
   if (typed.trim() !== 'decrypt') throw new Refusal('nothing changed')
   await decryptingWith(ctx, key)
 }
@@ -370,8 +384,8 @@ async function recover(ctx: Context): Promise<void> {
     throw new Refusal('that recovery code does not open memory.db; nothing changed')
   }
   storeKey(ctx, DB_KEY_REF, key)
-  if (ctx.writer.exists(DB_KEY_NEXT_REF)) ctx.writer.remove(DB_KEY_NEXT_REF)
-  ctx.log(`the key is back in the Keychain as ${DB_KEY_REF}; restart the daemon if it is down`)
+  if (ctx.store.exists(DB_KEY_NEXT_REF)) ctx.store.delete(DB_KEY_NEXT_REF)
+  ctx.log(`the key is back in ${ctx.store.place} as ${DB_KEY_REF}; restart the daemon if it is down`)
 }
 
 /**
@@ -396,7 +410,7 @@ async function resume(ctx: Context): Promise<void> {
   }
   const source = keyAt(ctx, journal.source)
   // The target entry is gone once a rekey's last step ran; then nothing can be in the converted state under it.
-  const target = journal.target === null ? null : ctx.keychain.get(journal.target)
+  const target = journal.target === null ? null : ctx.store.get(journal.target)
   const converted = journal.target !== null && target === null ? null : checkedCounts(ctx.path, target)
   if (existsSync(backup)) {
     const original = checkedCounts(backup, source)

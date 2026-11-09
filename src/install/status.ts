@@ -1,18 +1,18 @@
 // `kinfold status`: read-only. Hosts found and wired (yes/no/stale/partial), the
 // LaunchAgent, daemon health, each host's observer and where it came from,
-// keychain entries (metadata lookups only, never -w), the HMAC keys (master and legacy entries, sub-key epochs, leftover plain-text keys), data dir modes, and
+// the key store and its entries (metadata lookups only, never the value), the HMAC keys (master and legacy entries, sub-key epochs, leftover plain-text keys), data dir modes, and
 // duplicate project wiring. It creates nothing, not even the data dir.
 
 import { existsSync } from 'node:fs'
 import type { EffectiveSettings } from '../daemon/settings-route'
 import { OPENROUTER_CREDENTIAL_REF, providerTakesKey } from '../observer/settings'
-import { credentialWriterFor } from '../secrets/keychain-writer'
 import { inspectSamHooks } from './claude-hooks'
 import { getObserverSettings } from './daemon-client'
 import { dbStatusLines } from './db-encryption'
 import { detectHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
 import { type InstallEnv, errorMessage, installPaths } from './env'
+import { keyStoreStatusLine, readKeyStore } from './key-store-choice'
 import { entryCommand } from './entry'
 import { readJsonObject, readTextOrNull } from './files'
 import { EXIT_OK, daemonSituation } from './install'
@@ -80,16 +80,25 @@ async function observerLines(env: InstallEnv): Promise<{ lines: string[]; refs: 
   return { lines: ['observer settings:', ...read.view.effective.map(effectiveLine)], refs: [...new Set([OPENROUTER_CREDENTIAL_REF, ...refs])] }
 }
 
-function keychainLines(env: InstallEnv, refs: readonly string[]): string[] {
-  const writer = credentialWriterFor(env.platform, env.security)
-  if (writer === null) return [`keychain: none on ${env.platform}`]
+function keyStoreLines(env: InstallEnv, refs: readonly string[]): string[] {
+  const read = readKeyStore(env)
+  // The key store line above already names why the store is unknown.
+  if (!read.ok) return []
+  const store = read.store
+  if (store === null) return [`keychain: none on ${env.platform}`]
   return refs.map((ref) => {
     try {
-      return `keychain ${ref}: ${writer.exists(ref) ? 'present' : 'missing'}`
+      return `${store.label} ${ref}: ${store.exists(ref) ? 'present' : 'missing'}`
     } catch (error: unknown) {
-      return `keychain ${ref}: unknown (${errorMessage(error)})`
+      return `${store.label} ${ref}: unknown (${errorMessage(error)})`
     }
   })
+}
+
+/** The database lines with the key store line right after the `database:` one. */
+async function databaseLines(env: InstallEnv): Promise<string[]> {
+  const [database, ...rest] = await dbStatusLines(env)
+  return database === undefined ? [keyStoreStatusLine(env)] : [database, keyStoreStatusLine(env), ...rest]
 }
 
 function dataDirLines(env: InstallEnv): string[] {
@@ -118,9 +127,9 @@ export async function status(env: InstallEnv, running: string = VERSION): Promis
     ...(await hostLines(env)),
     ...mcpStatusLines(env),
     ...(await daemonLines(env)),
-    ...(await dbStatusLines(env)),
+    ...(await databaseLines(env)),
     ...observer.lines,
-    ...keychainLines(env, observer.refs),
+    ...keyStoreLines(env, observer.refs),
     ...hmacStatusLines(env),
     ...dataDirLines(env),
     updateLine(env, running),

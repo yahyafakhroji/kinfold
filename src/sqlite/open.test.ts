@@ -139,3 +139,53 @@ try { openEncrypted(${JSON.stringify(path)}, '${KEY}'); console.log('OPENED') } 
   expect(run.stdout.toString().trim()).toBe('library the SQLite library is not a sqlite3mc build; run kinfold install')
   expect(existsSync(path)).toBe(false)
 })
+
+/**
+ * A child process opens the store, takes the write lock and holds it for `holdMs`.
+ * The key reaches it on stdin, never argv. Resolves once the lock is held.
+ */
+async function holdLock(path: string, key: string, holdMs: number): Promise<{ done: Promise<number> }> {
+  const openModule = join(import.meta.dir, 'open.ts')
+  const script = `
+    const { openEncrypted } = await import(${JSON.stringify(openModule)})
+    const key = (await Bun.stdin.text()).trim()
+    const db = openEncrypted(${JSON.stringify(path)}, key)
+    db.exec('PRAGMA locking_mode = EXCLUSIVE')
+    db.exec('BEGIN EXCLUSIVE')
+    db.exec("CREATE TABLE IF NOT EXISTS held (n INTEGER)")
+    db.exec('INSERT INTO held VALUES (1)')
+    process.stdout.write('locked\\n')
+    Bun.sleepSync(${holdMs})
+    db.exec('COMMIT')
+    db.close()
+  `
+  const child = Bun.spawn([process.execPath, '-e', script], { stdin: 'pipe', stdout: 'pipe', stderr: 'inherit', env: process.env })
+  child.stdin.write(`${key}\n`)
+  child.stdin.end()
+  const reader = child.stdout.getReader()
+  let seen = ''
+  while (!seen.includes('locked')) {
+    const { value, done } = await reader.read()
+    if (done) throw new Error('the lock holder exited before taking the lock')
+    seen += new TextDecoder().decode(value)
+  }
+  reader.releaseLock()
+  return { done: child.exited }
+}
+
+test('an encrypted open waits for a busy store before its first read', async () => {
+  const path = seed(holding(KEY))
+  const waiting = await holdLock(path, KEY, 300)
+  openEncrypted(path, KEY, { readonly: true, busyTimeoutMs: 2000 }).close()
+  expect(await waiting.done).toBe(0)
+
+  const failing = await holdLock(path, KEY, 300)
+  let code = ''
+  try {
+    openEncrypted(path, KEY, { readonly: true }).close()
+  } catch (error: unknown) {
+    code = (error as { code?: string }).code ?? ''
+  }
+  expect(await failing.done).toBe(0)
+  expect(code).toBe('SQLITE_BUSY')
+})

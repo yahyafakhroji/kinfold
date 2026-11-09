@@ -2,10 +2,24 @@ import { expect, test } from 'bun:test'
 import { type FakeKeychain, fakeSecurity } from '../../install/test-support'
 import { DB_KEY_REF } from '../credentials'
 import { dbKeyStoreOf } from '../../sqlite/keys'
-import { type SecurityInvocation, createKeychainStore, keychainModule, legacyKeychainOf } from './keychain'
+import { KEY_STORE_MODULES, candidateKeyStores } from './select'
+import {
+  ITEM_NOT_FOUND_EXIT,
+  type SecurityCommand,
+  type SecurityInvocation,
+  type SecurityRunner,
+  addCommandLine,
+  createKeychainStore,
+  keychainArgs,
+  keychainModule,
+  legacyKeychainOf,
+} from './keychain'
 import { runKeyStoreContract } from './contract'
-import { ITEM_NOT_FOUND_EXIT, type SecurityCommand, createKeychainProvider, keychainArgs } from '../keychain'
-import { type SecurityRunner, addCommandLine, createKeychainWriter, credentialWriterFor } from '../keychain-writer'
+
+/** A read-only view over a `security` command that takes argv only, as the daemon's reads do. */
+function reader(run: SecurityCommand) {
+  return createKeychainStore(({ args }) => run(args))
+}
 
 function emptyKeychain(): FakeKeychain {
   return { refs: new Set<string>(), values: new Map<string, string>() }
@@ -59,18 +73,18 @@ function fake(exitCode: number, stdout = ''): { run: SecurityCommand; calls: (re
 
 test('looks up service kinfold with the ref as the account and -w', () => {
   const { run, calls } = fake(0, 'sk-or-value\n')
-  expect(createKeychainProvider(run).get('openrouter')).toBe('sk-or-value')
+  expect(reader(run).get('openrouter')).toBe('sk-or-value')
   expect(calls).toEqual([['find-generic-password', '-s', 'kinfold', '-a', 'openrouter', '-w']])
   expect(keychainArgs('openrouter')).toEqual(calls[0] as string[])
 })
 
 test('a missing item is null, not an error', () => {
-  expect(createKeychainProvider(fake(ITEM_NOT_FOUND_EXIT).run).get('openrouter')).toBeNull()
-  expect(createKeychainProvider(fake(0, '\n').run).get('openrouter')).toBeNull()
+  expect(reader(fake(ITEM_NOT_FOUND_EXIT).run).get('openrouter')).toBeNull()
+  expect(reader(fake(0, '\n').run).get('openrouter')).toBeNull()
 })
 
 test('another failure throws with the exit code only, never the output', () => {
-  const provider = createKeychainProvider(fake(51, 'partial-secret-output').run)
+  const provider = reader(fake(51, 'partial-secret-output').run)
   expect(() => provider.get('openrouter')).toThrow('keychain lookup failed (exit 51)')
   try {
     provider.get('openrouter')
@@ -81,7 +95,7 @@ test('another failure throws with the exit code only, never the output', () => {
 
 test('a ref that is not a short lowercase name is refused before any command runs', () => {
   const { run, calls } = fake(0, 'x')
-  expect(() => createKeychainProvider(run).get('-w; rm -rf')).toThrow('credential ref')
+  expect(() => reader(run).get('-w; rm -rf')).toThrow('credential ref')
   expect(calls).toEqual([])
 })
 
@@ -101,21 +115,21 @@ function fakeStore(entries: Record<string, Record<string, string>>): { run: Secu
 
 test('an entry only under the legacy service is read after kinfold misses', () => {
   const { run, calls } = fakeStore({ [LEGACY]: { 'db-key': 'legacy-value' } })
-  expect(createKeychainProvider(run).get('db-key')).toBe('legacy-value')
+  expect(reader(run).get('db-key')).toBe('legacy-value')
   expect(calls).toEqual([keychainArgs('db-key', 'kinfold'), keychainArgs('db-key', LEGACY)])
   expect(keychainArgs('db-key', LEGACY)).toEqual(['find-generic-password', '-s', LEGACY, '-a', 'db-key', '-w'])
 })
 
 test('an entry under both services returns the kinfold value without asking the legacy one', () => {
   const { run, calls } = fakeStore({ kinfold: { 'db-key': 'new-value' }, [LEGACY]: { 'db-key': 'old-value' } })
-  expect(createKeychainProvider(run).get('db-key')).toBe('new-value')
+  expect(reader(run).get('db-key')).toBe('new-value')
   expect(calls).toHaveLength(1)
 })
 
 test('a missing entry under both services is null; a non-44 failure never falls back', () => {
-  expect(createKeychainProvider(fakeStore({}).run).get('db-key')).toBeNull()
+  expect(reader(fakeStore({}).run).get('db-key')).toBeNull()
   const failing = fake(51)
-  expect(() => createKeychainProvider(failing.run).get('db-key')).toThrow('keychain lookup failed (exit 51)')
+  expect(() => reader(failing.run).get('db-key')).toThrow('keychain lookup failed (exit 51)')
   expect(failing.calls).toHaveLength(1)
 })
 
@@ -145,7 +159,7 @@ function fakeKeychain(exitFor: (invocation: SecurityInvocation) => number | null
 
 test('put sends the add command on stdin to security -i; argv never holds the value', () => {
   const keychain = fakeKeychain()
-  createKeychainWriter(keychain.run).put('openrouter', VALUE)
+  createKeychainStore(keychain.run).set('openrouter', VALUE)
   expect(keychain.calls[0]).toEqual({ args: ['-i'], stdin: `add-generic-password -U -s kinfold -a openrouter -w ${VALUE}\n` })
   expect(keychain.calls[1]).toEqual({ args: ['find-generic-password', '-s', 'kinfold', '-a', 'openrouter'] })
   for (const call of keychain.calls) expect(call.args.join(' ')).not.toContain(VALUE)
@@ -154,19 +168,19 @@ test('put sends the add command on stdin to security -i; argv never holds the va
 
 test('exists never asks for the secret (-w) and maps 44 to false', () => {
   const keychain = fakeKeychain()
-  const writer = createKeychainWriter(keychain.run)
+  const writer = createKeychainStore(keychain.run)
   expect(writer.exists('openrouter')).toBe(false)
-  writer.put('openrouter', VALUE)
+  writer.set('openrouter', VALUE)
   expect(writer.exists('openrouter')).toBe(true)
   expect(keychain.calls.some((call) => call.args.includes('-w'))).toBe(false)
 })
 
 test('a write security accepted but did not store is an error; errors never quote the value', () => {
   const silent = fakeKeychain((invocation) => (invocation.args[0] === '-i' ? 0 : null))
-  expect(() => createKeychainWriter(silent.run).put('openrouter', VALUE)).toThrow('keychain write did not create the entry')
+  expect(() => createKeychainStore(silent.run).set('openrouter', VALUE)).toThrow('keychain write did not create the entry')
   const failing = fakeKeychain((invocation) => (invocation.args[0] === '-i' ? 1 : null))
   try {
-    createKeychainWriter(failing.run).put('openrouter', VALUE)
+    createKeychainStore(failing.run).set('openrouter', VALUE)
     throw new Error('expected a failure')
   } catch (error: unknown) {
     expect((error as Error).message).toBe('keychain write failed (exit 1)')
@@ -188,16 +202,18 @@ test('values that would need quoting on a security -i line are refused without e
 
 test('remove deletes our entry by service and account, and reports a missing one', () => {
   const keychain = fakeKeychain()
-  const writer = createKeychainWriter(keychain.run)
-  writer.put('openrouter', VALUE)
-  expect(writer.remove('openrouter')).toBe(true)
-  expect(writer.remove('openrouter')).toBe(false)
+  const writer = createKeychainStore(keychain.run)
+  writer.set('openrouter', VALUE)
+  expect(writer.delete('openrouter')).toBe(true)
+  expect(writer.delete('openrouter')).toBe(false)
   expect(keychain.calls.at(-1)?.args).toEqual(['delete-generic-password', '-s', 'kinfold', '-a', 'openrouter'])
 })
 
-test('no writer off macOS', () => {
-  expect(credentialWriterFor('linux', fakeKeychain().run)).toBeNull()
-  expect(credentialWriterFor('darwin', fakeKeychain().run)).not.toBeNull()
+test('the Keychain is a key store on macOS only', () => {
+  expect(candidateKeyStores({ os: 'linux', wsl: false, node: 'linux' })).not.toContain('keychain')
+  expect(candidateKeyStores({ os: 'windows', wsl: false, node: 'win32' })).not.toContain('keychain')
+  expect(candidateKeyStores({ os: 'macos', wsl: false, node: 'darwin' })).toEqual(['keychain'])
+  expect(KEY_STORE_MODULES.keychain).toBe(keychainModule)
 })
 
 test('legacy reads, checks and removes under the shared-agent-memory service; the value stays out of argv', () => {
@@ -206,7 +222,7 @@ test('legacy reads, checks and removes under the shared-agent-memory service; th
     calls.push(invocation)
     return invocation.args.includes('-w') ? { exitCode: 0, stdout: `${VALUE}\n` } : { exitCode: 0, stdout: '' }
   }
-  const { legacy } = createKeychainWriter(run)
+  const { legacy } = createKeychainStore(run)
   expect(legacy.exists('db-key')).toBe(true)
   expect(legacy.read('db-key')).toBe(VALUE)
   expect(legacy.remove('db-key')).toBe(true)
@@ -219,9 +235,9 @@ test('legacy reads, checks and removes under the shared-agent-memory service; th
 })
 
 test('legacy.read maps 44 to null and other failures to an exit-code-only error', () => {
-  expect(createKeychainWriter(() => ({ exitCode: ITEM_NOT_FOUND_EXIT, stdout: '' })).legacy.read('db-key')).toBeNull()
+  expect(createKeychainStore(() => ({ exitCode: ITEM_NOT_FOUND_EXIT, stdout: '' })).legacy.read('db-key')).toBeNull()
   try {
-    createKeychainWriter(() => ({ exitCode: 51, stdout: VALUE })).legacy.read('db-key')
+    createKeychainStore(() => ({ exitCode: 51, stdout: VALUE })).legacy.read('db-key')
     throw new Error('expected a failure')
   } catch (error: unknown) {
     expect((error as Error).message).toBe('keychain lookup failed (exit 51)')
@@ -231,6 +247,6 @@ test('legacy.read maps 44 to null and other failures to an exit-code-only error'
 test('the service argument reaches the add line, and put never writes to the legacy service', () => {
   expect(addCommandLine('db-key', VALUE, true, 'shared-agent-memory')).toBe(`add-generic-password -U -s shared-agent-memory -a db-key -w ${VALUE}\n`)
   const keychain = fakeKeychain()
-  createKeychainWriter(keychain.run).put('db-key', VALUE)
+  createKeychainStore(keychain.run).set('db-key', VALUE)
   expect(keychain.calls.filter((call) => call.stdin !== undefined).every((call) => call.stdin?.includes('-s kinfold '))).toBe(true)
 })

@@ -1,20 +1,19 @@
 // install and uninstall first build a list of actions, then either print it
 // (--dry-run) or print and apply it in order. One list for both is what makes
 // a dry run honest: the plan shown is the plan that would run. Descriptions
-// carry paths, counts, hosts and argv only; a keychain value prints as
+// carry paths, counts, hosts and argv only; a stored secret prints as
 // <hidden>, and a file's content never prints at all.
 
 import { chmodSync, closeSync, mkdirSync, openSync, rmSync } from 'node:fs'
-import { KEYCHAIN_SERVICE } from '../secrets/credentials'
 import { HMAC_LEGACY_REF } from '../secrets/hmac-keys'
 import { type KeyStoreRecord, keyStoreRecordContent } from '../secrets/key-store-record'
 import { KEY_STORE_MODULES } from '../secrets/stores/select'
-import { credentialWriterFor } from '../secrets/keychain-writer'
 import type { EmbeddedAssets } from '../runtime/embedded'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import { START_WAIT_MS, putObserverSettings, waitForHealth, waitForStart } from './daemon-client'
 import { createDbKey, createPlainStore, describeCreateDbKey, describeCreatePlainStore } from './db-encryption'
 import { type InstallEnv, installPaths } from './env'
+import { requireKeyStore } from './key-store-choice'
 import { writeBackup, writeFileAtomic } from './files'
 import { BACKUP_REMOVAL_SUMMARY, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
 import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
@@ -45,11 +44,12 @@ export type Action =
   | { kind: 'wait-takeover'; pid: number | null; port: number }
   | { kind: 'wait-health' }
   | { kind: 'settings-put'; input: ObserverSettingsInput }
-  | { kind: 'keychain-put'; ref: string; value: string }
-  | { kind: 'keychain-delete'; ref: string; summary?: string }
-  /** Removed only after a Keychain read-back and a master-mode /health; else kept with the reason. */
+  /** description: the store's own dry-run text, filled at plan time; the value prints as <hidden>. */
+  | { kind: 'secret-set'; ref: string; value: string; description: string }
+  | { kind: 'secret-delete'; ref: string; description: string; summary?: string }
+  /** Removed only after a key store read-back and a master-mode /health; else kept with the reason. */
   | { kind: 'remove-hmac-backup'; path: string }
-  /** hmac.key written back from Keychain hmac-legacy before the HMAC entries go. */
+  /** hmac.key written back from the key store's hmac-legacy before the HMAC entries go. */
   | { kind: 'restore-hmac-legacy'; path: string }
   /** --remove-hmac-keys stops here while any daemon answers /health; a hand-started one would write a new sub-key afterwards. */
   | { kind: 'hmac-daemon-down'; pid: number | null; port: number }
@@ -113,8 +113,8 @@ export function describeAction(action: Action): string {
       const { host, provider, model, credentialRef } = action.input
       return `PUT /observer/settings host=${host} provider=${provider} model=${model} credentialRef=${credentialRef ?? 'none'}`
     }
-    case 'keychain-put': return `keychain: /usr/bin/security -i <<< "add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${action.ref} -w <hidden>"`
-    case 'keychain-delete': return `keychain: /usr/bin/security delete-generic-password -s ${KEYCHAIN_SERVICE} -a ${action.ref}${action.summary !== undefined ? `: ${action.summary}` : ''}`
+    case 'secret-set': return action.description
+    case 'secret-delete': return `${action.description}${action.summary !== undefined ? `: ${action.summary}` : ''}`
     case 'remove-hmac-backup': return `remove ${action.path}: ${BACKUP_REMOVAL_SUMMARY}`
     case 'restore-hmac-legacy': return `write ${action.path} from keychain entry ${HMAC_LEGACY_REF} (mode 0600), so a later install still verifies epoch-0 refs`
     case 'hmac-daemon-down': return `check that no daemon answers /health on port ${action.port} (a hand-started one must be stopped first: ${stopCommand(action.pid, action.port)})`
@@ -136,12 +136,6 @@ export function describeAction(action: Action): string {
     case 'move-data-dir': return describeMoveDataDir(action.from, action.to, action.linkOnly === true)
     case 'remove-legacy-keychain-entry': return describeRemoveLegacyEntry(action.ref)
   }
-}
-
-function writer(env: InstallEnv): NonNullable<ReturnType<typeof credentialWriterFor>> {
-  const found = credentialWriterFor(env.platform, env.security)
-  if (found === null) throw new Error(`no keychain on ${env.platform}; credentials are not stored`)
-  return found
 }
 
 /**
@@ -239,8 +233,8 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
       return waitFor(env, false, TAKEOVER_WAIT_MS, `the daemon on port ${action.port} is still running; nothing after this step ran`)
     case 'wait-health': return waitForDaemonStart(env)
     case 'settings-put': return putObserverSettings(env, action.input)
-    case 'keychain-put': return writer(env).put(action.ref, action.value)
-    case 'keychain-delete': return void writer(env).remove(action.ref)
+    case 'secret-set': return requireKeyStore(env).set(action.ref, action.value)
+    case 'secret-delete': return void requireKeyStore(env).delete(action.ref)
     case 'remove-hmac-backup': return removeHmacBackup(env, action.path)
     case 'restore-hmac-legacy': return restoreLegacyKey(env, action.path)
     case 'hmac-daemon-down':

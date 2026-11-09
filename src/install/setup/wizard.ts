@@ -10,10 +10,11 @@ import { OBSERVER_PROVIDERS, type ObserverProvider } from '../../observer/types'
 import { encodeRecoveryCode } from '../../sqlite/recovery'
 import { newDbKey } from '../../sqlite/keys'
 import { checkHealth } from '../daemon-client'
-import { STALE_DB_KEY, storedDbKey } from '../db-encryption'
-import { ENCRYPT_KEY_EXISTS } from '../encrypt'
+import { STALE_DB_KEY, staleDbKey, storedDbKey } from '../db-encryption'
+import { encryptKeyExists } from '../encrypt'
 import { type InstallHost, detectHosts, selectedHosts } from '../detect'
 import type { InstallEnv } from '../env'
+import { keyStoreOf } from '../key-store-choice'
 import {
   type Candidate,
   type ChoiceOptions,
@@ -224,9 +225,9 @@ async function keyWithConfirmedCode(env: InstallEnv, ask: Prompts, reuseStored: 
   let key = newDbKey()
   if (reuseStored) {
     const stored = storedDbKey(env)
-    if (stored.kind === 'unreadable') throw new ChoiceError(STALE_DB_KEY)
+    if (stored.kind === 'unreadable') throw new ChoiceError(staleKeyMessage(env))
     if (stored.kind === 'usable') {
-      ask.say('A database key from an earlier install is already in the Keychain; it is used again, and its recovery code is shown once more.')
+      ask.say(`A database key from an earlier install is already in ${keyStoreOf(env)?.place ?? 'the key store'}; it is used again, and its recovery code is shown once more.`)
       key = stored.key
     }
   }
@@ -243,9 +244,24 @@ export const DRY_RUN_NO_CODE = 'A dry run shows no recovery code: a real run sho
 /** The confirmed key, or null in a dry run: a code shown then would belong to a key that is thrown away. */
 async function confirmedKey(env: InstallEnv, ask: Prompts, reuseStored: boolean, dryRun: boolean): Promise<string | null> {
   if (!dryRun) return keyWithConfirmedCode(env, ask, reuseStored)
-  if (reuseStored && storedDbKey(env).kind === 'unreadable') throw new ChoiceError(STALE_DB_KEY)
+  if (reuseStored && storedDbKey(env).kind === 'unreadable') throw new ChoiceError(staleKeyMessage(env))
   ask.say(DRY_RUN_NO_CODE)
   return null
+}
+
+/** storedDbKey reads 'unreadable' only through a store, so there is one to name. */
+function staleKeyMessage(env: InstallEnv): string {
+  const store = keyStoreOf(env)
+  return store === null ? STALE_DB_KEY : staleDbKey(store)
+}
+
+/** What the chosen store says about keeping a key there; [] for the Keychain. */
+function storeNotes(env: InstallEnv): readonly string[] {
+  return keyStoreOf(env)?.notes ?? []
+}
+
+function sayNotes(env: InstallEnv, ask: Prompts): void {
+  for (const note of storeNotes(env)) ask.say(note)
 }
 
 function headlessEncryption(state: SetupState, flags: SetupFlags): EncryptionAnswer {
@@ -254,23 +270,36 @@ function headlessEncryption(state: SetupState, flags: SetupFlags): EncryptionAns
   return { kind: 'keep' }
 }
 
-async function encryptedStoreStep(ask: Prompts, flags: SetupFlags): Promise<EncryptionAnswer> {
+async function encryptedStoreStep(env: InstallEnv, ask: Prompts, flags: SetupFlags): Promise<EncryptionAnswer> {
   ask.say(ENCRYPTION_IS_ON)
-  if (!flags.noEncrypt && (await ask.confirm('Keep memory.db encrypted?', true))) return { kind: 'keep' }
+  if (!flags.noEncrypt && (await ask.confirm('Keep memory.db encrypted?', true))) {
+    sayNotes(env, ask)
+    return { kind: 'keep' }
+  }
   const typed = await ask.text('Type decrypt to store memory.db in plaintext again:', '')
   return typed.trim() === 'decrypt' ? { kind: 'decrypt-existing' } : { kind: 'keep' }
 }
 
+/** Without a terminal the notes go to the output once, whenever the store ends up encrypted. */
+function headlessStep(env: InstallEnv, state: SetupState, flags: SetupFlags): EncryptionAnswer {
+  const answer = headlessEncryption(state, flags)
+  const encrypted = answer.kind === 'new-encrypted' || (answer.kind === 'keep' && state.encryption === 'on')
+  if (encrypted) for (const note of storeNotes(env)) env.out(note)
+  return answer
+}
+
 async function encryptionStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags, dryRun: boolean): Promise<EncryptionAnswer> {
-  if (ask === null) return headlessEncryption(state, flags)
-  if (state.encryption === 'on') return encryptedStoreStep(ask, flags)
+  if (ask === null) return headlessStep(env, state, flags)
+  if (state.encryption === 'on') return encryptedStoreStep(env, ask, flags)
   if (state.encryption === 'new') {
     if (flags.noEncrypt || !(await ask.confirm('Encrypt memory.db?', true))) return { kind: 'new-plain' }
+    sayNotes(env, ask)
     return { kind: 'new-encrypted', key: await confirmedKey(env, ask, true, dryRun) }
   }
   if (flags.noEncrypt || !(await ask.confirm('Encrypt memory.db?', false))) return { kind: 'keep' }
   // A key already there may open an older encrypted copy; refused here, before a code is shown for a key that would be thrown away.
-  if (storedDbKey(env).kind !== 'none') throw new ChoiceError(ENCRYPT_KEY_EXISTS)
+  if (storedDbKey(env).kind !== 'none') throw new ChoiceError(encryptKeyExists(keyStoreOf(env) ?? { place: 'the key store' }))
+  sayNotes(env, ask)
   return { kind: 'encrypt-existing', key: await confirmedKey(env, ask, false, dryRun) }
 }
 

@@ -276,7 +276,7 @@ async function systemEnv(args: readonly string[], configuredDataDir: string | nu
   const [{ createCliRunner, createRunner }, { NO_CREDENTIALS }, { createSecurityRunner }, { createCommandRunner, createPromptIO }, { installedProgramPath, isCompiledProgram }, { nodeTerminal }] = await Promise.all([
     import('../observer/runners'),
     import('../secrets/credentials'),
-    import('../secrets/keychain-writer'),
+    import('../secrets/stores/keychain'),
     import('../install/system'),
     import('../install/entry'),
     import('../install/prompt/terminal'),
