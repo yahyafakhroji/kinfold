@@ -354,19 +354,25 @@ test('the WSL hooks run first only inside WSL', async () => {
   }
 })
 
-test('the stub WSL hooks change nothing', async () => {
-  const outputs: string[][] = []
-  const codes: number[][] = []
-  for (const wsl of [false, true]) {
-    const w = both({ platform: 'linux' })
-    w.env = { ...w.env, wsl }
-    const run = [await install(w.env, YES), await status(w.env), await uninstall(w.env, { dryRun: false, removeCredentials: false })]
-    codes.push(run)
-    outputs.push(w.out.map((line) => line.replaceAll(w.root, '<root>').replace(/\b(port|pid) \d+/g, '$1 <n>').replace(/127\.0\.0\.1:\d+/g, '127.0.0.1:<port>')))
-    await w.cleanup()
-    world = null
+test('WSL hooks that return null change nothing', async () => {
+  // Null hooks stand in for the real module, so this holds whatever src/wsl/entry.ts becomes.
+  mock.module('../wsl/entry', () => ({ ...realWsl, wslInstall: async () => null, wslStatus: async () => null, wslUninstall: async () => null }))
+  try {
+    const outputs: string[][] = []
+    const codes: number[][] = []
+    for (const wsl of [false, true]) {
+      const w = both({ platform: 'linux' })
+      w.env = { ...w.env, wsl }
+      const run = [await install(w.env, YES), await status(w.env), await uninstall(w.env, { dryRun: false, removeCredentials: false })]
+      codes.push(run)
+      outputs.push(w.out.map((line) => line.replaceAll(w.root, '<root>').replace(/\b(port|pid) \d+/g, '$1 <n>').replace(/127\.0\.0\.1:\d+/g, '127.0.0.1:<port>')))
+      await w.cleanup()
+      world = null
+    }
+    expect(outputs[1]).toEqual(outputs[0])
+    expect(codes[1]).toEqual(codes[0])
+    expect(outputs[0]?.length).toBeGreaterThan(0)
+  } finally {
+    mock.module('../wsl/entry', () => realWsl)
   }
-  expect(outputs[1]).toEqual(outputs[0])
-  expect(codes[1]).toEqual(codes[0])
-  expect(outputs[0]?.length).toBeGreaterThan(0)
 })
