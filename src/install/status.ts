@@ -22,6 +22,11 @@ import { mcpStatusLines } from './mcp-wiring'
 import { inspectShim } from './opencode-shim'
 import { describeModeChange, scanDataDirModes } from './permissions'
 import { vectorStatusLine } from './vec0-install'
+import { readEnv } from '../env-names'
+import { availableMessage, pendingNotice } from '../update/notice'
+import { readUpdateState } from '../update/state'
+import { VERSION } from '../version'
+import { readInstallRecord } from './setup/record'
 
 function claudeWiring(env: InstallEnv): string {
   const paths = installPaths(env)
@@ -94,7 +99,18 @@ function dataDirLines(env: InstallEnv): string[] {
   return [`data dir ${env.dataDir}: ${scan.changes.length} of ${scan.checked} need fixing (install fixes them):`, ...scan.changes.map((change) => `  ${describeModeChange(change)}`)]
 }
 
-export async function status(env: InstallEnv): Promise<number> {
+/** The saved update state only: status never fetches. */
+export function updateLine(env: InstallEnv, running: string = VERSION): string {
+  const record = readInstallRecord(env.dataDir)
+  const off = running === '0.0.0-dev' || record?.updateCheck === false || record?.channel === 'checkout' || readEnv(env.envVars ?? {}, 'NO_UPDATE_CHECK') === '1'
+  if (off) return 'update check: off'
+  const state = readUpdateState(env.dataDir)
+  const notice = pendingNotice(state, record, running)
+  if (notice !== null) return `update: ${availableMessage(notice)}`
+  return `update: none known (${state.checkedAt === null ? 'never checked' : `last checked ${new Date(state.checkedAt).toISOString()}`})`
+}
+
+export async function status(env: InstallEnv, running: string = VERSION): Promise<number> {
   const observer = await observerLines(env)
   const duplicates = findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings])
   const lines = [
@@ -107,6 +123,7 @@ export async function status(env: InstallEnv): Promise<number> {
     ...keychainLines(env, observer.refs),
     ...hmacStatusLines(env),
     ...dataDirLines(env),
+    updateLine(env, running),
     ...(duplicates.length === 0 ? ['duplicate wiring: none in this directory'] : duplicateWarning(duplicates)),
   ]
   for (const line of lines) env.out(line)

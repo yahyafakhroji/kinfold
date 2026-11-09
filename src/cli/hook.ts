@@ -21,11 +21,12 @@ import { type AdapterContext, defaultAdapterContext } from '../adapters/context'
 import { CURSOR_HOST, normalizeCursor } from '../adapters/cursor'
 import { recordedHostVersion } from '../adapters/host-version'
 import { type ContextClientOptions, fetchContext } from '../context/client'
-import { type ContextChannel, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
+import { type ContextChannel, MAX_CONTEXT_PROMPT_CHARS, type UpdateNotice } from '../context/types'
 import type { NormalizedEvent } from '../contract/event'
 import { isObserverProcess } from '../observer/env'
 import { resolveDataDir } from '../store/data-dir'
 import { applyDataDirFlag } from '../store/data-dir-flag'
+import { agentLine, availableMessage } from '../update/notice-text'
 import { recordEvent } from './record'
 
 export type ErrorSink = (line: string) => void
@@ -36,6 +37,8 @@ interface HookHostSpec {
   normalize: (payload: unknown, context: AdapterContext) => NormalizedEvent | null
   /** The stdout line that hands `text` to the host as session context. */
   sessionContext: (text: string) => string
+  /** The session-start line when an update notice rides along: the user sees it, or the agent is told. */
+  sessionContextWithNotice: (text: string, notice: UpdateNotice) => string
   /** The stdout line that adds the prompt-time delta to a turn; absent for hosts not wired for it yet (Cursor). Codex documents the same UserPromptSubmit shape as Claude Code. */
   promptContext?: (text: string) => string
 }
@@ -43,11 +46,22 @@ interface HookHostSpec {
 /** Claude Code and Codex share the hookSpecificOutput shape; Cursor's sessionStart reads additional_context. */
 const hookSpecific = (text: string): string => JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } })
 
+/** Claude Code shows `systemMessage` to the user, so the notice never enters the model's context; the pack may be empty. */
+const claudeWithNotice = (text: string, notice: UpdateNotice): string =>
+  JSON.stringify({ systemMessage: availableMessage(notice), ...(text !== '' ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {}) })
+
+/** Hosts with no user channel get one agent line as the last line of Kinfold's block. */
+const withAgentLine = (text: string, notice: UpdateNotice): string => [text.replace(/\n$/, ''), agentLine(notice)].filter((part) => part !== '').join('\n')
+
 export const HOOK_HOSTS: Readonly<Record<HookHost, HookHostSpec>> = {
-  'claude-code': { normalize: normalizeClaudeCode, sessionContext: hookSpecific, promptContext: userPromptContextOutput },
+  'claude-code': { normalize: normalizeClaudeCode, sessionContext: hookSpecific, sessionContextWithNotice: claudeWithNotice, promptContext: userPromptContextOutput },
   // Codex documents the same UserPromptSubmit hookSpecificOutput shape as Claude Code.
-  codex: { normalize: normalizeCodex, sessionContext: hookSpecific, promptContext: userPromptContextOutput },
-  cursor: { normalize: normalizeCursor, sessionContext: (text) => JSON.stringify({ additional_context: text }) },
+  codex: { normalize: normalizeCodex, sessionContext: hookSpecific, sessionContextWithNotice: (text, notice) => hookSpecific(withAgentLine(text, notice)), promptContext: userPromptContextOutput },
+  cursor: {
+    normalize: normalizeCursor,
+    sessionContext: (text) => JSON.stringify({ additional_context: text }),
+    sessionContextWithNotice: (text, notice) => JSON.stringify({ additional_context: withAgentLine(text, notice) }),
+  },
 }
 
 function errorMessage(error: unknown): string {
@@ -105,8 +119,11 @@ async function contextOutput(event: NormalizedEvent, dataDir: string, host: Hook
     { host: event.host, cwd: event.cwd, hostSessionId: event.hostSessionId, channel: wanted.channel, ...(prompt.trim() !== '' ? { prompt } : {}) },
     { ...inject, log: (line) => stderr(`kinfold-hook: ${line}`) },
   )
-  if (fetched.result === null || fetched.result.text === '') return null
-  return wanted.render(fetched.result.text)
+  const result = fetched.result
+  if (result === null) return null
+  // The notice rides on session start only; the route never attaches it to a prompt delta.
+  if (wanted.channel === 'session_start' && result.updateNotice !== undefined) return HOOK_HOSTS[host].sessionContextWithNotice(result.text, result.updateNotice)
+  return result.text === '' ? null : wanted.render(result.text)
 }
 
 /**

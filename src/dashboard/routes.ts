@@ -27,7 +27,7 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
 /** The files a release build carries; its generated module serves them by name. */
 export const EMBEDDED_ASSET_NAMES = [
   'api.js', 'app.css', 'app.js', 'dom.js', 'format.js', 'hash.js', 'login.js',
-  'page-data.js', 'page-memory.js', 'page-metrics.js', 'page-models.js', 'purge-flow.js', 'retention-flow.js',
+  'page-data.js', 'page-memory.js', 'page-metrics.js', 'page-models.js', 'purge-flow.js', 'retention-flow.js', 'update-banner.js',
 ] as const
 
 export interface DashboardDeps {

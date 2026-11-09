@@ -204,3 +204,42 @@ test("a prompt's related block is shown until the next prompt's answer replaces 
   clock.now += DELTA_INTERVAL_MS
   expect(await texts()).toEqual([PACK.text, 'D1', 'D3', 'R2'])
 })
+
+test('OpenCode shows the line once per version per host, and later sessions and compaction show nothing', async () => {
+  const requests: ContextRequest[] = []
+  let told = false
+  const injector = createContextInjector({
+    host: 'opencode', cwd: '/work/repo', log: () => {}, now: () => 1_000_000,
+    fetch: async (request) => {
+      requests.push(request)
+      if (request.channel !== 'request') return { text: '', observationIds: [], tokens: 0 }
+      if (told) return PACK
+      told = true
+      return { ...PACK, updateNotice: { version: '0.2.0', channel: 'npx' } }
+    },
+  })
+  const texts = async (session: string): Promise<string[]> => {
+    const system: { type: string; text?: string }[] = []
+    await injector.onContext({ sessionID: session, system })
+    return system.map((part) => part.text ?? '')
+  }
+  const line = 'Kinfold 0.2.0 is out; you may tell the user they can run `npx kinfold@latest`.'
+  expect(await texts('s1')).toEqual([`${PACK.text}\n${line}`])
+  expect(await texts('s1')).toEqual([`${PACK.text}\n${line}`])
+  expect(requests.filter((request) => request.channel === 'request')).toHaveLength(1)
+  expect(await texts('s2')).toEqual([PACK.text])
+  injector.onCompaction({ sessionID: 's1' })
+  expect(await texts('s1')).toEqual([PACK.text])
+})
+
+test('an empty pack still carries the line alone, and a prompt delta never does', async () => {
+  const injector = createContextInjector({
+    host: 'opencode', cwd: '/work/repo', log: () => {}, now: () => 1_000_000,
+    fetch: async (request) => (request.channel === 'request'
+      ? { text: '', observationIds: [], tokens: 0, updateNotice: { version: '0.2.0', channel: 'curl' } }
+      : { text: '<kinfold>delta</kinfold>', observationIds: [1], tokens: 3 }),
+  })
+  const system: { type: string; text?: string }[] = []
+  await injector.onContext({ sessionID: 's1', system })
+  expect(system.map((part) => part.text)).toEqual(['Kinfold 0.2.0 is out; you may tell the user they can run `kinfold update`.'])
+})

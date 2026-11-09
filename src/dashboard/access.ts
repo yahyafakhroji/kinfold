@@ -16,7 +16,7 @@ export type AccessResult = { ok: true; via: Credential } | { ok: false; status: 
 
 export const REQUEST_HEADER = 'x-sam-request'
 const SAFE_METHODS = new Set(['GET', 'HEAD'])
-const EITHER_EXACT = new Set(['/observer/settings', '/observer/test', '/observer/recheck', '/observer/models', '/metrics/summary'])
+const EITHER_EXACT = new Set(['/observer/settings', '/observer/test', '/observer/recheck', '/observer/models', '/metrics/summary', '/update'])
 const EITHER_PREFIXES = ['/data/', '/memory/']
 const PUBLIC_DASHBOARD = new Set(['/dashboard/login', '/dashboard/session'])
 

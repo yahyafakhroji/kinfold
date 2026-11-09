@@ -48,3 +48,19 @@ export function writeUpdateState(dataDir: string, state: UpdateState): void {
   const content = `${JSON.stringify({ lastAttemptAt: state.lastAttemptAt, latestVersion: state.latestVersion, checkedAt: state.checkedAt, notified: state.notified }, null, 2)}\n`
   writeFileAtomic(join(dataDir, UPDATE_STATE_FILE), content, DATA_FILE_MODE)
 }
+
+/**
+ * Every writer goes through here: the file is read again right before the
+ * write and only the fields the caller owns are replaced, so a slow daily check
+ * cannot undo a notice marked meanwhile, nor the reverse. The check owns
+ * lastAttemptAt, checkedAt and latestVersion; notices own `notified`.
+ */
+export function mergeUpdateState(dataDir: string, change: Partial<UpdateState> | ((current: UpdateState) => Partial<UpdateState>)): void {
+  const current = readUpdateState(dataDir)
+  writeUpdateState(dataDir, { ...current, ...(typeof change === 'function' ? change(current) : change) })
+}
+
+/** Records that `host` was shown the notice for `version`; the other fields are left as they are on disk now. */
+export function markNotified(dataDir: string, host: string, version: string): void {
+  mergeUpdateState(dataDir, (current) => ({ notified: { ...current.notified, [host]: version } }))
+}

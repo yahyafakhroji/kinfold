@@ -5,7 +5,7 @@
 
 import { readEnv } from '../env-names'
 import { readInstallRecord } from '../install/setup/record'
-import { readUpdateState, writeUpdateState } from './state'
+import { mergeUpdateState, readUpdateState } from './state'
 import { parseVersion } from './version-order'
 
 export const LATEST_RELEASE_URL = 'https://api.github.com/repos/yahyafakhroji/kinfold/releases/latest'
@@ -103,10 +103,10 @@ export async function runUpdateCheck(deps: UpdateCheckDeps): Promise<'disabled' 
     if (state.lastAttemptAt !== null && startedAt - state.lastAttemptAt < CHECK_INTERVAL_MS) return 'not-due'
     try {
       const found = await fetchLatestRelease(deps.fetch, deps.now)
-      writeUpdateState(deps.dataDir, { ...state, lastAttemptAt: startedAt, latestVersion: found.latestVersion, checkedAt: found.checkedAt })
+      mergeUpdateState(deps.dataDir, { lastAttemptAt: startedAt, latestVersion: found.latestVersion, checkedAt: found.checkedAt })
       return 'checked'
     } catch (error: unknown) {
-      writeUpdateState(deps.dataDir, { ...state, lastAttemptAt: startedAt })
+      mergeUpdateState(deps.dataDir, { lastAttemptAt: startedAt })
       deps.log(`update check failed (${error instanceof UpdateCheckError ? error.label : error instanceof Error ? error.name : 'error'})`)
       return 'failed'
     }

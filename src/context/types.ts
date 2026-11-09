@@ -31,6 +31,13 @@ export interface ContextRequest {
   prompt?: string
 }
 
+/** A newer release than the running one; the channel picks the command the user is told to run. */
+export const NOTICE_CHANNELS = ['npx', 'bunx', 'curl', 'powershell'] as const
+export interface UpdateNotice {
+  version: string
+  channel: (typeof NOTICE_CHANNELS)[number]
+}
+
 export interface ContextResult {
   /** Empty when the project has nothing to recall. */
   text: string
@@ -38,6 +45,8 @@ export interface ContextResult {
   tokens: number
   /** Prompt channel: the related-memory block alone, the end of `text`; absent when there is none. */
   relatedText?: string
+  /** Session start and OpenCode's first request only: a release this host has not been told about yet. */
+  updateNotice?: UpdateNotice
 }
 
 /** One stored observation as a pack sees it: no narrative, no facts, no payload. */
@@ -103,11 +112,21 @@ export function parseContextRequest(body: unknown): Parsed<ContextRequest> {
 /** Checks a daemon reply before the hook or plugin trusts it. */
 export function parseContextResult(body: unknown): ContextResult | null {
   if (!isRecord(body)) return null
-  const { text, observationIds, tokens, relatedText } = body
+  const { text, observationIds, tokens, relatedText, updateNotice } = body
   if (typeof text !== 'string' || typeof tokens !== 'number' || !Array.isArray(observationIds)) return null
   if (!observationIds.every((id) => Number.isSafeInteger(id))) return null
-  const result = { text, observationIds: observationIds as number[], tokens }
+  const notice = parseUpdateNotice(updateNotice)
+  const result = { text, observationIds: observationIds as number[], tokens, ...(notice !== null ? { updateNotice: notice } : {}) }
   if (relatedText === undefined) return result
   if (typeof relatedText !== 'string' || relatedText === '' || !text.endsWith(relatedText)) return null
   return { ...result, relatedText }
+}
+
+/** A malformed notice is dropped, never an error: the pack is still good. The version is only ever printed, so it stays short and plain. */
+function parseUpdateNotice(value: unknown): UpdateNotice | null {
+  if (!isRecord(value)) return null
+  const { version, channel } = value
+  if (typeof version !== 'string' || !/^[0-9A-Za-z.+-]{1,64}$/.test(version)) return null
+  const known = NOTICE_CHANNELS.find((name) => name === channel)
+  return known === undefined ? null : { version, channel: known }
 }

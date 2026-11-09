@@ -46,3 +46,17 @@ export async function api(method, path, body) {
 export function errorText(error) {
   return error instanceof Error ? error.message : 'something went wrong'
 }
+
+/**
+ * The update banner's text, or null when there is none or the daemon cannot say.
+ * @returns {Promise<string | null>}
+ */
+export async function fetchUpdateMessage() {
+  try {
+    const answer = await api('GET', '/update')
+    const found = answer !== null && typeof answer === 'object' && 'notice' in answer ? answer.notice : null
+    return found !== null && typeof found === 'object' && 'message' in found && typeof found.message === 'string' ? found.message : null
+  } catch {
+    return null
+  }
+}

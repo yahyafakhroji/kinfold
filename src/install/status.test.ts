@@ -9,6 +9,7 @@ import { EXIT_OK, install } from './install'
 import { mcpPaths, mcpTarget } from './mcp-wiring'
 import { VERSION } from '../version'
 import { status } from './status'
+import { writeUpdateState } from '../update/state'
 import { BUN, type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
 
 let world: FakeWorld | null = null
@@ -47,6 +48,7 @@ test('before install: hosts detected but not wired, daemon down, nothing created
     'hmac keys: none yet; keychain hmac-master missing, hmac-legacy missing',
     `  sub-keys in ${join(w.dataDir, 'hmac.d')}: none`,
     `data dir ${w.dataDir}: missing`,
+    'update check: off',
     'duplicate wiring: none in this directory',
   ])
   expect(w.securityCalls.every((call) => !call.args.includes('-w'))).toBe(true)
@@ -162,4 +164,16 @@ test('checkout status sees a hook for another folder as stale', async () => {
   w.out.length = 0
   await status(w.env)
   expect(w.out.join('\n')).toContain('claude-code: detected 2.1.310 (Claude Code); wired: yes')
+})
+
+test('status shows the notice', async () => {
+  const w = make({ withLibrary: false })
+  mkdirSync(w.dataDir, { recursive: true })
+  writeUpdateState(w.dataDir, { lastAttemptAt: 1, latestVersion: '0.2.0', checkedAt: 1_800_000_000_000, notified: {} })
+  await status(w.env, '0.1.0')
+  expect(w.out).toContain('update: Kinfold 0.2.0 is available. Run `kinfold update`.')
+  w.out.length = 0
+  writeUpdateState(w.dataDir, { lastAttemptAt: 1, latestVersion: '0.1.0', checkedAt: 1_800_000_000_000, notified: {} })
+  await status(w.env, '0.1.0')
+  expect(w.out).toContain('update: none known (last checked 2027-01-15T08:00:00.000Z)')
 })
