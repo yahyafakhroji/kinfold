@@ -63,7 +63,10 @@ function conversionProblem(env: InstallEnv, conversion: Conversion | null): stri
 }
 
 async function convert(env: InstallEnv, encryption: EncryptionAnswer): Promise<void> {
-  if (encryption.kind === 'encrypt-existing') await encryptWithKey(env, encryption.key)
+  if (encryption.kind === 'encrypt-existing') {
+    if (encryption.key === null) throw new Error('no confirmed key to encrypt with')
+    await encryptWithKey(env, encryption.key)
+  }
   else if (encryption.kind === 'decrypt-existing') await decryptConfirmed(env)
 }
 

@@ -49,7 +49,7 @@ export type EncryptionAnswer =
   | { kind: 'keep' }
   | { kind: 'new-encrypted'; key: string | null } // null: --yes, key made at run time and never shown
   | { kind: 'new-plain' }
-  | { kind: 'encrypt-existing'; key: string } // code shown and confirmed already
+  | { kind: 'encrypt-existing'; key: string | null } // code shown and confirmed already; null only in a dry run, which converts nothing
   | { kind: 'decrypt-existing' } // confirmed already
 
 export interface SetupAnswers {
@@ -238,6 +238,16 @@ async function keyWithConfirmedCode(env: InstallEnv, ask: Prompts, reuseStored: 
   throw new ChoiceError('the recovery code was not confirmed')
 }
 
+export const DRY_RUN_NO_CODE = 'A dry run shows no recovery code: a real run shows one here and asks you to confirm it.'
+
+/** The confirmed key, or null in a dry run: a code shown then would belong to a key that is thrown away. */
+async function confirmedKey(env: InstallEnv, ask: Prompts, reuseStored: boolean, dryRun: boolean): Promise<string | null> {
+  if (!dryRun) return keyWithConfirmedCode(env, ask, reuseStored)
+  if (reuseStored && storedDbKey(env).kind === 'unreadable') throw new ChoiceError(STALE_DB_KEY)
+  ask.say(DRY_RUN_NO_CODE)
+  return null
+}
+
 function headlessEncryption(state: SetupState, flags: SetupFlags): EncryptionAnswer {
   if (state.encryption === 'new') return flags.noEncrypt ? { kind: 'new-plain' } : { kind: 'new-encrypted', key: null }
   if (state.encryption === 'on' && flags.noEncrypt) throw new ChoiceError(NO_TTY_ENCRYPTION_CHANGE)
@@ -251,17 +261,17 @@ async function encryptedStoreStep(ask: Prompts, flags: SetupFlags): Promise<Encr
   return typed.trim() === 'decrypt' ? { kind: 'decrypt-existing' } : { kind: 'keep' }
 }
 
-async function encryptionStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags): Promise<EncryptionAnswer> {
+async function encryptionStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags, dryRun: boolean): Promise<EncryptionAnswer> {
   if (ask === null) return headlessEncryption(state, flags)
   if (state.encryption === 'on') return encryptedStoreStep(ask, flags)
   if (state.encryption === 'new') {
     if (flags.noEncrypt || !(await ask.confirm('Encrypt memory.db?', true))) return { kind: 'new-plain' }
-    return { kind: 'new-encrypted', key: await keyWithConfirmedCode(env, ask, true) }
+    return { kind: 'new-encrypted', key: await confirmedKey(env, ask, true, dryRun) }
   }
   if (flags.noEncrypt || !(await ask.confirm('Encrypt memory.db?', false))) return { kind: 'keep' }
   // A key already there may open an older encrypted copy; refused here, before a code is shown for a key that would be thrown away.
   if (storedDbKey(env).kind !== 'none') throw new ChoiceError(ENCRYPT_KEY_EXISTS)
-  return { kind: 'encrypt-existing', key: await keyWithConfirmedCode(env, ask, false) }
+  return { kind: 'encrypt-existing', key: await confirmedKey(env, ask, false, dryRun) }
 }
 
 // ---- summary ----------------------------------------------------------------
@@ -319,7 +329,7 @@ export async function runWizard(
   const { env, state } = retarget !== undefined && resolve(dataDir) !== resolve(firstState.dataDir) ? await retarget(dataDir) : { env: first, state: firstState }
   const hosts = await agentsStep(env, ask, state, flags)
   const observers = await observersStep(env, ask, state, flags, choice, hosts)
-  const encryption = await encryptionStep(env, ask, state, flags)
+  const encryption = await encryptionStep(env, ask, state, flags, choice.dryRun)
   const port = await portStep(env, ask, state, flags)
   const updateCheck = await updateCheckStep(ask, state, flags)
   const answers: SetupAnswers = { dataDir, hosts, observers, encryption, port, updateCheck }

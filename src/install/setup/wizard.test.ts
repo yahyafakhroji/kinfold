@@ -21,7 +21,7 @@ import type { TerminalIO } from '../prompt/terminal'
 import { type FakeWorld, createWorld, snapshotTree, startWorldDaemon } from '../test-support'
 import { LOCKED_FOLDER_NOTE, type SetupState, readSetupState } from './prefill'
 import { installRecordAction } from './record'
-import { NO_TTY_ENCRYPTION_CHANGE, STALE_DB_KEY, type SetupFlags, freePortFrom, runWizard } from './wizard'
+import { DRY_RUN_NO_CODE, NO_TTY_ENCRYPTION_CHANGE, STALE_DB_KEY, type SetupFlags, freePortFrom, runWizard } from './wizard'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -251,7 +251,7 @@ test('a plaintext store stays plain on Enter and encrypts with a confirmed code 
   const on = setup([], {}, terminal)
   const answers = await runWizard(on.w.env, createPrompts(terminal), rerun(await readSetupState(on.w.env), { encryption: 'off' }), flagsOf({ hosts: [] }), NO_CHOICE)
   expect(answers.encryption.kind).toBe('encrypt-existing')
-  const key = answers.encryption.kind === 'encrypt-existing' ? answers.encryption.key : ''
+  const key = answers.encryption.kind === 'encrypt-existing' ? (answers.encryption.key ?? '') : ''
   expect(terminal.output()).toContain(encodeRecoveryCode(key))
 })
 
@@ -365,4 +365,20 @@ test('the wizard writes nothing to the machine', async () => {
   await runWizard(w.env, ask(w), state, flagsOf(), NO_CHOICE)
   expect(snapshotTree(w.root)).toEqual(before)
   expect(w.securityCalls.slice(calls).some((call) => call.args[0] === '-i')).toBe(false)
+})
+
+test('a dry run shows no recovery code, and says a real run would show one at this step', async () => {
+  const fresh = setup([ENTER, ENTER, ENTER, ENTER, ENTER])
+  const state = await readSetupState(fresh.w.env)
+  const answers = await runWizard(fresh.w.env, ask(fresh.w), state, flagsOf({ hosts: [] }), { ...NO_CHOICE, dryRun: true })
+  expect(answers.encryption).toEqual({ kind: 'new-encrypted', key: null })
+  expect(fresh.term.output()).not.toMatch(CODE_PATTERN)
+  expect(fresh.term.output()).toContain(DRY_RUN_NO_CODE)
+  await world?.cleanup()
+  const plain = setup(['y', ENTER, ENTER, ENTER])
+  const plainState = rerun(await readSetupState(plain.w.env), { encryption: 'off' })
+  const converted = await runWizard(plain.w.env, ask(plain.w), plainState, flagsOf({ hosts: [] }), { ...NO_CHOICE, dryRun: true })
+  expect(converted.encryption).toEqual({ kind: 'encrypt-existing', key: null })
+  expect(plain.term.output()).not.toMatch(CODE_PATTERN)
+  expect(plain.term.output()).toContain(DRY_RUN_NO_CODE)
 })
