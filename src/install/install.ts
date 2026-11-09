@@ -18,6 +18,7 @@ import { DAEMON_INFO_FILE, DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-d
 import type { ObserverSettingsInput, ObserverSettingsRow } from '../store/observer-settings-store'
 import { mergeSamHooks } from './claude-hooks'
 import { type Health, checkHealth, getObserverSettings, readDaemonInfo, waitForStart } from './daemon-client'
+import { dataDirAccessFor } from './access/check'
 import { setupDbKeyActions } from './db-encryption'
 import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
@@ -30,7 +31,6 @@ import { ChoiceError, type ChoiceOptions, type ObserverChoice } from './observer
 import { hmacMigrationActions } from './hmac-migration'
 import { hostHookInstallActions, hostVersionActions, opencodeInstallActions } from './host-wiring'
 import { claudeMcpInstallActions, claudeMcpState, opencodeMcpInstallActions } from './mcp-wiring'
-import { scanDataDirModes } from './permissions'
 import { type ServiceControl, type ServiceStep, managedServiceOf, serviceOf } from './service/control'
 import { type Action, runPlan, stopCommand } from './plan'
 import { askHidden, createPrompts, PromptCancelled } from './prompt/prompts'
@@ -120,7 +120,7 @@ function mkdirIfMissing(path: string, mode: number): Action[] {
 
 function dataDirActions(env: InstallEnv): Action[] {
   const paths = installPaths(env)
-  const scan = scanDataDirModes(env.dataDir)
+  const scan = dataDirAccessFor(env).plannedFixes(env.dataDir)
   for (const link of scan.symlinks) env.out(`data dir: symlink ${link} left alone`)
   const touchLog: Action[] = existsSync(paths.logFile) ? [] : [{ kind: 'touch', path: paths.logFile, mode: DATA_FILE_MODE }]
   return [

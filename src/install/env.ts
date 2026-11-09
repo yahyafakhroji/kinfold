@@ -16,6 +16,7 @@ import type { KeyStore } from '../secrets/key-store'
 import type { SecurityRunner } from '../secrets/stores/keychain'
 import type { ServiceControl } from './service/control'
 import type { DiskEncryptionCheck } from './disk/check'
+import type { DataDirAccess } from './access/check'
 import type { BuildInput } from '../sqlite/build'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
 import type { ObserverRunner, ObserverSettings } from '../observer/types'
@@ -106,6 +107,8 @@ export interface InstallEnv {
   keyStore?: KeyStore | null
   /** The disk-encryption check status runs; default this platform's (disk/check.ts). Tests inject a stub. */
   diskCheck?: DiskEncryptionCheck
+  /** The data dir access check install and status run; default this platform's (access/check.ts). Tests inject a stub. */
+  dataDirAccess?: DataDirAccess
 }
 
 export { LAUNCH_AGENT_LABEL, PLUGIN_FILE_NAME }

@@ -3,7 +3,6 @@
 // the key store and its entries (metadata lookups only, never the value), the HMAC keys (master and legacy entries, sub-key epochs, leftover plain-text keys), data dir modes, and
 // duplicate project wiring. It creates nothing, not even the data dir.
 
-import { existsSync } from 'node:fs'
 import type { EffectiveSettings } from '../daemon/settings-route'
 import { OPENROUTER_CREDENTIAL_REF, providerTakesKey } from '../observer/settings'
 import { inspectSamHooks } from './claude-hooks'
@@ -21,7 +20,7 @@ import { hmacStatusLines } from './hmac-migration'
 import { hostWiringLine } from './host-wiring'
 import { mcpStatusLines } from './mcp-wiring'
 import { inspectShim } from './opencode-shim'
-import { describeModeChange, scanDataDirModes } from './permissions'
+import { dataDirAccessFor } from './access/check'
 import { vectorStatusLine } from './vec0-install'
 import { updatesEnabled } from '../update/enabled'
 import { availableMessage, pendingNotice } from '../update/notice'
@@ -104,12 +103,6 @@ async function databaseLines(env: InstallEnv): Promise<string[]> {
   return database === undefined ? [keyStoreStatusLine(env)] : [database, keyStoreStatusLine(env), ...rest]
 }
 
-function dataDirLines(env: InstallEnv): string[] {
-  if (!existsSync(env.dataDir)) return [`data dir ${env.dataDir}: missing`]
-  const scan = scanDataDirModes(env.dataDir)
-  if (scan.changes.length === 0) return [`data dir ${env.dataDir}: modes ok (${scan.checked} checked, dirs 0700, files 0600, program 0755)`]
-  return [`data dir ${env.dataDir}: ${scan.changes.length} of ${scan.checked} need fixing (install fixes them):`, ...scan.changes.map((change) => `  ${describeModeChange(change)}`)]
-}
 
 /** The saved update state only: status never fetches. */
 export function updateLine(env: InstallEnv, running: string = VERSION): string {
@@ -134,7 +127,7 @@ export async function status(env: InstallEnv, running: string = VERSION): Promis
     ...observer.lines,
     ...keyStoreLines(env, observer.refs),
     ...hmacStatusLines(env),
-    ...dataDirLines(env),
+    ...(await dataDirAccessFor(env).statusLines(env.dataDir)),
     updateLine(env, running),
     ...(duplicates.length === 0 ? ['duplicate wiring: none in this directory'] : duplicateWarning(duplicates)),
   ]
