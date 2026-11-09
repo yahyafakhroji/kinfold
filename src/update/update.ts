@@ -8,7 +8,7 @@
 // service as they were. A run killed outright (SIGKILL, a crash, a power loss)
 // cannot clean up, so each run first removes the temp files of runs no longer alive.
 
-import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, rmSync, writeSync } from 'node:fs'
+import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { envName } from '../env-names'
 import type { InstallEnv } from '../install/env'
@@ -81,18 +81,46 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+function errorLabel(error: unknown): string {
+  return (error as NodeJS.ErrnoException).code ?? (error instanceof Error ? error.name : 'error')
+}
+
 /**
- * Removes the temp programs of update runs that are gone. A live run's file is
- * left alone, since its install may still be copying from it; this run's own
- * name is left to the exclusive create, which refuses whatever is there.
+ * The temp programs of update runs that are gone, by name. A live run's file is
+ * left out, since its install may still be copying from it; this run's own
+ * name is left to the exclusive create, which refuses whatever is there. Only
+ * files and links count: a folder with that name is not something we wrote.
+ * A folder that cannot be read yields nothing, so it never blocks an update.
  */
-function sweepLeftovers(env: InstallEnv): void {
+function deadLeftovers(env: InstallEnv): string[] {
   const dir = binDir(env)
-  if (!existsSync(dir)) return
-  for (const name of readdirSync(dir)) {
+  let names: string[]
+  try {
+    names = existsSync(dir) ? readdirSync(dir) : []
+  } catch {
+    return []
+  }
+  return names.filter((name) => {
     const pid = Number(TEMP_NAME.exec(name)?.[1] ?? Number.NaN)
-    if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid || pidAlive(pid)) continue
-    rmSync(join(dir, name), { force: true })
+    if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid || pidAlive(pid)) return false
+    try {
+      const stat = lstatSync(join(dir, name))
+      return stat.isFile() || stat.isSymbolicLink()
+    } catch {
+      return false
+    }
+  })
+}
+
+/** One that cannot be removed is named and skipped, so a stuck leftover never stops the update. */
+function sweepLeftovers(env: InstallEnv): void {
+  for (const name of deadLeftovers(env)) {
+    const path = join(binDir(env), name)
+    try {
+      rmSync(path, { force: true })
+    } catch (error: unknown) {
+      env.out(`${PREFIX} could not remove ${path}, left by an earlier update (${errorLabel(error)}); remove it by hand`)
+    }
   }
 }
 
@@ -181,8 +209,10 @@ async function fetchExpectedHash(env: InstallEnv, version: string, assetName: st
 function describeDryRun(env: InstallEnv, running: string, latest: string, assetName: string, temp: string): string[] {
   const binPath = installedProgramPath(env.dataDir, env.platform)
   const channel = currentChannel(env, readInstallRecord(env.dataDir))
+  const leftovers = deadLeftovers(env)
   return [
-    `kinfold update: ${running} -> ${latest} (dry run; nothing is downloaded or installed)`,
+    `kinfold update: ${running} -> ${latest} (dry run; nothing is downloaded or changed)`,
+    ...(leftovers.length === 0 ? [] : [`  0. remove what earlier update runs left in ${binDir(env)}: ${leftovers.join(', ')}`]),
     `  1. download ${releaseSumsUrl(env.envVars ?? {}, latest)}`,
     `  2. download ${programUrl(latest, assetName)} to ${temp} (mode 0700, at most ${MAX_PROGRAM_BYTES} bytes)`,
     `  3. check its sha256 against the ${assetName} line of SHA256SUMS; a mismatch stops here with nothing changed`,
@@ -268,7 +298,8 @@ export async function runUpdate(env: InstallEnv, options: { dryRun: boolean }, d
     env.out(`${PREFIX} this is a checkout install; update it with git pull and bun src/cli/kinfold.ts install`)
     return EXIT_FAILED
   }
-  sweepLeftovers(env)
+  // A dry run only lists these (describeDryRun); it removes nothing.
+  if (!options.dryRun) sweepLeftovers(env)
   const running = deps.version ?? VERSION
   let latest: string
   try {
@@ -304,7 +335,7 @@ export async function runUpdate(env: InstallEnv, options: { dryRun: boolean }, d
   } catch (error: unknown) {
     // handOff catches its own failures, so anything here came before it: a full
     // disk or a permission error while writing the download.
-    const message = error instanceof UpdateStop ? error.message : `could not write the download (${(error as NodeJS.ErrnoException).code ?? (error instanceof Error ? error.name : 'error')}); nothing was changed`
+    const message = error instanceof UpdateStop ? error.message : `could not write the download (${errorLabel(error)}); nothing was changed`
     env.out(`${PREFIX} ${message}`)
     return EXIT_FAILED
   } finally {

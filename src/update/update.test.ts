@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, fstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { installedProgramPath } from '../install/entry'
 import { installProgram, releaseAssetName } from '../install/self-install'
 import { type FakeService, type FakeWorld, createWorld, fakeService } from '../install/test-support'
@@ -258,23 +258,64 @@ async function deadPid(): Promise<number> {
   return child.pid
 }
 
-for (const dryRun of [false, true]) {
-  test(`leftovers of dead update runs are swept, a live run's file is kept${dryRun ? ' (dry run)' : ''}`, async () => {
-    const { w, binPath } = updateWorld({ tag: 'v0.1.0' })
-    const bin = dirname(binPath)
-    const dead = join(bin, `.kinfold-update-${await deadPid()}`)
-    const deadExe = join(bin, `.kinfold-update-${await deadPid()}.exe`)
-    const live = join(bin, `.kinfold-update-${process.ppid}`)
-    const other = join(bin, '.kinfold-update-notapid')
-    for (const path of [dead, deadExe, live, other]) writeFileSync(path, 'partial program')
-    expect(await runUpdate(w.env, { dryRun }, { version: '0.1.0', runProgram: noRun })).toBe(0)
-    expect(existsSync(dead)).toBe(false)
-    expect(existsSync(deadExe)).toBe(false)
-    expect(existsSync(live)).toBe(true)
-    expect(existsSync(other)).toBe(true)
-    expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
-  })
+async function plantLeftovers(binPath: string): Promise<{ dead: string; deadExe: string; live: string; other: string }> {
+  const bin = dirname(binPath)
+  const paths = {
+    dead: join(bin, `.kinfold-update-${await deadPid()}`),
+    deadExe: join(bin, `.kinfold-update-${await deadPid()}.exe`),
+    live: join(bin, `.kinfold-update-${process.ppid}`),
+    other: join(bin, '.kinfold-update-notapid'),
+  }
+  for (const path of Object.values(paths)) writeFileSync(path, 'partial program')
+  return paths
 }
+
+test("leftovers of dead update runs are swept, a live run's file is kept", async () => {
+  const { w, binPath } = updateWorld({ tag: 'v0.1.0' })
+  const { dead, deadExe, live, other } = await plantLeftovers(binPath)
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: noRun })).toBe(0)
+  expect(existsSync(dead)).toBe(false)
+  expect(existsSync(deadExe)).toBe(false)
+  expect(existsSync(live)).toBe(true)
+  expect(existsSync(other)).toBe(true)
+  expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
+  expect(w.out).toEqual(['kinfold is up to date (0.1.0)'])
+})
+
+test('a dry run lists dead leftovers by name and removes nothing', async () => {
+  const { w, binPath } = updateWorld()
+  const paths = await plantLeftovers(binPath)
+  expect(await runUpdate(w.env, { dryRun: true }, { version: '0.1.0', runProgram: noRun })).toBe(0)
+  for (const path of Object.values(paths)) expect(existsSync(path)).toBe(true)
+  expect(w.out[0]).toBe('kinfold update: 0.1.0 -> 0.2.0 (dry run; nothing is downloaded or changed)')
+  const line = w.out.find((entry) => entry.startsWith('  0. remove what earlier update runs left in '))
+  expect(line).toBeDefined()
+  expect(line).toContain(basename(paths.dead))
+  expect(line).toContain(basename(paths.deadExe))
+  expect(line).not.toContain(basename(paths.live))
+  expect(line).not.toContain(basename(paths.other))
+})
+
+test('a folder with a temp name is skipped, and an unremovable leftover is named, not fatal', async () => {
+  const { w, binPath } = updateWorld({ tag: 'v0.1.0' })
+  const bin = dirname(binPath)
+  const folder = join(bin, `.kinfold-update-${await deadPid()}`)
+  mkdirSync(folder)
+  writeFileSync(join(folder, 'inside'), 'x')
+  const stuck = join(bin, `.kinfold-update-${await deadPid()}`)
+  writeFileSync(stuck, 'partial program')
+  chmodSync(bin, 0o500)
+  let code: number
+  try {
+    code = await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: noRun })
+  } finally {
+    chmodSync(bin, 0o700)
+  }
+  expect(code).toBe(0)
+  expect(existsSync(join(folder, 'inside'))).toBe(true)
+  expect(existsSync(stuck)).toBe(true)
+  expect(w.out).toEqual([`kinfold update: could not remove ${stuck}, left by an earlier update (EACCES); remove it by hand`, 'kinfold is up to date (0.1.0)'])
+})
 
 test('a file or link already at the temp name is refused, not followed or removed', async () => {
   const { w, binPath } = updateWorld()
