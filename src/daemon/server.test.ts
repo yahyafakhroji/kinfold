@@ -159,7 +159,8 @@ test('the daemon hands the read routes its reader and resolver', async () => {
   }
 })
 
-test("the daemon's reader opens an encrypted store with the daemon's keys and asks the store once", async () => {
+// Windows keeps the reader's file locked past the temp folder cleanup, as in the test above.
+test.skipIf(process.platform === 'win32')("the daemon's reader opens an encrypted store with the daemon's keys and asks the store once", async () => {
   const serve = spyOn(server, 'startServer')
   const encryptedDir = join(root, 'encrypted')
   const key = newDbKey()
