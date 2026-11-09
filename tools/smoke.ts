@@ -109,6 +109,9 @@ interface RunOptions {
 
 // Values that follow these flags can be passwords (security's -w and -p), so
 // the process tree never shows them.
+const PS_COLUMNS = 'pid=,ppid=,stat=,%cpu=,etime=,command='
+const DIAGNOSTIC_LINES = 80
+
 const SECRET_FLAG = /(^|\s)(-w|-p|--password)(\s+|=)(\S+)/g
 
 function redactSecretFlags(command: string): string {
@@ -116,7 +119,7 @@ function redactSecretFlags(command: string): string {
 }
 
 /**
- * The rows of `ps -ax -o pid=,ppid=,etime=,command=` for rootPid and everything
+ * The rows of `ps -ax -o pid=,ppid=,...,command=` for rootPid and everything
  * under it, parent before child, with secret flag values redacted.
  */
 export function descendantsOf(psOutput: string, rootPid: number): string[] {
@@ -148,14 +151,43 @@ export function descendantsOf(psOutput: string, rootPid: number): string[] {
  */
 function reportTimeout(argv: readonly string[], pid: number): void {
   const lines = [`smoke: timed out: ${redactSecretFlags(argv.join(' '))}`]
-  try {
-    const ps = Bun.spawnSync(['ps', '-ax', '-o', 'pid=,ppid=,etime=,command='], { stdout: 'pipe', stderr: 'ignore' })
-    const tree = ps.exitCode === 0 ? descendantsOf(ps.stdout.toString(), pid) : []
-    lines.push(tree.length === 0 ? 'smoke: no process tree (ps failed or the command already exited)' : 'smoke: process tree (pid ppid elapsed command):', ...tree.map((line) => `  ${line}`))
-  } catch (error: unknown) {
-    lines.push(`smoke: ps could not run (${error instanceof Error ? error.message : String(error)})`)
+  const tree = diagnostic(['ps', '-ax', '-o', PS_COLUMNS], (text) => descendantsOf(text, pid))
+  lines.push(tree.length === 0 ? 'smoke: no process tree (ps failed or the command already exited)' : 'smoke: process tree (pid ppid stat %cpu elapsed command):', ...tree.map((line) => `  ${line}`))
+  // Which descriptors it holds (a socket left open, a lock) and, on macOS, the
+  // native stack: idle in the event loop means an await that never settles.
+  lines.push('smoke: open files:', ...diagnostic(['lsof', '-n', '-P', '-p', String(pid)], capLines).map((line) => `  ${line}`))
+  if (process.platform === 'darwin') {
+    lines.push('smoke: stack sample:', ...diagnostic(['/usr/bin/sample', String(pid), '1'], mainThreadStack).map((line) => `  ${line}`))
   }
   process.stderr.write(`${lines.join('\n')}\n`)
+}
+
+/** A read-only probe's output through a filter; a probe that cannot run gives one line saying so. */
+function diagnostic(argv: readonly string[], filter: (text: string) => string[]): string[] {
+  try {
+    const result = Bun.spawnSync([...argv], { stdout: 'pipe', stderr: 'ignore' })
+    if (result.exitCode !== 0) return [`${argv[0]} exited ${result.exitCode}`]
+    return filter(result.stdout.toString())
+  } catch (error: unknown) {
+    return [`${argv[0]} could not run (${error instanceof Error ? error.message : String(error)})`]
+  }
+}
+
+function capLines(text: string): string[] {
+  return text.split('\n').filter((line) => line.trim() !== '').slice(0, DIAGNOSTIC_LINES).map(redactSecretFlags)
+}
+
+/** The call graph's first thread, which is the JavaScript thread in a Bun program. */
+function mainThreadStack(text: string): string[] {
+  const lines = text.split('\n')
+  const start = lines.findIndex((line) => line.startsWith('Call graph:'))
+  if (start < 0) return capLines(text)
+  const graph: string[] = []
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() === '' || (graph.length > 1 && /^ {4}\d+ Thread_/.test(line))) break
+    graph.push(line.replace(/\s+\(in [^)]*\)/, '').slice(0, 160))
+  }
+  return graph.slice(0, DIAGNOSTIC_LINES)
 }
 
 async function run(argv: readonly string[], options: RunOptions): Promise<SmokeResult> {
