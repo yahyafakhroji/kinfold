@@ -14,7 +14,8 @@ import { DB_KEY_REF } from '../../secrets/credentials'
 import { createKeychainProvider } from '../../secrets/keychain'
 import { credentialWriterFor } from '../../secrets/keychain-writer'
 import { credentialDbKeyStore } from '../../sqlite/keys'
-import { fileState, openStoreFile } from '../../sqlite/open'
+import { openReadOnly } from '../../context/fallback'
+import { fileState } from '../../sqlite/open'
 import { DB_FILE } from '../../store/data-dir'
 import { type ObserverSettingsInput, listObserverSettings } from '../../store/observer-settings-store'
 import { type WiringState, inspectSamHooks } from '../claude-hooks'
@@ -95,12 +96,26 @@ function toMap(rows: readonly RowLike[]): Map<InstallHost, ObserverSettingsInput
   return map
 }
 
-/** The store opened read-only with the platform key; throws when the key or the file will not open. */
+/**
+ * The store opened read-only with the platform key; throws when the key or the
+ * file will not open. A plain read-only open of a WAL store creates -wal and
+ * -shm beside it when they are missing, so it is used only when both are
+ * there; otherwise the file opens with immutable=1, which writes nothing.
+ * immutable cannot misread a store in use: every connection to a WAL store
+ * creates and keeps both side files while it is open, so their absence means
+ * nothing has the store open, and a writer that opens meanwhile only appends
+ * to its new -wal; the main file changes only at a checkpoint. What immutable
+ * can miss is a -wal a crashed daemon left without its -shm.
+ */
 function readStoreRows(env: InstallEnv, dataDir: string): RowLike[] {
   const writer = credentialWriterFor(env.platform, env.security)
   const keychain = createKeychainProvider((args) => env.security({ args }))
   const keys = credentialDbKeyStore('keychain', keychain, () => writer?.exists(DB_KEY_REF) ?? false)
-  const db = openStoreFile(join(dataDir, DB_FILE), { readonly: true, keys })
+  let failure: unknown = null
+  const db = openReadOnly(join(dataDir, DB_FILE), (error) => {
+    failure = error
+  }, keys)
+  if (db === null) throw failure ?? new Error('memory.db did not open')
   try {
     return listObserverSettings(db)
   } finally {

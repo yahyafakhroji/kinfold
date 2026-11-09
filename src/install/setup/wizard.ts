@@ -11,6 +11,7 @@ import { encodeRecoveryCode } from '../../sqlite/recovery'
 import { newDbKey } from '../../sqlite/keys'
 import { checkHealth } from '../daemon-client'
 import { STALE_DB_KEY, storedDbKey } from '../db-encryption'
+import { ENCRYPT_KEY_EXISTS } from '../encrypt'
 import { type InstallHost, detectHosts, selectedHosts } from '../detect'
 import type { InstallEnv } from '../env'
 import {
@@ -258,6 +259,8 @@ async function encryptionStep(env: InstallEnv, ask: Prompts | null, state: Setup
     return { kind: 'new-encrypted', key: await keyWithConfirmedCode(env, ask, true) }
   }
   if (flags.noEncrypt || !(await ask.confirm('Encrypt memory.db?', false))) return { kind: 'keep' }
+  // A key already there may open an older encrypted copy; refused here, before a code is shown for a key that would be thrown away.
+  if (storedDbKey(env).kind !== 'none') throw new ChoiceError(ENCRYPT_KEY_EXISTS)
   return { kind: 'encrypt-existing', key: await keyWithConfirmedCode(env, ask, false) }
 }
 

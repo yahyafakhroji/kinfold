@@ -8,6 +8,7 @@ import { encodeRecoveryCode } from '../../sqlite/recovery'
 import { openStore } from '../../store/db'
 import { type ObserverSettingsInput, upsertObserverSettings } from '../../store/observer-settings-store'
 import { mergeSamHooks } from '../claude-hooks'
+import { ENCRYPT_KEY_EXISTS } from '../encrypt'
 import { installPaths } from '../env'
 import { entryCommand } from '../entry'
 import { hostHookInstallActions } from '../host-wiring'
@@ -212,7 +213,10 @@ test('a db-key whose code cannot be recomputed ends the step with a message', as
   const state = await readSetupState(w.env)
   const failure = await runWizard(w.env, ask(w), state, flagsOf({ hosts: [] }), NO_CHOICE).catch((error: unknown) => error)
   expect(failure).toEqual(new ChoiceError(STALE_DB_KEY))
-  expect(STALE_DB_KEY).toContain('kinfold key show-recovery')
+  // No store exists for show-recovery to read, so the message names the Keychain item, never its value.
+  expect(STALE_DB_KEY).toContain('service kinfold and account db-key')
+  expect(STALE_DB_KEY).not.toContain('show-recovery')
+  expect(STALE_DB_KEY).not.toContain('not-a-key')
   expect(term.output()).not.toMatch(CODE_PATTERN)
   expect(w.securityCalls.some((call) => call.args[0] === '-i')).toBe(false)
 })
@@ -249,6 +253,15 @@ test('a plaintext store stays plain on Enter and encrypts with a confirmed code 
   expect(answers.encryption.kind).toBe('encrypt-existing')
   const key = answers.encryption.kind === 'encrypt-existing' ? answers.encryption.key : ''
   expect(terminal.output()).toContain(encodeRecoveryCode(key))
+})
+
+test('turning encryption on beside an existing db-key is refused before any code is shown', async () => {
+  const { w, term } = setup(['y', ENTER, ENTER, ENTER], { keychainRefs: [DB_KEY_REF] })
+  w.keychainValues.set(DB_KEY_REF, newDbKey())
+  const state = rerun(await readSetupState(w.env), { encryption: 'off' })
+  await expect(runWizard(w.env, ask(w), state, flagsOf({ hosts: [] }), NO_CHOICE)).rejects.toThrow(ENCRYPT_KEY_EXISTS)
+  expect(term.output()).not.toMatch(CODE_PATTERN)
+  expect(term.output()).not.toContain('Recovery code')
 })
 
 test('a taken port suggests the next free one', async () => {

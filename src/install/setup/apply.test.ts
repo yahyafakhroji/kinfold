@@ -225,7 +225,8 @@ test('--yes on a new store refuses a db-key whose code cannot be recomputed, bef
   expect(await install(w.env, YES)).toBe(EXIT_FAILED)
   expect(w.out.at(-1)).toBe(`install failed: ${STALE_DB_KEY}`)
   expect(snapshotTree(w.home)).toEqual(before)
-  expect(w.out.join('\n')).toContain('kinfold key show-recovery')
+  expect(w.out.at(-1)).toContain('service kinfold and account db-key')
+  expect(w.out.join('\n')).not.toContain('show-recovery')
 })
 
 test('the done screen names the next steps', async () => {
@@ -305,8 +306,13 @@ test('a dry run lists the encrypt step and changes nothing', async () => {
   const w = make()
   expect(await install(w.env, { ...YES, noEncrypt: true })).toBe(EXIT_OK)
   await w.env.run({ argv: bootoutArgv(UID) })
-  const state = await readSetupState(w.env)
+  const beside = (): string[] => readdirSync(w.dataDir).filter((name) => name.startsWith(DB_FILE)).sort()
+  expect(beside()).toEqual([DB_FILE])
   const before = snapshotTree(w.home)
+  // The daemon is down, so the saved observers come from the store itself.
+  const state = await readSetupState(w.env)
+  expect(state.observersError).toBeNull()
+  expect(state.observers.size).toBe(1)
   const refs = [...w.keychain].sort()
   w.fetches.length = 0
   w.out.length = 0
@@ -318,6 +324,16 @@ test('a dry run lists the encrypt step and changes nothing', async () => {
   expect([...w.keychain].sort()).toEqual(refs)
   expect(w.fetches.filter((line) => line.startsWith('PUT'))).toEqual([])
   expect(fileState(join(w.dataDir, DB_FILE))).toBe('plain')
+  expect(beside()).toEqual([DB_FILE])
+})
+
+test('--yes never asks for a missing observer key, even on a terminal', async () => {
+  const term = fakeTerminal(['sk-typed-key', ENTER])
+  const w = make({ claudeVersion: null, opencodeVersion: OPENCODE, keychainRefs: [], interactive: true, secrets: ['sk-typed-key'], terminal: term })
+  expect(await install(w.env, YES)).toBe(EXIT_FAILED)
+  expect(w.out.at(-1)).toBe('install failed: the openrouter key is not in the keychain and --yes asks nothing; pass --credential-stdin')
+  expect(term.output()).toBe('')
+  expect(w.keychain.has('openrouter')).toBe(false)
 })
 
 test('a key asked between the questions goes through the same terminal session', async () => {

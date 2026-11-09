@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DB_KEY_REF } from '../../secrets/credentials'
 import { type DbKeyStore, NO_DB_KEYS, newDbKey } from '../../sqlite/keys'
@@ -48,6 +48,8 @@ function seedPlainStore(w: FakeWorld, input: ObserverSettingsInput): void {
     store.db.close()
   }
 }
+
+const besideStore = (w: FakeWorld): string[] => readdirSync(w.dataDir).filter((name) => name.startsWith(DB_FILE)).sort()
 
 function writePlist(w: FakeWorld, edit: (text: string) => string = (text) => text): void {
   const paths = installPaths(w.env)
@@ -100,9 +102,26 @@ test('observers come from the store when the daemon is down', async () => {
   const w = make()
   await markInstalled(w)
   seedPlainStore(w, HAIKU)
+  expect(besideStore(w)).toEqual([DB_FILE])
   const state = await readSetupState(w.env)
   expect(state.observers.get('opencode')).toEqual(HAIKU)
   expect(state.encryption).toBe('off')
+  // The read writes nothing beside the store: no -wal or -shm appears.
+  expect(besideStore(w)).toEqual([DB_FILE])
+})
+
+test('a store whose WAL side files are there is read through them and keeps them', async () => {
+  const w = make()
+  await markInstalled(w)
+  seedPlainStore(w, HAIKU)
+  const open = openStore(w.dataDir, { keys: NO_DB_KEYS })
+  try {
+    expect(besideStore(w)).toEqual([DB_FILE, `${DB_FILE}-shm`, `${DB_FILE}-wal`])
+    expect((await readSetupState(w.env)).observers.get('opencode')).toEqual(HAIKU)
+    expect(besideStore(w)).toEqual([DB_FILE, `${DB_FILE}-shm`, `${DB_FILE}-wal`])
+  } finally {
+    open.db.close()
+  }
 })
 
 test('saved rows with no install.json and no plist still reach --yes', async () => {
@@ -126,7 +145,9 @@ test('an encrypted store is read through the Keychain key when the daemon is dow
   upsertObserverSettings(store.db, HAIKU, 1)
   store.db.close()
   const before = readFileSync(join(w.dataDir, DB_FILE))
+  expect(besideStore(w)).toEqual([DB_FILE])
   const state = await readSetupState(w.env)
+  expect(besideStore(w)).toEqual([DB_FILE])
   expect(state.encryption).toBe('on')
   expect(state.observers.get('opencode')).toEqual(HAIKU)
   expect(readFileSync(join(w.dataDir, DB_FILE)).equals(before)).toBe(true)

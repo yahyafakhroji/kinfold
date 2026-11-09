@@ -167,6 +167,9 @@ async function readCredentialValue(env: InstallEnv, ref: string, options: Choice
     if (session.stdinUsed) throw new ChoiceError(`stdin was already read; cannot read another key for ${ref}`)
     session.stdinUsed = true
     value = await env.io.readStdin()
+  } else if (options.yes) {
+    // --yes never asks, even on a terminal: a child `install --yes` must not stop at a question.
+    throw new ChoiceError(`the ${ref} key is not in the keychain and --yes asks nothing; pass --credential-stdin`)
   } else if (env.io.interactive) {
     value = await env.io.askSecret(`Key for ${ref} (stored in the macOS Keychain, not shown) > `)
   } else {

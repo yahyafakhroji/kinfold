@@ -46,8 +46,9 @@ export function dbKeyActions(env: InstallEnv): Action[] {
 }
 
 export const DB_KEY_MISMATCH = `the Keychain already holds ${DB_KEY_REF}, so the recovery code shown does not open this store; run kinfold key show-recovery`
+/** No store exists to show a code for, so the way out is the Keychain item itself, named and never read out. */
 export const STALE_DB_KEY =
-  'the Keychain already holds a database key (db-key) that no memory.db uses, and its recovery code cannot be recomputed; run kinfold key show-recovery to look at it before installing'
+  `the Keychain already holds a database key that no memory.db uses, and its recovery code cannot be recomputed from it; nothing was changed. If no copy of memory.db needs it, delete the Keychain item with service ${KEYCHAIN_SERVICE} and account ${DB_KEY_REF}, then run install again`
 
 const HEX_KEY = /^[0-9a-f]{64}$/
 
