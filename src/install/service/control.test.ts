@@ -1,7 +1,9 @@
 import { afterEach, expect, test } from 'bun:test'
 import { type FakeWorld, createWorld } from '../test-support'
 import { serviceFor } from './control'
+import { ScheduledTaskService } from './scheduled-task-service'
 import { StubService } from './stub-service'
+import { SystemdUserService } from './systemd-service'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -13,9 +15,10 @@ test('serviceFor picks the platform service', () => {
   world = createWorld()
   const env = world.env
   expect(serviceFor(env).label).toBe('LaunchAgent')
-  expect(serviceFor({ ...env, platform: 'linux' }).label).toBe('systemd user service')
-  expect(serviceFor({ ...env, platform: 'linux', wsl: true }).label).toBe('systemd user service')
-  expect(serviceFor({ ...env, platform: 'win32' }).label).toBe('scheduled task')
+  // The class, not its text: the Linux and Windows files are replaced by their real services.
+  expect(serviceFor({ ...env, platform: 'linux' })).toBeInstanceOf(SystemdUserService)
+  expect(serviceFor({ ...env, platform: 'linux', wsl: true })).toBeInstanceOf(SystemdUserService)
+  expect(serviceFor({ ...env, platform: 'win32' })).toBeInstanceOf(ScheduledTaskService)
   expect(serviceFor(env).unavailableReason()).toBeNull()
 })
 

@@ -178,9 +178,11 @@ test('the data dir permission fix reports each path with its old and new mode', 
 
 test('the non-macOS line names the program', async () => {
   const w = both({ opencodeVersion: undefined, keychainRefs: [] })
-  await install({ ...w.env, platform: 'linux' }, YES)
-  const line = w.out.find((l) => l.startsWith('systemd user service: '))
-  expect(line).toBe(`systemd user service: not set up on this platform yet; start the daemon yourself with: ${BUN} ${join(w.projectRoot, 'src/daemon/main.ts')}`)
+  // A stub stands in for the Linux service, so this test never depends on the real one's text.
+  const linux = { ...w.env, platform: 'linux' as const }
+  await install({ ...linux, service: new StubService(linux, 'test service') }, YES)
+  const line = w.out.find((l) => l.startsWith('test service: '))
+  expect(line).toBe(`test service: not set up on this platform yet; start the daemon yourself with: ${BUN} ${join(w.projectRoot, 'src/daemon/main.ts')}`)
   expect(line).not.toContain('bun run daemon')
 })
 
