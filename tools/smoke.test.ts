@@ -223,7 +223,8 @@ function recordingDeps(recorder: Recorder): { kinfold: Kinfold; runConversion: C
   let encrypted = true
   return {
     kinfold: async (world, args, stdin) => {
-      const command = args[0] ?? ''
+      // The status probe runs in its own empty home before install.
+      const command = world.home.endsWith('probe-home') ? `probe:${args[0] ?? ''}` : args[0] ?? ''
       recorder.calls.push(command)
       if (command === '--version') return ok('0.0.0-dev\n')
       if (command === 'install') {
@@ -281,7 +282,7 @@ async function runSmoke(platform: SmokePlatform, deps: { kinfold: Kinfold; runCo
   }
 }
 
-const SERVICE_ORDER = ['--version', 'install', 'status', 'hook', 'decrypt', 'status', 'encrypt', 'status', 'uninstall']
+const SERVICE_ORDER = ['--version', 'probe:status', 'install', 'status', 'hook', 'decrypt', 'status', 'encrypt', 'status', 'uninstall']
 
 function withoutSearches(calls: readonly string[]): string[] {
   return calls.filter((call) => call !== 'mcp')
@@ -292,7 +293,7 @@ describe('smoke order', () => {
     const recorder = newRecorder()
     await runSmoke(fakePlatform({ foregroundDaemon: recordingDaemon(recorder) }), recordingDeps(recorder))
     expect(withoutSearches(recorder.calls)).toEqual([
-      '--version',
+      '--version', 'probe:status',
       'install', 'fg-start', 'status', 'hook', 'fg-stop',
       'decrypt', 'fg-start', 'status', 'fg-stop',
       'encrypt', 'fg-start', 'status', 'fg-stop',
@@ -334,6 +335,25 @@ describe('smoke order', () => {
     const error = await rejection(runSmoke(fakePlatform({ foregroundDaemon: recordingDaemon(recorder) }), { ...deps, kinfold: failingHook }))
     expect(error).toBeInstanceOf(SmokeError)
     expect((error as SmokeError).step).toBe('hook')
-    expect(recorder.calls).toEqual(['--version', 'install', 'fg-start', 'status', 'hook', 'fg-stop', 'uninstall'])
+    expect(recorder.calls).toEqual(['--version', 'probe:status', 'install', 'fg-start', 'status', 'hook', 'fg-stop', 'uninstall'])
+  })
+
+  test('a compiled program that never finishes status fails before install, in its own step', async () => {
+    const recorder = newRecorder()
+    const deps = recordingDeps(recorder)
+    const limits: (number | undefined)[] = []
+    const spinning: Kinfold = async (world, args, stdin, timeoutMs) => {
+      if (!world.home.endsWith('probe-home')) return await deps.kinfold(world, args, stdin)
+      limits.push(timeoutMs)
+      expect(world.env.HOME).toBe(world.home)
+      throw new SmokeError('timeout', `${world.program} did not finish in ${timeoutMs} ms`)
+    }
+    const error = await rejection(runSmoke(fakePlatform(), { ...deps, kinfold: spinning }))
+    expect(error).toBeInstanceOf(SmokeError)
+    expect((error as SmokeError).step).toBe('compiled')
+    expect((error as SmokeError).message).toContain('status in an empty home did not finish in 20 s')
+    expect(limits).toEqual([20_000])
+    // Nothing was installed, so the cleanup does not uninstall either.
+    expect(recorder.calls).toEqual(['--version'])
   })
 })

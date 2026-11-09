@@ -30,6 +30,9 @@ const SHORT_TIMEOUT_MS = 20_000
 // Install waits up to 180 s for the daemon's /health and uninstall waits on the
 // service too, so their own limit must run out first and print its message.
 const SERVICE_COMMAND_TIMEOUT_MS = 240_000
+// status in an empty home answers in a second or two; a compiled program that
+// spins while loading its modules never does, and this fails it in seconds.
+const PROBE_TIMEOUT_MS = 20_000
 const SEARCH_TIMEOUT_MS = 45_000
 const SEARCH_POLL_MS = 500
 const OUTPUT_LIMIT = 6_000
@@ -45,7 +48,8 @@ export function homeForSmoke(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export interface SmokeDeps {
-  kinfold?: (world: SmokeWorld, args: readonly string[], stdin?: string) => Promise<SmokeResult>
+  /** timeoutMs overrides the per-command limit; the driver passes it only for the compiled-program probe. */
+  kinfold?: (world: SmokeWorld, args: readonly string[], stdin?: string, timeoutMs?: number) => Promise<SmokeResult>
   /** Test seam for the pty conversion; default platform.runConversion, else the expect-based one. */
   runConversion?: (world: SmokeWorld, operation: 'encrypt' | 'decrypt') => Promise<SmokeResult>
   /** Where HOME, PATH (to find claude) and KINFOLD_RELEASE_SUMS_URL are read; default process.env. */
@@ -58,7 +62,7 @@ export interface SmokeDeps {
 interface Run {
   world: SmokeWorld
   platform: SmokePlatform
-  kinfold: (world: SmokeWorld, args: readonly string[], stdin?: string) => Promise<SmokeResult>
+  kinfold: (world: SmokeWorld, args: readonly string[], stdin?: string, timeoutMs?: number) => Promise<SmokeResult>
   runConversion: (world: SmokeWorld, operation: 'encrypt' | 'decrypt') => Promise<SmokeResult>
   daemon: ForegroundDaemon
 }
@@ -228,11 +232,11 @@ function timeoutFor(args: readonly string[]): number {
   return PROGRAM_TIMEOUT_MS
 }
 
-async function kinfold(world: SmokeWorld, args: readonly string[], stdin?: string): Promise<SmokeResult> {
+async function kinfold(world: SmokeWorld, args: readonly string[], stdin?: string, timeoutMs?: number): Promise<SmokeResult> {
   return await run([world.program, ...args], {
     cwd: world.project,
     env: world.env,
-    timeoutMs: timeoutFor(args),
+    timeoutMs: timeoutMs ?? timeoutFor(args),
     showOutputOnTimeout: true,
     ...(stdin !== undefined ? { stdin } : {}),
   })
@@ -479,6 +483,26 @@ function encryptedLine(platform: SmokePlatform): RegExp {
   return new RegExp(`^database: encrypted \\(${escapeRegExp(platform.keyStoreLabel)} db-key present\\)`, 'm')
 }
 
+/**
+ * Runs status in a fresh empty home before anything is installed. status
+ * loads the installer's modules, which a compiled program can fail to finish
+ * loading (an import of the entry module spins forever) while the same code
+ * run from source works; this catches that in seconds instead of after
+ * install's full limit. Only finishing matters: the exit code of status in an
+ * empty home is not part of the check.
+ */
+async function probeCompiledStatus(ctx: Run): Promise<void> {
+  const home = join(ctx.world.root, 'probe-home')
+  mkdirSync(home, { recursive: true, mode: 0o700 })
+  const probe: SmokeWorld = { ...ctx.world, home, dataDir: join(home, '.kinfold'), env: { ...ctx.world.env, HOME: home } }
+  try {
+    await ctx.kinfold(probe, ['status'], undefined, PROBE_TIMEOUT_MS)
+  } catch (error: unknown) {
+    if (!(error instanceof SmokeError) || error.step !== 'timeout') throw error
+    throw new SmokeError('compiled', `status in an empty home did not finish in ${PROBE_TIMEOUT_MS / 1000} s; the compiled program never finished loading its modules (a module that imports src/cli/kinfold.ts spins it)\n${error.message}`)
+  }
+}
+
 async function steps(ctx: Run): Promise<void> {
   const { world, platform, kinfold, daemon } = ctx
   process.stdout.write('smoke: install\n')
@@ -617,6 +641,8 @@ export async function smoke(programPath: string, platform: SmokePlatform, deps: 
     // cleanup in the failure path never runs uninstall against them.
     ensurePortFree(deps.port ?? DEFAULT_PORT)
     if (platform.serviceLoaded(world.env)) throw new SmokeError('setup', `the ${platform.name} service is already loaded; the smoke will not take over an existing install`)
+    process.stdout.write('smoke: compiled status probe\n')
+    await probeCompiledStatus(ctx)
     const realClaude = Bun.which('claude', { PATH: env.PATH ?? '' })
     if (platform.writeObserverShim !== undefined) await platform.writeObserverShim(world, realClaude)
     else writeObserverShim(world, realClaude)
