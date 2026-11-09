@@ -4,7 +4,8 @@ import { chmodSync, existsSync, fstatSync, mkdirSync, readFileSync, readdirSync,
 import { basename, dirname, join } from 'node:path'
 import { installedProgramPath } from '../install/entry'
 import { installProgram, releaseAssetName } from '../install/self-install'
-import { type FakeService, type FakeWorld, createWorld, fakeService } from '../install/test-support'
+import { type FakeService, type FakeWorld, countingService, createWorld, fakeService } from '../install/test-support'
+import { StubService } from '../install/service/stub-service'
 import { LATEST_RELEASE_URL } from './check'
 import { programUrl, runUpdate } from './update'
 
@@ -358,4 +359,14 @@ test('a hand-off killed while the child had the service stopped starts it again 
   expect(code).toBe(1)
   expect(service.calls.filter((call) => call === 'start' || call === 'stop')).toEqual(['stop', 'start'])
   expect(w.out.at(-1)).toBe(`kinfold update: the new program's install stopped (exit 129); ${binPath} is still 0.1.0; the service is running`)
+})
+
+test('with an unavailable service the hand-off never starts or stops it', async () => {
+  const { w } = updateWorld()
+  const service = countingService(new StubService(w.env, 'test service'))
+  w.env = { ...w.env, service }
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: async () => 0 })).toBe(0)
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: async () => 3 })).toBe(1)
+  expect(w.out.at(-1)).toEndWith('; this platform has no background service')
+  expect(service.steps).toEqual([])
 })

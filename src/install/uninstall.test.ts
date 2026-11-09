@@ -3,11 +3,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { installPaths } from './env'
 import { EXIT_OK, install } from './install'
-import { LAUNCHCTL } from './launch-agent'
+import { LAUNCHCTL, bootoutArgv } from './launch-agent'
 import { MCP_SERVER_NAME, claudeMcpEntry } from './mcp-config'
 import { mcpPaths, mcpTarget } from './mcp-wiring'
 import { pluginFileContent } from './opencode-shim'
-import { type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
+import { type FakeWorld, UID, YES, createWorld, snapshotTree } from './test-support'
 import { uninstall } from './uninstall'
 
 let world: FakeWorld | null = null
@@ -43,6 +43,8 @@ test('uninstall removes only our hooks, the shim and the LaunchAgent; the data d
   expect(w.commands.filter((c) => c.argv[0] === LAUNCHCTL).map((c) => [...c.argv])).toEqual([
     [LAUNCHCTL, 'print', 'gui/501/dev.kinfold.daemon'],
     [LAUNCHCTL, 'bootout', 'gui/501/dev.kinfold.daemon'],
+    // The stop waits until launchd no longer has the job.
+    [LAUNCHCTL, 'print', 'gui/501/dev.kinfold.daemon'],
   ])
   expect(existsSync(w.dataDir)).toBe(true)
   expect(w.keychain.has('openrouter')).toBe(true)
@@ -128,4 +130,13 @@ test('the program and libraries are removed after the hosts are unwired, so a fa
   const bin = lines.findIndex((line) => line.includes('the installed kinfold program'))
   expect(mcp).toBeGreaterThanOrEqual(0)
   expect(bin).toBeGreaterThan(mcp)
+})
+
+test('uninstall stops and removes the service config through the service', async () => {
+  const w = await installed()
+  const paths = installPaths(w.env)
+  w.out.length = 0
+  expect(await uninstall(w.env, { dryRun: true, removeCredentials: false })).toBe(EXIT_OK)
+  const plan = w.out.filter((line) => /^ {2}\d+\. /.test(line)).map((line) => line.replace(/^ {2}\d+\. /, ''))
+  expect(plan.slice(0, 2)).toEqual([bootoutArgv(UID).join(' '), `remove ${paths.launchAgentPlist}: the LaunchAgent`])
 })

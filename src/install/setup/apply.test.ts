@@ -68,6 +68,10 @@ function recordingService(env: InstallEnv): ServiceControl & { calls: string[] }
     configuredDataDir: () => real.configuredDataDir(),
     configuredPort: () => real.configuredPort(),
     fileHolders: (path) => real.fileHolders(path),
+    configPath: () => real.configPath(),
+    configContent: (port) => real.configContent(port),
+    describe: (step) => real.describe(step),
+    unavailableReason: () => real.unavailableReason(),
   }
 }
 

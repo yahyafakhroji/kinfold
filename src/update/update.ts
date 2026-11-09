@@ -264,7 +264,7 @@ async function hashOrNull(path: string): Promise<string | null> {
 /** The child may have stopped the service before it failed, so say what it is now. */
 async function serviceState(env: InstallEnv): Promise<string> {
   const service = serviceOf(env)
-  if (service === null) return 'this platform has no background service'
+  if (service === null || service.unavailableReason() !== null) return 'this platform has no background service'
   try {
     return (await service.isRunning()) ? 'the service is running' : 'the service is stopped; kinfold install starts it again'
   } catch (error: unknown) {

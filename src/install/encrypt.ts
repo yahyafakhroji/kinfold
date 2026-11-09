@@ -7,7 +7,8 @@
 //   - encrypt and rekey show the recovery code first, and go on only once the
 //     person types its last two groups back;
 //   - the background service's daemon is stopped and started again around the change,
-//     a hand-started one makes the command refuse, and the maintenance marker
+//     a hand-started one makes the command refuse (so does any daemon where the
+//     service cannot be set up: kinfold never stops a process it did not start), and the maintenance marker
 //     keeps hooks and MCP servers off the file meanwhile;
 //   - the marker is also the journal: it names the operation and the key store
 //     entry that opens the result, so `kinfold key resume` can finish or undo a run
@@ -32,7 +33,7 @@ import { EXIT_FAILED, EXIT_OK } from './install'
 import { capitalized, keyStoreOf } from './key-store-choice'
 import { HEALTH_WAIT_MS } from './plan'
 import { confirmRecoveryCode, recoverySinkFromEnv } from './recovery-confirm'
-import { serviceOf } from './service/control'
+import { managedServiceOf } from './service/control'
 
 export const KEY_COMMANDS = ['encrypt', 'decrypt', 'rekey', 'show-recovery', 'recover', 'resume'] as const
 export type KeyCommand = (typeof KEY_COMMANDS)[number]
@@ -97,7 +98,7 @@ interface Daemon {
 }
 
 async function startDaemon(ctx: Context, daemon: Daemon): Promise<void> {
-  const service = serviceOf(ctx.env)
+  const service = managedServiceOf(ctx.env)
   if (!daemon.restart || service === null) {
     ctx.log('daemon: it was not running as a service; start it when you are ready')
     return
@@ -114,7 +115,7 @@ async function startDaemon(ctx: Context, daemon: Daemon): Promise<void> {
 }
 
 async function stopDaemon(ctx: Context): Promise<Daemon> {
-  const service = serviceOf(ctx.env)
+  const service = managedServiceOf(ctx.env)
   const loaded = service !== null && (await service.isRunning())
   if (loaded) {
     try {
@@ -136,7 +137,7 @@ async function stopDaemon(ctx: Context): Promise<Daemon> {
 
 /** Who still holds memory.db, for the "another process" refusal: pids and command names only. */
 async function holders(ctx: Context): Promise<string> {
-  return (await serviceOf(ctx.env)?.fileHolders(ctx.path)) ?? ''
+  return (await managedServiceOf(ctx.env)?.fileHolders(ctx.path)) ?? ''
 }
 
 /** Retries while another process holds the file: agent sessions let go of an idle reader within 30 s and cannot reopen past the marker. */
@@ -434,7 +435,7 @@ async function resume(ctx: Context): Promise<void> {
     throw new Refusal('memory.db opens with neither key; nothing was deleted. Run kinfold key recover with your recovery code')
   }
   rmSync(marker, { force: true })
-  const service = serviceOf(ctx.env)
+  const service = managedServiceOf(ctx.env)
   if (service !== null && service.isConfigured() && !(await service.isRunning())) await startDaemon(ctx, { restart: true })
 }
 

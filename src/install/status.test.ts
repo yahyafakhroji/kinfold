@@ -38,7 +38,7 @@ test('before install: hosts detected but not wired, daemon down, nothing created
     `mcp server ${entryIdentity(w.env.mode, 'mcp', w.env.dataDir)}:`,
     `  claude-code: no in ${mcpPaths(w.env).claudeUserConfig}`,
     `  opencode: no in ${mcpPaths(w.env).opencodeConfig}`,
-    'launch agent: plist missing; loaded: no',
+    'service (LaunchAgent): config missing; running: no',
     'daemon /health: down (nothing answers on 127.0.0.1:37811 (TypeError))',
     'semantic search: off (no pinned sqlite-vec build for darwin-test-arch)',
     'database: not created yet (keychain db-key missing)',
@@ -63,7 +63,7 @@ test('after install: wired, loaded, healthy, observers with their source, modes 
   const out = w.out.join('\n')
   expect(out).toContain('claude-code: detected 2.1.310 (Claude Code); wired: yes')
   expect(out).toContain('opencode: detected 2.1.4; wired: yes')
-  expect(out).toContain('launch agent: plist present; loaded: yes')
+  expect(out).toContain('service (LaunchAgent): config present; running: yes')
   expect(out).toMatch(/daemon \/health: up on 127\.0\.0\.1:\d+ version \S+ schema \d+ pid \d+, LaunchAgent/)
   expect(out).toContain(` version ${VERSION} schema `)
   expect(out).toContain('  claude-code: claude-cli/haiku; source host')
@@ -177,4 +177,12 @@ test('status shows the notice', async () => {
   writeUpdateState(w.dataDir, { lastAttemptAt: 1, latestVersion: '0.1.0', checkedAt: 1_800_000_000_000, notified: {} })
   await status(w.env, '0.1.0')
   expect(w.out).toContain('update: none known (last checked 2027-01-15T08:00:00.000Z)')
+})
+
+test('status names the service', async () => {
+  const w = make()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  w.out.length = 0
+  expect(await status(w.env)).toBe(EXIT_OK)
+  expect(w.out).toContain('service (LaunchAgent): config present; running: yes')
 })

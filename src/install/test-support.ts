@@ -351,7 +351,7 @@ export interface FakeService extends ServiceControl {
 }
 
 /** A ServiceControl that records calls and touches nothing; each answer can be set. */
-export function fakeService(options: { running?: boolean; configured?: boolean; startError?: Error; stopError?: Error; holders?: string; dataDir?: string; port?: number } = {}): FakeService {
+export function fakeService(options: { running?: boolean; configured?: boolean; startError?: Error; stopError?: Error; holders?: string; dataDir?: string; port?: number; unavailableReason?: string } = {}): FakeService {
   const calls: string[] = []
   let running = options.running ?? true
   return {
@@ -372,5 +372,34 @@ export function fakeService(options: { running?: boolean; configured?: boolean; 
     configuredDataDir: () => options.dataDir ?? null,
     configuredPort: () => options.port ?? null,
     fileHolders: async () => (calls.push('fileHolders'), options.holders ?? ''),
+    configPath: () => null,
+    configContent: () => null,
+    describe: (step) => `FakeService ${step}`,
+    unavailableReason: () => options.unavailableReason ?? null,
+  }
+}
+
+export interface CountingService extends ServiceControl {
+  /** The start and stop calls made, in order. */
+  steps: string[]
+}
+
+/** Wraps a service and counts its start and stop calls; unavailableReason can be overridden. */
+export function countingService(inner: ServiceControl, reason?: string): CountingService {
+  const steps: string[] = []
+  return {
+    label: inner.label,
+    steps,
+    isConfigured: () => inner.isConfigured(),
+    isRunning: () => inner.isRunning(),
+    start: () => (steps.push('start'), inner.start()),
+    stop: () => (steps.push('stop'), inner.stop()),
+    configuredDataDir: () => inner.configuredDataDir(),
+    configuredPort: () => inner.configuredPort(),
+    fileHolders: (path) => inner.fileHolders(path),
+    configPath: () => inner.configPath(),
+    configContent: (port) => inner.configContent(port),
+    describe: (step) => inner.describe(step),
+    unavailableReason: () => (reason !== undefined ? reason : inner.unavailableReason()),
   }
 }

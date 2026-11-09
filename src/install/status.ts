@@ -16,6 +16,7 @@ import { keyStoreStatusLine, readKeyStore } from './key-store-choice'
 import { entryCommand } from './entry'
 import { readJsonObject, readTextOrNull } from './files'
 import { EXIT_OK, daemonSituation } from './install'
+import { serviceOf } from './service/control'
 import { hmacStatusLines } from './hmac-migration'
 import { hostWiringLine } from './host-wiring'
 import { mcpStatusLines } from './mcp-wiring'
@@ -58,13 +59,15 @@ async function hostLines(env: InstallEnv): Promise<string[]> {
 
 async function daemonLines(env: InstallEnv): Promise<string[]> {
   const situation = await daemonSituation(env)
-  const plist = existsSync(installPaths(env).launchAgentPlist) ? 'present' : 'missing'
-  const owner = situation.health.up ? (situation.foreign ? ', not started by the LaunchAgent' : ', LaunchAgent') : ''
+  const service = serviceOf(env)
+  const label = service?.label ?? 'none'
+  const config = service !== null && service.isConfigured() ? 'present' : 'missing'
+  const owner = situation.health.up ? (situation.foreign ? `, not started by the ${label}` : situation.loaded || situation.legacyLoaded ? `, ${label}` : ', started by hand') : ''
   const pid = situation.pid !== null ? ` pid ${situation.pid}` : ''
   const health = situation.health.up
     ? `up on 127.0.0.1:${situation.port} version ${situation.health.version} schema ${situation.health.schemaVersion}${pid}${owner}`
     : `down (${situation.health.reason})`
-  return [`launch agent: plist ${plist}; loaded: ${situation.loaded ? 'yes' : 'no'}`, `daemon /health: ${health}`, vectorStatusLine(env, situation.health)]
+  return [`service (${label}): config ${config}; running: ${situation.loaded ? 'yes' : 'no'}`, `daemon /health: ${health}`, vectorStatusLine(env, situation.health)]
 }
 
 function effectiveLine(entry: EffectiveSettings): string {

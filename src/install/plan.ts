@@ -13,6 +13,7 @@ import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import { START_WAIT_MS, putObserverSettings, waitForHealth, waitForStart } from './daemon-client'
 import { createDbKey, createPlainStore, describeCreateDbKey, describeCreatePlainStore } from './db-encryption'
 import { type InstallEnv, installPaths } from './env'
+import { NOT_FOUND_EXIT } from './system'
 import { requireKeyStore } from './key-store-choice'
 import { writeBackup, writeFileAtomic } from './files'
 import { BACKUP_REMOVAL_SUMMARY, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
@@ -22,8 +23,9 @@ import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from '.
 import { CLAUDE_MCP_REMOVE_ARGV, claudeAddArgv, rollbackSafe } from './mcp-wiring'
 import { installProgram } from './self-install'
 import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describeMoveDataDir, describeRemoveLegacyEntry, moveDataDir, removeLegacyEntry, stopLegacyAgent } from './rename-migration'
-import { legacyBootoutArgv, bootstrapArgv } from './launch-agent'
+import { legacyBootoutArgv } from './launch-agent'
 import type { Vec0Asset } from '../vectors/vec0-release'
+import type { ServiceStep } from './service/control'
 
 export const HEALTH_WAIT_MS = 15_000
 export const TAKEOVER_WAIT_MS = 300_000
@@ -36,7 +38,8 @@ export type Action =
   | { kind: 'write'; path: string; content: string; mode: number; summary: string }
   /** recursive: a directory and everything in it (hmac.d/ on --remove-hmac-keys). */
   | { kind: 'remove'; path: string; summary: string; recursive?: boolean }
-  | { kind: 'launchctl'; argv: readonly string[] }
+  /** A start or stop through the platform's service; description is its dry-run line, filled at plan time. */
+  | { kind: 'service'; step: ServiceStep; description: string }
   /** A host CLI call such as `claude mcp add-json`; argv holds no secret, so it prints whole. */
   | { kind: 'command'; argv: readonly string[]; summary: string; whenMissing?: string }
   /** Swaps our Claude Code MCP entry: remove, add the new one, and put `previous` back if the add fails. Neither entry holds a secret. */
@@ -104,7 +107,7 @@ export function describeAction(action: Action): string {
     case 'backup': return `back up ${action.from} -> ${action.to} (mode 0600)`
     case 'write': return `write ${action.path}: ${action.summary}`
     case 'remove': return `remove ${action.path}${action.recursive === true ? '/' : ''}: ${action.summary}`
-    case 'launchctl': return action.argv.join(' ')
+    case 'service': return action.description
     case 'command': return `${action.summary}: ${action.argv.join(' ')}`
     case 'claude-mcp-replace': return `replace the Kinfold MCP server entry in Claude Code (user scope), putting the old one back if the new one fails: ${CLAUDE_MCP_REMOVE_ARGV.join(' ')}, then ${claudeAddArgv(action.next).join(' ')}`
     case 'wait-takeover': return `wait up to ${TAKEOVER_WAIT_MS / 1000} s for the running daemon on port ${action.port} to stop (you stop it: ${stopCommand(action.pid, action.port)})`
@@ -158,17 +161,16 @@ export async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Pr
   if (exitCode !== 0) throw new Error(`${argv.slice(0, 2).join(' ')} failed (exit ${exitCode})`)
 }
 
-const NOT_FOUND_EXIT = 127
-
 /**
  * A host CLI call. One with `whenMissing` is skipped, with that note, when its
  * binary is not installed: removing an agent is the likeliest reason to have
  * dropped its CLI, and every later run would fail the same way otherwise.
+ * Only the runner's not-found exit counts; a binary that is there but cannot
+ * run is a failure the user has to see.
  */
 async function runCommand(env: InstallEnv, action: Extract<Action, { kind: 'command' }>): Promise<void> {
-  if (action.whenMissing === undefined) return runLaunchctl(env, action.argv)
   const { exitCode } = await env.run({ argv: action.argv, timeoutMs: 15_000 })
-  if (exitCode === NOT_FOUND_EXIT) {
+  if (exitCode === NOT_FOUND_EXIT && action.whenMissing !== undefined) {
     env.out(action.whenMissing)
     return
   }
@@ -201,10 +203,17 @@ async function waitFor(env: InstallEnv, wantUp: boolean, timeoutMs: number, fail
   if (!(await waitForHealth(env, wantUp, timeoutMs))) throw new Error(failure)
 }
 
+// Loaded on use: the service module imports this one for HEALTH_WAIT_MS at its top level.
+const loadServiceControl = (): Promise<typeof import('./service/control')> => import('./service/control')
+
+async function runServiceStep(env: InstallEnv, step: ServiceStep): Promise<void> {
+  const service = (await loadServiceControl()).serviceOf(env)
+  if (service === null) throw new Error(`no background service to ${step} on ${env.platform}`)
+  return step === 'start' ? service.start() : service.stop()
+}
+
 async function waitForDaemonStart(env: InstallEnv): Promise<void> {
-  // Loaded on use: the service module imports this one for HEALTH_WAIT_MS at its top level.
-  const { serviceOf } = await import('./service/control')
-  const service = serviceOf(env)
+  const service = (await loadServiceControl()).serviceOf(env)
   const result = await waitForStart(env, service)
   if (result.ok) return
   const logFile = installPaths(env).logFile
@@ -225,7 +234,7 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'backup': return writeBackup(action.from, action.to)
     case 'write': return writeFileAtomic(action.path, action.content, action.mode)
     case 'remove': return rmSync(action.path, { force: true, recursive: action.recursive === true })
-    case 'launchctl': return runLaunchctl(env, action.argv)
+    case 'service': return runServiceStep(env, action.step)
     case 'command': return runCommand(env, action)
     case 'claude-mcp-replace': return replaceClaudeMcp(env, action.previous, action.next)
     case 'wait-takeover':

@@ -4,11 +4,14 @@ import { join } from 'node:path'
 import { CLAUDE_HOOK_EVENTS, samHookGroup } from './claude-hooks'
 import { getObserverSettings } from './daemon-client'
 import { installPaths } from './env'
-import { EXIT_OK, install } from './install'
-import { LAUNCHCTL, launchdPath } from './launch-agent'
+import { type DaemonSituation, EXIT_OK, SETTINGS_NOT_SENT_LINE, install, serviceActions } from './install'
+import { LAUNCHCTL, bootoutArgv, bootstrapArgv, launchdPath } from './launch-agent'
+import { LaunchAgentService } from './service/launch-agent-service'
+import { StubService } from './service/stub-service'
 import { entryCommand } from './entry'
 import { shimContent } from './opencode-shim'
-import { BUN, type FakeWorld, UID, YES, createWorld } from './test-support'
+import { BUN, type FakeWorld, UID, YES, countingService, createWorld, startWorldDaemon } from './test-support'
+import { DEFAULT_PORT } from '../daemon/daemon'
 import { NO_DB_KEYS } from '../sqlite/keys'
 import { openStore } from '../store/db'
 import { recordSafety } from '../store/observer-safety-store'
@@ -176,8 +179,8 @@ test('the data dir permission fix reports each path with its old and new mode', 
 test('the non-macOS line names the program', async () => {
   const w = both({ opencodeVersion: undefined, keychainRefs: [] })
   await install({ ...w.env, platform: 'linux' }, YES)
-  const line = w.out.find((l) => l.startsWith('LaunchAgent: macOS only'))
-  expect(line).toBe(`LaunchAgent: macOS only; start the daemon yourself with: ${BUN} ${join(w.projectRoot, 'src/daemon/main.ts')}`)
+  const line = w.out.find((l) => l.startsWith('systemd user service: '))
+  expect(line).toBe(`systemd user service: not set up on this platform yet; start the daemon yourself with: ${BUN} ${join(w.projectRoot, 'src/daemon/main.ts')}`)
   expect(line).not.toContain('bun run daemon')
 })
 
@@ -212,4 +215,75 @@ test('a re-run with the daemon down gives a saved observer without a failed safe
   store.db.close()
   expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
   expect(w.out.join('\n')).not.toContain('PUT /observer/settings host=opencode')
+})
+
+const DOWN: DaemonSituation = { health: { up: false, reason: 'test' }, loaded: false, legacyLoaded: false, pid: null, port: DEFAULT_PORT, foreign: false }
+
+test('the install plan starts and stops through the service', async () => {
+  const w = both()
+  const service = new LaunchAgentService(w.env)
+  const start = { kind: 'service', step: 'start', description: bootstrapArgv(w.env).join(' ') } as const
+  const stop = { kind: 'service', step: 'stop', description: bootoutArgv(UID).join(' ') } as const
+  const fresh = serviceActions(w.env, service, DOWN, false, false, DEFAULT_PORT)
+  expect(fresh.filter((action) => action.kind === 'service' || action.kind === 'wait-health')).toEqual([start, { kind: 'wait-health' }])
+
+  // Dry-run text is the launchctl argv it always was.
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  const plistPath = join(w.home, 'Library/LaunchAgents/dev.kinfold.daemon.plist')
+  expect(w.out.some((line) => /^ {2}\d+\. /.test(line) && line.endsWith(`. ${LAUNCHCTL} bootstrap gui/${UID} ${plistPath}`))).toBe(true)
+
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  const loaded: DaemonSituation = { ...DOWN, loaded: true, health: { up: true, version: 'x', schemaVersion: 1 } as DaemonSituation['health'] }
+  const moved = serviceActions(w.env, service, loaded, false, false, 4001)
+  expect(moved.filter((action) => action.kind === 'service')).toEqual([stop, start])
+})
+
+/** A linux world whose service is a counted stub, and the total time install slept. */
+function stubWorld(reason?: string): { w: FakeWorld; service: ReturnType<typeof countingService>; slept: () => number } {
+  const w = both({ platform: 'linux', opencodeVersion: undefined, keychainRefs: [] })
+  const service = countingService(new StubService(w.env, 'test service'), reason)
+  let slept = 0
+  w.env = { ...w.env, service, sleep: async (ms) => void (slept += ms) }
+  return { w, service, slept: () => slept }
+}
+
+const planLines = (w: FakeWorld): string[] => w.out.filter((line) => /^ {2}\d+\. /.test(line))
+
+test('an unavailable service keeps the manual start line and is never started or stopped', async () => {
+  const { w, service, slept } = stubWorld()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  const daemon = `${BUN} ${join(w.projectRoot, 'src/daemon/main.ts')}`
+  expect(w.out).toContain(`test service: not set up on this platform yet; start the daemon yourself with: ${daemon}`)
+  expect(w.out).toContain(SETTINGS_NOT_SENT_LINE)
+  const plan = planLines(w).join('\n')
+  expect(plan).not.toContain('GET /health')
+  expect(plan).not.toContain('PUT /observer/settings')
+  expect(plan).not.toContain('not supported on this platform yet')
+  expect(slept()).toBeLessThan(1_000)
+  expect(service.steps).toEqual([])
+
+  const other = stubWorld('no manager (x)')
+  expect(await install(other.w.env, YES)).toBe(EXIT_OK)
+  expect(other.w.out).toContain(`test service: no manager (x); start the daemon yourself with: ${BUN} ${join(other.w.projectRoot, 'src/daemon/main.ts')}`)
+  expect(other.service.steps).toEqual([])
+  await other.w.cleanup()
+})
+
+test('with an unavailable service a running daemon still gets the settings', async () => {
+  const { w, service } = stubWorld()
+  // A plaintext store, as one started by hand before any key store existed.
+  openStore(w.dataDir, { keys: NO_DB_KEYS }).db.close()
+  const daemon = startWorldDaemon(w, w.dataDir)
+  try {
+    expect(await install(w.env, YES)).toBe(EXIT_OK)
+    const plan = planLines(w).join('\n')
+    expect(plan).toContain('PUT /observer/settings host=claude-code')
+    expect(plan).not.toContain('GET /health')
+    expect(plan).not.toContain('not supported on this platform yet')
+    expect(w.out).not.toContain(SETTINGS_NOT_SENT_LINE)
+    expect(w.fetches).toContain('PUT /observer/settings')
+    expect(service.steps).toEqual([])
+  } finally {
+    await daemon.stop()
+  }
 })

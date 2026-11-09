@@ -22,7 +22,6 @@ import { getObserverSettings } from './daemon-client'
 import { type InstallEnv, errorMessage, installPaths } from './env'
 import { plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import { EXIT_FAILED, EXIT_OK } from './install'
-import { bootoutArgv, isAgentLoaded } from './launch-agent'
 import { INSTALL_HOSTS, type InstallHost } from './detect'
 import { claudeMcpUninstallActions, opencodeMcpUninstallActions } from './mcp-wiring'
 import { hmacRemoval } from './hmac-cleanup'
@@ -31,6 +30,7 @@ import { codexHookUninstallActions, hostHookUninstallActions } from './host-wiri
 import { readKeyStore, secretDeleteAction } from './key-store-choice'
 import { inspectShim } from './opencode-shim'
 import { type Action, runPlan } from './plan'
+import { managedServiceOf } from './service/control'
 
 export interface UninstallOptions {
   dryRun: boolean
@@ -39,10 +39,13 @@ export interface UninstallOptions {
   removeHmacKeys?: boolean
 }
 
-async function launchAgentActions(env: InstallEnv): Promise<Action[]> {
-  const paths = installPaths(env)
-  const unload: Action[] = (await isAgentLoaded(env)) ? [{ kind: 'launchctl', argv: bootoutArgv(env.uid) }] : []
-  const remove: Action[] = existsSync(paths.launchAgentPlist) ? [{ kind: 'remove', path: paths.launchAgentPlist, summary: 'the LaunchAgent' }] : []
+/** Stops the service and removes its config; a service install cannot set up here has neither. */
+async function serviceActions(env: InstallEnv): Promise<Action[]> {
+  const service = managedServiceOf(env)
+  if (service === null) return []
+  const unload: Action[] = (await service.isRunning()) ? [{ kind: 'service', step: 'stop', description: service.describe('stop') }] : []
+  const path = service.configPath()
+  const remove: Action[] = path !== null && existsSync(path) ? [{ kind: 'remove', path, summary: `the ${service.label}` }] : []
   return [...unload, ...remove]
 }
 
@@ -127,7 +130,7 @@ export async function uninstall(env: InstallEnv, options: UninstallOptions): Pro
     const store = read.ok ? read.store : null
     const hmac = read.ok && options.removeHmacKeys === true ? hmacRemoval(env, options.dryRun) : null
     const actions = [
-      ...(await launchAgentActions(env)),
+      ...(await serviceActions(env)),
       ...INSTALL_HOSTS.flatMap((host) => hostUnwireActions(env, host)),
       ...(options.removeCredentials ? credentialActions(store, refs) : []),
       ...(hmac?.actions ?? []),

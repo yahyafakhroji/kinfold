@@ -8,7 +8,7 @@
 // --takeover the install waits for the user to stop it and never kills it.
 
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { deprecationLines, envName, legacyName, readEnv } from '../env-names'
 import { DEFAULT_PORT } from '../daemon/daemon'
 import { LEGACY_LAUNCH_AGENT_LABEL } from '../names'
@@ -25,13 +25,13 @@ import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
 import { entryCommand } from './entry'
 import { type InstallKeyStore, chooseInstallKeyStore, keyStoreOf, keyStoreRecordActions, secretSetAction } from './key-store-choice'
 import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
-import { bootoutArgv, bootstrapArgv, isAgentLoaded, legacyPrintArgv, plistContent } from './launch-agent'
+import { isAgentLoaded, legacyPrintArgv } from './launch-agent'
 import { ChoiceError, type ChoiceOptions, type ObserverChoice } from './observer-choice'
 import { hmacMigrationActions } from './hmac-migration'
 import { hostHookInstallActions, hostVersionActions, opencodeInstallActions } from './host-wiring'
 import { claudeMcpInstallActions, claudeMcpState, opencodeMcpInstallActions } from './mcp-wiring'
 import { scanDataDirModes } from './permissions'
-import { serviceOf } from './service/control'
+import { type ServiceControl, type ServiceStep, managedServiceOf, serviceOf } from './service/control'
 import { type Action, runPlan, stopCommand } from './plan'
 import { askHidden, createPrompts, PromptCancelled } from './prompt/prompts'
 import { type ProgramCheck, checkProgram, programInstallActions } from './self-install'
@@ -79,7 +79,11 @@ export interface DaemonSituation {
   port: number
   /** The pre-rename LaunchAgent is loaded (and ours is not); the migration stops it. */
   legacyLoaded: boolean
-  /** Up, but not ours: neither our LaunchAgent nor the pre-rename one is loaded. */
+  /**
+   * Up, but not ours: neither our service nor the pre-rename LaunchAgent is
+   * loaded. Never set where the service cannot be set up: every daemon there
+   * was started by hand, and install only sends it settings.
+   */
   foreign: boolean
 }
 
@@ -92,10 +96,13 @@ function daemonInfoDir(env: InstallEnv): string {
 export async function daemonSituation(env: InstallEnv): Promise<DaemonSituation> {
   const info = readDaemonInfo(daemonInfoDir(env))
   const health = await checkHealth(env, info.port)
-  const loaded = await isAgentLoaded(env)
+  const service = serviceOf(env)
+  const loaded = service !== null && (await service.isRunning())
+  const unavailable = service !== null && service.unavailableReason() !== null
   // The pre-rename agent's daemon is ours too: the migration stops it, so it is never a second writer.
-  const legacyLoaded = !loaded && existsSync(installPaths(env).legacyLaunchAgentPlist) && (await isAgentLoaded(env, legacyPrintArgv(env.uid)))
-  return { health, loaded, legacyLoaded, pid: info.pid, port: info.port, foreign: health.up && !loaded && !legacyLoaded }
+  const legacyLoaded = !loaded && platformOf(env).os === 'macos' && existsSync(installPaths(env).legacyLaunchAgentPlist)
+    && (await isAgentLoaded(env, legacyPrintArgv(env.uid)))
+  return { health, loaded, legacyLoaded, pid: info.pid, port: info.port, foreign: health.up && !loaded && !legacyLoaded && !unavailable }
 }
 
 export function foreignDaemonMessage(situation: DaemonSituation): string[] {
@@ -160,37 +167,56 @@ function daemonCommandLine(env: InstallEnv): string {
   return [entry.command, ...entry.args].join(' ')
 }
 
+const serviceStep = (service: ServiceControl, step: ServiceStep): Action => ({ kind: 'service', step, description: service.describe(step) })
+
+/** The line for a service install cannot set up here; the daemon is the user's to start. */
+function manualStartLine(env: InstallEnv, label: string, reason: string, port: number): string {
+  const portEnv = port === DEFAULT_PORT ? '' : `${envName('PORT')}=${port} `
+  return `${label}: ${reason}; start the daemon yourself with: ${portEnv}${daemonCommandLine(env)}`
+}
+
+/** Why install sets no service up, or null when it does. */
+function manualStartReason(service: ServiceControl | null): string | null {
+  return service === null ? 'none on this platform' : service.unavailableReason()
+}
+
 /**
- * `restart`: a loaded daemon is reloaded even with an unchanged plist, so it
- * reads a new HMAC master. An unchanged plist plans no write, but a loaded
- * agent is always checked: launchd reports a crashed job as loaded while
+ * `restart`: a loaded daemon is reloaded even with an unchanged config, so it
+ * reads a new HMAC master. An unchanged config plans no write, but a loaded
+ * service is always checked: launchd reports a crashed job as loaded while
  * nothing answers, and running install again is how a user repairs that. When
  * the daemon is already down at plan time the plan restarts it first, because
- * a bare health wait would only report the failure.
+ * a bare health wait would only report the failure. A service that cannot be
+ * set up here gets no step at all: nothing would start the daemon, so a health
+ * wait could only fail.
  */
-function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeover: boolean, restart: boolean, port: number): Action[] {
-  if (platformOf(env).os !== 'macos') {
-    const portEnv = port === DEFAULT_PORT ? '' : `${envName('PORT')}=${port} `
-    env.out(`LaunchAgent: macOS only; start the daemon yourself with: ${portEnv}${daemonCommandLine(env)}`)
-    return [{ kind: 'wait-health' }]
+export function serviceActions(env: InstallEnv, service: ServiceControl | null, situation: DaemonSituation, takeover: boolean, restart: boolean, port: number): Action[] {
+  const reason = manualStartReason(service)
+  if (service === null || reason !== null) {
+    env.out(manualStartLine(env, service?.label ?? 'service', reason ?? '', port))
+    return []
   }
-  const paths = installPaths(env)
-  const content = plistContent(env, port)
-  const change = describeTextChange(readTextOrNull(paths.launchAgentPlist), content)
+  const path = service.configPath()
+  const content = service.configContent(port)
+  const change = path === null || content === null ? null : describeTextChange(readTextOrNull(path), content)
+  const file = path?.endsWith('.plist') === true ? 'plist' : 'config'
   if (change === null && situation.loaded && !restart) {
     if (situation.health.up) {
-      env.out('LaunchAgent: loaded with an unchanged plist; checking that the daemon answers')
+      env.out(`${service.label}: loaded with an unchanged ${file}; checking that the daemon answers`)
       return [{ kind: 'wait-health' }]
     }
-    env.out('LaunchAgent: loaded with an unchanged plist but the daemon is not answering; restarting it')
-    return [{ kind: 'launchctl', argv: bootoutArgv(env.uid) }, { kind: 'launchctl', argv: bootstrapArgv(env) }, { kind: 'wait-health' }]
+    env.out(`${service.label}: loaded with an unchanged ${file} but the daemon is not answering; restarting it`)
+    return [serviceStep(service, 'stop'), serviceStep(service, 'start'), { kind: 'wait-health' }]
   }
-  const write: Action[] = change === null ? [] : [{ kind: 'write', path: paths.launchAgentPlist, content, mode: FILE_MODE, summary: change }]
+  const write: Action[] = path === null || content === null || change === null ? [] : [
+    ...mkdirIfMissing(dirname(path), DIR_MODE),
+    { kind: 'write', path, content, mode: FILE_MODE, summary: change },
+  ]
   const wait: Action[] = situation.foreign && takeover ? [{ kind: 'wait-takeover', pid: situation.pid, port: situation.port }] : []
   let load: Action[] = []
-  if (!situation.loaded) load = [{ kind: 'launchctl', argv: bootstrapArgv(env) }]
-  else if (change !== null || restart) load = [{ kind: 'launchctl', argv: bootoutArgv(env.uid) }, { kind: 'launchctl', argv: bootstrapArgv(env) }]
-  return [...mkdirIfMissing(paths.launchAgentsDir, DIR_MODE), ...write, ...wait, ...load, { kind: 'wait-health' }]
+  if (!situation.loaded) load = [serviceStep(service, 'start')]
+  else if (change !== null || restart) load = [serviceStep(service, 'stop'), serviceStep(service, 'start')]
+  return [...write, ...wait, ...load, { kind: 'wait-health' }]
 }
 
 /**
@@ -267,9 +293,18 @@ async function settingsActions(env: InstallEnv, choices: readonly ObserverChoice
   })
 }
 
+export const SETTINGS_NOT_SENT_LINE = 'observer settings: not sent, since no daemon is running; run kinfold install again once it runs'
+
+/** Where the user starts the daemon, settings go only to one that answered while the plan was built. */
+async function plannedSettingsActions(env: InstallEnv, choices: readonly ObserverChoice[], stored: Pick<SetupState, 'failedProviders'>, noDaemon: boolean): Promise<Action[]> {
+  if (!noDaemon) return settingsActions(env, choices, stored)
+  env.out(SETTINGS_NOT_SENT_LINE)
+  return []
+}
+
 export interface InstallPlan {
   actions: Action[]
-  /** The plan stops the loaded LaunchAgent to replace the running program. */
+  /** The plan stops the loaded service to replace the running program. */
   stopsService: boolean
 }
 
@@ -306,9 +341,11 @@ export async function buildPlan(
     version: options.releaseVersion,
     check: check ?? undefined,
   })
+  const service = serviceOf(env)
+  const manual = manualStartReason(service) !== null
   // The running service starts the program being replaced, so it stops before
-  // the copy and the LaunchAgent step below starts it again from the new file.
-  const stopped = program.actions.length > 0 && platformOf(env).os === 'macos' && situation.loaded
+  // the copy and the service step below starts it again from the new file.
+  const stopped = program.actions.length > 0 && service !== null && !manual && situation.loaded
   const plannedSituation = stopped ? { ...situation, loaded: false } : situation
   return {
     actions: [
@@ -319,7 +356,7 @@ export async function buildPlan(
       ...sqlite3mc.actions,
       ...setupDbKeyActions(env, answers.encryption),
       ...vec0.actions,
-      ...(stopped ? [{ kind: 'launchctl', argv: bootoutArgv(env.uid) } satisfies Action] : []),
+      ...(stopped && service !== null ? [serviceStep(service, 'stop')] : []),
       ...program.actions,
       ...hostVersionActions(env, detections),
       ...credentialActions(env, choices),
@@ -327,8 +364,8 @@ export async function buildPlan(
       ...(hosts.includes('codex') ? hostHookInstallActions(env, 'codex') : []),
       ...(hosts.includes('cursor') ? hostHookInstallActions(env, 'cursor') : []),
       ...dropped.flatMap((host) => hostUnwireActions(env, host)),
-      ...launchAgentActions(env, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon, answers.port),
-      ...(await settingsActions(env, choices, state)),
+      ...serviceActions(env, service, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon, answers.port),
+      ...(await plannedSettingsActions(env, choices, state, manual && !situation.health.up)),
       ...hmac.cleanup,
       ...recordActions(env, state, answers),
     ],
@@ -336,10 +373,14 @@ export async function buildPlan(
   }
 }
 
-function agentState(situation: DaemonSituation): string {
-  if (situation.loaded) return 'LaunchAgent loaded'
+function agentState(env: InstallEnv, situation: DaemonSituation): string {
+  const service = serviceOf(env)
+  const label = service?.label ?? 'service'
+  const reason = manualStartReason(service)
+  if (reason !== null) return `${label}: ${reason}`
+  if (situation.loaded) return `${label} loaded`
   if (situation.legacyLoaded) return `LaunchAgent ${LEGACY_LAUNCH_AGENT_LABEL} (the old name) loaded; the migration stops it`
-  return 'LaunchAgent not loaded'
+  return `${label} not loaded`
 }
 
 /**
@@ -362,7 +403,7 @@ function legacyEnvProblem(env: InstallEnv): string | null {
 async function prepare(env: InstallEnv, options: InstallOptions): Promise<DaemonSituation | number> {
   for (const line of duplicateWarning(findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings]))) env.out(line)
   const situation = await daemonSituation(env)
-  env.out(`daemon: ${situation.health.up ? `answers on port ${situation.port}` : 'not running'}; ${agentState(situation)}`)
+  env.out(`daemon: ${situation.health.up ? `answers on port ${situation.port}` : 'not running'}; ${agentState(env, situation)}`)
   if (situation.foreign && !options.takeover && !options.dryRun) {
     for (const line of foreignDaemonMessage(situation)) env.out(line)
     return EXIT_BLOCKED
@@ -413,7 +454,7 @@ async function migrate(env: InstallEnv, situation: DaemonSituation, options: Ins
 export async function restartService(env: InstallEnv): Promise<void> {
   let started = false
   let startError: unknown = null
-  const service = serviceOf(env)
+  const service = managedServiceOf(env)
   try {
     if (service !== null && !(await service.isRunning())) {
       await service.start()

@@ -85,7 +85,7 @@ test('a loaded daemon with an unchanged plist is restarted when a master is crea
   const calls = w.commands.length
   expect(await install(w.env, YES)).toBe(EXIT_OK)
   const verbs = w.commands.slice(calls).filter((c) => c.argv[0] === LAUNCHCTL).map((c) => c.argv[1])
-  expect(verbs).toEqual(['print', 'bootout', 'bootstrap'])
+  expect(verbs).toEqual(['print', 'bootout', 'print', 'bootstrap'])
   expect(w.launchd.daemon?.hmacKeys.mode()).toBe('master')
 })
 

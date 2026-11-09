@@ -14,7 +14,8 @@ import { upsertProject } from '../store/writes'
 import { type Journal, runKeyCommand } from './encrypt'
 import type { InstallEnv } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
-import { type FakeWorld, createWorld, fakeService, startWorldDaemon } from './test-support'
+import { type FakeWorld, countingService, createWorld, fakeService, startWorldDaemon } from './test-support'
+import { StubService } from './service/stub-service'
 import { LAUNCHCTL } from './launch-agent'
 import { LSOF } from './service/launch-agent-service'
 
@@ -345,4 +346,25 @@ test('a service that fails to stop is started again and the store and marker are
   expect(fileState(path)).toBe('plain')
   expect(existsSync(maintenancePath(path))).toBe(false)
   expect(w.keychainValues.has(DB_KEY_REF)).toBe(false)
+})
+
+test('encrypt with an unavailable service refuses while a daemon answers', async () => {
+  const answering = world(null)
+  const service = countingService(new StubService(answering.env, 'test service'))
+  const daemon = startWorldDaemon(answering.w, answering.w.dataDir)
+  try {
+    expect(await runKeyCommand({ ...answering.env, service }, 'encrypt')).toBe(EXIT_FAILED)
+    expect(answering.w.out.at(-1)).toContain('a daemon still answers /health')
+    expect(service.steps).toEqual([])
+    expect(answering.w.commands).toEqual([])
+    expect(fileState(answering.path)).toBe('plain')
+  } finally {
+    await daemon.stop()
+  }
+
+  const quiet = world(null)
+  const quietService = countingService(new StubService(quiet.env, 'test service'))
+  expect(await runKeyCommand({ ...quiet.env, service: quietService }, 'encrypt')).toBe(EXIT_OK)
+  expect(quietService.steps).toEqual([])
+  expect(rows(openEncrypted(quiet.path, quiet.w.keychainValues.get(DB_KEY_REF)!))).toBe(10)
 })
