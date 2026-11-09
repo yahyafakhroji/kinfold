@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { OsName, PlatformInfo } from '../platform/platform'
 import type { KeyStore, KeyStoreDeps, KeyStoreKind, KeyStoreModule } from './key-store'
-import { KEY_STORE_FILE, readKeyStoreRecord, recordMismatchMessage, recordUnreadableMessage, resolveKeyStore } from './key-store-record'
+import { DB_KEY_REF } from './credentials'
+import { KEY_STORE_FILE, processKeyStoreDeps, readKeyStoreRecord, recordMismatchMessage, recordUnreadableMessage, resolveKeyStore } from './key-store-record'
+import { LOOKUP_TIMEOUT_MS, SECURITY_BINARY, SECURITY_TIMEOUT_MS, type SecuritySpawn, type SecuritySpawnOptions, createSecurityRunner } from './stores/keychain'
 import { KEY_STORE_MODULES } from './stores/select'
 
 let dir = ''
@@ -126,4 +128,41 @@ test('the test switch wins over a record', () => {
   expect(resolveKeyStore(dir, depsOn('macos', { KINFOLD_DB_KEYSTORE: 'none' }))?.kind).toBe('keychain')
   writeRecord('{"store":')
   expect(resolveKeyStore(dir, depsOn('macos', { KINFOLD_DB_KEYSTORE: 'none', NODE_ENV: 'test' }))).toBeNull()
+})
+
+function recordingSpawn(): { spawn: SecuritySpawn; seen: { cmd: string[]; options: SecuritySpawnOptions }[] } {
+  const seen: { cmd: string[]; options: SecuritySpawnOptions }[] = []
+  return { seen, spawn: (cmd, options) => (seen.push({ cmd, options }), { exitCode: 44, stdout: Buffer.from('') }) }
+}
+
+test('every process read of a key store uses the 5 s lookup timeout', () => {
+  expect(LOOKUP_TIMEOUT_MS).toBe(5_000)
+  const { spawn, seen } = recordingSpawn()
+  writeRecord('{"store":"keychain","chosenAt":1}')
+  // macOS forced, so the Keychain path runs on any host; the fake spawn never starts a child.
+  const deps = { ...processKeyStoreDeps(dir, { HOME: '/h' }, spawn), platform: depsOn('macos').platform }
+  const store = resolveKeyStore(dir, deps)
+  expect(store?.get(DB_KEY_REF)).toBeNull()
+  expect(store?.exists(DB_KEY_REF)).toBe(false)
+  rmSync(join(dir, KEY_STORE_FILE))
+  resolveKeyStore(dir, deps)?.get('openrouter')
+  expect(seen.length).toBeGreaterThan(0)
+  for (const { cmd, options } of seen) {
+    expect(cmd[0]).toBe(SECURITY_BINARY)
+    expect(options.timeout).toBe(LOOKUP_TIMEOUT_MS)
+    expect(options.env).toEqual({ PATH: '/usr/bin:/bin', HOME: '/h' })
+  }
+})
+
+test('the child gets HOME as the process has it, empty when unset', () => {
+  const { spawn, seen } = recordingSpawn()
+  processKeyStoreDeps(dir, {}, spawn).security({ args: ['find-generic-password'] })
+  expect(seen[0]!.options.env.HOME).toBe('')
+})
+
+test('installer writes keep the longer timeout', () => {
+  expect(SECURITY_TIMEOUT_MS).toBe(10_000)
+  const { spawn, seen } = recordingSpawn()
+  createSecurityRunner('/h', undefined, spawn)({ args: ['-i'], stdin: 'x' })
+  expect(seen[0]!.options.timeout).toBe(SECURITY_TIMEOUT_MS)
 })

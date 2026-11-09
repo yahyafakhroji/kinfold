@@ -7,6 +7,7 @@
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { type OpenOptions, openWithLibrary } from './driver'
+import type { KeyStoreDeps } from '../secrets/key-store'
 import { type DbKeyStore, NO_DB_KEYS, dbKeyStoreFor } from './keys'
 import { libraryFor } from './library'
 import { type Database, SqliteError } from './types'
@@ -44,6 +45,8 @@ export interface PlainOpenOptions extends OpenOptions {
 export interface StoreOpenOptions extends PlainOpenOptions {
   keys?: DbKeyStore
   env?: Readonly<Record<string, string | undefined>>
+  /** Used only when `keys` is absent; default processKeyStoreDeps. Tests pass a fake `security` here. */
+  keyStoreDeps?: KeyStoreDeps
 }
 
 /** While this file sits in the data dir, `kinfold encrypt|decrypt|rekey` is changing memory.db and nothing else may open it. */
@@ -94,7 +97,7 @@ export function openStoreFile(path: string, options: StoreOpenOptions = {}): Dat
   const env = options.env ?? process.env
   const state = fileState(path)
   if (state === 'plain') return openPlain(path, options, env)
-  const keys = options.keys ?? dbKeyStoreFor(dirname(path), env)
+  const keys = options.keys ?? dbKeyStoreFor(dirname(path), env, options.keyStoreDeps)
   const key = keys.read()
   if (key !== null) return openEncrypted(path, key, options, env)
   if (state === 'encrypted') throw new SqliteError(`memory.db is encrypted and the ${keys.name} has no database key; run kinfold key recover`, 'SQLITE_AUTH', 23, 'no_key')

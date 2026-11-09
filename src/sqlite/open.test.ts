@@ -122,7 +122,11 @@ test('the key store comes from the folder of the opened file', () => {
   writeFileSync(record, '{"store":"keychain"')
   expect(() => dbKeyStoreFor(dataDir, {}, linuxDeps)).toThrow(recordUnreadableMessage(record))
   // openStoreFile reads the record beside the file it opens, before it creates anything.
-  expect(() => openStoreFile(join(dataDir, 'memory.db'), { env: {} })).toThrow(recordUnreadableMessage(record))
+  // A fake `security`, so a parse that ever accepted this record still could not reach the real Keychain.
+  const lookups: string[][] = []
+  const macDeps: KeyStoreDeps = { ...depsOn('macos'), security: ({ args }) => (lookups.push([...args]), { exitCode: 51, stdout: '' }) }
+  expect(() => openStoreFile(join(dataDir, 'memory.db'), { env: {}, keyStoreDeps: macDeps })).toThrow(recordUnreadableMessage(record))
+  expect(lookups).toEqual([])
   expect(existsSync(join(dataDir, 'memory.db'))).toBe(false)
 })
 

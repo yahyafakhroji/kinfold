@@ -31,8 +31,23 @@ export type SecurityRunner = (invocation: SecurityInvocation) => SecurityResult
 /** `security` exits 44 when the item does not exist. */
 export const ITEM_NOT_FOUND_EXIT = 44
 export const SECURITY_BINARY = '/usr/bin/security'
-const LOOKUP_TIMEOUT_MS = 5_000
-const SECURITY_TIMEOUT_MS = 10_000
+/** Reads: hooks share a 10 s host budget, so a lookup stuck on a Keychain prompt must give up well inside it. */
+export const LOOKUP_TIMEOUT_MS = 5_000
+/** Installer writes, which run from a terminal and may wait on an unlock prompt. */
+export const SECURITY_TIMEOUT_MS = 10_000
+
+export interface SecuritySpawnOptions {
+  stdin: Buffer | 'ignore'
+  stdout: 'pipe'
+  stderr: 'ignore'
+  env: Record<string, string>
+  timeout: number
+}
+
+/** Test seam for the `security` child; default Bun.spawnSync. */
+export type SecuritySpawn = (cmd: string[], options: SecuritySpawnOptions) => { exitCode: number | null; stdout: Buffer }
+
+const spawnSecurity: SecuritySpawn = (cmd, options) => Bun.spawnSync(cmd, options)
 
 export const runSecurity: SecurityCommand = (args) => {
   const child = Bun.spawnSync([SECURITY_BINARY, ...args], {
@@ -44,15 +59,15 @@ export const runSecurity: SecurityCommand = (args) => {
   return { exitCode: child.exitCode ?? -1, stdout: child.stdout.toString() }
 }
 
-/** The real `security` child: a fixed PATH and the given HOME, stderr ignored. */
-export function createSecurityRunner(homeDir: string): SecurityRunner {
+/** The real `security` child: a fixed PATH and the given HOME, stderr ignored. Pass LOOKUP_TIMEOUT_MS for a runner that serves reads. */
+export function createSecurityRunner(homeDir: string, timeoutMs: number = SECURITY_TIMEOUT_MS, spawn: SecuritySpawn = spawnSecurity): SecurityRunner {
   return ({ args, stdin }) => {
-    const child = Bun.spawnSync([SECURITY_BINARY, ...args], {
+    const child = spawn([SECURITY_BINARY, ...args], {
       stdin: stdin !== undefined ? Buffer.from(stdin) : 'ignore',
       stdout: 'pipe',
       stderr: 'ignore',
       env: { PATH: '/usr/bin:/bin', HOME: homeDir },
-      timeout: SECURITY_TIMEOUT_MS,
+      timeout: timeoutMs,
     })
     return { exitCode: child.exitCode ?? -1, stdout: child.stdout.toString() }
   }

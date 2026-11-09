@@ -10,7 +10,7 @@ import { isAbsolute, join } from 'node:path'
 import { readEnv } from '../env-names'
 import { type PlatformInfo, currentPlatform } from '../platform/platform'
 import { KEY_STORE_KINDS, type KeyStore, type KeyStoreDeps, type KeyStoreKind, type KeyStoreModule } from './key-store'
-import { createSecurityRunner } from './stores/keychain'
+import { LOOKUP_TIMEOUT_MS, type SecuritySpawn, createSecurityRunner } from './stores/keychain'
 import { KEY_STORE_MODULES, candidateKeyStores, openKeyStore } from './stores/select'
 
 type Env = Readonly<Record<string, string | undefined>>
@@ -106,8 +106,12 @@ export function resolveKeyStore(dataDir: string, deps: KeyStoreDeps, modules: Mo
   return openKeyStore(record.store, { ...deps, dataDir, location: record.location }, modules)
 }
 
-/** The real process's deps: currentPlatform(), HOME, this data folder, the env, the real security runner. */
-export function processKeyStoreDeps(dataDir: string, env: Env = process.env): KeyStoreDeps {
+/**
+ * The real process's deps: currentPlatform(), HOME, this data folder, the env, the real security runner.
+ * Every process that reads keys comes through here, hooks included, so the runner
+ * uses the 5 s lookup timeout and the child gets HOME exactly as this process has it.
+ */
+export function processKeyStoreDeps(dataDir: string, env: Env = process.env, spawn?: SecuritySpawn): KeyStoreDeps {
   const homeDir = env.HOME !== undefined && env.HOME !== '' ? env.HOME : homedir()
-  return { platform: currentPlatform(), homeDir, dataDir, envVars: env, security: createSecurityRunner(homeDir) }
+  return { platform: currentPlatform(), homeDir, dataDir, envVars: env, security: createSecurityRunner(env.HOME ?? '', LOOKUP_TIMEOUT_MS, spawn) }
 }
