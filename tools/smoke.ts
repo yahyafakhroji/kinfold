@@ -95,7 +95,16 @@ export function childEnvironment(home: string, fakeBin: string, platform: SmokeP
   return { ...env, ...platform.childEnv?.(home) }
 }
 
-async function run(argv: readonly string[], options: { cwd: string; env: Record<string, string>; stdin?: string; timeoutMs?: number }): Promise<SmokeResult> {
+interface RunOptions {
+  cwd: string
+  env: Record<string, string>
+  stdin?: string
+  timeoutMs?: number
+  /** Adds what the command printed to a timeout error; never set for the key conversions, whose output holds the recovery code. */
+  showOutputOnTimeout?: boolean
+}
+
+async function run(argv: readonly string[], options: RunOptions): Promise<SmokeResult> {
   const child = Bun.spawn([...argv], {
     cwd: options.cwd,
     env: options.env,
@@ -114,7 +123,10 @@ async function run(argv: readonly string[], options: { cwd: string; env: Record<
       child.stderr instanceof ReadableStream ? new Response(child.stderr).text() : '',
       child.exited,
     ])
-    if (timedOut) throw new SmokeError('timeout', `${argv[0]} did not finish in ${options.timeoutMs ?? PROGRAM_TIMEOUT_MS} ms`)
+    if (timedOut) {
+      const output = options.showOutputOnTimeout === true ? describe({ code: -1, stdout, stderr }) : ''
+      throw new SmokeError('timeout', `${argv[0]} did not finish in ${options.timeoutMs ?? PROGRAM_TIMEOUT_MS} ms${output === '' ? '' : `\n${output}`}`)
+    }
     return { code, stdout, stderr }
   } finally {
     clearTimeout(timer)
@@ -132,6 +144,7 @@ async function kinfold(world: SmokeWorld, args: readonly string[], stdin?: strin
     cwd: world.project,
     env: world.env,
     timeoutMs: timeoutFor(args),
+    showOutputOnTimeout: true,
     ...(stdin !== undefined ? { stdin } : {}),
   })
 }
