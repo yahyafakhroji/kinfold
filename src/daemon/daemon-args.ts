@@ -4,6 +4,7 @@
 // macOS daemon reads KINFOLD_PORT and logs to stderr as before.
 // `--data-dir` is taken out earlier by applyDataDirFlag.
 
+import { isAbsolute } from 'node:path'
 import { type PlatformInfo, currentPlatform } from '../platform/platform'
 
 export interface DaemonArgs {
@@ -35,6 +36,8 @@ export function parseDaemonArgs(argv: readonly string[]): DaemonArgs {
     } else if (arg === '--log-file') {
       const value = argv[index + 1]
       if (value === undefined || value === '') throw new Error('kinfold daemon: --log-file takes a path')
+      // A relative path would land in whatever folder the service manager starts in.
+      if (!isAbsolute(value)) throw new Error('kinfold daemon: --log-file takes an absolute path')
       logFile = value
       index += 1
     } else {

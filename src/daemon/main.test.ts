@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { PlatformInfo } from '../platform/platform'
@@ -11,7 +11,7 @@ import { openStoreFile } from '../sqlite/open'
 import { SqliteError } from '../sqlite/types'
 import { loadMarkerKey } from '../store/hmac-key'
 import { envName } from '../env-names'
-import { daemonSecrets, runDaemon } from './main'
+import { daemonSecrets, fileSink, runDaemon } from './main'
 
 let dir = ''
 beforeEach(() => {
@@ -98,8 +98,9 @@ async function inProcessDaemon(argv: readonly string[]): Promise<{ dataDir: stri
   }
 }
 
-test('a log file gets every log line at 0600', async () => {
-  const logFile = join(dir, 'daemon.log')
+test('a log file gets every log line at 0600, in a logs folder made for it', async () => {
+  const logFile = join(dir, 'logs', 'daemon.log')
+  expect(existsSync(join(dir, 'logs'))).toBe(false)
   const daemon = await inProcessDaemon(['--log-file', logFile])
   try {
     expect(statSync(logFile).mode & 0o777).toBe(0o600)
@@ -117,4 +118,30 @@ test('SIGHUP stops the daemon cleanly', async () => {
   await daemon.stop('SIGHUP')
   expect(existsSync(join(daemon.dataDir, 'daemon.json'))).toBe(false)
   expect(process.listenerCount('SIGHUP')).toBe(before)
+})
+
+// Windows has no POSIX modes and needs a privilege to make a symlink.
+test.skipIf(process.platform === 'win32')('a symlinked log path is refused and its target is left as it was', () => {
+  const target = join(dir, 'elsewhere.txt')
+  writeFileSync(target, 'keep me\n', { mode: 0o644 })
+  chmodSync(target, 0o644)
+  const link = join(dir, 'daemon.log')
+  symlinkSync(target, link)
+  expect(() => fileSink(link)).toThrow(`kinfold daemon: --log-file ${link} is a symlink; refused`)
+  expect(statSync(target).mode & 0o777).toBe(0o644)
+  expect(readFileSync(target, 'utf8')).toBe('keep me\n')
+})
+
+test.skipIf(process.platform === 'win32')('an existing log file at 0644 ends at 0600 and keeps its lines', () => {
+  const logFile = join(dir, 'daemon.log')
+  writeFileSync(logFile, 'old line\n', { mode: 0o644 })
+  chmodSync(logFile, 0o644)
+  const file = fileSink(logFile)
+  try {
+    expect(statSync(logFile).mode & 0o777).toBe(0o600)
+    file.sink('new line\n')
+  } finally {
+    file.close()
+  }
+  expect(readFileSync(logFile, 'utf8')).toBe('old line\nnew line\n')
 })

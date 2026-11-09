@@ -10,6 +10,7 @@ test('daemon flags', () => {
   expect(() => parseDaemonArgs(['--port', '65536'])).toThrow('kinfold daemon: --port takes 1024-65535')
   expect(() => parseDaemonArgs(['--port'])).toThrow('kinfold daemon: --port takes 1024-65535')
   expect(() => parseDaemonArgs(['--verbose'])).toThrow('kinfold daemon: unknown argument --verbose')
+  expect(() => parseDaemonArgs(['--log-file', 'logs/daemon.log'])).toThrow('kinfold daemon: --log-file takes an absolute path')
 })
 
 test('SIGBREAK is a shutdown signal only on Windows', () => {

@@ -13,7 +13,8 @@ import { resolveDataDir } from '../store/data-dir'
 import { applyDataDirFlag } from '../store/data-dir-flag'
 import { type Embedder, createOpenRouterEmbedder } from '../vectors/embedder'
 import { VERSION } from '../version'
-import { closeSync, fchmodSync, openSync, writeSync } from 'node:fs'
+import { closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, writeSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { parsePort, startDaemon } from './daemon'
 import { SHUTDOWN_SIGNALS, parseDaemonArgs } from './daemon-args'
 import { logLine } from './log-line'
@@ -54,9 +55,31 @@ const stderrSink: LogSink = (line) => {
   process.stderr.write(line)
 }
 
-/** Opened once, append-only, created owner-only; a write that fails never stops the daemon. */
-function fileSink(path: string): { sink: LogSink; close: () => void } {
-  const fd = openSync(path, 'a', LOG_FILE_MODE)
+const LOG_DIR_MODE = 0o700
+
+function isSymlink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink()
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
+/**
+ * Opened once, append-only, owner-only; a write that fails never stops the
+ * daemon. The folder is made when missing, since a service with no console
+ * has nowhere else to say why it could not start. A symlink is refused, so
+ * the mode change can never land on another file.
+ */
+export function fileSink(path: string): { sink: LogSink; close: () => void } {
+  mkdirSync(dirname(path), { recursive: true, mode: LOG_DIR_MODE })
+  if (isSymlink(path)) throw new Error(`kinfold daemon: --log-file ${path} is a symlink; refused`)
+  const fd = openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | (constants.O_NOFOLLOW ?? 0), LOG_FILE_MODE)
+  if (!fstatSync(fd).isFile()) {
+    closeSync(fd)
+    throw new Error(`kinfold daemon: --log-file ${path} is not a regular file; refused`)
+  }
   fchmodSync(fd, LOG_FILE_MODE)
   return {
     sink: (line) => {
