@@ -68,7 +68,7 @@ function readingCodeFrom(prefix: readonly string[], after: string): TerminalIO &
 const ask = (w: FakeWorld) => createPrompts(w.env.terminal as TerminalIO)
 
 /** A re-run of a state with no hosts to ask about, so a test reaches one step in a few keys. */
-const rerun = (state: SetupState, over: Partial<SetupState> = {}): SetupState => ({ ...state, installed: true, ...over })
+const rerun = (state: SetupState, over: Partial<SetupState> = {}): SetupState => ({ ...state, installed: true, folderLocked: true, ...over })
 
 async function installedWithTwoHosts(w: FakeWorld): Promise<void> {
   const paths = installPaths(w.env)

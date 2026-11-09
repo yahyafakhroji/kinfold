@@ -32,6 +32,8 @@ import { type InstallChannel, currentChannel, readInstallRecord } from './record
 export interface SetupState {
   /** install.json exists, or the service config names a data folder. */
   installed: boolean
+  /** The folder holds an install: it is installed, or this run just moved one there from the old name. */
+  folderLocked: boolean
   /** The folder already installed, else the one this run resolved. */
   dataDir: string
   wiredHosts: InstallHost[]
@@ -166,7 +168,18 @@ function installedFolder(env: InstallEnv, configured: string | null): { dataDir:
   return null
 }
 
-export async function readSetupState(env: InstallEnv): Promise<SetupState> {
+export interface SetupStateOptions {
+  /**
+   * This run just moved an install from the old name into env.dataDir. Its
+   * plist is gone and the new one and install.json are not written yet, so
+   * nothing on disk says installed; the moved store must still lock the folder.
+   * Its old wiring is not recognised, so the agents still default to the
+   * detected ones, as on a first install.
+   */
+  migrated?: boolean
+}
+
+export async function readSetupState(env: InstallEnv, options: SetupStateOptions = {}): Promise<SetupState> {
   const service = serviceOf(env)
   const configured = service !== null && service.isConfigured() ? service.configuredDataDir() : null
   const found = installedFolder(env, configured)
@@ -179,6 +192,7 @@ export async function readSetupState(env: InstallEnv): Promise<SetupState> {
   const observers = await savedObservers(at, dataDir)
   return {
     installed,
+    folderLocked: installed || options.migrated === true,
     dataDir,
     wiredHosts,
     observers: observers.map,
@@ -200,7 +214,7 @@ function sameFolder(a: string, b: string): boolean {
 
 /** The refusal for a folder other than the installed one; null for the same folder, no request, or a first install. */
 export function lockedFolderProblem(state: SetupState, requested: string | null): string | null {
-  if (!state.installed || requested === null) return null
+  if (!state.folderLocked || requested === null) return null
   if (sameFolder(requested, state.dataDir)) return null
   return `the memory folder is ${state.dataDir}, not ${requested}. ${LOCKED_FOLDER_NOTE}`
 }

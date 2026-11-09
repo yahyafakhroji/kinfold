@@ -137,7 +137,7 @@ function expandFolder(env: InstallEnv, typed: string): string {
 }
 
 async function folderStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags): Promise<string> {
-  if (state.installed) {
+  if (state.folderLocked) {
     ask?.locked('Memory folder', state.dataDir, LOCKED_FOLDER_NOTE)
     return state.dataDir
   }

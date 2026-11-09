@@ -473,7 +473,7 @@ export async function install(env: InstallEnv, options: InstallOptions): Promise
     }
     migrated = moved.migrated
     const asking = withTerminalSecrets(env)
-    const state = await readSetupState(asking)
+    const state = await readSetupState(asking, { migrated })
     let target: FolderTarget = { env: asking, state }
     const prompts = env.terminal === null ? null : createPrompts(env.terminal)
     const answers = await runWizard(asking, prompts, state, setupFlags(options), options, async (dataDir) => (target = await folderTarget(asking, dataDir)))
