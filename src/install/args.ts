@@ -24,9 +24,12 @@ export interface CliArgs {
   removeHmacKeys: boolean
   hosts: InstallHost[] | null
   observers: ObserverFlag[]
+  noEncrypt: boolean
+  noUpdateCheck: boolean
+  port: number | null
 }
 
-type BooleanFlag = 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys'
+type BooleanFlag = 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck'
 
 const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: readonly Command[] }>> = {
   '--dry-run': { key: 'dryRun', commands: ['install', 'uninstall'] },
@@ -35,6 +38,8 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
   '--replace-credential': { key: 'replaceCredential', commands: ['install'] },
   '--credential-stdin': { key: 'credentialStdin', commands: ['install'] },
   '--takeover': { key: 'takeover', commands: ['install'] },
+  '--no-encrypt': { key: 'noEncrypt', commands: ['install'] },
+  '--no-update-check': { key: 'noUpdateCheck', commands: ['install'] },
   '--remove-credentials': { key: 'removeCredentials', commands: ['uninstall'] },
   '--remove-hmac-keys': { key: 'removeHmacKeys', commands: ['uninstall'] },
 }
@@ -43,6 +48,8 @@ export const USAGE = [
   'usage: kinfold <install|uninstall|status|size|retention|scan|findings|purge|dashboard|encrypt|decrypt|rekey|key|hook|mcp|daemon|observe> [--data-dir <path>] [--version] [flags]',
   '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>]...',
   '             [--skip-check] [--replace-credential] [--credential-stdin] [--takeover]',
+  '             [--no-encrypt] [--port <1024-65535>] [--no-update-check]',
+  '  update     [--dry-run]',
   '  uninstall  [--dry-run] [--remove-credentials] [--remove-hmac-keys]',
   '             --remove-hmac-keys deletes Keychain hmac-master and hmac-legacy and hmac.d/: stored refs can no longer',
   '             be checked, and a later install starts a new master (hmac.key is written back from hmac-legacy first)',
@@ -230,7 +237,7 @@ export function parseObserverFlag(value: string): Parsed<ObserverFlag> {
 }
 
 function initial(command: Command): CliArgs {
-  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [] }
+  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], noEncrypt: false, noUpdateCheck: false, port: null }
 }
 
 /** `--flag value` or `--flag=value`; returns the value and how many argv slots it used. */
@@ -241,7 +248,20 @@ function valueOf(argv: readonly string[], index: number, name: string): { value:
   return next === undefined ? null : { value: next, used: 2 }
 }
 
+const MIN_PORT = 1024
+const MAX_PORT = 65_535
+
+function parsePort(value: string): Parsed<number> {
+  const port = /^\d+$/.test(value) ? Number(value) : Number.NaN
+  if (!Number.isInteger(port) || port < MIN_PORT || port > MAX_PORT) return { ok: false, error: `--port takes a whole number from ${MIN_PORT} to ${MAX_PORT}` }
+  return { ok: true, value: port }
+}
+
 function applyValueFlag(args: CliArgs, name: string, value: string): Parsed<CliArgs> {
+  if (name === '--port') {
+    const port = parsePort(value)
+    return port.ok ? { ok: true, value: { ...args, port: port.value } } : port
+  }
   if (name === '--hosts') {
     const hosts = parseHosts(value)
     return hosts.ok ? { ok: true, value: { ...args, hosts: hosts.value } } : hosts
@@ -265,7 +285,7 @@ export function parseArgs(argv: readonly string[]): Parsed<CliArgs> {
       index += 1
       continue
     }
-    const name = ['--hosts', '--observer'].find((flag) => arg === flag || arg.startsWith(`${flag}=`))
+    const name = ['--hosts', '--observer', '--port'].find((flag) => arg === flag || arg.startsWith(`${flag}=`))
     if (name === undefined) return { ok: false, error: `unknown argument ${JSON.stringify(arg)}\n${USAGE}` }
     if (args.command !== 'install') return { ok: false, error: `${name} does not apply to ${args.command}` }
     const found = valueOf(argv, index, name)

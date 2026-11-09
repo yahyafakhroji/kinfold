@@ -24,7 +24,7 @@ test('--yes, --hosts and repeated --observer parse into one value', () => {
   expect(parsed).toEqual({
     ok: true,
     value: {
-      command: 'install', dryRun: false, yes: true, skipCheck: true, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false,
+      command: 'install', dryRun: false, yes: true, skipCheck: true, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, noEncrypt: false, noUpdateCheck: false, port: null,
       hosts: ['claude-code', 'opencode'],
       observers: [
         { host: 'claude-code', provider: 'claude-cli', model: 'sonnet' },
