@@ -37,7 +37,7 @@ export type Action =
   | { kind: 'remove'; path: string; summary: string; recursive?: boolean }
   | { kind: 'launchctl'; argv: readonly string[] }
   /** A host CLI call such as `claude mcp add-json`; argv holds no secret, so it prints whole. */
-  | { kind: 'command'; argv: readonly string[]; summary: string }
+  | { kind: 'command'; argv: readonly string[]; summary: string; whenMissing?: string }
   /** Swaps our Claude Code MCP entry: remove, add the new one, and put `previous` back if the add fails. Neither entry holds a secret. */
   | { kind: 'claude-mcp-replace'; previous: Record<string, unknown>; next: Record<string, unknown> }
   | { kind: 'wait-takeover'; pid: number | null; port: number }
@@ -159,6 +159,23 @@ export async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Pr
   if (exitCode !== 0) throw new Error(`${argv.slice(0, 2).join(' ')} failed (exit ${exitCode})`)
 }
 
+const NOT_FOUND_EXIT = 127
+
+/**
+ * A host CLI call. One with `whenMissing` is skipped, with that note, when its
+ * binary is not installed: removing an agent is the likeliest reason to have
+ * dropped its CLI, and every later run would fail the same way otherwise.
+ */
+async function runCommand(env: InstallEnv, action: Extract<Action, { kind: 'command' }>): Promise<void> {
+  if (action.whenMissing === undefined) return runLaunchctl(env, action.argv)
+  const { exitCode } = await env.run({ argv: action.argv, timeoutMs: 15_000 })
+  if (exitCode === NOT_FOUND_EXIT) {
+    env.out(action.whenMissing)
+    return
+  }
+  if (exitCode !== 0) throw new Error(`${action.argv.slice(0, 2).join(' ')} failed (exit ${exitCode})`)
+}
+
 async function replaceClaudeMcp(env: InstallEnv, previous: Record<string, unknown>, next: Record<string, unknown>): Promise<void> {
   if (!rollbackSafe(previous)) throw new Error('the previous Claude Code MCP entry carries env values Kinfold did not write; it was left alone')
   let timedOut = false
@@ -210,7 +227,7 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'write': return writeFileAtomic(action.path, action.content, action.mode)
     case 'remove': return rmSync(action.path, { force: true, recursive: action.recursive === true })
     case 'launchctl': return runLaunchctl(env, action.argv)
-    case 'command': return runLaunchctl(env, action.argv)
+    case 'command': return runCommand(env, action)
     case 'claude-mcp-replace': return replaceClaudeMcp(env, action.previous, action.next)
     case 'wait-takeover':
       env.out(`waiting for you to stop the running daemon: ${stopCommand(action.pid, action.port)}`)

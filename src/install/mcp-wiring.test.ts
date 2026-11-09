@@ -176,3 +176,45 @@ test('a remove that times out does not claim the entry was kept', async () => {
   expect(text).toContain('claude mcp remove did not finish; check the entry with claude mcp list --scope user')
   expect(text).not.toContain('left in place')
 })
+
+test('unticking Claude Code after its CLI is gone skips the MCP remove with a note and finishes the install', async () => {
+  let claudeGone = false
+  world = createWorld({
+    claudeVersion: '2.1.310 (Claude Code)',
+    opencodeVersion: '2.1.4',
+    keychainRefs: ['openrouter'],
+    commandOverride: (argv) => (claudeGone && argv[0] === 'claude' ? { exitCode: 127, stdout: '' } : undefined),
+  })
+  const w = world
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  // The fake CLI does not write ~/.claude.json, so put the entry there as the real one would.
+  writeFileSync(mcpPaths(w.env).claudeUserConfig, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: claudeMcpEntry(mcpTarget(w.env)) } }))
+  const before = readFileSync(mcpPaths(w.env).claudeUserConfig, 'utf8')
+  claudeGone = true
+  w.out.length = 0
+  w.commands.length = 0
+
+  expect(await install(w.env, { ...YES, hosts: ['opencode'] })).toBe(EXIT_OK)
+  const text = w.out.join('\n')
+  expect(text).toContain('claude not found: the Kinfold entry is still in Claude Code\'s config; remove it with claude mcp remove --scope user kinfold once Claude Code is back')
+  expect(text).toContain('installed.')
+  expect(mcpCommands(w)).toEqual([['claude', 'mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME]])
+  expect(readFileSync(mcpPaths(w.env).claudeUserConfig, 'utf8')).toBe(before)
+})
+
+test('a Claude Code MCP remove that fails for another reason still fails the step', async () => {
+  let failing = false
+  world = createWorld({
+    claudeVersion: '2.1.310 (Claude Code)',
+    opencodeVersion: '2.1.4',
+    keychainRefs: ['openrouter'],
+    commandOverride: (argv) => (failing && argv[0] === 'claude' && argv[2] === 'remove' ? { exitCode: 1, stdout: '' } : undefined),
+  })
+  const w = world
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  writeFileSync(mcpPaths(w.env).claudeUserConfig, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: claudeMcpEntry(mcpTarget(w.env)) } }))
+  failing = true
+  w.out.length = 0
+  expect(await install(w.env, { ...YES, hosts: ['opencode'] })).not.toBe(EXIT_OK)
+  expect(w.out.join('\n')).not.toContain('claude not found')
+})

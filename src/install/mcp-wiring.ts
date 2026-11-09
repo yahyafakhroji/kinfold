@@ -71,6 +71,7 @@ const claudeRemove: Action = {
   kind: 'command',
   argv: CLAUDE_MCP_REMOVE_ARGV,
   summary: 'unregister the Kinfold MCP server from Claude Code',
+  whenMissing: `claude not found: the Kinfold entry is still in Claude Code's config; remove it with ${CLAUDE_MCP_REMOVE_ARGV.join(' ')} once Claude Code is back`,
 }
 
 function stateIn(path: string, host: 'claude-code' | 'opencode', target: McpTarget): McpEntryState | 'unknown' {
