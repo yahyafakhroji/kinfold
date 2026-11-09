@@ -17,6 +17,7 @@ import type { McpRead } from '../store/mcp-read-store'
 import type { SessionSummary } from '../store/reads'
 import { type DataHandlers, type RouteAnswer, dataRoute } from './data-routes'
 import { parseMcpRead } from './mcp-read-route'
+import { type ReadRouteDeps, readRoute } from './read-routes'
 import type { HmacMode } from './hmac-rotation'
 import { type MemoryHandlers, memoryRoute } from './memory-routes'
 import type { ObserverModelsRoute } from './observer-models-route'
@@ -60,6 +61,8 @@ export interface ServerDeps {
   observerModels: ObserverModelsRoute
   /** Login codes and session cookies for the dashboard; in memory only. */
   auth: DashboardAuth
+  /** The /read/ routes (token only); absent, every /read/ path is 404. */
+  reads?: ReadRouteDeps
   /** Receives counts, ids and error messages only, never payloads. */
   log: (line: string) => void
 }
@@ -173,6 +176,7 @@ async function panelRoute(request: Request, url: URL, deps: ServerDeps): Promise
   if (path === '/observer/test') return deps.observerTest(request.method, () => readJson(request))
   if (path === '/update') return request.method === 'GET' ? { status: 200, body: { notice: deps.updateBanner?.() ?? null } } : { status: 405, body: { error: 'method not allowed' } }
   if (path === '/metrics/summary') return request.method === 'GET' ? deps.metrics(url.searchParams.get('window')) : { status: 405, body: { error: 'method not allowed' } }
+  if (path.startsWith('/read/') && deps.reads !== undefined) return readRoute(request.method, path, () => readJson(request), deps.reads, deps.log)
   return null
 }
 

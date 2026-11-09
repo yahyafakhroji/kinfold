@@ -58,6 +58,9 @@ import { availableMessage, pendingNotice } from '../update/notice'
 import { readUpdateState } from '../update/state'
 import { readInstallRecord } from '../install/setup/record'
 import { startServer } from './server'
+import type { ReadRouteDeps } from './read-routes'
+import { type MemoryReader, openMemoryReader } from '../mcp/reader'
+import { MCP_SEMANTIC_TIMEOUT_MS, type SemanticClient } from '../mcp/semantic-client'
 import { settingsHandlers } from './settings-route'
 import type { Embedder } from '../vectors/embedder'
 import { type Support, loadVec0 } from '../vectors/extension'
@@ -238,6 +241,36 @@ function retryFailed(db: Database, target: RetryTarget, observer: ObserverSchedu
   return reset
 }
 
+interface DaemonReads {
+  deps: ReadRouteDeps
+  close: () => void
+}
+
+/**
+ * The /read/ routes' deps. The reader is a second, read-only connection over
+ * the daemon's own memory.db, opened on first use (and asked again while the
+ * file cannot be opened), so it never shares the writer's statements.
+ */
+function daemonReads(dataDir: string, projectKeyFor: ReadRouteDeps['projectKeyFor'], vectors: Vectors): DaemonReads {
+  let reader: MemoryReader | null = null
+  const semantic: SemanticClient = (query) => vectors.search({ ...query, deadlineMs: MCP_SEMANTIC_TIMEOUT_MS })
+  return {
+    deps: {
+      reader: () => {
+        reader ??= openMemoryReader(dataDir)
+        return reader
+      },
+      projectKeyFor,
+      now: Date.now,
+      ...(vectors.support.ok ? { semantic } : {}),
+    },
+    close: () => {
+      reader?.close()
+      reader = null
+    },
+  }
+}
+
 function removeOwnInfoFile(path: string): void {
   if (!existsSync(path)) return
   const info: unknown = JSON.parse(readFileSync(path, 'utf8'))
@@ -266,6 +299,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const hmacKeys = createHmacKeys({ dataDir, keychain: options.keychain ?? NO_CREDENTIALS, now: options.hmac?.now ?? Date.now, log })
   const vectors = startVectors(store.db, dataDir, options.vectors, log)
   const projectKeyFor = createProjectKeyResolver(gitRunnerWithTimeout(DAEMON_GIT_TIMEOUT_MS))
+  const reads = daemonReads(dataDir, projectKeyFor, vectors)
   const drainOptions = (): DrainOptions => ({ spoolDir: join(dataDir, SPOOL_DIR), ...hmacKeys.marker(), projectKeyFor })
 
   let observer: ObserverScheduler | null = null
@@ -303,6 +337,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     observerModels: observerModelsRoute(options.observer?.cliRunnerFor ?? null, log, Date.now),
     observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log)),
     auth: createDashboardAuth(),
+    reads: reads.deps,
     log,
   })
   const infoPath = join(dataDir, DAEMON_INFO_FILE)
@@ -335,6 +370,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     await server.stop()
     await vectors.indexer?.whenIdle()
     removeOwnInfoFile(infoPath)
+    reads.close()
     store.db.close()
   }
   return { port: server.port, dataDir, scheduler, observer, hmacKeys, vectors: vectors.indexer, stop }

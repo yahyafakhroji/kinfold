@@ -13,7 +13,9 @@ import { resolveDataDir } from '../store/data-dir'
 import { applyDataDirFlag } from '../store/data-dir-flag'
 import { type Embedder, createOpenRouterEmbedder } from '../vectors/embedder'
 import { VERSION } from '../version'
+import { closeSync, fchmodSync, openSync, writeSync } from 'node:fs'
 import { parsePort, startDaemon } from './daemon'
+import { SHUTDOWN_SIGNALS, parseDaemonArgs } from './daemon-args'
 import { logLine } from './log-line'
 import { parseIdleMs, parseMaxWaitMs } from './observer-scheduler'
 
@@ -43,25 +45,83 @@ export function daemonSecrets(dataDir: string, deps: KeyStoreDeps): { credential
   return { credentials: credentialProviderOf(store), dbKeys: dbKeyStoreOf(store) }
 }
 
-function fail(message: string): never {
-  process.stderr.write(logLine(message))
+const LOG_FILE_MODE = 0o600
+
+/** Writes a finished log line to stderr, and to the --log-file when one is open. */
+type LogSink = (line: string) => void
+
+const stderrSink: LogSink = (line) => {
+  process.stderr.write(line)
+}
+
+/** Opened once, append-only, created owner-only; a write that fails never stops the daemon. */
+function fileSink(path: string): { sink: LogSink; close: () => void } {
+  const fd = openSync(path, 'a', LOG_FILE_MODE)
+  fchmodSync(fd, LOG_FILE_MODE)
+  return {
+    sink: (line) => {
+      process.stderr.write(line)
+      try {
+        writeSync(fd, line)
+      } catch {
+        // stderr still has the line.
+      }
+    },
+    close: () => closeSync(fd),
+  }
+}
+
+function fail(sink: LogSink, message: string): never {
+  sink(logLine(message))
   process.exit(1)
 }
 
-/** The daemon entry when `kinfold daemon` runs it; `argv` is what follows the subcommand, of which there are no flags yet. */
+/** Resolves on the first of SHUTDOWN_SIGNALS once the daemon has stopped, and takes its listeners back off. */
+function untilShutdown(daemon: ReturnType<typeof startDaemon>, sink: LogSink): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let stopping = false
+    const listeners = SHUTDOWN_SIGNALS.map((signal) => {
+      const listener = (): void => shutdown(signal)
+      process.on(signal, listener)
+      return [signal, listener] as const
+    })
+    function shutdown(signal: NodeJS.Signals): void {
+      if (stopping) return
+      stopping = true
+      sink(logLine(`${signal}, shutting down`))
+      daemon.stop().then(
+        () => {
+          for (const [name, listener] of listeners) process.off(name, listener)
+          resolve()
+        },
+        (error: unknown) => fail(sink, `shutdown failed: ${error instanceof Error ? error.message : String(error)}`),
+      )
+    }
+  })
+}
+
+/** The daemon entry when `kinfold daemon` runs it; `argv` is what follows the subcommand (daemon-args.ts lists the flags). */
 export async function runDaemon(argv: readonly string[]): Promise<void> {
   process.umask(OWNER_ONLY_UMASK)
-  for (const line of deprecationLines(process.env)) process.stderr.write(logLine(line))
+  let sink = stderrSink
+  let closeLog = (): void => {}
   let daemon: ReturnType<typeof startDaemon>
   try {
-    applyDataDirFlag(argv)
+    const args = parseDaemonArgs(applyDataDirFlag(argv))
+    if (args.logFile !== null) {
+      const file = fileSink(args.logFile)
+      sink = file.sink
+      closeLog = file.close
+    }
+    for (const line of deprecationLines(process.env)) sink(logLine(line))
     const dataDir = resolveDataDir()
     const { credentials, dbKeys } = daemonSecrets(dataDir, processKeyStoreDeps(dataDir))
     const runnerDeps: RunnerDeps = { dataDir, credentials }
     daemon = startDaemon({
       dataDir,
-      port: parsePort(readEnv(process.env, 'PORT')),
+      port: args.port ?? parsePort(readEnv(process.env, 'PORT')),
       version: VERSION,
+      log: (line) => sink(logLine(line)),
       keychain: credentials,
       dbKeys,
       vectors: { embedder: embedderFrom(credentials) },
@@ -77,25 +137,13 @@ export async function runDaemon(argv: readonly string[]): Promise<void> {
       },
     })
   } catch (error: unknown) {
-    fail(`failed to start: ${error instanceof Error ? error.message : String(error)}`)
+    fail(sink, `failed to start: ${error instanceof Error ? error.message : String(error)}`)
   }
 
   // The server stays up until a stop signal arrives. The caller exits after
   // this resolves, so a `kinfold daemon` process never tears down its own server.
-  await new Promise<void>((resolve) => {
-    let stopping = false
-    const shutdown = (signal: string): void => {
-      if (stopping) return
-      stopping = true
-      process.stderr.write(logLine(`${signal}, shutting down`))
-      daemon.stop().then(
-        () => resolve(),
-        (error: unknown) => fail(`shutdown failed: ${error instanceof Error ? error.message : String(error)}`),
-      )
-    }
-    process.on('SIGINT', () => shutdown('SIGINT'))
-    process.on('SIGTERM', () => shutdown('SIGTERM'))
-  })
+  await untilShutdown(daemon, sink)
+  closeLog()
 }
 
 if (import.meta.main) {

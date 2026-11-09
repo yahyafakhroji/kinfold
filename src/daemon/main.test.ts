@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { PlatformInfo } from '../platform/platform'
@@ -10,7 +10,8 @@ import type { SecurityInvocation } from '../secrets/stores/keychain'
 import { openStoreFile } from '../sqlite/open'
 import { SqliteError } from '../sqlite/types'
 import { loadMarkerKey } from '../store/hmac-key'
-import { daemonSecrets } from './main'
+import { envName } from '../env-names'
+import { daemonSecrets, runDaemon } from './main'
 
 let dir = ''
 beforeEach(() => {
@@ -65,4 +66,55 @@ test('a store that cannot be read never leads to a new key', () => {
   expect(readdirSync(dir)).toEqual([KEY_STORE_FILE])
   // Only reads reached the store: nothing tried to add an entry.
   expect(calls.some((call) => call.args[0] === '-i')).toBe(false)
+})
+
+const DAEMON_ENV = [envName('DATA_DIR'), envName('PORT'), 'HOME'] as const
+
+/** Runs runDaemon in this process on a free port with a temp data folder, until `stop` sends the signal. */
+async function inProcessDaemon(argv: readonly string[]): Promise<{ dataDir: string; stop: (signal: NodeJS.Signals) => Promise<void> }> {
+  const saved = DAEMON_ENV.map((name) => [name, process.env[name]] as const)
+  const umask = process.umask()
+  const dataDir = join(dir, 'data')
+  process.env[envName('DATA_DIR')] = dataDir
+  process.env[envName('PORT')] = '0'
+  process.env.HOME = dir
+  const running = runDaemon(argv)
+  const info = join(dataDir, 'daemon.json')
+  for (let waited = 0; !existsSync(info); waited += 20) {
+    if (waited > 10_000) throw new Error('daemon.json never appeared')
+    await Bun.sleep(20)
+  }
+  return {
+    dataDir,
+    stop: async (signal) => {
+      process.emit(signal)
+      await running
+      process.umask(umask)
+      for (const [name, value] of saved) {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      }
+    },
+  }
+}
+
+test('a log file gets every log line at 0600', async () => {
+  const logFile = join(dir, 'daemon.log')
+  const daemon = await inProcessDaemon(['--log-file', logFile])
+  try {
+    expect(statSync(logFile).mode & 0o777).toBe(0o600)
+    expect(readFileSync(logFile, 'utf8')).toMatch(/listening on 127\.0\.0\.1:\d+ /)
+  } finally {
+    await daemon.stop('SIGTERM')
+  }
+  expect(readFileSync(logFile, 'utf8')).toContain('SIGTERM, shutting down')
+})
+
+test('SIGHUP stops the daemon cleanly', async () => {
+  const before = process.listenerCount('SIGHUP')
+  const daemon = await inProcessDaemon([])
+  expect(process.listenerCount('SIGHUP')).toBe(before + 1)
+  await daemon.stop('SIGHUP')
+  expect(existsSync(join(daemon.dataDir, 'daemon.json'))).toBe(false)
+  expect(process.listenerCount('SIGHUP')).toBe(before)
 })

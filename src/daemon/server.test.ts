@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +7,11 @@ import { captureEvent } from '../capture/capture'
 import { ulid } from '../contract/ulid'
 import { loadHmacKey } from '../store/hmac-key'
 import { type RunningDaemon, startDaemon } from './daemon'
+import * as ingest from './ingest'
+import * as readRoutes from './read-routes'
+import * as server from './server'
+import { openStore } from '../store/db'
+import { PROJECT_A, seedMcpObservation, seedMcpSession } from '../mcp/test-support'
 import { LATEST_SCHEMA_VERSION } from '../store/schema'
 import { VERSION } from '../version'
 
@@ -110,4 +115,41 @@ test('an event spooled while the daemon was down lands on the next start', async
 
   const body = (await (await fetch(url('/sessions'), authed())).json()) as { sessions: { hostSessionId: string }[] }
   expect(body.sessions.map((session) => session.hostSessionId)).toEqual([sessionId])
+})
+
+test('a /read/ path answers 404 until read routes exist', async () => {
+  expect((await fetch(url('/read/search'), authed({ method: 'POST', body: '{}' }))).status).toBe(404)
+  const real = { ...readRoutes }
+  const stub = mock(async () => ({ status: 200, body: { from: 'read-route' } }))
+  mock.module('./read-routes', () => ({ ...real, readRoute: stub }))
+  try {
+    expect((await fetch(url('/read/search'), { method: 'POST', body: '{}' })).status).toBe(401)
+    expect(stub).not.toHaveBeenCalled()
+    const answer = await fetch(url('/read/search'), authed({ method: 'POST', body: '{}' }))
+    expect(answer.status).toBe(200)
+    expect(await answer.json()).toEqual({ from: 'read-route' })
+    expect(stub).toHaveBeenCalledTimes(1)
+  } finally {
+    mock.module('./read-routes', () => real)
+  }
+})
+
+test('the daemon hands the read routes its reader and resolver', async () => {
+  const serve = spyOn(server, 'startServer')
+  const drain = spyOn(ingest, 'drainSpool')
+  const otherDir = join(root, 'other')
+  const other = startDaemon({ dataDir: otherDir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
+  try {
+    const reads = serve.mock.calls[0]![0].reads!
+    expect(reads.projectKeyFor).toBe(drain.mock.calls[0]![1].projectKeyFor)
+    const writer = openStore(otherDir)
+    const sessionId = seedMcpSession(writer, PROJECT_A, 'claude-code', 'r-1')
+    const id = seedMcpObservation(writer, { sessionId, projectKey: PROJECT_A, title: 'Seen through the daemon reader', at: Date.now() })
+    writer.db.close()
+    expect(reads.reader()?.observation(id, null)?.title).toBe('Seen through the daemon reader')
+  } finally {
+    serve.mockRestore()
+    drain.mockRestore()
+    await other.stop()
+  }
 })
