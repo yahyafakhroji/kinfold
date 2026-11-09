@@ -175,7 +175,7 @@ test('a verified program is handed install --yes with the saved channel', async 
   expect(tempFiles(binPath)).toEqual([])
   expect(w.out.at(-1)).toBe('kinfold updated to 0.2.0')
   // The service is the child install's to stop and start, never this process's.
-  expect(service.calls).toEqual([])
+  expect(service.calls.filter((call) => call === 'start' || call === 'stop')).toEqual([])
 })
 
 test('a failed hand-off says the old program is still in place', async () => {
@@ -248,7 +248,8 @@ test('a failed hand-off that left the service stopped says so', async () => {
   w.env = { ...w.env, service: stopped }
   expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: async () => 4 })).toBe(1)
   expect(w.out.at(-1)).toBe(`kinfold update: the new program's install stopped (exit 4); ${binPath} is still 0.1.0; the service is stopped; kinfold install starts it again`)
-  expect(stopped.calls).toEqual(['isRunning'])
+  // Stopped before the hand-off too, so it is not this process's to start.
+  expect(stopped.calls.filter((call) => call === 'start' || call === 'stop')).toEqual([])
 })
 
 /** A pid that existed and has exited: a short child, waited for. */
@@ -342,4 +343,19 @@ test('a write error before the hand-off says nothing was changed', async () => {
   expect(tempFiles(binPath)).toEqual([])
   expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
   expect(service.calls).toEqual([])
+})
+
+test('a hand-off killed while the child had the service stopped starts it again from the parent', async () => {
+  const { w, binPath, service } = updateWorld()
+  // The child stops the service before it replaces the program, then a closed terminal kills it.
+  const code = await runUpdate(w.env, { dryRun: false }, {
+    version: '0.1.0',
+    runProgram: async () => {
+      await service.stop()
+      return 129
+    },
+  })
+  expect(code).toBe(1)
+  expect(service.calls.filter((call) => call === 'start' || call === 'stop')).toEqual(['stop', 'start'])
+  expect(w.out.at(-1)).toBe(`kinfold update: the new program's install stopped (exit 129); ${binPath} is still 0.1.0; the service is running`)
 })

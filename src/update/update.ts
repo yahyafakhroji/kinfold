@@ -14,6 +14,7 @@ import { envName } from '../env-names'
 import type { InstallEnv } from '../install/env'
 import { serviceOf } from '../install/service/control'
 import { installedProgramPath } from '../install/entry'
+import { restartService } from '../install/install'
 import { RELEASE_BASE, fetchReleaseSums, fileSha256, parseSha256Sums, releaseAssetName, releaseSumsUrl } from '../install/self-install'
 import { currentChannel, readInstallRecord } from '../install/setup/record'
 import { VERSION } from '../version'
@@ -271,9 +272,18 @@ async function serviceState(env: InstallEnv): Promise<string> {
   }
 }
 
+async function isRunning(env: InstallEnv): Promise<boolean> {
+  try {
+    return (await serviceOf(env)?.isRunning()) === true
+  } catch {
+    return false
+  }
+}
+
 async function handOff(env: InstallEnv, temp: string, running: string, latest: string, run: NonNullable<UpdateDeps['runProgram']>): Promise<number> {
   const binPath = installedProgramPath(env.dataDir, env.platform)
   const before = await hashOrNull(binPath)
+  const wasRunning = await isRunning(env)
   let code: number
   try {
     code = await run(temp, ['--data-dir', env.dataDir, 'install', '--yes'], childEnv(env))
@@ -285,6 +295,10 @@ async function handOff(env: InstallEnv, temp: string, running: string, latest: s
     env.out(`kinfold updated to ${latest}`)
     return EXIT_OK
   }
+  // A child killed by a signal between its service stop and start never runs
+  // its own restart. This process outlives it (its signal handlers only wait),
+  // and whichever program is in place now was checked, so it starts that one.
+  if (wasRunning && !(await isRunning(env))) await restartService(env)
   const unchanged = before !== null && (await hashOrNull(binPath)) === before
   const program = unchanged
     ? `${PREFIX} the new program's install stopped (exit ${code}); ${binPath} is still ${running}`
