@@ -294,7 +294,7 @@ test('without a TTY an existing-store encryption change refuses', async () => {
 
 test('without a TTY a flag wins, then the saved value, and the observer step needs --yes or --observer', async () => {
   const { w } = setup([], { interactive: false, terminal: null, claudeVersion: '2.0.0' })
-  const state = rerun(await readSetupState(w.env), { port: 38000, updateCheck: false, encryption: 'off' })
+  const state = rerun(await readSetupState(w.env), { port: 38000, updateCheck: false, encryption: 'off', wiredHosts: ['claude-code'] })
   const failure = await runWizard(w.env, null, state, flagsOf(), NO_CHOICE).catch((error: unknown) => error)
   expect(failure).toBeInstanceOf(ChoiceError)
   expect((failure as Error).message).toContain('without a TTY')
@@ -318,6 +318,23 @@ test('no detected agent on a first install skips the agent question', async () =
   const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)
   expect(answers.hosts).toEqual([])
   expect(term.output()).toContain('No supported agent was found')
+})
+
+test('a headless no-agent run says so', async () => {
+  const { w } = setup([], { interactive: false, terminal: null })
+  const answers = await runWizard(w.env, null, await readSetupState(w.env), flagsOf({ yes: true, noEncrypt: true }), { ...NO_CHOICE, yes: true })
+  expect(answers.hosts).toEqual([])
+  expect(w.out.some((line) => line.includes('No supported agent was found'))).toBe(true)
+})
+
+test('--yes on a re-run keeps exactly the wired set', async () => {
+  // claude-code is wired but not detected; codex is detected but not wired.
+  const { w } = setup([], { interactive: false, terminal: null, codexVersion: '1.0.0' })
+  const state = rerun(await readSetupState(w.env), { wiredHosts: ['claude-code'], encryption: 'off' })
+  const flags = flagsOf({ yes: true, observers: [{ host: 'claude-code', provider: 'claude-cli', model: 'haiku' }] })
+  const answers = await runWizard(w.env, null, state, flags, { ...NO_CHOICE, yes: true, flags: flags.observers })
+  expect(answers.hosts).toEqual(['claude-code'])
+  expect(answers.encryption).toEqual({ kind: 'keep' })
 })
 
 test('declining the summary cancels', async () => {

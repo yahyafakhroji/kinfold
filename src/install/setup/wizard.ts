@@ -26,6 +26,7 @@ import {
   chooseObservers,
   defaultInput,
   describeInput,
+  isCliLoginProvider,
   listModelsFor,
   newCredentialSession,
   settingsInputFor,
@@ -64,6 +65,7 @@ export interface SetupAnswers {
 export const NO_TTY_ENCRYPTION_CHANGE = 'changing encryption on an existing store needs a terminal; run kinfold encrypt or kinfold decrypt'
 export const STALE_DB_KEY =
   'the Keychain already holds a database key (db-key) that no memory.db uses, and its recovery code cannot be recomputed; run kinfold key show-recovery to look at it before installing'
+export const NO_AGENTS_NOTE = 'No supported agent was found on this machine, so none will be wired.'
 export const ENCRYPTION_IS_ON = 'Encryption is on. Run kinfold key show-recovery to see the recovery code.'
 
 const MIN_PORT = 1024
@@ -108,9 +110,9 @@ async function portHolder(env: InstallEnv, port: number): Promise<string | null>
   }
 }
 
-async function defaultPort(env: InstallEnv, wanted: number): Promise<{ port: number; takenBy: string | null | undefined }> {
+async function defaultPort(env: InstallEnv, wanted: number, lookUpHolder: boolean): Promise<{ port: number; takenBy: string | null | undefined }> {
   if (await portAvailable(env, wanted)) return { port: wanted, takenBy: undefined }
-  const holder = await portHolder(env, wanted)
+  const holder = lookUpHolder ? await portHolder(env, wanted) : null
   return { port: await freePortFrom(env, wanted + 1), takenBy: holder }
 }
 
@@ -121,7 +123,7 @@ const validPort = (value: string): string | null => {
 
 async function portStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags): Promise<number> {
   if (flags.port !== null) return flags.port
-  const wanted = await defaultPort(env, state.port)
+  const wanted = await defaultPort(env, state.port, ask !== null)
   if (ask === null) return wanted.port
   const taken = wanted.takenBy === undefined ? '' : `Port ${state.port} is in use${wanted.takenBy === null ? '' : ` (process ${wanted.takenBy})`}. `
   return Number(await ask.text(`${taken}Port for the daemon:`, String(wanted.port), validPort))
@@ -154,7 +156,6 @@ async function agentsStep(env: InstallEnv, ask: Prompts | null, state: SetupStat
   if (flags.hosts !== null) return selectedHosts(await detectHosts(env, flags.hosts))
   const detections = await detectHosts(env, null)
   const detected = selectedHosts(detections)
-  if (ask === null) return detected
   const wired = new Set(state.wiredHosts)
   // Not detected and not wired is the only untickable host; a wired one whose agent is gone can still be unticked to drop its wiring.
   const choices: Choice<InstallHost>[] = detections.map((found) => ({
@@ -163,8 +164,14 @@ async function agentsStep(env: InstallEnv, ask: Prompts | null, state: SetupStat
     hint: found.note,
     ...(!found.selected && !wired.has(found.host) ? { disabled: found.note } : {}),
   }))
+  if (ask === null) {
+    // Under --yes the saved wiring is the default; a host whose agent is gone stays wired until someone unticks it.
+    const hosts = state.installed ? state.wiredHosts : detected
+    if (hosts.length === 0) env.out(NO_AGENTS_NOTE)
+    return hosts
+  }
   if (choices.every((choice) => choice.disabled !== undefined)) {
-    ask.say('No supported agent was found on this machine, so none will be wired.')
+    ask.say(NO_AGENTS_NOTE)
     return []
   }
   return ask.multiSelect('Which agents should share memory?', choices, state.installed ? state.wiredHosts : detected)
@@ -175,7 +182,7 @@ async function agentsStep(env: InstallEnv, ask: Prompts | null, state: SetupStat
 type ProviderPick = 'current' | ObserverProvider
 
 async function askModel(env: InstallEnv, ask: Prompts, host: InstallHost, provider: ObserverProvider, current: Candidate): Promise<string> {
-  if (provider === 'codex-cli' || provider === 'opencode-cli') showModels(env, provider, await listModelsFor(env, provider))
+  if (isCliLoginProvider(provider)) showModels(env, provider, await listModelsFor(env, provider))
   const initial = current.input.provider === provider ? current.input.model : ''
   const model = await ask.text(`Model for ${provider} on ${host}:`, initial, (value) => (value.trim() === '' ? 'a model name is needed' : null))
   return model.trim()

@@ -91,7 +91,7 @@ export interface Candidate {
   origin: ObserverChoice['origin']
 }
 
-function isCliLoginProvider(provider: string): provider is CliLoginProvider {
+export function isCliLoginProvider(provider: string): provider is CliLoginProvider {
   return (CLI_LOGIN_PROVIDERS as readonly string[]).includes(provider)
 }
 
