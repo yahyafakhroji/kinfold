@@ -53,6 +53,7 @@ import { observerModelsRoute } from './observer-models-route'
 import { createObserverTester, observerTestRoute } from './observer-test'
 import { startDataTicks } from './data-ticks'
 import { VERSION } from '../version'
+import { type UpdateCheckDeps, startUpdateChecks } from '../update/check'
 import { startServer } from './server'
 import { settingsHandlers } from './settings-route'
 import type { Embedder } from '../vectors/embedder'
@@ -84,6 +85,8 @@ export interface DaemonOptions {
   hmac?: { rotationTickMs?: number; now?: () => number }
   /** Semantic search. Without it there is no embedding and /search/semantic answers unavailable. */
   vectors?: DaemonVectorOptions
+  /** The daily update check's fetch, clock and environment, for tests. It never runs for a 0.0.0-dev version. */
+  updateCheck?: Partial<Pick<UpdateCheckDeps, 'fetch' | 'now' | 'envVars'>>
 }
 
 export interface DaemonVectorOptions {
@@ -303,12 +306,21 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const observing = options.observer !== undefined ? startObserver(store.db, options.observer, hmacKeys, () => vectors.indexer?.tick(), log) : null
   observer = observing?.observer ?? null
   const dataTicks = startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, ...options.dataControl })
+  const updateChecks = startUpdateChecks({
+    dataDir,
+    version: options.version ?? VERSION,
+    fetch: options.updateCheck?.fetch ?? ((url, init) => fetch(url, init)),
+    now: options.updateCheck?.now ?? Date.now,
+    envVars: options.updateCheck?.envVars ?? (() => process.env),
+    log,
+  })
   log(`listening on 127.0.0.1:${server.port} schema=${store.schemaVersion} observer=${observer !== null ? 'on' : 'off'}`)
 
   const stop = async (): Promise<void> => {
     clearInterval(interval)
     clearInterval(rotation)
     dataTicks.stop()
+    updateChecks.stop()
     if (observing !== null) stopObserver(observing)
     if (vectors.timer !== null) clearInterval(vectors.timer)
     vectors.indexer?.stop()
