@@ -5,13 +5,15 @@ import { join } from 'node:path'
 import { USAGE, parseArgs } from '../install/args'
 import { HOOK_TIMEOUT_S } from '../install/claude-hooks'
 import { EXIT_USAGE } from '../install/install'
-import { type FakeWorld, createWorld } from '../install/test-support'
+import { fakeTerminal } from '../install/prompt/fake-terminal'
+import { LOCKED_FOLDER_NOTE } from '../install/setup/prefill'
+import { type FakeWorld, createWorld, snapshotTree } from '../install/test-support'
 import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
 import { VERSION } from '../version'
 import { mergeSamHooks } from '../install/claude-hooks'
 import { installPaths } from '../install/env'
 import { entryCommand } from '../install/entry'
-import { type SubcommandRunners, dataDirFor, envForDataDir, runKinfold } from './kinfold'
+import { EXIT_CANCELLED, type SubcommandRunners, dataDirFor, envForDataDir, runKinfold } from './kinfold'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -180,12 +182,12 @@ test('a bare kinfold installs, and --help prints usage without installing', asyn
   world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', interactive: true })
 
   expect(await runKinfold([], world.env)).toBe(0)
-  expect(world.out.at(-1)).toBe('installed. Check it with: bun src/cli/kinfold.ts status')
+  expect(world.out).toContain('installed. Check it with: bun src/cli/kinfold.ts status')
 
   world.out.length = 0
   expect(await runKinfold(['--help'], world.env)).toBe(0)
   expect(world.out[0]).toStartWith('usage: kinfold ')
-  expect(world.out.at(-1)).not.toBe('installed. Check it with: bun src/cli/kinfold.ts status')
+  expect(world.out).not.toContain('installed. Check it with: bun src/cli/kinfold.ts status')
 })
 
 test('--data-dir before the subcommand wins over the environment and reaches the subcommand', async () => {
@@ -287,6 +289,39 @@ test('install --data-dir uses the given folder for a dry run', async () => {
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test('Ctrl-C at a setup question exits 130 with the terminal cooked and nothing done', async () => {
+  const term = fakeTerminal(['\u0003'])
+  world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', keychainRefs: ['openrouter'], interactive: true, terminal: term })
+  const before = snapshotTree(world.home)
+  expect(await runKinfold(['install'], world.env)).toBe(EXIT_CANCELLED)
+  expect(term.rawStates()).toEqual([true, false])
+  expect(world.out.some((line) => line.startsWith('applying') || /^ {2}\d+\. /.test(line))).toBe(false)
+  expect(world.out.at(-1)).toBe('install cancelled; nothing was changed')
+  expect(snapshotTree(world.home)).toEqual(before)
+})
+
+test('a closed stdin at a setup question exits 130 too', async () => {
+  const term = fakeTerminal([])
+  world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', keychainRefs: ['openrouter'], interactive: true, terminal: term })
+  expect(await runKinfold(['install'], world.env)).toBe(EXIT_CANCELLED)
+  expect(term.rawStates().at(-1)).toBe(false)
+})
+
+test('--data-dir elsewhere on an installed machine is refused with the locked-folder note, writing nothing', async () => {
+  world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', keychainRefs: ['openrouter'] })
+  expect(await runKinfold(['install', '--yes'], world.env)).toBe(0)
+  const other = join(world.root, 'elsewhere')
+  const before = snapshotTree(world.root)
+  world.out.length = 0
+  expect(await runKinfold(['install', '--data-dir', other, '--yes'], world.env)).toBe(1)
+  expect(world.out.at(-1)).toBe(`install failed: the memory folder is ${world.dataDir}, not ${other}. ${LOCKED_FOLDER_NOTE}`)
+  expect(existsSync(other)).toBe(false)
+  const after = snapshotTree(world.root)
+  // Only the running daemon's own store files may change meanwhile.
+  const changed = Object.keys({ ...before, ...after }).filter((path) => JSON.stringify(before[path]) !== JSON.stringify(after[path]))
+  expect(changed.filter((path) => !/^home\/\.kinfold\/memory\.db(-wal|-shm)?$/.test(path))).toEqual([])
 })
 
 test('the daemon subcommand stays up and stops cleanly on SIGTERM', async () => {

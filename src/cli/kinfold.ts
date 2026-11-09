@@ -23,6 +23,8 @@ import { VERSION } from '../version'
 /** Repeated rather than imported from the installer, which the hook path must not load. */
 const EXIT_FAILED = 1
 const EXIT_USAGE = 2
+/** 128 + SIGINT, as a shell reports a Ctrl-C. */
+export const EXIT_CANCELLED = 130
 
 export type SubcommandName = 'hook' | 'mcp' | 'daemon' | 'observe'
 
@@ -162,16 +164,26 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     return uninstall(effective, { dryRun: installArgs.dryRun, removeCredentials: installArgs.removeCredentials, removeHmacKeys: installArgs.removeHmacKeys })
   }
   const { install } = await import('../install/install')
-  return install(effective, {
-    dryRun: installArgs.dryRun,
-    yes: installArgs.yes,
-    skipCheck: installArgs.skipCheck,
-    replaceCredential: installArgs.replaceCredential,
-    credentialStdin: installArgs.credentialStdin,
-    takeover: installArgs.takeover,
-    hosts: installArgs.hosts,
-    flags: installArgs.observers,
-  })
+  try {
+    return await install(effective, {
+      dryRun: installArgs.dryRun,
+      yes: installArgs.yes,
+      skipCheck: installArgs.skipCheck,
+      replaceCredential: installArgs.replaceCredential,
+      credentialStdin: installArgs.credentialStdin,
+      takeover: installArgs.takeover,
+      hosts: installArgs.hosts,
+      flags: installArgs.observers,
+      dataDirFlag: global.value.dataDir,
+      noEncrypt: installArgs.noEncrypt,
+      port: installArgs.port,
+      noUpdateCheck: installArgs.noUpdateCheck,
+    })
+  } catch (error: unknown) {
+    // Ctrl-C or a closed stdin at a question; install has said so and written nothing.
+    if (error instanceof Error && error.name === 'PromptCancelled') return EXIT_CANCELLED
+    throw error
+  }
 }
 
 /**
