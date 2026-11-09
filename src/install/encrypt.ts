@@ -358,7 +358,7 @@ async function decrypt(ctx: Context): Promise<void> {
   requireState(ctx, 'encrypted')
   requireInteractive(ctx, 'kinfold decrypt asks you to confirm and')
   const key = readKey(ctx)
-  const typed = await ctx.env.io.ask(`kinfold decrypt stores memory.db in plaintext again and deletes its ${ctx.store.label === 'keychain' ? 'Keychain key' : `key from ${ctx.store.place}`}. Type decrypt to go on: `)
+  const typed = await ctx.env.io.ask(`kinfold decrypt stores memory.db in plaintext again and deletes its ${ctx.store.kind === 'keychain' ? 'Keychain key' : `key from ${ctx.store.place}`}. Type decrypt to go on: `)
   if (typed.trim() !== 'decrypt') throw new Refusal('nothing changed')
   await decryptingWith(ctx, key)
 }

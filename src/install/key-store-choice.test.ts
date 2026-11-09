@@ -232,3 +232,16 @@ test("encrypt refuses with today's message where there is no key store", async (
   expect(await runKeyCommand(w.env, 'encrypt')).toBe(EXIT_FAILED)
   expect(w.out.at(-1)).toBe('kinfold encrypt: encryption needs the macOS Keychain; linux gets its key store in a later release')
 })
+
+test('a first install on another folder records the store there, and an injected store stays with the first folder', async () => {
+  const w = make()
+  const other = join(w.root, 'other-memory')
+  const injected = recordingKeyStore()
+  w.env.keyStore = injected
+  expect(await install(w.env, { ...DRY, dataDirFlag: other })).toBe(EXIT_OK)
+  const lines = planLines(w)
+  // The folder the wizard ends on gets a store of its own: the Keychain, chosen afresh, not the injected one.
+  expect(lines.some((line) => line.includes(`record the key store (keychain) in ${join(other, KEY_STORE_FILE)}`))).toBe(true)
+  expect(lines.some((line) => line.includes(recordPath(w)))).toBe(false)
+  expect(injected.seen).toEqual([])
+})
