@@ -28,3 +28,10 @@ test('USAGE lists the new flags and the update command', () => {
   for (const text of ['--no-encrypt', '--port <1024-65535>', '--no-update-check']) expect(USAGE).toContain(text)
   expect(USAGE).toMatch(/update\s+\[--dry-run\]/)
 })
+
+test('update takes only --dry-run', () => {
+  expect(parseArgs(['update'])).toMatchObject({ ok: true, value: { command: 'update', dryRun: false } })
+  expect(parseArgs(['update', '--dry-run'])).toMatchObject({ ok: true, value: { command: 'update', dryRun: true } })
+  expect(parseArgs(['update', '--yes'])).toEqual({ ok: false, error: '--yes does not apply to update' })
+  expect(parseArgs(['update', '--port', '40000'])).toEqual({ ok: false, error: '--port does not apply to update' })
+})

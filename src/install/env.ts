@@ -90,6 +90,8 @@ export interface InstallEnv {
   service?: ServiceControl | null
   /** Whether 127.0.0.1:<port> can be bound; default binds it and lets go at once. A port our own daemon holds counts as free whatever this says. */
   portFree?: (port: number) => Promise<boolean>
+  /** Test seam for the bin folder's fsync after the program rename; default fs.fsyncSync. */
+  fsyncDir?: (fd: number) => void
   /** The installer's own environment variables, for the SAM_* deprecation checks; default none. Never printed. */
   envVars?: Readonly<Record<string, string | undefined>>
 }

@@ -159,6 +159,10 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     const { status } = await import('../install/status')
     return status(effective)
   }
+  if (installArgs.command === 'update') {
+    const { runUpdate } = await import('../update/update')
+    return runUpdate(effective, { dryRun: installArgs.dryRun })
+  }
   if (installArgs.command === 'uninstall') {
     const { uninstall } = await import('../install/uninstall')
     return uninstall(effective, { dryRun: installArgs.dryRun, removeCredentials: installArgs.removeCredentials, removeHmacKeys: installArgs.removeHmacKeys })

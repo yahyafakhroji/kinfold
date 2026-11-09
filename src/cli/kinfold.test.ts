@@ -432,3 +432,12 @@ test('a fatal mcp error logs only its name, not the message', async () => {
     rmSync(home, { recursive: true, force: true })
   }
 })
+
+test('`kinfold update` dispatches to the updater, which refuses a checkout', async () => {
+  world = createWorld()
+  const fetched: string[] = []
+  world.env = { ...world.env, fetch: async (url) => (fetched.push(url), new Response('', { status: 500 })) }
+  expect(await runKinfold(['update', '--dry-run'], world.env)).toBe(1)
+  expect(world.out.at(-1)).toBe('kinfold update: this is a checkout install; update it with git pull and bun src/cli/kinfold.ts install')
+  expect(fetched).toEqual([])
+})

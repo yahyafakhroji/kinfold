@@ -3,13 +3,15 @@
 // SHA256SUMS of the release it came from before any other step can change the
 // machine; a development build skips that check and says so. The copy goes
 // through a temp file in the bin folder, is fsynced and made executable, then
-// renamed, so a failure never leaves the old program half replaced.
+// renamed, so a failure never leaves the old program half replaced; the bin
+// folder is then fsynced so the rename itself survives a power loss.
 
 import { createHash } from 'node:crypto'
 import { chmodSync, closeSync, copyFileSync, createReadStream, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readEnv } from '../env-names'
+import { fsyncDirectory } from '../fs/atomic'
 import { VERSION } from '../version'
 import type { InstallEnv } from './env'
 import type { Action } from './plan'
@@ -62,7 +64,7 @@ export function parseSha256Sums(text: string): Map<string, string> {
 }
 
 /** Streams the file, so a compiled program is never read whole into memory. */
-async function fileSha256(path: string): Promise<string> {
+export async function fileSha256(path: string): Promise<string> {
   const hash = createHash('sha256')
   for await (const chunk of createReadStream(path)) hash.update(chunk)
   return hash.digest('hex')
@@ -133,6 +135,11 @@ async function fetchSums(env: InstallEnv, url: string): Promise<string> {
   return new TextDecoder().decode(bytes)
 }
 
+/** The checksum list of a release, through releaseSumsUrl so a candidate's override still applies. */
+export async function fetchReleaseSums(env: InstallEnv, version: string): Promise<string> {
+  return fetchSums(env, releaseSumsUrl(env.envVars ?? {}, version))
+}
+
 export interface ProgramCheckOptions {
   source: string
   dryRun: boolean
@@ -198,7 +205,7 @@ export async function checkProgram(env: InstallEnv, options: ProgramCheckOptions
     return { sourceHash, assetName, expectedSha256: sourceHash, check: false }
   }
   if (options.dryRun) return { sourceHash, assetName, expectedSha256: null, check: true }
-  const text = await fetchSums(env, releaseSumsUrl(env.envVars ?? {}, version))
+  const text = await fetchReleaseSums(env, version)
   const expected = assetName === null ? undefined : parseSha256Sums(text).get(assetName)
   if (expected === undefined || sourceHash !== expected) throw new Error('program does not match the release checksums')
   return { sourceHash, assetName, expectedSha256: expected, check: true }
@@ -256,4 +263,7 @@ export async function installProgram(env: InstallEnv, action: Extract<Action, { 
     rmSync(temp, { force: true })
     throw error
   }
+  // The service starts this path next; without the folder flush a power loss
+  // could bring back the old name entry after the new program was reported in place.
+  fsyncDirectory(dir, { platform: env.platform, fsyncDir: env.fsyncDir })
 }

@@ -1,4 +1,4 @@
-// `kinfold <install|uninstall|status> [flags]`. Hand-parsed, zero dependencies. A
+// `kinfold <install|uninstall|status|update> [flags]`. Hand-parsed, zero dependencies. A
 // flag that does not apply to the command is an error rather than ignored, so
 // `kinfold status --dry-run` cannot be mistaken for a promise.
 
@@ -9,7 +9,7 @@ import type { DataSettingsChange } from '../store/data-settings-store'
 import { INSTALL_HOSTS, type InstallHost } from './detect'
 import { type ObserverFlag, parseProviderModel } from './observer-choice'
 
-export const COMMANDS = ['install', 'uninstall', 'status'] as const
+export const COMMANDS = ['install', 'uninstall', 'status', 'update'] as const
 export type Command = (typeof COMMANDS)[number]
 
 export interface CliArgs {
@@ -32,7 +32,7 @@ export interface CliArgs {
 type BooleanFlag = 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck'
 
 const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: readonly Command[] }>> = {
-  '--dry-run': { key: 'dryRun', commands: ['install', 'uninstall'] },
+  '--dry-run': { key: 'dryRun', commands: ['install', 'uninstall', 'update'] },
   '--yes': { key: 'yes', commands: ['install'] },
   '--skip-check': { key: 'skipCheck', commands: ['install'] },
   '--replace-credential': { key: 'replaceCredential', commands: ['install'] },
@@ -45,7 +45,7 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
 }
 
 export const USAGE = [
-  'usage: kinfold <install|uninstall|status|size|retention|scan|findings|purge|dashboard|encrypt|decrypt|rekey|key|hook|mcp|daemon|observe> [--data-dir <path>] [--version] [flags]',
+  'usage: kinfold <install|uninstall|status|update|size|retention|scan|findings|purge|dashboard|encrypt|decrypt|rekey|key|hook|mcp|daemon|observe> [--data-dir <path>] [--version] [flags]',
   '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>]...',
   '             [--skip-check] [--replace-credential] [--credential-stdin] [--takeover]',
   '             [--no-encrypt] [--port <1024-65535>] [--no-update-check]',
