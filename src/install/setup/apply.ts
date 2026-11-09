@@ -10,6 +10,7 @@ import { DB_KEY_REF } from '../../secrets/credentials'
 import { credentialWriterFor } from '../../secrets/keychain-writer'
 import { fileState } from '../../sqlite/open'
 import { DB_FILE } from '../../store/data-dir'
+import { storedDbKey } from '../db-encryption'
 import { detectHosts } from '../detect'
 import { ENCRYPT_KEY_EXISTS, decryptConfirmed, encryptWithKey } from '../encrypt'
 import { type InstallEnv, errorMessage } from '../env'
@@ -60,6 +61,19 @@ function conversionProblem(env: InstallEnv, conversion: Conversion | null): stri
     return null
   }
   return state === 'encrypted' ? null : 'memory.db is not encrypted any more; run install again'
+}
+
+/**
+ * After a failed encrypt, whether the recovery code the person just saved
+ * belongs to anything: not when memory.db is still plaintext and the Keychain
+ * does not hold that key.
+ */
+function unusedCodeNote(env: InstallEnv, encryption: EncryptionAnswer): string {
+  if (encryption.kind !== 'encrypt-existing' || encryption.key === null) return ''
+  if (fileState(join(env.dataDir, DB_FILE)) !== 'plain') return ''
+  const stored = storedDbKey(env)
+  if (stored.kind === 'usable' && stored.key === encryption.key) return ''
+  return '. memory.db was not changed and is still plaintext, so the recovery code shown is not used; discard it'
 }
 
 async function convert(env: InstallEnv, encryption: EncryptionAnswer): Promise<void> {
@@ -116,7 +130,7 @@ export async function applySetup(env: InstallEnv, state: SetupState, answers: Se
       try {
         await convert(env, answers.encryption)
       } catch (error: unknown) {
-        env.out(`install: everything else is in place, but kinfold ${conversion} failed: ${errorMessage(error)}`)
+        env.out(`install: everything else is in place, but kinfold ${conversion} failed: ${errorMessage(error)}${unusedCodeNote(env, answers.encryption)}`)
         return EXIT_FAILED
       }
     }

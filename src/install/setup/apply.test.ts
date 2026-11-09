@@ -20,7 +20,7 @@ import { fakeTerminal } from '../prompt/fake-terminal'
 import type { TerminalIO } from '../prompt/terminal'
 import type { ServiceControl } from '../service/control'
 import { LaunchAgentService } from '../service/launch-agent-service'
-import { type FakeWorld, UID, YES, createWorld, snapshotTree } from '../test-support'
+import { type FakeWorld, UID, YES, createWorld, fakeService, snapshotTree } from '../test-support'
 import { SHOW_RECOVERY_LINE, applySetup, doneLines } from './apply'
 import { type SetupState, readSetupState } from './prefill'
 import { INSTALL_RECORD_FILE } from './record'
@@ -367,4 +367,23 @@ test('a first install on a typed folder plans against that folder as it is', asy
   expect(w.out).toContain(`database: ${join(other, DB_FILE)} is plaintext; it stays that way until kinfold encrypt`)
   expect(term.output()).toContain('Encrypt memory.db?')
   expect(term.output()).toContain('(y/N)')
+})
+
+test('a failed encrypt after the code was shown says the code is unused and memory.db was not changed', async () => {
+  const w = make()
+  expect(await install(w.env, { ...YES, noEncrypt: true })).toBe(EXIT_OK)
+  const path = join(w.dataDir, DB_FILE)
+  const before = readFileSync(path)
+  w.env = { ...w.env, service: fakeService({ stopError: new Error('stop refused') }) }
+  w.out.length = 0
+  const key = newDbKey()
+  const { code } = await applyWith(w, { kind: 'encrypt-existing', key })
+  expect(code).toBe(EXIT_FAILED)
+  expect(fileState(path)).toBe('plain')
+  expect(readFileSync(path).equals(before)).toBe(true)
+  expect(w.keychain.has(DB_KEY_REF)).toBe(false)
+  const last = w.out.at(-1) ?? ''
+  expect(last).toContain('kinfold encrypt failed')
+  expect(last).toMatch(/memory\.db was not changed and is still plaintext, so the recovery code shown is not used; discard it$/)
+  expect(w.out.join('\n')).not.toContain(encodeRecoveryCode(key))
 })
