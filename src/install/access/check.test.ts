@@ -1,4 +1,4 @@
-import { afterAll, afterEach, expect, mock, test } from 'bun:test'
+import { afterEach, expect, mock, test } from 'bun:test'
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { EXIT_OK, install } from '../install'
@@ -17,10 +17,11 @@ afterEach(async () => {
   await world?.cleanup()
   world = null
 })
-afterAll(() => {
+
+function restoreRealModules(): void {
   mock.module('./posix-modes', () => realPosix)
   mock.module('./windows-acl', () => realWindows)
-})
+}
 
 function looseDataDir(w: FakeWorld): void {
   mkdirSync(w.dataDir, { recursive: true })
@@ -64,14 +65,19 @@ test('each platform gets its access check', () => {
   const windowsSpy = mock(() => windows)
   mock.module('./posix-modes', () => ({ ...realPosix, posixModeAccess: posixSpy }))
   mock.module('./windows-acl', () => ({ ...realWindows, windowsAclAccess: windowsSpy }))
-  world = createWorld()
-  expect(dataDirAccessFor({ ...world.env, platform: 'darwin' })).toBe(posix)
-  expect(dataDirAccessFor({ ...world.env, platform: 'linux' })).toBe(posix)
-  expect(dataDirAccessFor({ ...world.env, platform: 'linux', wsl: true })).toBe(posix)
-  expect(dataDirAccessFor({ ...world.env, platform: 'win32' })).toBe(windows)
-  expect(posixSpy).toHaveBeenCalledTimes(3)
-  expect(windowsSpy).toHaveBeenCalledTimes(1)
-  // The injected one wins over any platform's.
-  expect(dataDirAccessFor({ ...world.env, platform: 'win32', dataDirAccess: quietAccess })).toBe(quietAccess)
-  expect(windowsSpy).toHaveBeenCalledTimes(1)
+  // Undone inside the test, so no other test in this file ever sees the spies.
+  try {
+    world = createWorld()
+    expect(dataDirAccessFor({ ...world.env, platform: 'darwin' })).toBe(posix)
+    expect(dataDirAccessFor({ ...world.env, platform: 'linux' })).toBe(posix)
+    expect(dataDirAccessFor({ ...world.env, platform: 'linux', wsl: true })).toBe(posix)
+    expect(dataDirAccessFor({ ...world.env, platform: 'win32' })).toBe(windows)
+    expect(posixSpy).toHaveBeenCalledTimes(3)
+    expect(windowsSpy).toHaveBeenCalledTimes(1)
+    // The injected one wins over any platform's.
+    expect(dataDirAccessFor({ ...world.env, platform: 'win32', dataDirAccess: quietAccess })).toBe(quietAccess)
+    expect(windowsSpy).toHaveBeenCalledTimes(1)
+  } finally {
+    restoreRealModules()
+  }
 })

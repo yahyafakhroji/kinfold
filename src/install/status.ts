@@ -103,7 +103,6 @@ async function databaseLines(env: InstallEnv): Promise<string[]> {
   return database === undefined ? [keyStoreStatusLine(env)] : [database, keyStoreStatusLine(env), ...rest]
 }
 
-
 /** The saved update state only: status never fetches. */
 export function updateLine(env: InstallEnv, running: string = VERSION): string {
   const record = readInstallRecord(env.dataDir)
