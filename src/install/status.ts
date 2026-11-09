@@ -27,7 +27,7 @@ import { availableMessage, pendingNotice } from '../update/notice'
 import { readUpdateState } from '../update/state'
 import { VERSION } from '../version'
 import { readInstallRecord } from './setup/record'
-import { wslStatus } from '../wsl/entry'
+import { type WslStatus, wslStatus } from '../wsl/entry'
 
 function claudeWiring(env: InstallEnv): string {
   const paths = installPaths(env)
@@ -55,6 +55,11 @@ async function hostLines(env: InstallEnv): Promise<string[]> {
       : detection.host === 'opencode' ? `${opencodeWiring(env)} in ${paths.opencodePlugin}` : hostWiringLine(env, detection.host)
     return `  ${detection.host}: ${found}; wired: ${wired}`
   })
+}
+
+/** Every host's detection and wiring line, then the MCP lines: what status prints under `hosts:`. */
+export async function hostStatusLines(env: InstallEnv): Promise<string[]> {
+  return [...(await hostLines(env)), ...mcpStatusLines(env)]
 }
 
 async function daemonLines(env: InstallEnv): Promise<string[]> {
@@ -116,15 +121,22 @@ export function updateLine(env: InstallEnv, running: string = VERSION): string {
 }
 
 export async function status(env: InstallEnv, running: string = VERSION): Promise<number> {
-  const wsl = platformOf(env).wsl ? await wslStatus(env) : null
+  let wsl: WslStatus | null = null
+  if (platformOf(env).wsl) {
+    // The Windows side can fail in ways this host cannot fix; the rest of status still holds.
+    try {
+      wsl = await wslStatus(env)
+    } catch (error: unknown) {
+      env.out(`WSL (preview): status unknown (${errorMessage(error)})`)
+    }
+  }
   for (const line of wsl?.lines ?? []) env.out(line)
   if (wsl?.replaces === true) return EXIT_OK
   const observer = await observerLines(env)
   const duplicates = findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings])
   const lines = [
     'hosts:',
-    ...(await hostLines(env)),
-    ...mcpStatusLines(env),
+    ...(await hostStatusLines(env)),
     ...(await daemonLines(env)),
     ...(await databaseLines(env)),
     ...observer.lines,

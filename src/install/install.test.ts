@@ -16,7 +16,7 @@ import { NO_DB_KEYS } from '../sqlite/keys'
 import { openStore } from '../store/db'
 import { recordSafety } from '../store/observer-safety-store'
 import { upsertObserverSettings } from '../store/observer-settings-store'
-import { status } from './status'
+import { hostStatusLines, status } from './status'
 import { uninstall } from './uninstall'
 import type { WslStatus } from '../wsl/entry'
 
@@ -375,4 +375,39 @@ test('WSL hooks that return null change nothing', async () => {
   } finally {
     mock.module('../wsl/entry', () => realWsl)
   }
+})
+
+test('a WSL status that throws prints an unknown line and status goes on', async () => {
+  mock.module('../wsl/entry', () => ({ ...realWsl, wslStatus: async () => { throw new Error('powershell.exe exited 1') } }))
+  try {
+    const w = both({ platform: 'linux' })
+    w.env = { ...w.env, wsl: true }
+    expect(await status(w.env)).toBe(EXIT_OK)
+    expect(w.out[0]).toBe('WSL (preview): status unknown (powershell.exe exited 1)')
+    expect(w.out[1]).toBe('hosts:')
+  } finally {
+    mock.module('../wsl/entry', () => realWsl)
+  }
+})
+
+// The pinned lines use POSIX separators.
+test.skipIf(process.platform === 'win32')('hostStatusLines returns exactly the macOS host and MCP lines status prints', async () => {
+  const w = both()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  w.out.length = 0
+  expect(await status(w.env)).toBe(EXIT_OK)
+  const printed = w.out.slice(1, w.out.findIndex((line) => line.startsWith('service (')))
+  expect(w.out[0]).toBe('hosts:')
+  expect(printed.length).toBeGreaterThan(4)
+  expect(await hostStatusLines(w.env)).toEqual(printed)
+  const normalized = (await hostStatusLines(w.env)).map((line) => line.replaceAll(w.home, '<home>').replaceAll(w.root, '<root>'))
+  expect(normalized).toEqual([
+    '  claude-code: detected 2.1.310 (Claude Code); wired: yes in <home>/.claude/settings.json',
+    '  opencode: detected 2.1.4; wired: yes in <home>/.config/opencode/plugins/kinfold.js',
+    '  codex: not detected (not found (no codex on PATH, no Codex.app)); wired: no (no hooks.json) in <home>/.codex/hooks.json',
+    '  cursor: not detected (not found (no cursor-agent or cursor on PATH, no Cursor.app)); wired: no (no hooks.json) in <home>/.cursor/hooks.json',
+    'mcp server <root>/checkout/src/mcp/server.ts:',
+    '  claude-code: no in <home>/.claude.json',
+    '  opencode: yes in <home>/.config/opencode/opencode.json',
+  ])
 })
