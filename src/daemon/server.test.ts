@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +7,12 @@ import { captureEvent } from '../capture/capture'
 import { ulid } from '../contract/ulid'
 import { loadHmacKey } from '../store/hmac-key'
 import { type RunningDaemon, startDaemon } from './daemon'
+import * as ingest from './ingest'
+import * as readRoutes from './read-routes'
+import * as server from './server'
+import { openStore } from '../store/db'
+import { type DbKeyStore, newDbKey } from '../sqlite/keys'
+import { PROJECT_A, seedMcpObservation, seedMcpSession } from '../mcp/test-support'
 import { LATEST_SCHEMA_VERSION } from '../store/schema'
 import { VERSION } from '../version'
 
@@ -110,4 +116,69 @@ test('an event spooled while the daemon was down lands on the next start', async
 
   const body = (await (await fetch(url('/sessions'), authed())).json()) as { sessions: { hostSessionId: string }[] }
   expect(body.sessions.map((session) => session.hostSessionId)).toEqual([sessionId])
+})
+
+test('a /read/ path answers 404 when no read route takes it, and the route answer otherwise', async () => {
+  // Mocked both ways, so the test holds whatever the real read routes answer.
+  const real = { ...readRoutes }
+  const declined = mock(async () => null)
+  const stub = mock(async () => ({ status: 200, body: { from: 'read-route' } }))
+  mock.module('./read-routes', () => ({ ...real, readRoute: declined }))
+  try {
+    expect((await fetch(url('/read/search'), authed({ method: 'POST', body: '{}' }))).status).toBe(404)
+    expect(declined).toHaveBeenCalledTimes(1)
+    mock.module('./read-routes', () => ({ ...real, readRoute: stub }))
+    expect((await fetch(url('/read/search'), { method: 'POST', body: '{}' })).status).toBe(401)
+    expect(stub).not.toHaveBeenCalled()
+    const answer = await fetch(url('/read/search'), authed({ method: 'POST', body: '{}' }))
+    expect(answer.status).toBe(200)
+    expect(await answer.json()).toEqual({ from: 'read-route' })
+    expect(stub).toHaveBeenCalledTimes(1)
+  } finally {
+    mock.module('./read-routes', () => real)
+  }
+})
+
+test('the daemon hands the read routes its reader and resolver', async () => {
+  const serve = spyOn(server, 'startServer')
+  const drain = spyOn(ingest, 'drainSpool')
+  const otherDir = join(root, 'other')
+  const other = startDaemon({ dataDir: otherDir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
+  try {
+    const reads = serve.mock.calls[0]![0].reads!
+    expect(reads.projectKeyFor).toBe(drain.mock.calls[0]![1].projectKeyFor)
+    const writer = openStore(otherDir)
+    const sessionId = seedMcpSession(writer, PROJECT_A, 'claude-code', 'r-1')
+    const id = seedMcpObservation(writer, { sessionId, projectKey: PROJECT_A, title: 'Seen through the daemon reader', at: Date.now() })
+    writer.db.close()
+    expect(reads.reader()?.observation(id, null)?.title).toBe('Seen through the daemon reader')
+  } finally {
+    serve.mockRestore()
+    drain.mockRestore()
+    await other.stop()
+  }
+})
+
+// Windows keeps the reader's file locked past the temp folder cleanup, as in the test above.
+test.skipIf(process.platform === 'win32')("the daemon's reader opens an encrypted store with the daemon's keys and asks the store once", async () => {
+  const serve = spyOn(server, 'startServer')
+  const encryptedDir = join(root, 'encrypted')
+  const key = newDbKey()
+  let reads = 0
+  const keys: DbKeyStore = { name: 'counting', read: () => (reads++, key), exists: () => true }
+  const writer = openStore(encryptedDir, { keys: { ...keys, read: () => key } })
+  const sessionId = seedMcpSession(writer, PROJECT_A, 'claude-code', 'r-1')
+  const id = seedMcpObservation(writer, { sessionId, projectKey: PROJECT_A, title: 'Read with the daemon key', at: Date.now() })
+  writer.db.close()
+  const other = startDaemon({ dataDir: encryptedDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, dbKeys: keys })
+  try {
+    const routes = serve.mock.calls[0]![0].reads!
+    expect(routes.reader()?.observation(id, null)?.title).toBe('Read with the daemon key')
+    // The writer and the reader both opened the file; the store was read once.
+    expect(reads).toBe(1)
+  } finally {
+    serve.mockRestore()
+    await other.stop()
+  }
+  expect(reads).toBe(1)
 })

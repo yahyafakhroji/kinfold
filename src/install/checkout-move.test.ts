@@ -331,7 +331,7 @@ test('an unchanged plist with a dead daemon restarts the service', async () => {
 
   w.commands.length = 0
   expect(await install(w.env, programOptions(move))).toBe(EXIT_OK)
-  expect(launchctlVerbs(w)).toEqual(['print', 'bootout', 'bootstrap'])
+  expect(launchctlVerbs(w)).toEqual(['print', 'bootout', 'print', 'bootstrap'])
   expect(w.launchd.loaded).toBe(true)
   expect((await checkHealth(w.env, readDaemonInfo(w.dataDir).port)).up).toBe(true)
 })

@@ -7,7 +7,8 @@
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { type OpenOptions, openWithLibrary } from './driver'
-import { type DbKeyStore, NO_DB_KEYS, platformDbKeyStore } from './keys'
+import type { KeyStoreDeps } from '../secrets/key-store'
+import { type DbKeyStore, NO_DB_KEYS, dbKeyStoreFor } from './keys'
 import { libraryFor } from './library'
 import { type Database, SqliteError } from './types'
 
@@ -39,11 +40,18 @@ export function fileState(path: string): FileState {
 export interface PlainOpenOptions extends OpenOptions {
   /** Open this instead, such as a `file:` URI with immutable=1; the library is still found from `path`. */
   target?: string
+  /**
+   * How long to wait on a lock, set right after the open: before the key and before any read, since
+   * the key check itself reads the file and a writer holding it would otherwise fail that read at once.
+   */
+  busyTimeoutMs?: number
 }
 
 export interface StoreOpenOptions extends PlainOpenOptions {
   keys?: DbKeyStore
   env?: Readonly<Record<string, string | undefined>>
+  /** Used only when `keys` is absent; default processKeyStoreDeps. Tests pass a fake `security` here. */
+  keyStoreDeps?: KeyStoreDeps
 }
 
 /** While this file sits in the data dir, `kinfold encrypt|decrypt|rekey` is changing memory.db and nothing else may open it. */
@@ -53,14 +61,26 @@ export function maintenancePath(dbPath: string): string {
   return join(dirname(dbPath), MAINTENANCE_FILE)
 }
 
+function openWaiting(path: string, options: PlainOpenOptions, env: Readonly<Record<string, string | undefined>>): Database {
+  const db = openWithLibrary(libraryFor(path, env), options.target ?? path, options)
+  if (options.busyTimeoutMs === undefined) return db
+  try {
+    db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.trunc(options.busyTimeoutMs))}`)
+    return db
+  } catch (error: unknown) {
+    db.close()
+    throw error
+  }
+}
+
 export function openPlain(path: string, options: PlainOpenOptions = {}, env: Readonly<Record<string, string | undefined>> = process.env): Database {
-  return openWithLibrary(libraryFor(path, env), options.target ?? path, options)
+  return openWaiting(path, options, env)
 }
 
 /** Opens with the key and proves it with a read; a wrong key throws kind bad_key. The key is never kept or put in an error. */
 export function openEncrypted(path: string, key: string, options: PlainOpenOptions = {}, env: Readonly<Record<string, string | undefined>> = process.env): Database {
   if (!/^[0-9a-f]{64}$/.test(key)) throw new SqliteError('the database key is not 64 hex characters', 'SQLITE_AUTH', 23, 'bad_key')
-  const db = openWithLibrary(libraryFor(path, env), options.target ?? path, options)
+  const db = openWaiting(path, options, env)
   try {
     db.exec(`PRAGMA key = 'raw:${key}'`)
     // A library that ignored the key would answer this with no cipher; refuse rather than store plaintext.
@@ -82,7 +102,7 @@ export function openEncrypted(path: string, key: string, options: PlainOpenOptio
  * True when the store is plaintext while the key store holds a key: the file
  * was replaced by a plaintext copy, or a conversion failed. Metadata only.
  */
-export function plaintextBesideKey(path: string, keys: DbKeyStore = platformDbKeyStore()): boolean {
+export function plaintextBesideKey(path: string, keys: DbKeyStore = dbKeyStoreFor(dirname(path))): boolean {
   return fileState(path) === 'plain' && keys.exists()
 }
 
@@ -94,7 +114,7 @@ export function openStoreFile(path: string, options: StoreOpenOptions = {}): Dat
   const env = options.env ?? process.env
   const state = fileState(path)
   if (state === 'plain') return openPlain(path, options, env)
-  const keys = options.keys ?? platformDbKeyStore(env)
+  const keys = options.keys ?? dbKeyStoreFor(dirname(path), env, options.keyStoreDeps)
   const key = keys.read()
   if (key !== null) return openEncrypted(path, key, options, env)
   if (state === 'encrypted') throw new SqliteError(`memory.db is encrypted and the ${keys.name} has no database key; run kinfold key recover`, 'SQLITE_AUTH', 23, 'no_key')

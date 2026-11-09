@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { ERROR_CODES, MAX_LINE_CHARS, PROTOCOL_VERSIONS } from './protocol'
+import { ERROR_CODES, MAX_LINE_CHARS, PROTOCOL_VERSIONS, handleLine } from './protocol'
+import { type ToolOutcome, callTool as localCallTool } from './tools'
+import { openMemoryReader } from './reader'
+import { mcpToolCallerFor } from '../wsl/mcp-backend'
 import { type McpServer, createMcpServer, runStdio } from './server'
 import { type McpFixture, NOW, PAYLOAD_MARKER, PROJECT_A, gitForProjectA, openMcpFixture } from './test-support'
 
@@ -106,4 +109,23 @@ test('runStdio splits lines across chunks and skips an oversize line', async () 
   expect(replies.map((reply) => reply.id)).toEqual([1, null, 2])
   expect(replies[1]!.error!.code).toBe(ERROR_CODES.parse)
   expect(out.join('')).not.toContain(PAYLOAD_MARKER)
+})
+
+test('an MCP tool call goes through the injected caller', async () => {
+  const fixed: ToolOutcome = { result: { content: [{ type: 'text', text: 'from elsewhere' }], structuredContent: { status: 'ok' } }, count: 0 }
+  const calls: [string, unknown][] = []
+  const reader = openMemoryReader(fixture.dataDir)
+  const tools = { reader: () => reader, projectKey: PROJECT_A, now: () => NOW }
+  const base = { tools, log: () => {}, clock: () => 0 }
+  const line = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search', arguments: { query: 'parser' } } })
+  try {
+    const injected = JSON.parse((await handleLine(line, { ...base, call: async (name, args) => (calls.push([name, args]), fixed) }))!)
+    expect(injected.result).toEqual(fixed.result)
+    expect(calls).toEqual([['search', { query: 'parser' }]])
+    const local = JSON.parse((await handleLine(line, base))!)
+    expect(local.result).toEqual((await localCallTool('search', { query: 'parser' }, tools))!.result)
+  } finally {
+    reader?.close()
+  }
+  expect(mcpToolCallerFor({ dataDir: fixture.dataDir, cwd: '/work/repo', platform: { os: 'macos', wsl: false, node: 'darwin' } })).toBeNull()
 })

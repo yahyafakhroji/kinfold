@@ -17,11 +17,20 @@ jobs:
     # does not absorb a cancelled job, so the job limit only backstops the
     # tighter step limits that bound each long step.
     timeout-minutes: 30
-    continue-on-error: ${{ matrix.os != 'macos-latest' }}
+    continue-on-error: ${{ !matrix.required }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        # Each OS's line is flipped to required by the change that brings it
+        # up; the os line between keeps two such changes from touching
+        # neighbouring lines.
+        include:
+          - os: macos-latest
+            required: true
+          - os: ubuntu-latest
+            required: false
+          - os: windows-latest
+            required: false
     steps:
       - uses: actions/checkout@v5
 
@@ -69,11 +78,20 @@ jobs:
     name: types (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
-    continue-on-error: ${{ matrix.os != 'macos-latest' }}
+    continue-on-error: ${{ !matrix.required }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        # Each OS's line is flipped to required by the change that brings it
+        # up; the os line between keeps two such changes from touching
+        # neighbouring lines.
+        include:
+          - os: macos-latest
+            required: true
+          - os: ubuntu-latest
+            required: false
+          - os: windows-latest
+            required: false
     steps:
       - uses: actions/checkout@v5
 

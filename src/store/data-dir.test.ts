@@ -71,7 +71,7 @@ test('a hook run with only the legacy dir spools there and does not create ~/.ki
     stderr: 'pipe',
     // No KINFOLD_DATA_DIR or SAM_DATA_DIR: the hook resolves the data dir from HOME like a live one.
     // The temp dir has no daemon.json, so the hook only spools and never reaches a running daemon.
-    env: { PATH: process.env.PATH ?? '', HOME: home, KINFOLD_DB_KEYSTORE: 'none' },
+    env: { PATH: process.env.PATH ?? '', HOME: home, NODE_ENV: 'test', KINFOLD_DB_KEYSTORE: 'none' },
   })
   expect(await child.exited).toBe(0)
   expect(existsSync(current)).toBe(false)

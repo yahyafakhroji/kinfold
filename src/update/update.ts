@@ -11,7 +11,7 @@
 import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { envName } from '../env-names'
-import type { InstallEnv } from '../install/env'
+import { type InstallEnv, platformOf } from '../install/env'
 import { serviceOf } from '../install/service/control'
 import { installedProgramPath } from '../install/entry'
 import { restartService } from '../install/install'
@@ -68,7 +68,7 @@ function binDir(env: InstallEnv): string {
 }
 
 function tempPath(env: InstallEnv): string {
-  const suffix = env.platform === 'win32' ? '.exe' : ''
+  const suffix = platformOf(env).os === 'windows' ? '.exe' : ''
   return join(binDir(env), `.kinfold-update-${process.pid}${suffix}`)
 }
 
@@ -264,7 +264,7 @@ async function hashOrNull(path: string): Promise<string | null> {
 /** The child may have stopped the service before it failed, so say what it is now. */
 async function serviceState(env: InstallEnv): Promise<string> {
   const service = serviceOf(env)
-  if (service === null) return 'this platform has no background service'
+  if (service === null || service.unavailableReason() !== null) return 'this platform has no background service'
   try {
     return (await service.isRunning()) ? 'the service is running' : 'the service is stopped; kinfold install starts it again'
   } catch (error: unknown) {

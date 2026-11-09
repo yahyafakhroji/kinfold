@@ -9,37 +9,44 @@
 // legacy key stay with the data dir, since stored refs need them,
 // unless --remove-hmac-keys: that writes hmac.key back from
 // hmac-legacy, then deletes both entries and hmac.d/ (hmac-cleanup.ts).
+// With an unreadable key-store.json the store is unknown, so no key is
+// deleted; everything else is still removed, and the record is named.
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { KEYCHAIN_SERVICE, isSystemCredentialRef } from '../secrets/credentials'
-import { credentialWriterFor } from '../secrets/keychain-writer'
+import type { KeyStore } from '../secrets/key-store'
 import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
 import { removeSamHooks } from './claude-hooks'
 import { getObserverSettings } from './daemon-client'
-import { type InstallEnv, errorMessage, installPaths } from './env'
+import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
 import { plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import { EXIT_FAILED, EXIT_OK } from './install'
-import { bootoutArgv, isAgentLoaded } from './launch-agent'
 import { INSTALL_HOSTS, type InstallHost } from './detect'
 import { claudeMcpUninstallActions, opencodeMcpUninstallActions } from './mcp-wiring'
 import { hmacRemoval } from './hmac-cleanup'
 import { hmacKeptNotes } from './hmac-migration'
 import { codexHookUninstallActions, hostHookUninstallActions } from './host-wiring'
+import { readKeyStore, secretDeleteAction } from './key-store-choice'
 import { inspectShim } from './opencode-shim'
 import { type Action, runPlan } from './plan'
+import { managedServiceOf } from './service/control'
+import { wslUninstall } from '../wsl/entry'
 
 export interface UninstallOptions {
   dryRun: boolean
   removeCredentials: boolean
-  /** Delete Keychain hmac-master and hmac-legacy and hmac.d/, after restoring hmac.key. */
+  /** Delete the key store's hmac-master and hmac-legacy and hmac.d/, after restoring hmac.key. */
   removeHmacKeys?: boolean
 }
 
-async function launchAgentActions(env: InstallEnv): Promise<Action[]> {
-  const paths = installPaths(env)
-  const unload: Action[] = (await isAgentLoaded(env)) ? [{ kind: 'launchctl', argv: bootoutArgv(env.uid) }] : []
-  const remove: Action[] = existsSync(paths.launchAgentPlist) ? [{ kind: 'remove', path: paths.launchAgentPlist, summary: 'the LaunchAgent' }] : []
+/** Stops the service and removes its config; a service install cannot set up here has neither. */
+async function serviceActions(env: InstallEnv): Promise<Action[]> {
+  const service = managedServiceOf(env)
+  if (service === null) return []
+  const unload: Action[] = (await service.isRunning()) ? [{ kind: 'service', step: 'stop', description: service.describe('stop') }] : []
+  const path = service.configPath()
+  const remove: Action[] = path !== null && existsSync(path) ? [{ kind: 'remove', path, summary: `the ${service.label}` }] : []
   return [...unload, ...remove]
 }
 
@@ -48,7 +55,7 @@ function installedFilesActions(env: InstallEnv): Action[] {
   const bin = join(env.dataDir, 'bin')
   const lib = join(env.dataDir, 'lib')
   return [
-    ...(existsSync(bin) ? [{ kind: 'remove', path: bin, summary: 'the installed kinfold program', recursive: true } as const] : []),
+    ...(existsSync(bin) ? [{ kind: 'remove-program-dir', path: bin, summary: 'the installed kinfold program' } as const] : []),
     ...(existsSync(lib) ? [{ kind: 'remove', path: lib, summary: 'the installed sqlite libraries', recursive: true } as const] : []),
   ]
 }
@@ -94,33 +101,52 @@ async function ourRefs(env: InstallEnv, dryRun: boolean): Promise<string[]> {
   return [...new Set([OPENROUTER_CREDENTIAL_REF, ...named])].filter((ref) => !isSystemCredentialRef(ref))
 }
 
-function credentialActions(env: InstallEnv, refs: readonly string[]): Action[] {
-  const writer = credentialWriterFor(env.platform, env.security)
-  if (writer === null) return []
-  return refs.filter((ref) => writer.exists(ref)).map((ref): Action => ({ kind: 'keychain-delete', ref }))
+function credentialActions(store: KeyStore | null, refs: readonly string[]): Action[] {
+  if (store === null) return []
+  return refs.filter((ref) => store.exists(ref)).map((ref): Action => secretDeleteAction(store, ref))
 }
 
-function keptNotes(env: InstallEnv, refs: readonly string[], removeCredentials: boolean): string[] {
+function keptEntryNote(store: KeyStore, ref: string): string {
+  if (store.kind === 'keychain') return `kept keychain entry ${ref}; remove it with: security delete-generic-password -s ${KEYCHAIN_SERVICE} -a ${ref}  (or rerun with --remove-credentials)`
+  return `kept ${store.describeEntry(ref)}; rerun with --remove-credentials to remove it`
+}
+
+function keptNotes(env: InstallEnv, store: KeyStore | null, refs: readonly string[], removeCredentials: boolean): string[] {
   const notes = [`kept the data dir ${env.dataDir} (memory, spool, logs); remove it with: rm -rf ${env.dataDir}`]
-  if (removeCredentials) return notes
-  return [...notes, ...refs.map((ref) => `kept keychain entry ${ref}; remove it with: security delete-generic-password -s ${KEYCHAIN_SERVICE} -a ${ref}  (or rerun with --remove-credentials)`)]
+  if (removeCredentials || store === null) return notes
+  return [...notes, ...refs.map((ref) => keptEntryNote(store, ref))]
+}
+
+/** Uninstall goes on without the keys when the store is unknown: a broken record must not keep the agents wired. */
+function unknownStoreNote(reason: string, options: UninstallOptions): string[] {
+  const asked = [options.removeCredentials ? '--remove-credentials' : '', options.removeHmacKeys === true ? '--remove-hmac-keys' : ''].filter((flag) => flag !== '')
+  const skipped = asked.length > 0 ? `; ${asked.join(' and ')} skipped, no key was deleted` : ''
+  return [`key store: unknown (${reason})${skipped}`]
 }
 
 export async function uninstall(env: InstallEnv, options: UninstallOptions): Promise<number> {
   try {
+    if (platformOf(env).wsl) {
+      const code = await wslUninstall(env, options)
+      if (code !== null) return code
+    }
     const refs = await ourRefs(env, options.dryRun)
-    const hmac = options.removeHmacKeys === true ? hmacRemoval(env, options.dryRun) : null
+    const read = readKeyStore(env)
+    const store = read.ok ? read.store : null
+    const hmac = read.ok && options.removeHmacKeys === true ? hmacRemoval(env, options.dryRun) : null
     const actions = [
-      ...(await launchAgentActions(env)),
+      ...(await serviceActions(env)),
       ...INSTALL_HOSTS.flatMap((host) => hostUnwireActions(env, host)),
-      ...(options.removeCredentials ? credentialActions(env, refs) : []),
+      ...(options.removeCredentials ? credentialActions(store, refs) : []),
       ...(hmac?.actions ?? []),
       // Last: until every host entry is gone, each of them still names this program.
       ...installedFilesActions(env),
     ]
     await runPlan(env, actions, options.dryRun)
-    for (const note of [...keptNotes(env, refs, options.removeCredentials), ...(hmac?.notes ?? hmacKeptNotes(env))]) env.out(note)
-    return EXIT_OK
+    const keyNotes = read.ok ? (hmac?.notes ?? hmacKeptNotes(env)) : unknownStoreNote(read.reason, options)
+    for (const note of [...keptNotes(env, store, refs, options.removeCredentials), ...keyNotes]) env.out(note)
+    const skippedDeletes = !read.ok && (options.removeCredentials || options.removeHmacKeys === true)
+    return skippedDeletes ? EXIT_FAILED : EXIT_OK
   } catch (error: unknown) {
     env.out(`uninstall failed: ${errorMessage(error)}`)
     return EXIT_FAILED

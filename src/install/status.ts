@@ -1,32 +1,33 @@
 // `kinfold status`: read-only. Hosts found and wired (yes/no/stale/partial), the
 // LaunchAgent, daemon health, each host's observer and where it came from,
-// keychain entries (metadata lookups only, never -w), the HMAC keys (master and legacy entries, sub-key epochs, leftover plain-text keys), data dir modes, and
+// the key store and its entries (metadata lookups only, never the value), the HMAC keys (master and legacy entries, sub-key epochs, leftover plain-text keys), data dir modes, and
 // duplicate project wiring. It creates nothing, not even the data dir.
 
-import { existsSync } from 'node:fs'
 import type { EffectiveSettings } from '../daemon/settings-route'
 import { OPENROUTER_CREDENTIAL_REF, providerTakesKey } from '../observer/settings'
-import { credentialWriterFor } from '../secrets/keychain-writer'
 import { inspectSamHooks } from './claude-hooks'
 import { getObserverSettings } from './daemon-client'
 import { dbStatusLines } from './db-encryption'
 import { detectHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
-import { type InstallEnv, errorMessage, installPaths } from './env'
+import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
+import { keyStoreStatusLine, noStoreWord, readKeyStore } from './key-store-choice'
 import { entryCommand } from './entry'
 import { readJsonObject, readTextOrNull } from './files'
 import { EXIT_OK, daemonSituation } from './install'
+import { serviceOf } from './service/control'
 import { hmacStatusLines } from './hmac-migration'
 import { hostWiringLine } from './host-wiring'
 import { mcpStatusLines } from './mcp-wiring'
 import { inspectShim } from './opencode-shim'
-import { describeModeChange, scanDataDirModes } from './permissions'
+import { dataDirAccessFor } from './access/check'
 import { vectorStatusLine } from './vec0-install'
 import { updatesEnabled } from '../update/enabled'
 import { availableMessage, pendingNotice } from '../update/notice'
 import { readUpdateState } from '../update/state'
 import { VERSION } from '../version'
 import { readInstallRecord } from './setup/record'
+import { type WslStatus, wslStatus } from '../wsl/entry'
 
 function claudeWiring(env: InstallEnv): string {
   const paths = installPaths(env)
@@ -56,15 +57,22 @@ async function hostLines(env: InstallEnv): Promise<string[]> {
   })
 }
 
+/** Every host's detection and wiring line, then the MCP lines: what status prints under `hosts:`. */
+export async function hostStatusLines(env: InstallEnv): Promise<string[]> {
+  return [...(await hostLines(env)), ...mcpStatusLines(env)]
+}
+
 async function daemonLines(env: InstallEnv): Promise<string[]> {
   const situation = await daemonSituation(env)
-  const plist = existsSync(installPaths(env).launchAgentPlist) ? 'present' : 'missing'
-  const owner = situation.health.up ? (situation.foreign ? ', not started by the LaunchAgent' : ', LaunchAgent') : ''
+  const service = serviceOf(env)
+  const label = service?.label ?? 'none'
+  const config = service !== null && service.isConfigured() ? 'present' : 'missing'
+  const owner = situation.health.up ? (situation.foreign ? `, not started by the ${label}` : situation.loaded || situation.legacyLoaded ? `, ${label}` : ', started by hand') : ''
   const pid = situation.pid !== null ? ` pid ${situation.pid}` : ''
   const health = situation.health.up
     ? `up on 127.0.0.1:${situation.port} version ${situation.health.version} schema ${situation.health.schemaVersion}${pid}${owner}`
     : `down (${situation.health.reason})`
-  return [`launch agent: plist ${plist}; loaded: ${situation.loaded ? 'yes' : 'no'}`, `daemon /health: ${health}`, vectorStatusLine(env, situation.health)]
+  return [`service (${label}): config ${config}; running: ${situation.loaded ? 'yes' : 'no'}`, `daemon /health: ${health}`, vectorStatusLine(env, situation.health)]
 }
 
 function effectiveLine(entry: EffectiveSettings): string {
@@ -80,23 +88,25 @@ async function observerLines(env: InstallEnv): Promise<{ lines: string[]; refs: 
   return { lines: ['observer settings:', ...read.view.effective.map(effectiveLine)], refs: [...new Set([OPENROUTER_CREDENTIAL_REF, ...refs])] }
 }
 
-function keychainLines(env: InstallEnv, refs: readonly string[]): string[] {
-  const writer = credentialWriterFor(env.platform, env.security)
-  if (writer === null) return [`keychain: none on ${env.platform}`]
+function keyStoreLines(env: InstallEnv, refs: readonly string[]): string[] {
+  const read = readKeyStore(env)
+  // The key store line above already names why the store is unknown.
+  if (!read.ok) return []
+  const store = read.store
+  if (store === null) return [`${noStoreWord(env)}: none on ${env.platform}`]
   return refs.map((ref) => {
     try {
-      return `keychain ${ref}: ${writer.exists(ref) ? 'present' : 'missing'}`
+      return `${store.label} ${ref}: ${store.exists(ref) ? 'present' : 'missing'}`
     } catch (error: unknown) {
-      return `keychain ${ref}: unknown (${errorMessage(error)})`
+      return `${store.label} ${ref}: unknown (${errorMessage(error)})`
     }
   })
 }
 
-function dataDirLines(env: InstallEnv): string[] {
-  if (!existsSync(env.dataDir)) return [`data dir ${env.dataDir}: missing`]
-  const scan = scanDataDirModes(env.dataDir)
-  if (scan.changes.length === 0) return [`data dir ${env.dataDir}: modes ok (${scan.checked} checked, dirs 0700, files 0600, program 0755)`]
-  return [`data dir ${env.dataDir}: ${scan.changes.length} of ${scan.checked} need fixing (install fixes them):`, ...scan.changes.map((change) => `  ${describeModeChange(change)}`)]
+/** The database lines with the key store line right after the `database:` one. */
+async function databaseLines(env: InstallEnv): Promise<string[]> {
+  const [database, ...rest] = await dbStatusLines(env)
+  return database === undefined ? [keyStoreStatusLine(env)] : [database, keyStoreStatusLine(env), ...rest]
 }
 
 /** The saved update state only: status never fetches. */
@@ -111,18 +121,28 @@ export function updateLine(env: InstallEnv, running: string = VERSION): string {
 }
 
 export async function status(env: InstallEnv, running: string = VERSION): Promise<number> {
+  let wsl: WslStatus | null = null
+  if (platformOf(env).wsl) {
+    // The Windows side can fail in ways this host cannot fix; the rest of status still holds.
+    try {
+      wsl = await wslStatus(env)
+    } catch (error: unknown) {
+      env.out(`WSL (preview): status unknown (${errorMessage(error)})`)
+    }
+  }
+  for (const line of wsl?.lines ?? []) env.out(line)
+  if (wsl?.replaces === true) return EXIT_OK
   const observer = await observerLines(env)
   const duplicates = findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings])
   const lines = [
     'hosts:',
-    ...(await hostLines(env)),
-    ...mcpStatusLines(env),
+    ...(await hostStatusLines(env)),
     ...(await daemonLines(env)),
-    ...(await dbStatusLines(env)),
+    ...(await databaseLines(env)),
     ...observer.lines,
-    ...keychainLines(env, observer.refs),
+    ...keyStoreLines(env, observer.refs),
     ...hmacStatusLines(env),
-    ...dataDirLines(env),
+    ...(await dataDirAccessFor(env).statusLines(env.dataDir)),
     updateLine(env, running),
     ...(duplicates.length === 0 ? ['duplicate wiring: none in this directory'] : duplicateWarning(duplicates)),
   ]

@@ -8,7 +8,6 @@ import { installPaths } from '../env'
 import { bootoutArgv, bootstrapArgv, LAUNCHCTL, plistContent } from '../launch-agent'
 import { BOOTSTRAP_ATTEMPTS } from '../plan'
 import { type FakeWorld, UID, createWorld } from '../test-support'
-import { serviceFor } from './control'
 import { LaunchAgentService, LSOF, PS } from './launch-agent-service'
 
 let world: FakeWorld | null = null
@@ -108,10 +107,4 @@ test('fileHolders lists pids and command names, leaving this process out', async
   expect(w.commands.map((c) => [...c.argv])).toEqual([[LSOF, '-t', '/x/memory.db'], [PS, '-o', 'pid=,comm=', '-p', '4242']])
   const none = { ...env, run: async () => ({ exitCode: 1, stdout: '' }) }
   expect(await new LaunchAgentService(none).fileHolders('/x/memory.db')).toBe('')
-})
-
-test('serviceFor gives the LaunchAgent on darwin and nothing elsewhere', () => {
-  world = createWorld()
-  expect(serviceFor(world.env)?.label).toBe('LaunchAgent')
-  expect(serviceFor({ ...world.env, platform: 'linux' })).toBeNull()
 })

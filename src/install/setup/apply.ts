@@ -7,12 +7,11 @@
 import { join } from 'node:path'
 import { DATA_DIR_NAME } from '../../names'
 import { DB_KEY_REF } from '../../secrets/credentials'
-import { credentialWriterFor } from '../../secrets/keychain-writer'
 import { fileState } from '../../sqlite/open'
 import { DB_FILE } from '../../store/data-dir'
 import { storedDbKey } from '../db-encryption'
 import { detectHosts } from '../detect'
-import { ENCRYPT_KEY_EXISTS, decryptConfirmed, encryptWithKey } from '../encrypt'
+import { decryptConfirmed, encryptKeyExists, encryptWithKey, noKeyStoreRefusal } from '../encrypt'
 import { type InstallEnv, errorMessage } from '../env'
 import {
   type DaemonSituation,
@@ -26,6 +25,7 @@ import {
   reportDetections,
   restartService,
 } from '../install'
+import { type InstallKeyStore, keyStoreOf, readKeyStore } from '../key-store-choice'
 import { ChoiceError, describeInput } from '../observer-choice'
 import { runPlan } from '../plan'
 import { PromptCancelled } from '../prompt/prompts'
@@ -37,6 +37,8 @@ import type { EncryptionAnswer, SetupAnswers } from './wizard'
 export interface ApplyContext {
   check: ProgramCheck | null
   situation: DaemonSituation
+  /** The store install chose for env.dataDir; its record goes in the plan when it was just chosen. */
+  keyStore?: InstallKeyStore
 }
 
 type Conversion = 'encrypt' | 'decrypt'
@@ -47,17 +49,15 @@ function conversionOf(encryption: EncryptionAnswer): Conversion | null {
   return null
 }
 
-const NO_KEY_STORE = (platform: string): string => `encryption needs the macOS Keychain; ${platform} gets its key store in a later release`
-
 /** Refuses, before the plan writes anything, an encryption change that the flow after it would refuse. */
 function conversionProblem(env: InstallEnv, conversion: Conversion | null): string | null {
   if (conversion === null) return null
-  const writer = credentialWriterFor(env.platform, env.security)
-  if (writer === null) return NO_KEY_STORE(env.platform)
+  const store = keyStoreOf(env)
+  if (store === null) return noKeyStoreRefusal(env.platform)
   const state = fileState(join(env.dataDir, DB_FILE))
   if (conversion === 'encrypt') {
     if (state !== 'plain') return 'memory.db is not a plaintext store any more; run install again'
-    if (writer.exists(DB_KEY_REF)) return ENCRYPT_KEY_EXISTS
+    if (store.exists(DB_KEY_REF)) return encryptKeyExists(store)
     return null
   }
   return state === 'encrypted' ? null : 'memory.db is not encrypted any more; run install again'
@@ -65,15 +65,20 @@ function conversionProblem(env: InstallEnv, conversion: Conversion | null): stri
 
 /**
  * After a failed encrypt, whether the recovery code the person just saved
- * belongs to anything: not when memory.db is still plaintext and the Keychain
- * does not hold that key.
+ * belongs to anything: not when memory.db is still plaintext and the key store
+ * does not hold that key. Any error here gives no note, so the failure line
+ * itself always prints.
  */
 function unusedCodeNote(env: InstallEnv, encryption: EncryptionAnswer): string {
-  if (encryption.kind !== 'encrypt-existing' || encryption.key === null) return ''
-  if (fileState(join(env.dataDir, DB_FILE)) !== 'plain') return ''
-  const stored = storedDbKey(env)
-  if (stored.kind === 'usable' && stored.key === encryption.key) return ''
-  return '. memory.db was not changed and is still plaintext, so the recovery code shown is not used; discard it'
+  try {
+    if (encryption.kind !== 'encrypt-existing' || encryption.key === null) return ''
+    if (fileState(join(env.dataDir, DB_FILE)) !== 'plain') return ''
+    const stored = storedDbKey(env)
+    if (stored.kind === 'usable' && stored.key === encryption.key) return ''
+    return '. memory.db was not changed and is still plaintext, so the recovery code shown is not used; discard it'
+  } catch {
+    return ''
+  }
 }
 
 async function convert(env: InstallEnv, encryption: EncryptionAnswer): Promise<void> {
@@ -112,7 +117,7 @@ export async function applySetup(env: InstallEnv, state: SetupState, answers: Se
       env.out(`observer ${choice.input.host}: ${describeInput(choice.input)} (${choice.origin}); ${choice.credentialNote}; check ${choice.check}`)
     }
     const found = detections.filter((detection) => detection.selected && answers.hosts.includes(detection.host))
-    const plan = await buildPlan(env, { hosts: answers.hosts, detections: found, situation }, answers, state, options, check)
+    const plan = await buildPlan(env, { hosts: answers.hosts, detections: found, situation, keyStore: given?.keyStore }, answers, state, options, check)
     try {
       await runPlan(env, plan.actions, options.dryRun)
     } catch (error: unknown) {
@@ -164,6 +169,7 @@ export function doneLines(env: InstallEnv, answers: SetupAnswers, state: SetupSt
   if (answers.hosts.length === 0) lines.push('No agent is wired; run install again to add one.')
   // Under --yes the key was made, or kept, without its code on screen.
   const unseen = answers.encryption.kind === 'new-encrypted' && answers.encryption.key === null
-  if (unseen && credentialWriterFor(env.platform, env.security) !== null) lines.push(SHOW_RECOVERY_LINE)
+  const read = readKeyStore(env)
+  if (unseen && read.ok && read.store !== null) lines.push(SHOW_RECOVERY_LINE)
   return lines
 }

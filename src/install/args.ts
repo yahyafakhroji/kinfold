@@ -51,7 +51,7 @@ export const USAGE = [
   '             [--no-encrypt] [--port <1024-65535>] [--no-update-check]',
   '  update     [--dry-run]',
   '  uninstall  [--dry-run] [--remove-credentials] [--remove-hmac-keys]',
-  '             --remove-hmac-keys deletes Keychain hmac-master and hmac-legacy and hmac.d/: stored refs can no longer',
+  '             --remove-hmac-keys deletes the stored hmac-master and hmac-legacy keys and hmac.d/: stored refs can no longer',
   '             be checked, and a later install starts a new master (hmac.key is written back from hmac-legacy first)',
   '  status',
   '  dashboard  [--print]',

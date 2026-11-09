@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { envForDataDir } from '../../cli/kinfold'
+import { envForDataDir } from '../../cli/data-dir-env'
 import { DB_KEY_REF } from '../../secrets/credentials'
 import { NO_DB_KEYS, newDbKey } from '../../sqlite/keys'
 import { fileState, openEncrypted } from '../../sqlite/open'
@@ -68,6 +68,10 @@ function recordingService(env: InstallEnv): ServiceControl & { calls: string[] }
     configuredDataDir: () => real.configuredDataDir(),
     configuredPort: () => real.configuredPort(),
     fileHolders: (path) => real.fileHolders(path),
+    configPath: () => real.configPath(),
+    configContent: (port) => real.configContent(port),
+    describe: (step) => real.describe(step),
+    unavailableReason: () => real.unavailableReason(),
   }
 }
 
@@ -386,4 +390,23 @@ test('a failed encrypt after the code was shown says the code is unused and memo
   expect(last).toContain('kinfold encrypt failed')
   expect(last).toMatch(/memory\.db was not changed and is still plaintext, so the recovery code shown is not used; discard it$/)
   expect(w.out.join('\n')).not.toContain(encodeRecoveryCode(key))
+})
+
+test('a failing note check keeps the encrypt failure line', async () => {
+  const w = make()
+  expect(await install(w.env, { ...YES, noEncrypt: true })).toBe(EXIT_OK)
+  const path = join(w.dataDir, DB_FILE)
+  const refusing = fakeService({ stopError: new Error('stop refused') })
+  // memory.db turns into a directory before the note reads it, so the note's own check throws.
+  const stop = async (): Promise<void> => {
+    rmSync(path, { force: true })
+    mkdirSync(path)
+    await refusing.stop()
+  }
+  w.env = { ...w.env, service: { ...refusing, stop } }
+  w.out.length = 0
+  const { code } = await applyWith(w, { kind: 'encrypt-existing', key: newDbKey() })
+  expect(code).toBe(EXIT_FAILED)
+  expect(w.out.some((line) => line.startsWith('install: everything else is in place, but kinfold encrypt failed:'))).toBe(true)
+  expect(w.out.some((line) => line.startsWith('install failed:'))).toBe(false)
 })

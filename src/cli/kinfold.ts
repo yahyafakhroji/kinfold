@@ -17,8 +17,10 @@ import type { Parsed } from '../context/types'
 import { envName, readEnv } from '../env-names'
 import type { InstallEnv } from '../install/env'
 import type { InstallMode } from '../install/entry'
+import { currentPlatform } from '../platform/platform'
 import { DAEMON_INFO_FILE, DB_FILE, resolveDataDir, resolveInstallDataDir } from '../store/data-dir'
 import { VERSION } from '../version'
+import { envForDataDir } from './data-dir-env'
 
 /** Repeated rather than imported from the installer, which the hook path must not load. */
 const EXIT_FAILED = 1
@@ -211,18 +213,6 @@ async function withDataDir(dataDir: string | null, run: () => Promise<void>): Pr
   }
 }
 
-/**
- * The same environment aimed at another data folder. An installed program
- * lives in the folder it serves (<dataDir>/bin), so its path follows the
- * folder; a checkout run keeps pointing at the checkout. The path is spelled
- * as installedProgramPath does (entry.ts), repeated because the hook path must
- * not load the installer.
- */
-export function envForDataDir(env: InstallEnv, dataDir: string): InstallEnv {
-  const mode: InstallMode = env.mode.kind === 'program' ? { kind: 'program', binPath: join(dataDir, 'bin', env.platform === 'win32' ? 'kinfold.exe' : 'kinfold') } : env.mode
-  return { ...env, dataDir, mode, unflaggedDataDir: env.unflaggedDataDir ?? env.dataDir }
-}
-
 /** What tells the program run by hand which folder it was installed into. */
 export interface ProgramLocation {
   compiled: boolean
@@ -275,12 +265,13 @@ async function systemEnv(args: readonly string[], configuredDataDir: string | nu
   const [{ createCliRunner, createRunner }, { NO_CREDENTIALS }, { createSecurityRunner }, { createCommandRunner, createPromptIO }, { installedProgramPath, isCompiledProgram }, { nodeTerminal }] = await Promise.all([
     import('../observer/runners'),
     import('../secrets/credentials'),
-    import('../secrets/keychain-writer'),
+    import('../secrets/stores/keychain'),
     import('../install/system'),
     import('../install/entry'),
     import('../install/prompt/terminal'),
   ])
   const homeDir = homedir()
+  const platform = currentPlatform()
   const program = { compiled: isCompiledProgram(), execPath: process.execPath }
   const dataDir = dataDirForCommand(args[0], configuredDataDir, process.env, homeDir, program)
   const unflaggedDataDir = dataDirForCommand(args[0], null, process.env, homeDir, program)
@@ -290,13 +281,14 @@ async function systemEnv(args: readonly string[], configuredDataDir: string | nu
   // folder, not to where this copy happens to run; a checkout run keeps
   // pointing bun at the checkout's scripts.
   const mode: InstallMode = isCompiledProgram()
-    ? { kind: 'program', binPath: installedProgramPath(dataDir, process.platform) }
+    ? { kind: 'program', binPath: installedProgramPath(dataDir, platform.node) }
     : { kind: 'checkout', bunPath: process.execPath, projectRoot }
   return {
     homeDir,
     dataDir,
     unflaggedDataDir,
-    platform: process.platform,
+    platform: platform.node,
+    wsl: platform.wsl,
     mode,
     projectRoot,
     cwd: process.cwd(),

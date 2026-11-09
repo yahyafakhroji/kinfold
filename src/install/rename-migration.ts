@@ -26,11 +26,12 @@ import { envName } from '../env-names'
 import { DATA_DIR_NAME, LEGACY_KEYCHAIN_SERVICE, LEGACY_LAUNCH_AGENT_LABEL, LEGACY_MCP_SERVER_NAME } from '../names'
 import { DB_KEY_NEXT_REF, DB_KEY_REF, KEYCHAIN_SERVICE } from '../secrets/credentials'
 import { HMAC_LEGACY_REF, HMAC_MASTER_REF } from '../secrets/hmac-keys'
-import { readKeychainValue } from '../secrets/keychain'
-import { type CredentialWriter, credentialWriterFor } from '../secrets/keychain-writer'
+import type { KeyStore } from '../secrets/key-store'
+import { type LegacyKeychain, describeLegacyDelete, legacyKeychainOf, readKeychainValue } from '../secrets/stores/keychain'
 import { checkHealth, readDaemonInfo } from './daemon-client'
-import { type InstallEnv, errorMessage, installPaths } from './env'
+import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
 import { readJsonObject, readTextOrNull } from './files'
+import { keyStoreOf } from './key-store-choice'
 import { isAgentLoaded, legacyBootoutArgv, legacyPrintArgv } from './launch-agent'
 import { hasOurMcpEntryNamed } from './mcp-config'
 import { mcpPaths } from './mcp-wiring'
@@ -54,8 +55,13 @@ function pathKind(path: string): PathKind {
   }
 }
 
-function legacyRefs(writer: CredentialWriter | null): string[] {
-  return writer === null ? [] : LEGACY_KEYCHAIN_REFS.filter((ref) => writer.legacy.exists(ref))
+/** The pre-rename Keychain entries live under the old service of the Keychain store only. */
+function legacyOf(store: KeyStore | null): LegacyKeychain | null {
+  return store === null ? null : legacyKeychainOf(store)
+}
+
+function legacyRefs(legacy: LegacyKeychain | null): string[] {
+  return legacy === null ? [] : LEGACY_KEYCHAIN_REFS.filter((ref) => legacy.exists(ref))
 }
 
 /**
@@ -126,9 +132,8 @@ export interface MigrationOptions {
  */
 export function renameMigrationActions(env: InstallEnv, options: MigrationOptions = {}): Action[] {
   const paths = installPaths(env)
-  const writer = credentialWriterFor(env.platform, env.security)
-  const refs = legacyRefs(writer)
-  const plist = env.platform === 'darwin' && existsSync(paths.legacyLaunchAgentPlist)
+  const refs = legacyRefs(legacyOf(keyStoreOf(env)))
+  const plist = platformOf(env).os === 'macos' && existsSync(paths.legacyLaunchAgentPlist)
   const move = dataDirMove(env, refs.length > 0 || plist)
   if (!plist && refs.length === 0 && move.length === 0) return []
   const waitMs = options.takeover === true ? TAKEOVER_WAIT_MS : MIGRATION_HEALTH_WAIT_MS
@@ -167,13 +172,19 @@ export function describeCopyKeychainEntry(ref: string): string {
 }
 
 export function describeRemoveLegacyEntry(ref: string): string {
-  return `keychain: /usr/bin/security delete-generic-password -s ${LEGACY_KEYCHAIN_SERVICE} -a ${ref}, only once the ${KEYCHAIN_SERVICE} copy reads back equal`
+  return describeLegacyDelete(ref)
 }
 
-function keychainWriter(env: InstallEnv): CredentialWriter {
-  const writer = credentialWriterFor(env.platform, env.security)
-  if (writer === null) throw new Error(`no keychain on ${env.platform}`)
-  return writer
+interface MigrationKeychain {
+  store: KeyStore
+  legacy: LegacyKeychain
+}
+
+function keychainOf(env: InstallEnv): MigrationKeychain {
+  const store = keyStoreOf(env)
+  const legacy = legacyOf(store)
+  if (store === null || legacy === null) throw new Error(`no keychain on ${env.platform}`)
+  return { store, legacy }
 }
 
 /** The value under kinfold only, with no fallback to the old service. */
@@ -200,24 +211,24 @@ export async function checkDaemonDown(env: InstallEnv, port: number, waitMs: num
 
 /** Copies one entry to kinfold; an equal copy already there is fine, a different one stops everything. */
 export function copyKeychainEntry(env: InstallEnv, ref: string): void {
-  const writer = keychainWriter(env)
-  const value = writer.legacy.read(ref)
+  const { store, legacy } = keychainOf(env)
+  const value = legacy.read(ref)
   if (value === null) throw new Error(`keychain entry ${ref} under ${LEGACY_KEYCHAIN_SERVICE} is gone or empty; nothing was deleted`)
   const existing = currentValue(env, ref)
   if (existing !== null && existing !== value) {
     throw new Error(`keychain entry ${ref} under ${KEYCHAIN_SERVICE} holds a different value than under ${LEGACY_KEYCHAIN_SERVICE}; kinfold keeps both and deletes nothing. Decide which one is right and remove the other by hand, then rerun`)
   }
-  if (existing === null) writer.create(ref, value)
+  if (existing === null) store.create(ref, value)
   if (currentValue(env, ref) !== value) throw new Error(`keychain entry ${ref} under ${KEYCHAIN_SERVICE} did not read back equal after the copy; nothing was deleted`)
 }
 
 /** Deletes the old entry only while the kinfold copy reads back equal; an old entry already gone is fine. */
 export function removeLegacyEntry(env: InstallEnv, ref: string): void {
-  const writer = keychainWriter(env)
-  const value = writer.legacy.read(ref)
+  const { legacy } = keychainOf(env)
+  const value = legacy.read(ref)
   if (value === null) return
   if (currentValue(env, ref) !== value) throw new Error(`keychain entry ${ref} under ${KEYCHAIN_SERVICE} does not match the old one; the old entry was kept`)
-  writer.legacy.remove(ref)
+  legacy.remove(ref)
 }
 
 export function moveDataDir(env: InstallEnv, from: string, to: string): void {

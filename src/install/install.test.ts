@@ -1,17 +1,28 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, mock, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { CLAUDE_HOOK_EVENTS, samHookGroup } from './claude-hooks'
 import { getObserverSettings } from './daemon-client'
 import { installPaths } from './env'
-import { EXIT_OK, install } from './install'
-import { LAUNCHCTL, launchdPath } from './launch-agent'
+import { type DaemonSituation, EXIT_OK, SETTINGS_NOT_SENT_LINE, install, serviceActions } from './install'
+import { LAUNCHCTL, bootoutArgv, bootstrapArgv, launchdPath } from './launch-agent'
+import { LaunchAgentService } from './service/launch-agent-service'
+import { StubService } from './service/stub-service'
 import { entryCommand } from './entry'
 import { shimContent } from './opencode-shim'
-import { BUN, type FakeWorld, UID, YES, createWorld } from './test-support'
+import { BUN, type FakeWorld, UID, YES, countingService, createWorld, recordingKeyStore, startWorldDaemon } from './test-support'
+import { DEFAULT_PORT } from '../daemon/daemon'
 import { NO_DB_KEYS } from '../sqlite/keys'
 import { openStore } from '../store/db'
+import { recordSafety } from '../store/observer-safety-store'
 import { upsertObserverSettings } from '../store/observer-settings-store'
+import { hostStatusLines, status } from './status'
+import { uninstall } from './uninstall'
+import type { WslStatus } from '../wsl/entry'
+
+// The real hooks, put back after each swap: mock.module lasts for the whole
+// process, and other test files use the real module.
+const realWsl = { ...(await import('../wsl/entry')) }
 
 const CLAUDE = '2.1.310 (Claude Code)'
 const OPENCODE = 'opencode v2.1.4'
@@ -174,9 +185,11 @@ test('the data dir permission fix reports each path with its old and new mode', 
 
 test('the non-macOS line names the program', async () => {
   const w = both({ opencodeVersion: undefined, keychainRefs: [] })
-  await install({ ...w.env, platform: 'linux' }, YES)
-  const line = w.out.find((l) => l.startsWith('LaunchAgent: macOS only'))
-  expect(line).toBe(`LaunchAgent: macOS only; start the daemon yourself with: ${BUN} ${join(w.projectRoot, 'src/daemon/main.ts')}`)
+  // A stub stands in for the Linux service, so this test never depends on the real one's text.
+  const linux = { ...w.env, platform: 'linux' as const }
+  await install({ ...linux, service: new StubService(linux, 'test service') }, YES)
+  const line = w.out.find((l) => l.startsWith('test service: '))
+  expect(line).toBe(`test service: not set up on this platform yet; start the daemon yourself with: ${BUN} ${join(w.projectRoot, 'src/daemon/main.ts')}`)
   expect(line).not.toContain('bun run daemon')
 })
 
@@ -190,4 +203,232 @@ test('with the daemon down, a saved observer read from the store gets no PUT, so
   expect(plan).not.toContain('PUT /observer/settings host=opencode')
   // A host with no saved row still gets its default saved.
   expect(plan).toContain('PUT /observer/settings host=claude-code provider=claude-cli')
+})
+
+test('a re-run with the daemon down still clears a failed safety row for a saved CLI observer', async () => {
+  const w = both()
+  const store = openStore(w.dataDir, { keys: NO_DB_KEYS })
+  upsertObserverSettings(store.db, { host: 'opencode', provider: 'codex-cli', model: 'gpt-5', credentialRef: null, enabled: true }, 1)
+  recordSafety(store.db, { provider: 'codex-cli', cliVersion: '1.0.0', binaryPath: '/opt/fake/bin/codex' }, 'failed', 'tool_attempt', 1)
+  store.db.close()
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  const plan = w.out.join('\n')
+  expect(plan).toContain('PUT /observer/settings host=opencode provider=codex-cli model=gpt-5')
+})
+
+test('a re-run with the daemon down gives a saved observer without a failed safety row no PUT', async () => {
+  const w = both()
+  const store = openStore(w.dataDir, { keys: NO_DB_KEYS })
+  upsertObserverSettings(store.db, { host: 'opencode', provider: 'codex-cli', model: 'gpt-5', credentialRef: null, enabled: true }, 1)
+  recordSafety(store.db, { provider: 'opencode-cli', cliVersion: '1.0.0', binaryPath: '/opt/fake/bin/opencode' }, 'failed', 'tool_attempt', 1)
+  store.db.close()
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  expect(w.out.join('\n')).not.toContain('PUT /observer/settings host=opencode')
+})
+
+const DOWN: DaemonSituation = { health: { up: false, reason: 'test' }, loaded: false, legacyLoaded: false, pid: null, port: DEFAULT_PORT, foreign: false }
+
+test('the install plan starts and stops through the service', async () => {
+  const w = both()
+  const service = new LaunchAgentService(w.env)
+  const start = { kind: 'service', step: 'start', description: bootstrapArgv(w.env).join(' ') } as const
+  const stop = { kind: 'service', step: 'stop', description: bootoutArgv(UID).join(' ') } as const
+  const fresh = serviceActions(w.env, service, DOWN, false, false, DEFAULT_PORT)
+  expect(fresh.filter((action) => action.kind === 'service' || action.kind === 'wait-health')).toEqual([start, { kind: 'wait-health' }])
+
+  // Dry-run text is the launchctl argv it always was.
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  const plistPath = join(w.home, 'Library/LaunchAgents/dev.kinfold.daemon.plist')
+  expect(w.out.some((line) => /^ {2}\d+\. /.test(line) && line.endsWith(`. ${LAUNCHCTL} bootstrap gui/${UID} ${plistPath}`))).toBe(true)
+
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  const loaded: DaemonSituation = { ...DOWN, loaded: true, health: { up: true, version: 'x', schemaVersion: 1 } as DaemonSituation['health'] }
+  const moved = serviceActions(w.env, service, loaded, false, false, 4001)
+  expect(moved.filter((action) => action.kind === 'service')).toEqual([stop, start])
+})
+
+/** A linux world whose service is a counted stub, and the total time install slept. */
+function stubWorld(reason?: string): { w: FakeWorld; service: ReturnType<typeof countingService>; slept: () => number } {
+  const w = both({ platform: 'linux', opencodeVersion: undefined, keychainRefs: [] })
+  const service = countingService(new StubService(w.env, 'test service'), reason)
+  let slept = 0
+  w.env = { ...w.env, service, sleep: async (ms) => void (slept += ms) }
+  return { w, service, slept: () => slept }
+}
+
+const planLines = (w: FakeWorld): string[] => w.out.filter((line) => /^ {2}\d+\. /.test(line))
+
+test('an unavailable service keeps the manual start line and is never started or stopped', async () => {
+  const { w, service, slept } = stubWorld()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  const daemon = `${BUN} ${join(w.projectRoot, 'src/daemon/main.ts')}`
+  expect(w.out).toContain(`test service: not set up on this platform yet; start the daemon yourself with: ${daemon}`)
+  expect(w.out).toContain(SETTINGS_NOT_SENT_LINE)
+  const plan = planLines(w).join('\n')
+  expect(plan).not.toContain('GET /health')
+  expect(plan).not.toContain('PUT /observer/settings')
+  expect(plan).not.toContain('not supported on this platform yet')
+  expect(slept()).toBeLessThan(1_000)
+  expect(service.steps).toEqual([])
+
+  const other = stubWorld('no manager (x)')
+  expect(await install(other.w.env, YES)).toBe(EXIT_OK)
+  expect(other.w.out).toContain(`test service: no manager (x); start the daemon yourself with: ${BUN} ${join(other.w.projectRoot, 'src/daemon/main.ts')}`)
+  expect(other.service.steps).toEqual([])
+  await other.w.cleanup()
+})
+
+test('with an unavailable service a running daemon still gets the settings', async () => {
+  const { w, service } = stubWorld()
+  // A plaintext store, as one started by hand before any key store existed.
+  openStore(w.dataDir, { keys: NO_DB_KEYS }).db.close()
+  const daemon = startWorldDaemon(w, w.dataDir)
+  try {
+    expect(await install(w.env, YES)).toBe(EXIT_OK)
+    const plan = planLines(w).join('\n')
+    expect(plan).toContain('PUT /observer/settings host=claude-code')
+    expect(plan).not.toContain('GET /health')
+    expect(plan).not.toContain('not supported on this platform yet')
+    expect(w.out).not.toContain(SETTINGS_NOT_SENT_LINE)
+    expect(w.fetches).toContain('PUT /observer/settings')
+    expect(service.steps).toEqual([])
+  } finally {
+    await daemon.stop()
+  }
+})
+
+const RESTART_LINE = 'test service: restart the daemon you started so it picks up the new key or library'
+
+test('with an unavailable service, a new HMAC master tells the user to restart the daemon they started', async () => {
+  const { w, service } = stubWorld()
+  w.env = { ...w.env, keyStore: recordingKeyStore() }
+  openStore(w.dataDir, { keys: NO_DB_KEYS }).db.close()
+  const daemon = startWorldDaemon(w, w.dataDir)
+  try {
+    expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+    expect(planLines(w).some((line) => line.includes('hmac-master'))).toBe(true)
+    expect(w.out).toContain(RESTART_LINE)
+    expect(service.steps).toEqual([])
+  } finally {
+    await daemon.stop()
+  }
+  // With nothing running there is nothing to restart.
+  w.out.length = 0
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  expect(w.out).not.toContain(RESTART_LINE)
+})
+
+interface WslCalls {
+  install: number
+  status: number
+  uninstall: number
+}
+
+/** Stand-ins for the three WSL hooks that count their calls and answer what they are given. */
+function countingWslHooks(answers: { install?: number | null; status?: WslStatus | null; uninstall?: number | null } = {}): WslCalls {
+  const calls = { install: 0, status: 0, uninstall: 0 }
+  mock.module('../wsl/entry', () => ({
+    ...realWsl,
+    wslInstall: async () => (calls.install += 1, answers.install ?? null),
+    wslStatus: async () => (calls.status += 1, answers.status ?? null),
+    wslUninstall: async () => (calls.uninstall += 1, answers.uninstall ?? null),
+  }))
+  return calls
+}
+
+async function runAllThree(w: FakeWorld): Promise<void> {
+  await install(w.env, { ...YES, dryRun: true })
+  await status(w.env)
+  await uninstall(w.env, { dryRun: true, removeCredentials: false })
+}
+
+test('the WSL hooks run first only inside WSL', async () => {
+  try {
+    for (const [platform, wsl, expected] of [['linux', true, 1], ['darwin', false, 0], ['linux', false, 0], ['darwin', true, 0]] as const) {
+      const calls = countingWslHooks()
+      const w = both({ platform })
+      w.env = { ...w.env, wsl }
+      await runAllThree(w)
+      expect(calls).toEqual({ install: expected, status: expected, uninstall: expected })
+      await w.cleanup()
+      world = null
+    }
+
+    countingWslHooks({ install: 3, uninstall: 4, status: { lines: ['WSL (preview): x'], replaces: true } })
+    const w = both({ platform: 'linux' })
+    w.env = { ...w.env, wsl: true }
+    expect(await install(w.env, YES)).toBe(3)
+    expect(w.out).toEqual([])
+    expect(existsSync(w.dataDir) ? readdirSync(w.dataDir).sort() : []).toEqual(['lib'])
+    expect(await status(w.env)).toBe(EXIT_OK)
+    expect(w.out).toEqual(['WSL (preview): x'])
+    w.out.length = 0
+    expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(4)
+    expect(w.out).toEqual([])
+
+    countingWslHooks({ status: { lines: ['WSL (preview): y'], replaces: false } })
+    expect(await status(w.env)).toBe(EXIT_OK)
+    expect(w.out[0]).toBe('WSL (preview): y')
+    expect(w.out).toContain('hosts:')
+  } finally {
+    mock.module('../wsl/entry', () => realWsl)
+  }
+})
+
+test('WSL hooks that return null change nothing', async () => {
+  // Null hooks stand in for the real module, so this holds whatever src/wsl/entry.ts becomes.
+  mock.module('../wsl/entry', () => ({ ...realWsl, wslInstall: async () => null, wslStatus: async () => null, wslUninstall: async () => null }))
+  try {
+    const outputs: string[][] = []
+    const codes: number[][] = []
+    for (const wsl of [false, true]) {
+      const w = both({ platform: 'linux' })
+      w.env = { ...w.env, wsl }
+      const run = [await install(w.env, YES), await status(w.env), await uninstall(w.env, { dryRun: false, removeCredentials: false })]
+      codes.push(run)
+      outputs.push(w.out.map((line) => line.replaceAll(w.root, '<root>').replace(/\b(port|pid) \d+/g, '$1 <n>').replace(/127\.0\.0\.1:\d+/g, '127.0.0.1:<port>')))
+      await w.cleanup()
+      world = null
+    }
+    expect(outputs[1]).toEqual(outputs[0])
+    expect(codes[1]).toEqual(codes[0])
+    expect(outputs[0]?.length).toBeGreaterThan(0)
+  } finally {
+    mock.module('../wsl/entry', () => realWsl)
+  }
+})
+
+test('a WSL status that throws prints an unknown line and status goes on', async () => {
+  mock.module('../wsl/entry', () => ({ ...realWsl, wslStatus: async () => { throw new Error('powershell.exe exited 1') } }))
+  try {
+    const w = both({ platform: 'linux' })
+    w.env = { ...w.env, wsl: true }
+    expect(await status(w.env)).toBe(EXIT_OK)
+    expect(w.out[0]).toBe('WSL (preview): status unknown (powershell.exe exited 1)')
+    expect(w.out[1]).toBe('hosts:')
+  } finally {
+    mock.module('../wsl/entry', () => realWsl)
+  }
+})
+
+// The pinned lines use POSIX separators.
+test.skipIf(process.platform === 'win32')('hostStatusLines returns exactly the macOS host and MCP lines status prints', async () => {
+  const w = both()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  w.out.length = 0
+  expect(await status(w.env)).toBe(EXIT_OK)
+  const printed = w.out.slice(1, w.out.findIndex((line) => line.startsWith('service (')))
+  expect(w.out[0]).toBe('hosts:')
+  expect(printed.length).toBeGreaterThan(4)
+  expect(await hostStatusLines(w.env)).toEqual(printed)
+  const normalized = (await hostStatusLines(w.env)).map((line) => line.replaceAll(w.home, '<home>').replaceAll(w.root, '<root>'))
+  expect(normalized).toEqual([
+    '  claude-code: detected 2.1.310 (Claude Code); wired: yes in <home>/.claude/settings.json',
+    '  opencode: detected 2.1.4; wired: yes in <home>/.config/opencode/plugins/kinfold.js',
+    '  codex: not detected (not found (no codex on PATH, no Codex.app)); wired: no (no hooks.json) in <home>/.codex/hooks.json',
+    '  cursor: not detected (not found (no cursor-agent or cursor on PATH, no Cursor.app)); wired: no (no hooks.json) in <home>/.cursor/hooks.json',
+    'mcp server <root>/checkout/src/mcp/server.ts:',
+    '  claude-code: no in <home>/.claude.json',
+    '  opencode: yes in <home>/.config/opencode/opencode.json',
+  ])
 })

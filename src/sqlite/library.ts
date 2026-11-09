@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:f
 import { basename, dirname, join } from 'node:path'
 import { envName, readEnv } from '../env-names'
 import { writeFileAtomic } from '../fs/atomic'
+import { currentPlatform } from '../platform/platform'
 import { DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
 import { sqlite3mcLibraryExtension } from './release'
 import { SqliteError } from './types'
@@ -44,7 +45,7 @@ export function manifestPath(dataDir: string): string {
 }
 
 /** The file name for a build with this hash on this platform, or null where there is no build. */
-export function libraryFileName(sha256: string, platform: string = process.platform): string | null {
+export function libraryFileName(sha256: string, platform: string = currentPlatform().node): string | null {
   const extension = sqlite3mcLibraryExtension(platform)
   return extension === null ? null : `libsqlite3mc-${sha256.slice(0, 16)}.${extension}`
 }
@@ -98,7 +99,7 @@ function removeLibraryBuildQuietly(path: string, log?: (line: string) => void): 
  * atomically after it, so no reader ever sees a manifest naming a file that is
  * not there. Older builds go only once the manifest no longer names them.
  */
-export function installLibraryBuild(dir: string, bytes: Uint8Array, sha256: string, sourceSha256: string, platform: string = process.platform, log?: (line: string) => void): void {
+export function installLibraryBuild(dir: string, bytes: Uint8Array, sha256: string, sourceSha256: string, platform: string = currentPlatform().node, log?: (line: string) => void): void {
   if (sha256Bytes(bytes) !== sha256) throw new Error(EMBEDDED_LIBRARY_SHA_MISMATCH)
   const file = libraryFileName(sha256, platform)
   if (file === null) throw new Error(`no sqlite3mc build for ${platform}`)

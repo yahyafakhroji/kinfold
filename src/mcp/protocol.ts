@@ -11,7 +11,7 @@ import { isRecord } from '../contract/event'
 import { MCP_SERVER_NAME } from '../names'
 import { MCP_READ_STATUSES, MCP_TOOLS, type McpReadStatus, type McpTool } from '../store/mcp-read-store'
 import type { ReadReporter } from './read-reporter'
-import { TOOL_DEFINITIONS, type ToolContext, type ToolOutcome, callTool } from './tools'
+import { TOOL_DEFINITIONS, type ToolCaller, type ToolContext, type ToolOutcome, callTool } from './tools'
 import { VERSION } from '../version'
 
 /** Newest first; an unknown requested version gets the newest. */
@@ -34,6 +34,8 @@ export interface ProtocolDeps {
   clock: () => number
   /** Fire-and-forget read reports to the daemon; absent in tests that do not care. */
   reporter?: ReadReporter
+  /** Runs tools somewhere other than the local reader; absent, callTool answers from deps.tools. */
+  call?: ToolCaller
 }
 
 interface Request {
@@ -83,7 +85,7 @@ function initializeResult(params: unknown): Record<string, unknown> {
 
 async function runTool(name: string, args: unknown, deps: ProtocolDeps): Promise<ToolOutcome | null> {
   try {
-    return await callTool(name, args, deps.tools)
+    return await (deps.call ?? ((tool, input) => callTool(tool, input, deps.tools)))(name, args)
   } catch (error: unknown) {
     // A database error mid-read: say so without its message, which can quote SQL or paths.
     deps.log(`tool=${name} status=internal_error class=${error instanceof Error ? error.name : typeof error}`)

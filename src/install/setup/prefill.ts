@@ -10,12 +10,10 @@ import { existsSync, realpathSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { DEFAULT_PORT } from '../../daemon/daemon'
 import { OBSERVER_PROVIDERS } from '../../observer/types'
-import { DB_KEY_REF } from '../../secrets/credentials'
-import { createKeychainProvider } from '../../secrets/keychain'
-import { credentialWriterFor } from '../../secrets/keychain-writer'
-import { credentialDbKeyStore } from '../../sqlite/keys'
+import { dbKeyStoreOf } from '../../sqlite/keys'
 import { fileState, openStoreFile } from '../../sqlite/open'
 import { DB_FILE } from '../../store/data-dir'
+import { listSafety } from '../../store/observer-safety-store'
 import { type ObserverSettingsInput, listObserverSettings } from '../../store/observer-settings-store'
 import { type WiringState, inspectSamHooks } from '../claude-hooks'
 import { getObserverSettings, readDaemonInfo } from '../daemon-client'
@@ -24,6 +22,7 @@ import { type InstallEnv, installPaths } from '../env'
 import { entryCommand } from '../entry'
 import { readJsonObject, readTextOrNull } from '../files'
 import { hostWiringState } from '../host-wiring'
+import { keyStoreOf } from '../key-store-choice'
 import { ChoiceError, type ObserverFlag } from '../observer-choice'
 import { inspectShim } from '../opencode-shim'
 import { serviceOf } from '../service/control'
@@ -40,6 +39,11 @@ export interface SetupState {
   observers: ReadonlyMap<InstallHost, ObserverSettingsInput>
   /** Why the saved observers could not be read; null when they were, or when there is nothing to read. */
   observersError: string | null
+  /**
+   * Providers with a failed safety row, read from memory.db when the daemon was down; empty when the
+   * daemon answered (install asks it again) or nothing could be read. A saved choice for one still gets its PUT.
+   */
+  failedProviders: readonly string[]
   encryption: 'on' | 'off' | 'new'
   port: number
   updateCheck: boolean
@@ -129,31 +133,42 @@ function storeTarget(path: string): string {
   return immutableUri(path)
 }
 
-/** The store's rows, read with the platform key; throws when the key or the file will not open. */
-function readStoreRows(env: InstallEnv, dataDir: string): RowLike[] {
-  const writer = credentialWriterFor(env.platform, env.security)
-  const keychain = createKeychainProvider((args) => env.security({ args }))
-  const keys = credentialDbKeyStore('keychain', keychain, () => writer?.exists(DB_KEY_REF) ?? false)
+export interface StoreState {
+  rows: RowLike[]
+  /** Providers with a failed safety row. */
+  failedProviders: string[]
+}
+
+/** The store's rows and failed safety providers in one read-only open, with the key store's key; throws when the key or the file will not open. */
+export function readStoreState(env: InstallEnv, dataDir: string): StoreState {
+  const keys = dbKeyStoreOf(keyStoreOf({ ...env, dataDir }))
   const path = join(dataDir, DB_FILE)
   const target = storeTarget(path)
-  const db = openStoreFile(path, { readonly: true, target, keys })
+  // A daemon starting up may hold the WAL briefly while it recovers it, so the wait is set before the key and the first read.
+  const db = openStoreFile(path, { readonly: true, target, keys, ...(target === path ? { busyTimeoutMs: READ_BUSY_TIMEOUT_MS } : {}) })
   try {
-    // A daemon starting up may hold the WAL briefly while it recovers it.
-    if (target === path) db.exec(`PRAGMA busy_timeout = ${READ_BUSY_TIMEOUT_MS}`)
-    return listObserverSettings(db)
+    const failed = new Set(listSafety(db).filter((row) => row.status === 'failed').map((row) => row.provider))
+    return { rows: listObserverSettings(db), failedProviders: [...failed] }
   } finally {
     db.close()
   }
 }
 
-async function savedObservers(env: InstallEnv, dataDir: string): Promise<{ map: Map<InstallHost, ObserverSettingsInput>; error: string | null }> {
+interface SavedObservers {
+  map: Map<InstallHost, ObserverSettingsInput>
+  error: string | null
+  failedProviders: string[]
+}
+
+async function savedObservers(env: InstallEnv, dataDir: string): Promise<SavedObservers> {
   const read = await getObserverSettings(env)
-  if (read.ok) return { map: toMap(read.view.rows), error: null }
+  if (read.ok) return { map: toMap(read.view.rows), error: null, failedProviders: [] }
   try {
-    if (fileState(join(dataDir, DB_FILE)) === 'new') return { map: new Map(), error: null }
-    return { map: toMap(readStoreRows(env, dataDir)), error: null }
+    if (fileState(join(dataDir, DB_FILE)) === 'new') return { map: new Map(), error: null, failedProviders: [] }
+    const state = readStoreState(env, dataDir)
+    return { map: toMap(state.rows), error: null, failedProviders: state.failedProviders }
   } catch {
-    return { map: new Map(), error: UNREADABLE_OBSERVERS }
+    return { map: new Map(), error: UNREADABLE_OBSERVERS, failedProviders: [] }
   }
 }
 
@@ -197,6 +212,7 @@ export async function readSetupState(env: InstallEnv, options: SetupStateOptions
     wiredHosts,
     observers: observers.map,
     observersError: observers.error,
+    failedProviders: observers.failedProviders,
     encryption: ({ plain: 'off', encrypted: 'on', new: 'new' } as const)[fileState(join(dataDir, DB_FILE))],
     // A configured service without the port key runs the daemon on its default port.
     port: service !== null && service.isConfigured() ? (service.configuredPort() ?? DEFAULT_PORT) : readDaemonInfo(dataDir).port,

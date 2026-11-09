@@ -35,3 +35,15 @@ export function assertCredentialRef(ref: string): void {
 
 /** For platforms without a supported keychain: every lookup is a missing credential, never a fallback. */
 export const NO_CREDENTIALS: CredentialProvider = { get: () => null }
+
+const MAX_VALUE_CHARS = 512
+/** Printable ASCII without whitespace or quote characters: one token on a `security -i` line, no escaping needed. */
+const STORABLE_VALUE = /^[\x21-\x7e]+$/
+const QUOTES = /["'\\]/
+
+/** Throws without quoting the value. */
+export function assertStorableValue(value: string): void {
+  if (value.length === 0 || value.length > MAX_VALUE_CHARS || !STORABLE_VALUE.test(value) || QUOTES.test(value)) {
+    throw new Error('credential must be 1 to 512 printable characters without spaces or quotes')
+  }
+}

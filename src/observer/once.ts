@@ -6,8 +6,9 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { daemonSecrets } from '../daemon/main'
 import { readEnv } from '../env-names'
-import { platformCredentialProvider } from '../secrets/keychain'
+import { processKeyStoreDeps } from '../secrets/key-store-record'
 import { DAEMON_INFO_FILE } from '../store/data-dir'
 import { openStore } from '../store/db'
 import { type BatchOutcome, processSessionBatch } from './process'
@@ -17,9 +18,10 @@ export const MAX_ONCE_BATCHES = 20
 
 export async function observeSessionOnce(dataDir: string, sessionId: number, log: (line: string) => void): Promise<BatchOutcome[]> {
   if (existsSync(join(dataDir, DAEMON_INFO_FILE))) throw new Error('a daemon owns this data dir; stop it or use a copy')
-  const store = openStore(dataDir)
+  const { credentials, dbKeys } = daemonSecrets(dataDir, processKeyStoreDeps(dataDir))
+  const store = openStore(dataDir, { keys: dbKeys })
   try {
-    const runnerFor = runnerFactory({ dataDir, credentials: platformCredentialProvider() })
+    const runnerFor = runnerFactory({ dataDir, credentials })
     const outcomes: BatchOutcome[] = []
     for (let batch = 0; batch < MAX_ONCE_BATCHES; batch += 1) {
       const outcome = await processSessionBatch({ db: store.db, runnerFor, log }, sessionId)

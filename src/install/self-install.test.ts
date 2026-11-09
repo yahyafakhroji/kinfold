@@ -8,9 +8,13 @@ import { checkHealth, readDaemonInfo } from './daemon-client'
 import { type CommandResult, installPaths } from './env'
 import { installedProgramPath } from './entry'
 import { EXIT_OK, install } from './install'
-import { LAUNCHCTL } from './launch-agent'
-import { parseSha256Sums, programInstallActions, releaseAssetName, releaseSumsUrl, verifyProgram } from './self-install'
-import { type FakeWorld, YES, createWorld, fakeService, snapshotTree, startWorldDaemon } from './test-support'
+import { LAUNCHCTL, bootoutArgv } from './launch-agent'
+import type { ServiceControl } from './service/control'
+import { LaunchAgentService } from './service/launch-agent-service'
+import { PROGRAM_MODE, installProgram, parseSha256Sums, programInstallActions, releaseAssetName, releaseSumsUrl, verifyProgram } from './self-install'
+import { posixProgramFiles } from './program-files'
+import { currentPlatform } from '../platform/platform'
+import { type FakeWorld, YES, countingService, createWorld, fakeService, snapshotTree, startWorldDaemon } from './test-support'
 import { uninstall } from './uninstall'
 
 const HEX = 'a'.repeat(64)
@@ -288,6 +292,11 @@ test('a failed copy starts the daemon again from the program still in place', as
   expect(w.out.join('\n')).toContain('the daemon was started again from the program in place')
 })
 
+/** The world's real LaunchAgent, so the plan's stop really stops its daemon, with some members replaced. */
+function launchAgentWith(w: FakeWorld, overrides: Partial<ServiceControl>): ServiceControl {
+  return { ...countingService(new LaunchAgentService(w.env)), ...overrides }
+}
+
 test('a failed start after the plan stopped the service is reported and the step error stands', async () => {
   const { w, source } = programWorld()
   expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
@@ -298,7 +307,7 @@ test('a failed start after the plan stopped the service is reported and the step
     out(line)
     if (line.startsWith('applying ')) rmSync(source)
   }
-  w.env.service = fakeService({ running: false, startError: new Error('boom') })
+  w.env.service = launchAgentWith(w, { start: async () => Promise.reject(new Error('boom')) })
   expect(await install(w.env, installOptions(source))).toBe(1)
   const lines = w.out.join('\n')
   expect(lines).toContain('is not running after restarting (boom), so nothing will answer /health')
@@ -316,11 +325,15 @@ test('a restart that opens a large store says the daemon may still be starting',
     if (line.startsWith('applying ')) rmSync(source)
   }
   // Stopped by the plan, started again here, then never answering /health, as a daemon busy with a large store.
-  const service = fakeService({ running: false })
-  w.env.service = service
+  const real = new LaunchAgentService(w.env)
+  const starts: string[] = []
+  w.env.service = launchAgentWith(w, {
+    start: async () => void starts.push('start'),
+    isRunning: async () => starts.length > 0 || (await real.isRunning()),
+  })
   expect(await install(w.env, installOptions(source))).toBe(1)
   const lines = w.out.join('\n')
-  expect(service.calls.filter((call) => call === 'start')).toHaveLength(1)
+  expect(starts).toHaveLength(1)
   expect(lines).toContain('the daemon did not answer /health after restarting; it may still be opening a large store. Run kinfold status in a minute')
   expect(lines).not.toContain('is not running after restarting')
 })
@@ -335,7 +348,9 @@ test('a service left loaded after a slow wait-health is not started again and th
   w.env.fetch = (async () => Promise.reject(new Error('refused'))) as unknown as typeof w.env.fetch
   expect(await install(w.env, installOptions(source))).toBe(1)
   const lines = w.out.join('\n')
-  expect(service.calls).not.toContain('start')
+  // The plan's own start ran; the restart after the failed wait found the service loaded and left it.
+  expect(service.calls.filter((call) => call === 'start')).toHaveLength(1)
+  expect(service.calls.lastIndexOf('start')).toBeLessThan(service.calls.lastIndexOf('isRunning'))
   expect(lines).toContain('the daemon did not answer /health within 180 s; it may still be opening a large store')
   expect(lines).toContain('it may still be opening a large store. Run kinfold status in a minute; see')
   expect(lines).not.toContain('is not running after restarting')
@@ -357,7 +372,7 @@ test('a running service is stopped before its program is replaced and started af
   w.commands.length = 0
   w.out.length = 0
   expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
-  expect(w.commands.filter((call) => call.argv[0] === LAUNCHCTL).map((call) => call.argv[1])).toEqual(['print', 'bootout', 'bootstrap'])
+  expect(w.commands.filter((call) => call.argv[0] === LAUNCHCTL).map((call) => call.argv[1])).toEqual(['print', 'bootout', 'print', 'bootstrap'])
   const lines = w.out.join('\n')
   const stop = lines.indexOf(`/bin/launchctl bootout gui/501/dev.kinfold.daemon`)
   const copy = lines.indexOf(`install program ${binPath}`)
@@ -384,7 +399,7 @@ test('uninstall removes the program and library folders and keeps the rest of th
 const RUNNING = '0.2.0-rc.1'
 
 /** A program world whose installed program answers `--version` with `answer`, and the plan for installing `source` over it. */
-async function planOver(answer: CommandResult): Promise<{ w: FakeWorld; binPath: string; source: string; actions: string[] }> {
+async function planOver(answer: CommandResult, version: string = RUNNING): Promise<{ w: FakeWorld; binPath: string; source: string; actions: string[] }> {
   const { w, binPath, source } = programWorld()
   mkdirSync(join(w.dataDir, 'bin'), { recursive: true, mode: 0o700 })
   writeFileSync(binPath, 'installed program\n', { mode: 0o755 })
@@ -392,7 +407,7 @@ async function planOver(answer: CommandResult): Promise<{ w: FakeWorld; binPath:
   w.env = { ...w.env, run: async (request) => (request.argv[0] === binPath ? (w.commands.push(request), answer) : run(request)) }
   const sourceHash = sha(readFileSync(source))
   const check = { sourceHash, assetName: ASSET, expectedSha256: sourceHash, check: true }
-  const plan = await programInstallActions(w.env, { source, dryRun: false, version: RUNNING, check })
+  const plan = await programInstallActions(w.env, { source, dryRun: false, version, check })
   return { w, binPath, source, actions: plan.actions.map((action) => action.kind) }
 }
 
@@ -403,6 +418,13 @@ test('an installed program newer than the running one is kept, said in one line'
   const version = w.commands.filter((c) => c.argv[0] === binPath)
   expect(version.map((c) => c.argv)).toEqual([[binPath, '--version']])
   expect(version[0]?.timeoutMs).toBeGreaterThan(0)
+})
+
+test('a development build is told how to replace a newer program', async () => {
+  const { w, binPath, actions } = await planOver({ exitCode: 0, stdout: '0.3.0\n' }, '0.0.0-dev')
+  expect(actions).toEqual([])
+  expect(w.out).toEqual([`program: ${binPath} is 0.3.0, newer than this development build; kept it. Remove ${binPath} first to install this build`])
+  expect(w.out.some((line) => line.includes('npx kinfold@latest'))).toBe(false)
 })
 
 for (const [name, answer] of [
@@ -428,6 +450,36 @@ test('a kept newer program leaves the rest of the install to run, pointed at it'
   w.env = { ...w.env, run: async (request) => (request.argv[0] === binPath ? { exitCode: 0, stdout: '9.0.0\n' } : run(request)) }
   expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
   expect(readFileSync(binPath, 'utf8')).toBe('installed program\n')
-  expect(w.out.join('\n')).toContain('newer than this one (0.0.0-dev); kept it')
+  expect(w.out.join('\n')).toContain('newer than this development build; kept it')
   expect(w.out).toContain(`installed. Check it with: ${binPath} status`)
+})
+
+test('replacing the program plans a service stop before the copy', async () => {
+  const { w, source } = programWorld()
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  writeFileSync(source, 'kinfold program v2\n')
+  w.out.length = 0
+  expect(await install(w.env, { ...installOptions(source), dryRun: true })).toBe(EXIT_OK)
+  const plan = w.out.filter((line) => /^ {2}\d+\. /.test(line))
+  const stop = plan.findIndex((line) => line.endsWith(bootoutArgv(w.env.uid).join(' ')))
+  const copy = plan.findIndex((line) => line.includes('install program '))
+  expect(stop).toBeGreaterThanOrEqual(0)
+  expect(stop).toBeLessThan(copy)
+})
+
+test('the program is replaced through the platform\'s program files', async () => {
+  const { w, source } = programWorld()
+  const winBin = installedProgramPath(w.dataDir, 'win32')
+  const replaced: [string, string][] = []
+  const env = { ...w.env, platform: 'win32' as const, programFiles: { ...posixProgramFiles, replace: (temp: string, target: string) => (replaced.push([temp, target]), posixProgramFiles.replace(temp, target)) } }
+  const expectedSha256 = sha(readFileSync(source))
+  await installProgram(env, { kind: 'install-program', from: source, to: winBin, assetName: null, expectedSha256, check: false })
+  expect(replaced).toEqual([[join(w.dataDir, 'bin', `.kinfold-tmp-${process.pid}`), winBin]])
+
+  // A darwin world on a Windows runner cannot fsync a folder, and its modes are not POSIX ones.
+  const darwinBin = installedProgramPath(w.dataDir, 'darwin')
+  await installProgram({ ...w.env, fsyncDir: () => {} }, { kind: 'install-program', from: source, to: darwinBin, assetName: null, expectedSha256, check: false })
+  expect(readFileSync(darwinBin, 'utf8')).toBe('kinfold program v1\n')
+  if (currentPlatform().os !== 'windows') expect(statSync(darwinBin).mode & 0o777).toBe(PROGRAM_MODE)
+  expect(readdirSync(join(w.dataDir, 'bin')).sort()).toEqual(['kinfold', 'kinfold.exe'])
 })

@@ -2,18 +2,18 @@
 // process that opens an encrypted memory.db reads it here; nothing else ever
 // sees it, and no error carries it. macOS keeps it in the login Keychain as
 // kinfold/db-key, or shared-agent-memory/db-key until migrated.
-// Linux and Windows stores are not built yet; until then those platforms have
-// no key, so new stores there stay plaintext. KINFOLD_DB_KEYSTORE=none turns the
-// store off under `bun test` only (NODE_ENV=test), so no test reads the real
-// Keychain and no production environment can switch encryption off.
+// Which store holds it is read from key-store.json in the data folder of the
+// file being opened. KINFOLD_DB_KEYSTORE=none turns the store off under
+// `bun test` only (NODE_ENV=test), so no test reads the real Keychain and no
+// production environment can switch encryption off.
 
 import { randomBytes } from 'node:crypto'
-import { envName, readEnv } from '../env-names'
-import { LEGACY_KEYCHAIN_SERVICE } from '../names'
+import { envName } from '../env-names'
 import { type CredentialProvider, DB_KEY_REF } from '../secrets/credentials'
 import { isHexKey } from '../secrets/hmac-keys'
-import { ITEM_NOT_FOUND_EXIT, type SecurityResult, createKeychainProvider, runSecurity } from '../secrets/keychain'
-import { existsArgs } from '../secrets/keychain-writer'
+import { type KeyStore, type KeyStoreDeps, credentialProviderOf } from '../secrets/key-store'
+import { keyStoresOffForTests, processKeyStoreDeps, resolveKeyStore } from '../secrets/key-store-record'
+import { legacyKeychainOf } from '../secrets/stores/keychain'
 import { SqliteError } from './types'
 
 export const DB_KEYSTORE_ENV = envName('DB_KEYSTORE')
@@ -47,17 +47,45 @@ export function credentialDbKeyStore(name: string, credentials: CredentialProvid
   }
 }
 
-function keychainHasEntry(result: SecurityResult): boolean {
-  if (result.exitCode === 0) return true
-  if (result.exitCode === ITEM_NOT_FOUND_EXIT) return false
-  throw new SqliteError(`keychain lookup failed (exit ${result.exitCode})`, 'SQLITE_AUTH', 23, 'no_key')
+// A failed lookup is a no_key error carrying the store's own fixed message,
+// which never holds the key.
+function lookupOrNoKey(lookup: () => boolean): boolean {
+  try {
+    return lookup()
+  } catch (error: unknown) {
+    throw new SqliteError(error instanceof Error ? error.message : 'key store lookup failed', 'SQLITE_AUTH', 23, 'no_key')
+  }
 }
 
-/** The store for this platform: the Keychain on macOS, none elsewhere until E4, none when KINFOLD_DB_KEYSTORE=none. */
-export function platformDbKeyStore(env: Readonly<Record<string, string | undefined>> = process.env, platform: string = process.platform): DbKeyStore {
-  if (readEnv(env, 'DB_KEYSTORE') === 'none' && env.NODE_ENV === 'test') return NO_DB_KEYS
-  if (platform !== 'darwin') return NO_DB_KEYS
-  return credentialDbKeyStore('keychain', createKeychainProvider(), () => keychainHasEntry(runSecurity(existsArgs(DB_KEY_REF))) || keychainHasEntry(runSecurity(existsArgs(DB_KEY_REF, LEGACY_KEYCHAIN_SERVICE))))
+/** The database key in a store; an entry under the Keychain's old service counts until it is migrated. */
+export function dbKeyStoreOf(store: KeyStore | null): DbKeyStore {
+  if (store === null) return NO_DB_KEYS
+  const legacy = legacyKeychainOf(store)
+  const exists = (): boolean => lookupOrNoKey(() => store.exists(DB_KEY_REF)) || (legacy !== null && lookupOrNoKey(() => legacy.exists(DB_KEY_REF)))
+  return credentialDbKeyStore(store.label, credentialProviderOf(store), exists)
+}
+
+/** The database key store key-store.json in `dataDir` names; throws the record's fixed message when it cannot be trusted. */
+export function dbKeyStoreFor(dataDir: string, env: Readonly<Record<string, string | undefined>> = process.env, deps: KeyStoreDeps = processKeyStoreDeps(dataDir, env)): DbKeyStore {
+  if (keyStoresOffForTests(env)) return NO_DB_KEYS
+  return dbKeyStoreOf(resolveKeyStore(dataDir, deps))
+}
+
+/**
+ * Keeps the first key the store hands back, so a process that opens the same
+ * database again (the daemon's reader after a close) asks the store once. A
+ * missing key is not kept: it may be stored later.
+ */
+export function rememberedDbKeys(keys: DbKeyStore): DbKeyStore {
+  let key: string | null = null
+  return {
+    name: keys.name,
+    read: () => {
+      key ??= keys.read()
+      return key
+    },
+    exists: () => key !== null || keys.exists(),
+  }
 }
 
 export function newDbKey(): string {

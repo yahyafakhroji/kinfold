@@ -13,10 +13,13 @@
 import { resolveDataDir } from '../store/data-dir'
 import { applyDataDirFlag } from '../store/data-dir-flag'
 import { DAEMON_GIT_TIMEOUT_MS, type GitRunner, GitTimeoutError, gitRunnerWithTimeout, resolveProjectKey } from '../store/project-key'
+import { currentPlatform } from '../platform/platform'
+import { mcpToolCallerFor } from '../wsl/mcp-backend'
 import { MAX_LINE_CHARS, handleLine, oversizeReply } from './protocol'
 import { type ReadReporter, createReadReporter, hostFromEnv } from './read-reporter'
 import { type MemoryReader, openMemoryReader } from './reader'
 import { type SemanticClient, createSemanticClient } from './semantic-client'
+import type { ToolCaller } from './tools'
 
 export interface McpServerOptions {
   dataDir: string
@@ -29,6 +32,8 @@ export interface McpServerOptions {
   reporter?: ReadReporter
   /** Vector search through the daemon; main() builds one, tests may leave it out for keyword-only search. */
   semantic?: SemanticClient
+  /** Where tool calls go instead of the local reader; serveMcp asks src/wsl/mcp-backend.ts for one. */
+  call?: ToolCaller
 }
 
 export interface McpServer {
@@ -85,6 +90,7 @@ export function createMcpServer(options: McpServerOptions): McpServer {
     log,
     clock: options.clock ?? (() => performance.now()),
     ...(options.reporter !== undefined ? { reporter: options.reporter } : {}),
+    ...(options.call !== undefined ? { call: options.call } : {}),
   }
   return {
     projectKey,
@@ -139,7 +145,9 @@ async function serveMcp(argv: readonly string[]): Promise<void> {
   const dataDir = resolveDataDir()
   const host = hostFromEnv(process.env)
   const reporter = createReadReporter({ dataDir, host })
-  const server = createMcpServer({ dataDir, cwd: process.cwd(), log, reporter, semantic: createSemanticClient({ dataDir }) })
+  const cwd = process.cwd()
+  const call = mcpToolCallerFor({ dataDir, cwd, platform: currentPlatform() }) ?? undefined
+  const server = createMcpServer({ dataDir, cwd, log, reporter, semantic: createSemanticClient({ dataDir }), ...(call !== undefined ? { call } : {}) })
   log(`ready project=${server.projectKey === null ? 'unresolved' : 'resolved'} host=${host ?? 'unknown'}`)
   try {
     await runStdio(server, Bun.stdin.stream(), (line) => {

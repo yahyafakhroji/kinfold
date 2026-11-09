@@ -1,9 +1,11 @@
 // Runs the built program through install, a hook, MCP search, encryption and
-// uninstall against the home CI gives it. It is the macOS smoke job's body:
-// each step prints as it passes, the first mismatch stops the run, and a
-// finally block always tries to uninstall and remove the temporary folder.
+// uninstall against the home CI gives it. It is the smoke job's body on every
+// OS that has a steps file under tools/smoke/: each step prints as it passes,
+// the first mismatch stops the run, and a finally block always tries to
+// uninstall and remove the temporary folder.
 // A real home is refused unless GitHub Actions is running, so a local run
-// cannot install into a developer's home.
+// cannot install into a developer's home. What differs per OS (the service, the
+// key store label, the program name) comes from tools/smoke/<os>.ts.
 //
 // The job installs the agent CLIs, but nothing can log in there, so the
 // observer stands in for a logged-in one: a small `claude` wrapper in front of
@@ -15,20 +17,25 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
+import { currentPlatform } from '../src/platform/platform'
+import { SmokeError, loadSmokePlatform } from './smoke/platform'
+import type { SmokePlatform, SmokeResult, SmokeWorld } from './smoke/platform'
+
+export { SmokeError }
+export type { SmokeResult, SmokeWorld }
 
 const DEFAULT_PORT = 37_811
-const LAUNCH_AGENT_LABEL = 'dev.kinfold.daemon'
 const PROGRAM_TIMEOUT_MS = 180_000
+const SHORT_TIMEOUT_MS = 20_000
+// Install waits up to 180 s for the daemon's /health and uninstall waits on the
+// service too, so their own limit must run out first and print its message.
+const SERVICE_COMMAND_TIMEOUT_MS = 240_000
+// status in an empty home answers in a second or two; a compiled program that
+// spins while loading its modules never does, and this fails it in seconds.
+const PROBE_TIMEOUT_MS = 20_000
 const SEARCH_TIMEOUT_MS = 45_000
 const SEARCH_POLL_MS = 500
 const OUTPUT_LIMIT = 6_000
-
-export class SmokeError extends Error {
-  override name = 'SmokeError'
-  constructor(readonly step: string, message: string) {
-    super(message)
-  }
-}
 
 /** The smoke writes to the default keychain and the launchd user domain, so it only runs on an ephemeral CI runner. */
 export function homeForSmoke(env: NodeJS.ProcessEnv = process.env): string {
@@ -40,21 +47,24 @@ export function homeForSmoke(env: NodeJS.ProcessEnv = process.env): string {
   return home
 }
 
-interface Result {
-  code: number
-  stdout: string
-  stderr: string
+export interface SmokeDeps {
+  /** timeoutMs overrides the per-command limit; the driver passes it only for the compiled-program probe. */
+  kinfold?: (world: SmokeWorld, args: readonly string[], stdin?: string, timeoutMs?: number) => Promise<SmokeResult>
+  /** Test seam for the pty conversion; default platform.runConversion, else the expect-based one. */
+  runConversion?: (world: SmokeWorld, operation: 'encrypt' | 'decrypt') => Promise<SmokeResult>
+  /** Where HOME, PATH (to find claude) and KINFOLD_RELEASE_SUMS_URL are read; default process.env. */
+  env?: NodeJS.ProcessEnv
+  /** The port that must be free before install; default 37811. */
+  port?: number
 }
 
-interface World {
-  program: string
-  root: string
-  home: string
-  project: string
-  dataDir: string
-  fakeBin: string
-  env: Record<string, string>
-  marker: string
+/** The steps' view of one run: the world plus the seams resolved once. */
+interface Run {
+  world: SmokeWorld
+  platform: SmokePlatform
+  kinfold: (world: SmokeWorld, args: readonly string[], stdin?: string, timeoutMs?: number) => Promise<SmokeResult>
+  runConversion: (world: SmokeWorld, operation: 'encrypt' | 'decrypt') => Promise<SmokeResult>
+  daemon: ForegroundDaemon
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -66,7 +76,7 @@ function cap(text: string): string {
 }
 
 /** The command's own output, trimmed to a readable tail. Secrets never reach this path: encrypt output is not printed. */
-function describe(result: Result): string {
+function describe(result: SmokeResult): string {
   const parts = [
     result.stdout.trim() === '' ? '' : `stdout:\n${cap(result.stdout.trim())}`,
     result.stderr.trim() === '' ? '' : `stderr:\n${cap(result.stderr.trim())}`,
@@ -74,7 +84,7 @@ function describe(result: Result): string {
   return parts.join('\n')
 }
 
-function childEnvironment(home: string, fakeBin: string): Record<string, string> {
+export function childEnvironment(home: string, fakeBin: string, platform: SmokePlatform): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value
@@ -89,10 +99,102 @@ function childEnvironment(home: string, fakeBin: string): Record<string, string>
   delete env.SAM_PORT
   delete env.KINFOLD_DB_KEYSTORE
   delete env.SAM_DB_KEYSTORE
-  return env
+  return { ...env, ...platform.childEnv?.(home) }
 }
 
-async function run(argv: readonly string[], options: { cwd: string; env: Record<string, string>; stdin?: string; timeoutMs?: number }): Promise<Result> {
+interface RunOptions {
+  cwd: string
+  env: Record<string, string>
+  stdin?: string
+  timeoutMs?: number
+  /** Adds what the command printed to a timeout error; never set for the key conversions, whose output holds the recovery code. */
+  showOutputOnTimeout?: boolean
+}
+
+// Values that follow these flags can be passwords (security's -w and -p), so
+// the process tree never shows them.
+const PS_COLUMNS = 'pid=,ppid=,stat=,%cpu=,etime=,command='
+const DIAGNOSTIC_LINES = 80
+
+const SECRET_FLAG = /(^|\s)(-w|-p|--password)(\s+|=)(\S+)/g
+
+function redactSecretFlags(command: string): string {
+  return command.replace(SECRET_FLAG, '$1$2$3<redacted>')
+}
+
+/**
+ * The rows of `ps -ax -o pid=,ppid=,...,command=` for rootPid and everything
+ * under it, parent before child, with secret flag values redacted.
+ */
+export function descendantsOf(psOutput: string, rootPid: number): string[] {
+  const rows = new Map<number, { ppid: number; line: string }>()
+  const children = new Map<number, number[]>()
+  for (const raw of psOutput.split('\n')) {
+    const match = /^\s*(\d+)\s+(\d+)\s+\S+\s+\S/.exec(raw)
+    if (match === null) continue
+    const pid = Number(match[1])
+    const ppid = Number(match[2])
+    rows.set(pid, { ppid, line: redactSecretFlags(raw.trim()) })
+    children.set(ppid, [...(children.get(ppid) ?? []), pid])
+  }
+  const lines: string[] = []
+  const visit = (pid: number, depth: number): void => {
+    const row = rows.get(pid)
+    if (row === undefined || depth > rows.size) return
+    lines.push(row.line)
+    for (const child of children.get(pid) ?? []) visit(child, depth + 1)
+  }
+  visit(rootPid, 0)
+  return lines
+}
+
+/**
+ * Names what a timed-out command is waiting on before it is killed: its argv
+ * and the processes under it. No env values are printed, and the key
+ * conversions' argv holds only the expect script path and the program.
+ */
+function reportTimeout(argv: readonly string[], pid: number): void {
+  const lines = [`smoke: timed out: ${redactSecretFlags(argv.join(' '))}`]
+  const tree = diagnostic(['ps', '-ax', '-o', PS_COLUMNS], (text) => descendantsOf(text, pid))
+  lines.push(tree.length === 0 ? 'smoke: no process tree (ps failed or the command already exited)' : 'smoke: process tree (pid ppid stat %cpu elapsed command):', ...tree.map((line) => `  ${line}`))
+  // Which descriptors it holds (a socket left open, a lock) and, on macOS, the
+  // native stack: idle in the event loop means an await that never settles.
+  lines.push('smoke: open files:', ...diagnostic(['lsof', '-n', '-P', '-p', String(pid)], capLines).map((line) => `  ${line}`))
+  if (process.platform === 'darwin') {
+    lines.push('smoke: stack sample:', ...diagnostic(['/usr/bin/sample', String(pid), '1'], mainThreadStack).map((line) => `  ${line}`))
+  }
+  process.stderr.write(`${lines.join('\n')}\n`)
+}
+
+/** A read-only probe's output through a filter; a probe that cannot run gives one line saying so. */
+function diagnostic(argv: readonly string[], filter: (text: string) => string[]): string[] {
+  try {
+    const result = Bun.spawnSync([...argv], { stdout: 'pipe', stderr: 'ignore' })
+    if (result.exitCode !== 0) return [`${argv[0]} exited ${result.exitCode}`]
+    return filter(result.stdout.toString())
+  } catch (error: unknown) {
+    return [`${argv[0]} could not run (${error instanceof Error ? error.message : String(error)})`]
+  }
+}
+
+function capLines(text: string): string[] {
+  return text.split('\n').filter((line) => line.trim() !== '').slice(0, DIAGNOSTIC_LINES).map(redactSecretFlags)
+}
+
+/** The call graph's first thread, which is the JavaScript thread in a Bun program. */
+function mainThreadStack(text: string): string[] {
+  const lines = text.split('\n')
+  const start = lines.findIndex((line) => line.startsWith('Call graph:'))
+  if (start < 0) return capLines(text)
+  const graph: string[] = []
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() === '' || (graph.length > 1 && /^ {4}\d+ Thread_/.test(line))) break
+    graph.push(line.replace(/\s+\(in [^)]*\)/, '').slice(0, 160))
+  }
+  return graph.slice(0, DIAGNOSTIC_LINES)
+}
+
+async function run(argv: readonly string[], options: RunOptions): Promise<SmokeResult> {
   const child = Bun.spawn([...argv], {
     cwd: options.cwd,
     env: options.env,
@@ -103,6 +205,7 @@ async function run(argv: readonly string[], options: { cwd: string; env: Record<
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
+    reportTimeout(argv, child.pid)
     child.kill()
   }, options.timeoutMs ?? PROGRAM_TIMEOUT_MS)
   try {
@@ -111,18 +214,35 @@ async function run(argv: readonly string[], options: { cwd: string; env: Record<
       child.stderr instanceof ReadableStream ? new Response(child.stderr).text() : '',
       child.exited,
     ])
-    if (timedOut) throw new SmokeError('timeout', `${argv[0]} did not finish in ${options.timeoutMs ?? PROGRAM_TIMEOUT_MS} ms`)
+    if (timedOut) {
+      const output = options.showOutputOnTimeout === true ? describe({ code: -1, stdout, stderr }) : ''
+      throw new SmokeError('timeout', `${argv[0]} did not finish in ${options.timeoutMs ?? PROGRAM_TIMEOUT_MS} ms${output === '' ? '' : `\n${output}`}`)
+    }
     return { code, stdout, stderr }
   } finally {
     clearTimeout(timer)
   }
 }
 
-async function kinfold(world: World, args: readonly string[], stdin?: string): Promise<Result> {
-  return await run([world.program, ...args], { cwd: world.project, env: world.env, ...(stdin !== undefined ? { stdin } : {}) })
+// The version probe and each MCP exchange answer at once, so they get the
+// short limit; install and the rest may wait on downloads and the service.
+function timeoutFor(args: readonly string[]): number {
+  if (args[0] === '--version' || args[0] === 'mcp') return SHORT_TIMEOUT_MS
+  if (args[0] === 'install' || args[0] === 'uninstall') return SERVICE_COMMAND_TIMEOUT_MS
+  return PROGRAM_TIMEOUT_MS
 }
 
-function expectOk(step: string, result: Result): void {
+async function kinfold(world: SmokeWorld, args: readonly string[], stdin?: string, timeoutMs?: number): Promise<SmokeResult> {
+  return await run([world.program, ...args], {
+    cwd: world.project,
+    env: world.env,
+    timeoutMs: timeoutMs ?? timeoutFor(args),
+    showOutputOnTimeout: true,
+    ...(stdin !== undefined ? { stdin } : {}),
+  })
+}
+
+function expectOk(step: string, result: SmokeResult): void {
   if (result.code === 0) return
   const output = describe(result)
   throw new SmokeError(step, `the program exited ${result.code}${output === '' ? '' : `\n${output}`}`)
@@ -156,7 +276,7 @@ function shQuote(value: string): string {
  * every other call goes to the real CLI, so version detection and MCP
  * registration keep working.
  */
-function writeObserverShim(world: World, realClaude: string | null): void {
+function writeObserverShim(world: SmokeWorld, realClaude: string | null): void {
   mkdirSync(world.fakeBin, { recursive: true, mode: 0o700 })
   if (realClaude === null) throw new SmokeError('setup', 'claude is not on PATH; the workflow installs it before the smoke')
   const delegate = `exec ${shQuote(realClaude)} "$@"`
@@ -206,17 +326,12 @@ function replyFor(stdout: string, id: number): Record<string, unknown> | null {
 }
 
 /** One stdio MCP exchange: initialize, then the tool call, then close stdin so the server exits. */
-async function mcpCall(world: World, tool: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function mcpCall(ctx: Run, tool: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const requests = [
     { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'kinfold-smoke', version: '1' } } },
     { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: tool, arguments: args } },
   ].map((request) => JSON.stringify(request)).join('\n')
-  const result = await run([world.program, 'mcp'], {
-    cwd: world.project,
-    env: world.env,
-    stdin: `${requests}\n`,
-    timeoutMs: 20_000,
-  })
+  const result = await ctx.kinfold(ctx.world, ['mcp'], `${requests}\n`)
   if (result.code !== 0) throw new SmokeError('mcp', `the MCP server exited ${result.code}\n${describe(result)}`)
   const reply = replyFor(result.stdout, 2)
   if (reply === null) throw new SmokeError('mcp', `the MCP server did not answer the ${tool} call\n${describe(result)}`)
@@ -238,11 +353,12 @@ function searchHits(reply: Record<string, unknown>): SearchHit[] {
   })
 }
 
-async function waitForSearch(world: World, step: string): Promise<SearchHit> {
+async function waitForSearch(ctx: Run, step: string): Promise<SearchHit> {
+  const { world } = ctx
   const deadline = Date.now() + SEARCH_TIMEOUT_MS
   let last: SearchHit[] = []
   for (;;) {
-    const reply = await mcpCall(world, 'search', { query: world.marker })
+    const reply = await mcpCall(ctx, 'search', { query: world.marker })
     last = searchHits(reply)
     const found = last.find((hit) => hit.title.includes(world.marker))
     if (found !== undefined) return found
@@ -254,9 +370,10 @@ async function waitForSearch(world: World, step: string): Promise<SearchHit> {
 }
 
 /** The observation still answers after a key change, with the text the hook carried. */
-async function expectEventStillSearchable(world: World, step: string): Promise<void> {
-  const hit = await waitForSearch(world, step)
-  const fetched = await mcpCall(world, 'get_observations', { ids: [hit.id] })
+async function expectEventStillSearchable(ctx: Run, step: string): Promise<void> {
+  const { world } = ctx
+  const hit = await waitForSearch(ctx, step)
+  const fetched = await mcpCall(ctx, 'get_observations', { ids: [hit.id] })
   const structured = isRecord(fetched.structuredContent) ? fetched.structuredContent : {}
   const observations = Array.isArray(structured.observations) ? structured.observations : []
   const first = observations[0]
@@ -265,7 +382,7 @@ async function expectEventStillSearchable(world: World, step: string): Promise<v
   expectContains(step, narrative, 'carried')
 }
 
-function daemonLogTail(world: World): string {
+function daemonLogTail(world: SmokeWorld): string {
   const path = join(world.dataDir, 'logs', 'daemon.log')
   if (!existsSync(path)) return 'the daemon log does not exist'
   try {
@@ -277,7 +394,7 @@ function daemonLogTail(world: World): string {
 }
 
 /** The interval that converts memory.db needs a terminal; expect supplies one and answers its prompts. */
-async function runPty(world: World, operation: 'encrypt' | 'decrypt'): Promise<Result> {
+async function runPty(world: SmokeWorld, operation: 'encrypt' | 'decrypt'): Promise<SmokeResult> {
   const scriptPath = join(world.root, `expect-${operation}.exp`)
   writeFileSync(scriptPath, operation === 'encrypt' ? ENCRYPT_EXPECT : DECRYPT_EXPECT, { mode: 0o600 })
   if (!existsSync('/usr/bin/expect')) throw new SmokeError('setup', '/usr/bin/expect is missing; the key commands need a terminal')
@@ -332,18 +449,62 @@ const DECRYPT_EXPECT = [
   '',
 ].join('\n')
 
-function launchAgentLoaded(world: World): boolean {
-  const uid = process.getuid?.() ?? -1
-  if (uid < 0) return true
-  const result = Bun.spawnSync(['/bin/launchctl', 'print', `gui/${uid}/${LAUNCH_AGENT_LABEL}`], {
-    env: world.env,
-    stdout: 'ignore',
-    stderr: 'ignore',
-  })
-  return result.exitCode === 0
+interface ForegroundDaemon {
+  start(): Promise<void>
+  stop(): Promise<void>
 }
 
-async function steps(world: World): Promise<void> {
+/**
+ * The platform's hand-started daemon, or nothing when the service runs it.
+ * The conversions replace memory.db and the commands only stop and restart a
+ * service they installed, so the driver stops a hand-started daemon around
+ * each one itself.
+ */
+function foregroundDaemon(platform: SmokePlatform, world: SmokeWorld): ForegroundDaemon {
+  let running: { stop(): Promise<void> } | null = null
+  return {
+    async start() {
+      if (platform.foregroundDaemon === undefined || running !== null) return
+      running = await platform.foregroundDaemon(world)
+    },
+    async stop() {
+      const handle = running
+      running = null
+      await handle?.stop()
+    },
+  }
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function encryptedLine(platform: SmokePlatform): RegExp {
+  return new RegExp(`^database: encrypted \\(${escapeRegExp(platform.keyStoreLabel)} db-key present\\)`, 'm')
+}
+
+/**
+ * Runs status in a fresh empty home before anything is installed. status
+ * loads the installer's modules, which a compiled program can fail to finish
+ * loading (an import of the entry module spins forever) while the same code
+ * run from source works; this catches that in seconds instead of after
+ * install's full limit. Only finishing matters: the exit code of status in an
+ * empty home is not part of the check.
+ */
+async function probeCompiledStatus(ctx: Run): Promise<void> {
+  const home = join(ctx.world.root, 'probe-home')
+  mkdirSync(home, { recursive: true, mode: 0o700 })
+  const probe: SmokeWorld = { ...ctx.world, home, dataDir: join(home, '.kinfold'), env: { ...ctx.world.env, HOME: home } }
+  try {
+    await ctx.kinfold(probe, ['status'], undefined, PROBE_TIMEOUT_MS)
+  } catch (error: unknown) {
+    if (!(error instanceof SmokeError) || error.step !== 'timeout') throw error
+    throw new SmokeError('compiled', `status in an empty home did not finish in ${PROBE_TIMEOUT_MS / 1000} s; the compiled program never finished loading its modules (a module that imports src/cli/kinfold.ts spins it)\n${error.message}`)
+  }
+}
+
+async function steps(ctx: Run): Promise<void> {
+  const { world, platform, kinfold, daemon } = ctx
   process.stdout.write('smoke: install\n')
   const installed = await kinfold(world, [
     'install',
@@ -356,8 +517,9 @@ async function steps(world: World): Promise<void> {
   expectOk('install', installed)
   expectContains('install', installed.stdout, 'observer claude-code: claude-cli/haiku (flag)')
   expectContains('install', installed.stdout, 'observer opencode: claude-cli/haiku (flag)')
-  const binPath = join(world.dataDir, 'bin', 'kinfold')
+  const binPath = join(world.dataDir, 'bin', platform.programName)
   if (!existsSync(binPath)) throw new SmokeError('install', `${binPath} was not installed`)
+  await daemon.start()
 
   process.stdout.write('smoke: status\n')
   const status = await kinfold(world, ['status'])
@@ -365,7 +527,7 @@ async function steps(world: World): Promise<void> {
   expectContains('status', status.stdout, /daemon \/health: up on 127\.0\.0\.1:37811\b/)
   expectContains('status', status.stdout, /^ {2}claude-code: .*wired: yes/m)
   expectContains('status', status.stdout, /^ {2}opencode: .*wired: yes/m)
-  expectContains('status', status.stdout, /^database: encrypted \(keychain db-key present\)/m)
+  expectContains('status', status.stdout, encryptedLine(platform))
 
   process.stdout.write('smoke: hook\n')
   const hook = await kinfold(world, ['hook', '--host', 'claude-code'], `${JSON.stringify({
@@ -377,38 +539,48 @@ async function steps(world: World): Promise<void> {
   expectOk('hook', hook)
 
   process.stdout.write('smoke: search\n')
-  await expectEventStillSearchable(world, 'search')
+  await expectEventStillSearchable(ctx, 'search')
 
   // A new install creates the store encrypted, so decrypt comes first; the
   // pair then covers both conversions and the recovery code.
   process.stdout.write('smoke: decrypt\n')
-  const decrypted = await runPty(world, 'decrypt')
+  await daemon.stop()
+  const decrypted = await ctx.runConversion(world, 'decrypt')
   expectOk('decrypt', decrypted)
+  await daemon.start()
   const afterDecrypt = await kinfold(world, ['status'])
   expectOk('decrypt', afterDecrypt)
   expectContains('decrypt', afterDecrypt.stdout, /daemon \/health: up on 127\.0\.0\.1:37811\b/)
   expectContains('decrypt', afterDecrypt.stdout, /^database: plaintext/m)
-  await expectEventStillSearchable(world, 'decrypt')
+  await expectEventStillSearchable(ctx, 'decrypt')
 
   process.stdout.write('smoke: encrypt\n')
-  const encrypted = await runPty(world, 'encrypt')
+  await daemon.stop()
+  const encrypted = await ctx.runConversion(world, 'encrypt')
   if (encrypted.code !== 0) throw new SmokeError('encrypt', `encrypt did not finish (expect exit ${encrypted.code})`)
+  await daemon.start()
   const afterEncrypt = await kinfold(world, ['status'])
   expectOk('encrypt', afterEncrypt)
   expectContains('encrypt', afterEncrypt.stdout, /daemon \/health: up on 127\.0\.0\.1:37811\b/)
-  expectContains('encrypt', afterEncrypt.stdout, /^database: encrypted \(keychain db-key present\)/m)
-  await expectEventStillSearchable(world, 'encrypt')
+  expectContains('encrypt', afterEncrypt.stdout, encryptedLine(platform))
+  await expectEventStillSearchable(ctx, 'encrypt')
 }
 
 interface Cleanup {
   problems: string[]
 }
 
-async function cleanup(world: World, installStarted: boolean, uninstalled: boolean): Promise<Cleanup> {
+async function cleanup(ctx: Run, installStarted: boolean, uninstalled: boolean): Promise<Cleanup> {
+  const { world } = ctx
   const problems: string[] = []
+  try {
+    await ctx.daemon.stop()
+  } catch (error: unknown) {
+    problems.push(`the foreground daemon could not be stopped (${error instanceof Error ? error.message : String(error)})`)
+  }
   if (installStarted && !uninstalled) {
     try {
-      const result = await kinfold(world, ['uninstall'])
+      const result = await ctx.kinfold(world, ['uninstall'])
       if (result.code !== 0) problems.push(`uninstall exited ${result.code}\n${describe(result)}`)
     } catch (error: unknown) {
       problems.push(`uninstall could not run (${error instanceof Error ? error.message : String(error)})`)
@@ -422,10 +594,11 @@ async function cleanup(world: World, installStarted: boolean, uninstalled: boole
   return { problems }
 }
 
-async function smoke(programPath: string): Promise<void> {
+export async function smoke(programPath: string, platform: SmokePlatform, deps: SmokeDeps = {}): Promise<void> {
+  const env = deps.env ?? process.env
   const program = resolve(programPath)
   if (!existsSync(program)) throw new SmokeError('setup', `${program} does not exist`)
-  const home = homeForSmoke()
+  const home = homeForSmoke(env)
   const root = mkdtempSync(join(tmpdir(), 'kinfold-smoke-'))
   const projectRoot = join(root, 'project')
   const fakeBin = join(root, 'bin')
@@ -435,50 +608,63 @@ async function smoke(programPath: string): Promise<void> {
   // a symlink, so the kernel reports the real path to the child; the payload
   // and the child must name the same project or the search misses the event.
   const project = realpathSync(projectRoot)
-  const world: World = {
+  const world: SmokeWorld = {
     program,
     root,
     home,
     project,
     dataDir: join(home, '.kinfold'),
     fakeBin,
-    env: childEnvironment(home, fakeBin),
+    env: childEnvironment(home, fakeBin, platform),
     marker: `smokeevent${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+  }
+  const ctx: Run = {
+    world,
+    platform,
+    kinfold: deps.kinfold ?? kinfold,
+    runConversion: deps.runConversion ?? platform.runConversion?.bind(platform) ?? runPty,
+    daemon: foregroundDaemon(platform, world),
   }
 
   let installStarted = false
   let uninstalled = false
   let failure: unknown = null
   try {
-    const version = await run([program, '--version'], { cwd: project, env: world.env, timeoutMs: 20_000 })
+    const version = await ctx.kinfold(world, ['--version'])
     expectOk('version', version)
     const release = version.stdout.trim()
-    if (release !== '0.0.0-dev' && (process.env.KINFOLD_RELEASE_SUMS_URL ?? '') === '') {
+    if (release !== '0.0.0-dev' && (env.KINFOLD_RELEASE_SUMS_URL ?? '') === '') {
       throw new SmokeError('setup', `${release} needs KINFOLD_RELEASE_SUMS_URL; the self-check must read the release SHA256SUMS`)
     }
     // These guards run before anything is installed, so a busy port or an
     // existing agent stops the smoke without touching the machine, and the
     // cleanup in the failure path never runs uninstall against them.
-    ensurePortFree(DEFAULT_PORT)
-    if (launchAgentLoaded(world)) throw new SmokeError('setup', `${LAUNCH_AGENT_LABEL} is already loaded; the smoke will not take over an existing install`)
-    writeObserverShim(world, Bun.which('claude', { PATH: process.env.PATH ?? '' }))
+    ensurePortFree(deps.port ?? DEFAULT_PORT)
+    if (platform.serviceLoaded(world.env)) throw new SmokeError('setup', `the ${platform.name} service is already loaded; the smoke will not take over an existing install`)
+    process.stdout.write('smoke: compiled status probe\n')
+    await probeCompiledStatus(ctx)
+    const realClaude = Bun.which('claude', { PATH: env.PATH ?? '' })
+    if (platform.writeObserverShim !== undefined) await platform.writeObserverShim(world, realClaude)
+    else writeObserverShim(world, realClaude)
 
     installStarted = true
-    await steps(world)
+    await steps(ctx)
 
     process.stdout.write('smoke: uninstall\n')
-    const result = await kinfold(world, ['uninstall'])
+    await ctx.daemon.stop()
+    const result = await ctx.kinfold(world, ['uninstall'])
     expectOk('uninstall', result)
     uninstalled = true
     const binPath = join(world.dataDir, 'bin')
     if (existsSync(binPath)) throw new SmokeError('uninstall', `${binPath} is still there`)
-    const plist = join(home, 'Library', 'LaunchAgents', `${LAUNCH_AGENT_LABEL}.plist`)
-    if (existsSync(plist)) throw new SmokeError('uninstall', `${plist} is still there`)
-    if (launchAgentLoaded(world)) throw new SmokeError('uninstall', `${LAUNCH_AGENT_LABEL} is still loaded`)
+    for (const file of platform.serviceFiles(home)) {
+      if (existsSync(file)) throw new SmokeError('uninstall', `${file} is still there`)
+    }
+    if (platform.serviceLoaded(world.env)) throw new SmokeError('uninstall', `the ${platform.name} service is still loaded`)
   } catch (error: unknown) {
     failure = error
   } finally {
-    const cleaned = await cleanup(world, installStarted, uninstalled)
+    const cleaned = await cleanup(ctx, installStarted, uninstalled)
     if (cleaned.problems.length > 0) {
       if (failure === null) failure = new SmokeError('cleanup', cleaned.problems.join('; '))
       else process.stderr.write(`smoke: cleanup also failed: ${cleaned.problems.join('; ')}\n`)
@@ -494,7 +680,7 @@ async function main(): Promise<void> {
     process.exit(1)
   }
   try {
-    await smoke(program)
+    await smoke(program, await loadSmokePlatform(currentPlatform().os))
     process.stdout.write('smoke ok\n')
   } catch (error: unknown) {
     if (error instanceof SmokeError) process.stderr.write(`smoke failed at ${error.step}: ${error.message}\n`)

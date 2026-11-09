@@ -8,21 +8,23 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { currentPlatform, type OsName, osOf } from '../platform/platform'
 import type { Database } from '../sqlite/types'
 import { vec0AssetFor } from './vec0-release'
 
 export const VEC0_DIR = 'lib'
 
-const VEC0_FILES: Readonly<Record<string, string>> = { darwin: 'vec0.dylib', linux: 'vec0.so', win32: 'vec0.dll' }
+const VEC0_FILES: Readonly<Record<OsName, string>> = { macos: 'vec0.dylib', linux: 'vec0.so', windows: 'vec0.dll' }
 
 export type Support = { ok: true; detail: string } | { ok: false; reason: string }
 
 /** The vec0 file name on a platform, or null where Kinfold has no build. */
 export function vec0FileName(platform: string): string | null {
-  return VEC0_FILES[platform] ?? null
+  const os = osOf(platform)
+  return os === null ? null : VEC0_FILES[os]
 }
 
-export function vec0Path(dataDir: string, platform: string = process.platform): string {
+export function vec0Path(dataDir: string, platform: string = currentPlatform().node): string {
   return join(dataDir, VEC0_DIR, vec0FileName(platform) ?? 'vec0.dylib')
 }
 
@@ -31,7 +33,7 @@ export function sha256File(path: string): string {
 }
 
 /** Hash check, load, then vec_version() as the proof that the functions answer. */
-export function loadVec0(db: Database, dataDir: string, platform: string = process.platform, arch: string = process.arch): Support {
+export function loadVec0(db: Database, dataDir: string, platform: string = currentPlatform().node, arch: string = process.arch): Support {
   const asset = vec0AssetFor(platform, arch)
   if (asset === null) return { ok: false, reason: `no pinned sqlite-vec build for ${platform}-${arch}` }
   const path = vec0Path(dataDir, platform)

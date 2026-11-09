@@ -5,9 +5,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { envName } from '../../env-names'
 import { type InstallEnv, installPaths } from '../env'
-import { bootoutArgv, bootstrapArgv, isAgentLoaded } from '../launch-agent'
+import { bootoutArgv, bootstrapArgv, isAgentLoaded, plistContent } from '../launch-agent'
 import { HEALTH_WAIT_MS, runLaunchctl } from '../plan'
-import type { ServiceControl } from './control'
+import type { ServiceControl, ServiceStep } from './control'
 
 export const LSOF = '/usr/sbin/lsof'
 export const PS = '/bin/ps'
@@ -84,6 +84,22 @@ export class LaunchAgentService implements ServiceControl {
     if (value === undefined || !/^\d+$/.test(value)) return null
     const port = Number(value)
     return port >= 1 && port <= MAX_PORT ? port : null
+  }
+
+  configPath(): string {
+    return this.plistPath
+  }
+
+  configContent(port: number): string {
+    return plistContent(this.env, port)
+  }
+
+  describe(step: ServiceStep): string {
+    return (step === 'start' ? bootstrapArgv(this.env) : bootoutArgv(this.env.uid)).join(' ')
+  }
+
+  unavailableReason(): string | null {
+    return null
   }
 
   async fileHolders(path: string): Promise<string> {

@@ -17,8 +17,9 @@ import { wantedEpochs } from '../daemon/hmac-rotation'
 import { DATA_DIR_NAME, LEGACY_KEYCHAIN_SERVICE, LEGACY_LAUNCH_AGENT_LABEL } from '../names'
 import { DB_KEY_REF } from '../secrets/credentials'
 import { epochAt, previousEpoch } from '../secrets/hmac-keys'
-import { ITEM_NOT_FOUND_EXIT, type SecurityCommand, createKeychainProvider } from '../secrets/keychain'
-import type { SecurityInvocation, SecurityRunner } from '../secrets/keychain-writer'
+import type { KeyStore } from '../secrets/key-store'
+import { credentialProviderOf } from '../secrets/key-store'
+import { ITEM_NOT_FOUND_EXIT, type SecurityInvocation, type SecurityRunner, createKeychainStore } from '../secrets/stores/keychain'
 import { credentialDbKeyStore } from '../sqlite/keys'
 import { libDir, libraryFileName, manifestPath } from '../sqlite/library'
 import { SQLITE3MC_ZIP_SHA256 } from '../sqlite/release'
@@ -97,13 +98,13 @@ const okCliRunner: CliObserverRunner = {
   listModels: async () => [],
 }
 
-interface FakeKeychain {
+export interface FakeKeychain {
   refs: Set<string>
   values: Map<string, string>
 }
 
 /** Entries are keyed by (service, account): kinfold is the world's own sets, shared-agent-memory the legacy ones. */
-function fakeSecurity(kinfold: FakeKeychain, legacy: FakeKeychain, calls: SecurityInvocation[]): SecurityRunner {
+export function fakeSecurity(kinfold: FakeKeychain, legacy: FakeKeychain, calls: SecurityInvocation[]): SecurityRunner {
   const store = (service: string | undefined): FakeKeychain => (service === LEGACY_KEYCHAIN_SERVICE ? legacy : kinfold)
   return (invocation) => {
     calls.push(invocation)
@@ -129,11 +130,6 @@ function fakeSecurity(kinfold: FakeKeychain, legacy: FakeKeychain, calls: Securi
   }
 }
 
-/** The daemon's reads go through the same fake as the installer's writes. */
-function securityCommand(world: FakeWorld): SecurityCommand {
-  return (args) => world.env.security({ args })
-}
-
 /**
  * A daemon on a free loopback port reading the world's Keychain, as the real
  * daemon reads the real one: a db-key the world holds encrypts a new store.
@@ -141,8 +137,12 @@ function securityCommand(world: FakeWorld): SecurityCommand {
  * by hand (a legacy install's, say) and must stop it itself.
  */
 export function startWorldDaemon(world: FakeWorld, dataDir: string): RunningDaemon {
-  const keychain = createKeychainProvider(securityCommand(world))
-  const dbKeys = credentialDbKeyStore('keychain', keychain, () => world.keychain.has(DB_KEY_REF) || world.legacyKeychain.has(DB_KEY_REF))
+  // The daemon's reads go through the same fake as the installer's writes, or through the injected store.
+  const injected = world.env.keyStore
+  const keychain = credentialProviderOf(injected ?? createKeychainStore((invocation) => world.env.security(invocation)))
+  const dbKeys = injected === undefined || injected === null
+    ? credentialDbKeyStore('keychain', keychain, () => world.keychain.has(DB_KEY_REF) || world.legacyKeychain.has(DB_KEY_REF))
+    : credentialDbKeyStore(injected.label, keychain, () => injected.exists(DB_KEY_REF))
   const daemon = startDaemon({ dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, keychain, dbKeys })
   world.allowedPorts.add(daemon.port)
   return daemon
@@ -279,6 +279,51 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
   return world
 }
 
+export interface RecordingKeyStore extends KeyStore {
+  values: Map<string, string>
+  /** Every account any call named, in order. */
+  seen: string[]
+}
+
+/** An in-memory KeyStore that records each account it is asked about; its texts follow the Keychain's shape with its own label. */
+export function recordingKeyStore(options: { kind?: KeyStore['kind']; label?: string; place?: string; notes?: readonly string[] } = {}): RecordingKeyStore {
+  const values = new Map<string, string>()
+  const seen: string[] = []
+  const label = options.label ?? 'test-store'
+  const touch = (account: string): void => void seen.push(account)
+  return {
+    kind: options.kind ?? 'key-file',
+    label,
+    place: options.place ?? 'the test store',
+    notes: options.notes ?? [],
+    values,
+    seen,
+    get: (account) => (touch(account), values.get(account) ?? null),
+    exists: (account) => (touch(account), values.has(account)),
+    set: (account, value) => {
+      touch(account)
+      values.set(account, value)
+    },
+    create: (account, value) => {
+      touch(account)
+      if (values.has(account)) return false
+      values.set(account, value)
+      return true
+    },
+    delete: (account) => (touch(account), values.delete(account)),
+    describeSet: (account) => `${label}: set ${account} (<hidden>)`,
+    describeDelete: (account) => `${label}: delete ${account}`,
+    describeEntry: (account) => `the ${label} entry ${account}`,
+  }
+}
+
+/** A `security` runner that fails the test if anything calls it. */
+export function forbiddenSecurity(): SecurityRunner {
+  return () => {
+    throw new Error('security was called')
+  }
+}
+
 export interface TreeEntry {
   mode: number
   mtimeMs: number
@@ -306,7 +351,7 @@ export interface FakeService extends ServiceControl {
 }
 
 /** A ServiceControl that records calls and touches nothing; each answer can be set. */
-export function fakeService(options: { running?: boolean; configured?: boolean; startError?: Error; stopError?: Error; holders?: string; dataDir?: string; port?: number } = {}): FakeService {
+export function fakeService(options: { running?: boolean; configured?: boolean; startError?: Error; stopError?: Error; holders?: string; dataDir?: string; port?: number; unavailableReason?: string } = {}): FakeService {
   const calls: string[] = []
   let running = options.running ?? true
   return {
@@ -327,5 +372,34 @@ export function fakeService(options: { running?: boolean; configured?: boolean; 
     configuredDataDir: () => options.dataDir ?? null,
     configuredPort: () => options.port ?? null,
     fileHolders: async () => (calls.push('fileHolders'), options.holders ?? ''),
+    configPath: () => null,
+    configContent: () => null,
+    describe: (step) => `FakeService ${step}`,
+    unavailableReason: () => options.unavailableReason ?? null,
+  }
+}
+
+export interface CountingService extends ServiceControl {
+  /** The start and stop calls made, in order. */
+  steps: string[]
+}
+
+/** Wraps a service and counts its start and stop calls; unavailableReason can be overridden. */
+export function countingService(inner: ServiceControl, reason?: string): CountingService {
+  const steps: string[] = []
+  return {
+    label: inner.label,
+    steps,
+    isConfigured: () => inner.isConfigured(),
+    isRunning: () => inner.isRunning(),
+    start: () => (steps.push('start'), inner.start()),
+    stop: () => (steps.push('stop'), inner.stop()),
+    configuredDataDir: () => inner.configuredDataDir(),
+    configuredPort: () => inner.configuredPort(),
+    fileHolders: (path) => inner.fileHolders(path),
+    configPath: () => inner.configPath(),
+    configContent: (port) => inner.configContent(port),
+    describe: (step) => inner.describe(step),
+    unavailableReason: () => (reason !== undefined ? reason : inner.unavailableReason()),
   }
 }

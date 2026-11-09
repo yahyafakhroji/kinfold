@@ -1,28 +1,32 @@
 // install and uninstall first build a list of actions, then either print it
 // (--dry-run) or print and apply it in order. One list for both is what makes
 // a dry run honest: the plan shown is the plan that would run. Descriptions
-// carry paths, counts, hosts and argv only; a keychain value prints as
+// carry paths, counts, hosts and argv only; a stored secret prints as
 // <hidden>, and a file's content never prints at all.
 
 import { chmodSync, closeSync, mkdirSync, openSync, rmSync } from 'node:fs'
-import { KEYCHAIN_SERVICE } from '../secrets/credentials'
 import { HMAC_LEGACY_REF } from '../secrets/hmac-keys'
-import { credentialWriterFor } from '../secrets/keychain-writer'
+import { type KeyStoreRecord, keyStoreRecordContent } from '../secrets/key-store-record'
+import { KEY_STORE_MODULES } from '../secrets/stores/select'
 import type { EmbeddedAssets } from '../runtime/embedded'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import { START_WAIT_MS, putObserverSettings, waitForHealth, waitForStart } from './daemon-client'
 import { createDbKey, createPlainStore, describeCreateDbKey, describeCreatePlainStore } from './db-encryption'
 import { type InstallEnv, installPaths } from './env'
+import { NOT_FOUND_EXIT } from './system'
+import { requireKeyStore } from './key-store-choice'
 import { writeBackup, writeFileAtomic } from './files'
-import { BACKUP_REMOVAL_SUMMARY, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
+import { backupRemovalSummary, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
 import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
 import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbeddedSqlite3mc, installSqlite3mc } from './sqlite3mc-install'
 import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from './vec0-install'
 import { CLAUDE_MCP_REMOVE_ARGV, claudeAddArgv, rollbackSafe } from './mcp-wiring'
 import { installProgram } from './self-install'
+import { leftBehindLine, programFilesOf } from './program-files'
 import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describeMoveDataDir, describeRemoveLegacyEntry, moveDataDir, removeLegacyEntry, stopLegacyAgent } from './rename-migration'
-import { legacyBootoutArgv, bootstrapArgv } from './launch-agent'
+import { legacyBootoutArgv } from './launch-agent'
 import type { Vec0Asset } from '../vectors/vec0-release'
+import type { ServiceStep } from './service/control'
 
 export const HEALTH_WAIT_MS = 15_000
 export const TAKEOVER_WAIT_MS = 300_000
@@ -35,7 +39,10 @@ export type Action =
   | { kind: 'write'; path: string; content: string; mode: number; summary: string }
   /** recursive: a directory and everything in it (hmac.d/ on --remove-hmac-keys). */
   | { kind: 'remove'; path: string; summary: string; recursive?: boolean }
-  | { kind: 'launchctl'; argv: readonly string[] }
+  /** <dataDir>/bin, through the platform's program files: a file a running program holds is named and left. */
+  | { kind: 'remove-program-dir'; path: string; summary: string }
+  /** A start or stop through the platform's service; description is its dry-run line, filled at plan time. */
+  | { kind: 'service'; step: ServiceStep; description: string }
   /** A host CLI call such as `claude mcp add-json`; argv holds no secret, so it prints whole. */
   | { kind: 'command'; argv: readonly string[]; summary: string; whenMissing?: string }
   /** Swaps our Claude Code MCP entry: remove, add the new one, and put `previous` back if the add fails. Neither entry holds a secret. */
@@ -43,12 +50,13 @@ export type Action =
   | { kind: 'wait-takeover'; pid: number | null; port: number }
   | { kind: 'wait-health' }
   | { kind: 'settings-put'; input: ObserverSettingsInput }
-  | { kind: 'keychain-put'; ref: string; value: string }
-  | { kind: 'keychain-delete'; ref: string; summary?: string }
-  /** Removed only after a Keychain read-back and a master-mode /health; else kept with the reason. */
-  | { kind: 'remove-hmac-backup'; path: string }
-  /** hmac.key written back from Keychain hmac-legacy before the HMAC entries go. */
-  | { kind: 'restore-hmac-legacy'; path: string }
+  /** description: the store's own dry-run text, filled at plan time; the value prints as <hidden>. */
+  | { kind: 'secret-set'; ref: string; value: string; description: string }
+  | { kind: 'secret-delete'; ref: string; description: string; summary?: string }
+  /** Removed only after a key store read-back and a master-mode /health; else kept with the reason. */
+  | { kind: 'remove-hmac-backup'; path: string; storeLabel: string }
+  /** hmac.key written back from the key store's hmac-legacy before the HMAC entries go. */
+  | { kind: 'restore-hmac-legacy'; path: string; storeLabel: string }
   /** --remove-hmac-keys stops here while any daemon answers /health; a hand-started one would write a new sub-key afterwards. */
   | { kind: 'hmac-daemon-down'; pid: number | null; port: number }
   /** A kept install backup, removed only when it equals hmac.key on disk (restored by then); else kept. */
@@ -67,9 +75,11 @@ export type Action =
    * db-key for a store the daemon has yet to create, added without replacing any entry: made at run time,
    * or `key`, the one whose recovery code was shown (it prints as <hidden>).
    */
-  | { kind: 'create-db-key'; path: string; key?: string }
+  | { kind: 'create-db-key'; path: string; storeLabel: string; key?: string }
   /** --no-encrypt on a new store: an empty plaintext store, made before the daemon could create it encrypted. */
   | { kind: 'create-plain-store'; path: string }
+  /** key-store.json: the store chosen at install, which every later process opens without probing. */
+  | { kind: 'record-key-store'; path: string; record: KeyStoreRecord }
   /** Rename migration: bootout dev.shared-agent-memory.daemon when launchd has it loaded. */
   | { kind: 'stop-legacy-agent'; uid: number }
   /** Rename migration: stops here while any daemon answers /health; it would keep writing to the store being moved. */
@@ -100,7 +110,8 @@ export function describeAction(action: Action): string {
     case 'backup': return `back up ${action.from} -> ${action.to} (mode 0600)`
     case 'write': return `write ${action.path}: ${action.summary}`
     case 'remove': return `remove ${action.path}${action.recursive === true ? '/' : ''}: ${action.summary}`
-    case 'launchctl': return action.argv.join(' ')
+    case 'remove-program-dir': return `remove ${action.path}/: ${action.summary}`
+    case 'service': return action.description
     case 'command': return `${action.summary}: ${action.argv.join(' ')}`
     case 'claude-mcp-replace': return `replace the Kinfold MCP server entry in Claude Code (user scope), putting the old one back if the new one fails: ${CLAUDE_MCP_REMOVE_ARGV.join(' ')}, then ${claudeAddArgv(action.next).join(' ')}`
     case 'wait-takeover': return `wait up to ${TAKEOVER_WAIT_MS / 1000} s for the running daemon on port ${action.port} to stop (you stop it: ${stopCommand(action.pid, action.port)})`
@@ -109,10 +120,10 @@ export function describeAction(action: Action): string {
       const { host, provider, model, credentialRef } = action.input
       return `PUT /observer/settings host=${host} provider=${provider} model=${model} credentialRef=${credentialRef ?? 'none'}`
     }
-    case 'keychain-put': return `keychain: /usr/bin/security -i <<< "add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${action.ref} -w <hidden>"`
-    case 'keychain-delete': return `keychain: /usr/bin/security delete-generic-password -s ${KEYCHAIN_SERVICE} -a ${action.ref}${action.summary !== undefined ? `: ${action.summary}` : ''}`
-    case 'remove-hmac-backup': return `remove ${action.path}: ${BACKUP_REMOVAL_SUMMARY}`
-    case 'restore-hmac-legacy': return `write ${action.path} from keychain entry ${HMAC_LEGACY_REF} (mode 0600), so a later install still verifies epoch-0 refs`
+    case 'secret-set': return action.description
+    case 'secret-delete': return `${action.description}${action.summary !== undefined ? `: ${action.summary}` : ''}`
+    case 'remove-hmac-backup': return `remove ${action.path}: ${backupRemovalSummary(action.storeLabel)}`
+    case 'restore-hmac-legacy': return `write ${action.path} from ${action.storeLabel} entry ${HMAC_LEGACY_REF} (mode 0600), so a later install still verifies epoch-0 refs`
     case 'hmac-daemon-down': return `check that no daemon answers /health on port ${action.port} (a hand-started one must be stopped first: ${stopCommand(action.pid, action.port)})`
     case 'remove-redundant-hmac-backup': return `remove ${action.path} if it equals ${action.legacyPath}: a kept install backup, redundant once hmac.key is back`
     case 'install-vec0': return `download ${action.asset.url} and write its ${action.asset.member} to ${action.path} (mode 0600), after checking both against the pinned sha256`
@@ -123,20 +134,15 @@ export function describeAction(action: Action): string {
       const check = action.check ? ` after checking ${action.assetName ?? 'it'} against SHA256SUMS` : ' (checksum check skipped for the development version)'
       return `install program ${action.to} from ${action.from}${check}`
     }
-    case 'create-db-key': return describeCreateDbKey(action.path, action.key)
+    case 'create-db-key': return describeCreateDbKey(action.storeLabel, action.path, action.key)
     case 'create-plain-store': return describeCreatePlainStore(action.path)
+    case 'record-key-store': return `record the key store (${KEY_STORE_MODULES[action.record.store].label}) in ${action.path} (mode 0600)`
     case 'stop-legacy-agent': return `${legacyBootoutArgv(action.uid).join(' ')} (if loaded): stop the daemon installed under the old name`
     case 'migration-daemon-down': return `check that no daemon answers /health on port ${action.port}, waiting up to ${action.waitMs / 1000} s (one still running must be stopped first; nothing is moved while it runs)`
     case 'copy-keychain-entry': return describeCopyKeychainEntry(action.ref)
     case 'move-data-dir': return describeMoveDataDir(action.from, action.to, action.linkOnly === true)
     case 'remove-legacy-keychain-entry': return describeRemoveLegacyEntry(action.ref)
   }
-}
-
-function writer(env: InstallEnv): NonNullable<ReturnType<typeof credentialWriterFor>> {
-  const found = credentialWriterFor(env.platform, env.security)
-  if (found === null) throw new Error(`no keychain on ${env.platform}; credentials are not stored`)
-  return found
 }
 
 /**
@@ -159,17 +165,16 @@ export async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Pr
   if (exitCode !== 0) throw new Error(`${argv.slice(0, 2).join(' ')} failed (exit ${exitCode})`)
 }
 
-const NOT_FOUND_EXIT = 127
-
 /**
  * A host CLI call. One with `whenMissing` is skipped, with that note, when its
  * binary is not installed: removing an agent is the likeliest reason to have
  * dropped its CLI, and every later run would fail the same way otherwise.
+ * Only the runner's not-found exit counts; a binary that is there but cannot
+ * run is a failure the user has to see.
  */
 async function runCommand(env: InstallEnv, action: Extract<Action, { kind: 'command' }>): Promise<void> {
-  if (action.whenMissing === undefined) return runLaunchctl(env, action.argv)
   const { exitCode } = await env.run({ argv: action.argv, timeoutMs: 15_000 })
-  if (exitCode === NOT_FOUND_EXIT) {
+  if (exitCode === NOT_FOUND_EXIT && action.whenMissing !== undefined) {
     env.out(action.whenMissing)
     return
   }
@@ -202,15 +207,28 @@ async function waitFor(env: InstallEnv, wantUp: boolean, timeoutMs: number, fail
   if (!(await waitForHealth(env, wantUp, timeoutMs))) throw new Error(failure)
 }
 
+// Loaded on use: the service module imports this one for HEALTH_WAIT_MS at its top level.
+const loadServiceControl = (): Promise<typeof import('./service/control')> => import('./service/control')
+
+async function runServiceStep(env: InstallEnv, step: ServiceStep): Promise<void> {
+  const service = (await loadServiceControl()).serviceOf(env)
+  if (service === null) throw new Error(`no background service to ${step} on ${env.platform}`)
+  return step === 'start' ? service.start() : service.stop()
+}
+
 async function waitForDaemonStart(env: InstallEnv): Promise<void> {
-  // Loaded on use: the service module imports this one for HEALTH_WAIT_MS at its top level.
-  const { serviceOf } = await import('./service/control')
-  const service = serviceOf(env)
+  const service = (await loadServiceControl()).serviceOf(env)
   const result = await waitForStart(env, service)
   if (result.ok) return
   const logFile = installPaths(env).logFile
   if (result.reason === 'not-running') throw new Error(`the ${service?.label ?? 'service'} stopped running before the daemon answered /health; the log is ${logFile}`)
   throw new Error(`the daemon did not answer /health within ${START_WAIT_MS / 1000} s; it may still be opening a large store. Run kinfold status in a minute; the log is ${logFile}`)
+}
+
+// A file left behind does not fail the step: the agents are unwired by now, so
+// it goes once the sessions still running it close.
+function removeProgramDir(env: InstallEnv, path: string): void {
+  for (const left of programFilesOf(env).removeBinDir(path)) env.out(leftBehindLine(left))
 }
 
 function touch(path: string, mode: number): void {
@@ -226,7 +244,8 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'backup': return writeBackup(action.from, action.to)
     case 'write': return writeFileAtomic(action.path, action.content, action.mode)
     case 'remove': return rmSync(action.path, { force: true, recursive: action.recursive === true })
-    case 'launchctl': return runLaunchctl(env, action.argv)
+    case 'remove-program-dir': return removeProgramDir(env, action.path)
+    case 'service': return runServiceStep(env, action.step)
     case 'command': return runCommand(env, action)
     case 'claude-mcp-replace': return replaceClaudeMcp(env, action.previous, action.next)
     case 'wait-takeover':
@@ -234,8 +253,8 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
       return waitFor(env, false, TAKEOVER_WAIT_MS, `the daemon on port ${action.port} is still running; nothing after this step ran`)
     case 'wait-health': return waitForDaemonStart(env)
     case 'settings-put': return putObserverSettings(env, action.input)
-    case 'keychain-put': return writer(env).put(action.ref, action.value)
-    case 'keychain-delete': return void writer(env).remove(action.ref)
+    case 'secret-set': return requireKeyStore(env).set(action.ref, action.value)
+    case 'secret-delete': return void requireKeyStore(env).delete(action.ref)
     case 'remove-hmac-backup': return removeHmacBackup(env, action.path)
     case 'restore-hmac-legacy': return restoreLegacyKey(env, action.path)
     case 'hmac-daemon-down':
@@ -249,6 +268,8 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'install-program': return installProgram(env, action)
     case 'create-db-key': return createDbKey(env, action.path, action.key)
     case 'create-plain-store': return createPlainStore(env, action.path)
+    // The folder is flushed too: a record lost in a crash would leave the choice to the missing-record rule.
+    case 'record-key-store': return writeFileAtomic(action.path, keyStoreRecordContent(action.record), 0o600, { syncDir: true, fsyncDir: env.fsyncDir, platform: env.platform })
     case 'stop-legacy-agent': return stopLegacyAgent(env)
     case 'migration-daemon-down': return checkDaemonDown(env, action.port, action.waitMs)
     case 'copy-keychain-entry': return copyKeychainEntry(env, action.ref)

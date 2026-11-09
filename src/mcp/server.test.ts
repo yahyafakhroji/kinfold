@@ -47,7 +47,7 @@ interface Run {
 async function runServer(messages: readonly unknown[]): Promise<Run> {
   const child = Bun.spawn(['bun', SERVER], {
     cwd,
-    env: { PATH: process.env.PATH ?? '', HOME: root, KINFOLD_DATA_DIR: dataDir, [SQLITE3MC_LIB_ENV]: process.env[SQLITE3MC_LIB_ENV] ?? '', KINFOLD_DB_KEYSTORE: 'none' },
+    env: { PATH: process.env.PATH ?? '', HOME: root, KINFOLD_DATA_DIR: dataDir, [SQLITE3MC_LIB_ENV]: process.env[SQLITE3MC_LIB_ENV] ?? '', NODE_ENV: 'test', KINFOLD_DB_KEYSTORE: 'none' },
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
