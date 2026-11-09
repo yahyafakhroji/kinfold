@@ -40,6 +40,12 @@ describe('smoke workflow', () => {
       expect(block).not.toContain('brew ')
     }
   })
+
+  test('the sums URL comes from pathToFileURL, not file://$PWD', () => {
+    const text = workflow('smoke.yml')
+    expect(text).toContain('bun tools/smoke-sums-url.ts dist/SHA256SUMS')
+    expect(text).not.toContain('file://$PWD')
+  })
 })
 
 describe('ci workflow', () => {

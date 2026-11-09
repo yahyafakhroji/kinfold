@@ -92,7 +92,10 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then program="$program.exe"; fi
           test -f "$program"
           test -f dist/SHA256SUMS
-          KINFOLD_RELEASE_SUMS_URL="file://$PWD/dist/SHA256SUMS" bun tools/smoke.ts "$program"
+          # Git Bash spells $PWD without a drive letter on Windows, so the
+          # URL comes from pathToFileURL, not from prefixing file:// to it.
+          sums_url="$(bun tools/smoke-sums-url.ts dist/SHA256SUMS)"
+          KINFOLD_RELEASE_SUMS_URL="$sums_url" bun tools/smoke.ts "$program"
 
       - name: Show the daemon log
         if: always() && steps.gate.outputs.enabled == 'true'
