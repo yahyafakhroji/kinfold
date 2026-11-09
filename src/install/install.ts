@@ -43,7 +43,7 @@ import { type FolderTarget, type SetupAnswers, type SetupFlags, runWizard } from
 import { sqlite3mcInstallActions } from './sqlite3mc-install'
 import { hostUnwireActions } from './uninstall'
 import { vec0InstallActions } from './vec0-install'
-import { envForDataDir } from '../cli/kinfold'
+import { envForDataDir } from '../cli/data-dir-env'
 
 export const EXIT_OK = 0
 export const EXIT_FAILED = 1

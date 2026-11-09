@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { envForDataDir } from '../../cli/kinfold'
+import { envForDataDir } from '../../cli/data-dir-env'
 import { DB_KEY_REF } from '../../secrets/credentials'
 import { NO_DB_KEYS, newDbKey } from '../../sqlite/keys'
 import { fileState, openEncrypted } from '../../sqlite/open'

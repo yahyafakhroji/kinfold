@@ -17,9 +17,10 @@ import type { Parsed } from '../context/types'
 import { envName, readEnv } from '../env-names'
 import type { InstallEnv } from '../install/env'
 import type { InstallMode } from '../install/entry'
-import { currentPlatform, osOf } from '../platform/platform'
+import { currentPlatform } from '../platform/platform'
 import { DAEMON_INFO_FILE, DB_FILE, resolveDataDir, resolveInstallDataDir } from '../store/data-dir'
 import { VERSION } from '../version'
+import { envForDataDir } from './data-dir-env'
 
 /** Repeated rather than imported from the installer, which the hook path must not load. */
 const EXIT_FAILED = 1
@@ -210,18 +211,6 @@ async function withDataDir(dataDir: string | null, run: () => Promise<void>): Pr
     if (previous === undefined) delete process.env[key]
     else process.env[key] = previous
   }
-}
-
-/**
- * The same environment aimed at another data folder. An installed program
- * lives in the folder it serves (<dataDir>/bin), so its path follows the
- * folder; a checkout run keeps pointing at the checkout. The path is spelled
- * as installedProgramPath does (entry.ts), repeated because the hook path must
- * not load the installer.
- */
-export function envForDataDir(env: InstallEnv, dataDir: string): InstallEnv {
-  const mode: InstallMode = env.mode.kind === 'program' ? { kind: 'program', binPath: join(dataDir, 'bin', osOf(env.platform) === 'windows' ? 'kinfold.exe' : 'kinfold') } : env.mode
-  return { ...env, dataDir, mode, unflaggedDataDir: env.unflaggedDataDir ?? env.dataDir }
 }
 
 /** What tells the program run by hand which folder it was installed into. */

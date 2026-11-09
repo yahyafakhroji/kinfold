@@ -13,7 +13,8 @@ import { VERSION } from '../version'
 import { mergeSamHooks } from '../install/claude-hooks'
 import { installPaths } from '../install/env'
 import { entryCommand } from '../install/entry'
-import { EXIT_CANCELLED, type SubcommandRunners, dataDirFor, envForDataDir, runKinfold } from './kinfold'
+import { envForDataDir } from './data-dir-env'
+import { EXIT_CANCELLED, type SubcommandRunners, dataDirFor, runKinfold } from './kinfold'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
