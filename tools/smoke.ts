@@ -27,6 +27,9 @@ export type { SmokeResult, SmokeWorld }
 const DEFAULT_PORT = 37_811
 const PROGRAM_TIMEOUT_MS = 180_000
 const SHORT_TIMEOUT_MS = 20_000
+// Install waits up to 180 s for the daemon's /health and uninstall waits on the
+// service too, so their own limit must run out first and print its message.
+const SERVICE_COMMAND_TIMEOUT_MS = 240_000
 const SEARCH_TIMEOUT_MS = 45_000
 const SEARCH_POLL_MS = 500
 const OUTPUT_LIMIT = 6_000
@@ -104,6 +107,57 @@ interface RunOptions {
   showOutputOnTimeout?: boolean
 }
 
+// Values that follow these flags can be passwords (security's -w and -p), so
+// the process tree never shows them.
+const SECRET_FLAG = /(^|\s)(-w|-p|--password)(\s+|=)(\S+)/g
+
+function redactSecretFlags(command: string): string {
+  return command.replace(SECRET_FLAG, '$1$2$3<redacted>')
+}
+
+/**
+ * The rows of `ps -ax -o pid=,ppid=,etime=,command=` for rootPid and everything
+ * under it, parent before child, with secret flag values redacted.
+ */
+export function descendantsOf(psOutput: string, rootPid: number): string[] {
+  const rows = new Map<number, { ppid: number; line: string }>()
+  const children = new Map<number, number[]>()
+  for (const raw of psOutput.split('\n')) {
+    const match = /^\s*(\d+)\s+(\d+)\s+\S+\s+\S/.exec(raw)
+    if (match === null) continue
+    const pid = Number(match[1])
+    const ppid = Number(match[2])
+    rows.set(pid, { ppid, line: redactSecretFlags(raw.trim()) })
+    children.set(ppid, [...(children.get(ppid) ?? []), pid])
+  }
+  const lines: string[] = []
+  const visit = (pid: number, depth: number): void => {
+    const row = rows.get(pid)
+    if (row === undefined || depth > rows.size) return
+    lines.push(row.line)
+    for (const child of children.get(pid) ?? []) visit(child, depth + 1)
+  }
+  visit(rootPid, 0)
+  return lines
+}
+
+/**
+ * Names what a timed-out command is waiting on before it is killed: its argv
+ * and the processes under it. No env values are printed, and the key
+ * conversions' argv holds only the expect script path and the program.
+ */
+function reportTimeout(argv: readonly string[], pid: number): void {
+  const lines = [`smoke: timed out: ${redactSecretFlags(argv.join(' '))}`]
+  try {
+    const ps = Bun.spawnSync(['ps', '-ax', '-o', 'pid=,ppid=,etime=,command='], { stdout: 'pipe', stderr: 'ignore' })
+    const tree = ps.exitCode === 0 ? descendantsOf(ps.stdout.toString(), pid) : []
+    lines.push(tree.length === 0 ? 'smoke: no process tree (ps failed or the command already exited)' : 'smoke: process tree (pid ppid elapsed command):', ...tree.map((line) => `  ${line}`))
+  } catch (error: unknown) {
+    lines.push(`smoke: ps could not run (${error instanceof Error ? error.message : String(error)})`)
+  }
+  process.stderr.write(`${lines.join('\n')}\n`)
+}
+
 async function run(argv: readonly string[], options: RunOptions): Promise<SmokeResult> {
   const child = Bun.spawn([...argv], {
     cwd: options.cwd,
@@ -115,6 +169,7 @@ async function run(argv: readonly string[], options: RunOptions): Promise<SmokeR
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
+    reportTimeout(argv, child.pid)
     child.kill()
   }, options.timeoutMs ?? PROGRAM_TIMEOUT_MS)
   try {
@@ -136,7 +191,9 @@ async function run(argv: readonly string[], options: RunOptions): Promise<SmokeR
 // The version probe and each MCP exchange answer at once, so they get the
 // short limit; install and the rest may wait on downloads and the service.
 function timeoutFor(args: readonly string[]): number {
-  return args[0] === '--version' || args[0] === 'mcp' ? SHORT_TIMEOUT_MS : PROGRAM_TIMEOUT_MS
+  if (args[0] === '--version' || args[0] === 'mcp') return SHORT_TIMEOUT_MS
+  if (args[0] === 'install' || args[0] === 'uninstall') return SERVICE_COMMAND_TIMEOUT_MS
+  return PROGRAM_TIMEOUT_MS
 }
 
 async function kinfold(world: SmokeWorld, args: readonly string[], stdin?: string): Promise<SmokeResult> {

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import { SmokeError, childEnvironment, ensurePortFree, homeForSmoke, smoke } from './smoke'
+import { SmokeError, childEnvironment, descendantsOf, ensurePortFree, homeForSmoke, smoke } from './smoke'
 import type { SmokeDeps } from './smoke'
 import { smokePlatform as macos } from './smoke/macos'
 import { loadSmokePlatform } from './smoke/platform'
@@ -60,6 +60,44 @@ async function loadFrom(name: string, text: string): Promise<unknown> {
     rmSync(dir, { recursive: true, force: true })
   }
 }
+
+describe('descendantsOf', () => {
+  const PS = [
+    '    1     0 10-00:00:00 /sbin/launchd',
+    '  500     1    05:00 /bin/zsh',
+    '  600   500    03:00 /dist/kinfold install --yes',
+    '  610   600    02:59 /usr/local/bin/claude mcp add-json --scope user kinfold {}',
+    '  620   610    02:58 node /usr/local/lib/claude/cli.js',
+    '  630   600    02:00 /usr/bin/security find-generic-password -s kinfold -w',
+    '  640   600    01:00 /usr/bin/security add-generic-password -s kinfold -w hunter2 -U',
+    '  700   500    01:00 /bin/sleep 100',
+    'not a ps row',
+    '',
+  ].join('\n')
+
+  test('lists the timed-out process and everything under it, parent first', () => {
+    const tree = descendantsOf(PS, 600)
+    expect(tree.map((line) => line.split(/\s+/)[0])).toEqual(['600', '610', '620', '630', '640'])
+    expect(tree[0]).toBe('600   500    03:00 /dist/kinfold install --yes')
+  })
+
+  test('leaves out siblings, parents and lines that are not rows', () => {
+    const tree = descendantsOf(PS, 600).join('\n')
+    expect(tree).not.toContain('/bin/sleep')
+    expect(tree).not.toContain('/bin/zsh')
+    expect(tree).not.toContain('not a ps row')
+  })
+
+  test('never shows a password flag value', () => {
+    const tree = descendantsOf(PS, 600).join('\n')
+    expect(tree).not.toContain('hunter2')
+    expect(tree).toContain('-w <redacted> -U')
+  })
+
+  test('a pid that is gone gives an empty tree', () => {
+    expect(descendantsOf(PS, 999)).toEqual([])
+  })
+})
 
 describe('loadSmokePlatform', () => {
   test('a platform without steps stops at setup', async () => {
