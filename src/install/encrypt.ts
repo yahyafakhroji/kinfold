@@ -29,7 +29,8 @@ import { RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../sq
 import { DATA_FILE_MODE, DB_FILE } from '../store/data-dir'
 import { waitForHealth, waitForStart } from './daemon-client'
 import { diskCheckOf } from './disk/check'
-import { type InstallEnv, errorMessage } from './env'
+import { type InstallEnv, errorMessage, platformOf } from './env'
+import type { OsName } from '../platform/platform'
 import { EXIT_FAILED, EXIT_OK } from './install'
 import { capitalized, keyStoreOf } from './key-store-choice'
 import { HEALTH_WAIT_MS } from './plan'
@@ -287,6 +288,13 @@ function readKey(ctx: Context): string {
   return key
 }
 
+/** Where each OS can keep old blocks of a deleted file. */
+const OLD_BLOCK_PLACES: Readonly<Record<OsName, string>> = {
+  macos: 'an SSD, APFS snapshots or Time Machine',
+  linux: 'an SSD, filesystem snapshots or backups',
+  windows: 'an SSD, Volume Shadow Copies or File History',
+}
+
 async function encrypt(ctx: Context): Promise<void> {
   requireState(ctx, 'plain')
   requireSecretOutput(ctx, 'kinfold encrypt shows a recovery code and')
@@ -295,7 +303,7 @@ async function encrypt(ctx: Context): Promise<void> {
     if (typed.trim() !== 'replace') throw new Refusal(`nothing changed; ${DB_KEY_REF} is kept`)
   }
   ctx.log(`kinfold encrypt converts memory.db to an encrypted file (ChaCha20-Poly1305), with its key in ${ctx.store.place}.`)
-  ctx.log(`The plaintext backup it takes is deleted afterwards, but an SSD, APFS snapshots or Time Machine may keep old blocks; full-disk encryption (${diskCheckOf(ctx.env).name}) covers those.`)
+  ctx.log(`The plaintext backup it takes is deleted afterwards, but ${OLD_BLOCK_PLACES[platformOf(ctx.env).os]} may keep old blocks; full-disk encryption (${diskCheckOf(ctx.env).name}) covers those.`)
   const key = newDbKey()
   if (!(await confirmCode(ctx, encodeRecoveryCode(key)))) throw new Refusal('those were not the last two groups; nothing changed')
   await encryptingWith(ctx, key)

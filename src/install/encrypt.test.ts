@@ -16,6 +16,8 @@ import type { InstallEnv } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
 import { type FakeWorld, countingService, createWorld, fakeService, startWorldDaemon } from './test-support'
 import { StubService } from './service/stub-service'
+import { stubDiskCheck } from './disk/stub-check'
+import { recordingKeyStore } from './test-support'
 import { LAUNCHCTL } from './launch-agent'
 import { LSOF } from './service/launch-agent-service'
 
@@ -367,4 +369,26 @@ test('encrypt with an unavailable service refuses while a daemon answers', async
   expect(await runKeyCommand({ ...quiet.env, service: quietService }, 'encrypt')).toBe(EXIT_OK)
   expect(quietService.steps).toEqual([])
   expect(rows(openEncrypted(quiet.path, quiet.w.keychainValues.get(DB_KEY_REF)!))).toBe(10)
+})
+
+const OLD_BLOCKS = /^The plaintext backup it takes is deleted afterwards, but /
+
+test("encrypt's old-blocks note names the macOS places on macOS", async () => {
+  const { w, env } = world(null)
+  expect(await runKeyCommand(env, 'encrypt')).toBe(EXIT_OK)
+  expect(w.out.filter((line) => OLD_BLOCKS.test(line))).toEqual([
+    'The plaintext backup it takes is deleted afterwards, but an SSD, APFS snapshots or Time Machine may keep old blocks; full-disk encryption (FileVault) covers those.',
+  ])
+})
+
+test("encrypt's old-blocks note names each other OS's own places", async () => {
+  for (const [platform, places] of [['linux', 'filesystem snapshots or backups'], ['win32', 'Volume Shadow Copies or File History']] as const) {
+    const { w, env } = world(null)
+    const other: InstallEnv = { ...env, platform, keyStore: recordingKeyStore(), diskCheck: stubDiskCheck('Test') }
+    await runKeyCommand(other, 'encrypt')
+    const line = w.out.find((entry) => OLD_BLOCKS.test(entry))
+    expect(line).toContain(`an SSD, ${places} may keep old blocks`)
+    expect(line).toContain('(Test)')
+    expect(line).not.toContain('APFS')
+  }
 })
