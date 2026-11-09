@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { type RunningDaemon, startDaemon } from '../daemon/daemon'
 import { ObserverError, type ObserverRunner } from '../observer/types'
+import { KEY_STORE_MODULES } from '../secrets/stores/select'
+import { stubKeyStoreModule } from '../secrets/stores/stub'
 import { samHookGroup } from './claude-hooks'
 import { installPaths } from './env'
 import { EXIT_BLOCKED, EXIT_OK, install } from './install'
@@ -139,7 +141,13 @@ test('interactively, a failed check says so and asks again; no other provider is
 
 test('off macOS a key cannot be stored, so the install refuses instead of falling back', async () => {
   const w = make({ platform: 'linux' })
-  expect(await install(w.env, YES)).toBe(1)
+  // Stub Linux stores, so this test keeps its meaning once a real Linux store lands.
+  const keyStoreModules = {
+    ...KEY_STORE_MODULES,
+    libsecret: stubKeyStoreModule('libsecret', 'libsecret', 'the Secret Service'),
+    'key-file': stubKeyStoreModule('key-file', 'key file', 'the key file'),
+  }
+  expect(await install(w.env, { ...YES, keyStoreModules })).toBe(1)
   expect(w.out.at(-1)).toBe('install failed: openrouter needs a key, and storing keys needs the macOS Keychain; linux is not supported yet')
 })
 
