@@ -9,12 +9,11 @@
 
 import { randomBytes } from 'node:crypto'
 import { envName, readEnv } from '../env-names'
-import { LEGACY_KEYCHAIN_SERVICE } from '../names'
 import { currentPlatform, osOf } from '../platform/platform'
 import { type CredentialProvider, DB_KEY_REF } from '../secrets/credentials'
 import { isHexKey } from '../secrets/hmac-keys'
-import { ITEM_NOT_FOUND_EXIT, type SecurityResult, createKeychainProvider, runSecurity } from '../secrets/keychain'
-import { existsArgs } from '../secrets/keychain-writer'
+import { type KeyStore, credentialProviderOf } from '../secrets/key-store'
+import { createKeychainStore, legacyKeychainOf, runSecurity } from '../secrets/stores/keychain'
 import { SqliteError } from './types'
 
 export const DB_KEYSTORE_ENV = envName('DB_KEYSTORE')
@@ -48,17 +47,29 @@ export function credentialDbKeyStore(name: string, credentials: CredentialProvid
   }
 }
 
-function keychainHasEntry(result: SecurityResult): boolean {
-  if (result.exitCode === 0) return true
-  if (result.exitCode === ITEM_NOT_FOUND_EXIT) return false
-  throw new SqliteError(`keychain lookup failed (exit ${result.exitCode})`, 'SQLITE_AUTH', 23, 'no_key')
+// A failed lookup is a no_key error carrying the store's own fixed message,
+// which never holds the key.
+function lookupOrNoKey(lookup: () => boolean): boolean {
+  try {
+    return lookup()
+  } catch (error: unknown) {
+    throw new SqliteError(error instanceof Error ? error.message : 'key store lookup failed', 'SQLITE_AUTH', 23, 'no_key')
+  }
+}
+
+/** The database key in a store; an entry under the Keychain's old service counts until it is migrated. */
+export function dbKeyStoreOf(store: KeyStore | null): DbKeyStore {
+  if (store === null) return NO_DB_KEYS
+  const legacy = legacyKeychainOf(store)
+  const exists = (): boolean => lookupOrNoKey(() => store.exists(DB_KEY_REF)) || (legacy !== null && lookupOrNoKey(() => legacy.exists(DB_KEY_REF)))
+  return credentialDbKeyStore(store.label, credentialProviderOf(store), exists)
 }
 
 /** The store for this platform: the Keychain on macOS, none elsewhere until E4, none when KINFOLD_DB_KEYSTORE=none. */
 export function platformDbKeyStore(env: Readonly<Record<string, string | undefined>> = process.env, platform: string = currentPlatform().node): DbKeyStore {
   if (readEnv(env, 'DB_KEYSTORE') === 'none' && env.NODE_ENV === 'test') return NO_DB_KEYS
   if (osOf(platform) !== 'macos') return NO_DB_KEYS
-  return credentialDbKeyStore('keychain', createKeychainProvider(), () => keychainHasEntry(runSecurity(existsArgs(DB_KEY_REF))) || keychainHasEntry(runSecurity(existsArgs(DB_KEY_REF, LEGACY_KEYCHAIN_SERVICE))))
+  return dbKeyStoreOf(createKeychainStore(({ args }) => runSecurity(args)))
 }
 
 export function newDbKey(): string {

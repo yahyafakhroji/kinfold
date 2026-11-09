@@ -97,13 +97,13 @@ const okCliRunner: CliObserverRunner = {
   listModels: async () => [],
 }
 
-interface FakeKeychain {
+export interface FakeKeychain {
   refs: Set<string>
   values: Map<string, string>
 }
 
 /** Entries are keyed by (service, account): kinfold is the world's own sets, shared-agent-memory the legacy ones. */
-function fakeSecurity(kinfold: FakeKeychain, legacy: FakeKeychain, calls: SecurityInvocation[]): SecurityRunner {
+export function fakeSecurity(kinfold: FakeKeychain, legacy: FakeKeychain, calls: SecurityInvocation[]): SecurityRunner {
   const store = (service: string | undefined): FakeKeychain => (service === LEGACY_KEYCHAIN_SERVICE ? legacy : kinfold)
   return (invocation) => {
     calls.push(invocation)
