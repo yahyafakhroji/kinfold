@@ -7,6 +7,8 @@
 import { chmodSync, closeSync, mkdirSync, openSync, rmSync } from 'node:fs'
 import { KEYCHAIN_SERVICE } from '../secrets/credentials'
 import { HMAC_LEGACY_REF } from '../secrets/hmac-keys'
+import { type KeyStoreRecord, keyStoreRecordContent } from '../secrets/key-store-record'
+import { KEY_STORE_MODULES } from '../secrets/stores/select'
 import { credentialWriterFor } from '../secrets/keychain-writer'
 import type { EmbeddedAssets } from '../runtime/embedded'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
@@ -70,6 +72,8 @@ export type Action =
   | { kind: 'create-db-key'; path: string; key?: string }
   /** --no-encrypt on a new store: an empty plaintext store, made before the daemon could create it encrypted. */
   | { kind: 'create-plain-store'; path: string }
+  /** key-store.json: the store chosen at install, which every later process opens without probing. */
+  | { kind: 'record-key-store'; path: string; record: KeyStoreRecord }
   /** Rename migration: bootout dev.shared-agent-memory.daemon when launchd has it loaded. */
   | { kind: 'stop-legacy-agent'; uid: number }
   /** Rename migration: stops here while any daemon answers /health; it would keep writing to the store being moved. */
@@ -125,6 +129,7 @@ export function describeAction(action: Action): string {
     }
     case 'create-db-key': return describeCreateDbKey(action.path, action.key)
     case 'create-plain-store': return describeCreatePlainStore(action.path)
+    case 'record-key-store': return `record the key store (${KEY_STORE_MODULES[action.record.store].label}) in ${action.path} (mode 0600)`
     case 'stop-legacy-agent': return `${legacyBootoutArgv(action.uid).join(' ')} (if loaded): stop the daemon installed under the old name`
     case 'migration-daemon-down': return `check that no daemon answers /health on port ${action.port}, waiting up to ${action.waitMs / 1000} s (one still running must be stopped first; nothing is moved while it runs)`
     case 'copy-keychain-entry': return describeCopyKeychainEntry(action.ref)
@@ -249,6 +254,8 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'install-program': return installProgram(env, action)
     case 'create-db-key': return createDbKey(env, action.path, action.key)
     case 'create-plain-store': return createPlainStore(env, action.path)
+    // The folder is flushed too: a record lost in a crash would leave the choice to the missing-record rule.
+    case 'record-key-store': return writeFileAtomic(action.path, keyStoreRecordContent(action.record), 0o600, { syncDir: true, fsyncDir: env.fsyncDir, platform: env.platform })
     case 'stop-legacy-agent': return stopLegacyAgent(env)
     case 'migration-daemon-down': return checkDaemonDown(env, action.port, action.waitMs)
     case 'copy-keychain-entry': return copyKeychainEntry(env, action.ref)

@@ -7,7 +7,7 @@
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { type OpenOptions, openWithLibrary } from './driver'
-import { type DbKeyStore, NO_DB_KEYS, platformDbKeyStore } from './keys'
+import { type DbKeyStore, NO_DB_KEYS, dbKeyStoreFor } from './keys'
 import { libraryFor } from './library'
 import { type Database, SqliteError } from './types'
 
@@ -82,7 +82,7 @@ export function openEncrypted(path: string, key: string, options: PlainOpenOptio
  * True when the store is plaintext while the key store holds a key: the file
  * was replaced by a plaintext copy, or a conversion failed. Metadata only.
  */
-export function plaintextBesideKey(path: string, keys: DbKeyStore = platformDbKeyStore()): boolean {
+export function plaintextBesideKey(path: string, keys: DbKeyStore = dbKeyStoreFor(dirname(path))): boolean {
   return fileState(path) === 'plain' && keys.exists()
 }
 
@@ -94,7 +94,7 @@ export function openStoreFile(path: string, options: StoreOpenOptions = {}): Dat
   const env = options.env ?? process.env
   const state = fileState(path)
   if (state === 'plain') return openPlain(path, options, env)
-  const keys = options.keys ?? platformDbKeyStore(env)
+  const keys = options.keys ?? dbKeyStoreFor(dirname(path), env)
   const key = keys.read()
   if (key !== null) return openEncrypted(path, key, options, env)
   if (state === 'encrypted') throw new SqliteError(`memory.db is encrypted and the ${keys.name} has no database key; run kinfold key recover`, 'SQLITE_AUTH', 23, 'no_key')

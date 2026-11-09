@@ -6,7 +6,9 @@ import { type RunnerDeps, createCliRunner, runnerFactory } from '../observer/run
 import { createSafetyGate } from '../observer/safety-gate'
 import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
 import type { CredentialProvider } from '../secrets/credentials'
-import { platformCredentialProvider } from '../secrets/keychain'
+import { type KeyStoreDeps, credentialProviderOf } from '../secrets/key-store'
+import { processKeyStoreDeps, resolveKeyStore } from '../secrets/key-store-record'
+import { type DbKeyStore, dbKeyStoreOf } from '../sqlite/keys'
 import { resolveDataDir } from '../store/data-dir'
 import { applyDataDirFlag } from '../store/data-dir-flag'
 import { type Embedder, createOpenRouterEmbedder } from '../vectors/embedder'
@@ -31,6 +33,16 @@ function embedderFrom(credentials: CredentialProvider): Embedder | null {
   }
 }
 
+/**
+ * Credentials and the database key, both from the one store key-store.json
+ * names. Throws the record's fixed message when the record cannot be trusted,
+ * so the daemon stops before it opens memory.db or makes any key.
+ */
+export function daemonSecrets(dataDir: string, deps: KeyStoreDeps): { credentials: CredentialProvider; dbKeys: DbKeyStore } {
+  const store = resolveKeyStore(dataDir, deps)
+  return { credentials: credentialProviderOf(store), dbKeys: dbKeyStoreOf(store) }
+}
+
 function fail(message: string): never {
   process.stderr.write(logLine(message))
   process.exit(1)
@@ -44,13 +56,14 @@ export async function runDaemon(argv: readonly string[]): Promise<void> {
   try {
     applyDataDirFlag(argv)
     const dataDir = resolveDataDir()
-    const credentials = platformCredentialProvider()
+    const { credentials, dbKeys } = daemonSecrets(dataDir, processKeyStoreDeps(dataDir))
     const runnerDeps: RunnerDeps = { dataDir, credentials }
     daemon = startDaemon({
       dataDir,
       port: parsePort(readEnv(process.env, 'PORT')),
       version: VERSION,
       keychain: credentials,
+      dbKeys,
       vectors: { embedder: embedderFrom(credentials) },
       observer: {
         runnerFor: runnerFactory(runnerDeps),

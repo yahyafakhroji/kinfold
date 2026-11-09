@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openReadOnly } from '../context/fallback'
 import type { CredentialProvider } from '../secrets/credentials'
+import type { KeyStoreDeps } from '../secrets/key-store'
+import { KEY_STORE_FILE, recordUnreadableMessage } from '../secrets/key-store-record'
 import { openStore } from '../store/db'
 import { upsertProject } from '../store/writes'
-import { DB_KEYSTORE_ENV, type DbKeyStore, NO_DB_KEYS, credentialDbKeyStore, newDbKey, platformDbKeyStore } from './keys'
+import { DB_KEYSTORE_ENV, type DbKeyStore, NO_DB_KEYS, credentialDbKeyStore, dbKeyStoreFor, newDbKey } from './keys'
 import { fileState, openEncrypted, openStoreFile } from './open'
 
 let dataDir: string
@@ -86,10 +88,9 @@ test('the key store returns a hex key or null, and a failed or bad lookup never 
   expect(() => credentialDbKeyStore('keychain', provider('SECRET-NOT-HEX'))).not.toThrow()
   expect(() => credentialDbKeyStore('keychain', provider('SECRET-NOT-HEX')).read()).toThrow(expect.objectContaining({ kind: 'no_key', message: expect.not.stringContaining('SECRET') }))
   expect(() => credentialDbKeyStore('keychain', provider(new Error('SECRET in stderr'))).read()).toThrow(expect.objectContaining({ kind: 'no_key', message: expect.not.stringContaining('SECRET') }))
-  expect(platformDbKeyStore({ [DB_KEYSTORE_ENV]: 'none', NODE_ENV: 'test' }, 'darwin')).toBe(NO_DB_KEYS)
+  expect(dbKeyStoreFor(dataDir, { [DB_KEYSTORE_ENV]: 'none', NODE_ENV: 'test' }, depsOn('macos', { [DB_KEYSTORE_ENV]: 'none', NODE_ENV: 'test' }))).toBe(NO_DB_KEYS)
   // Outside bun test the switch does nothing: no environment can turn encryption off.
-  expect(platformDbKeyStore({ [DB_KEYSTORE_ENV]: 'none' }, 'darwin').name).toBe('keychain')
-  expect(platformDbKeyStore({}, 'linux')).toBe(NO_DB_KEYS)
+  expect(dbKeyStoreFor(dataDir, { [DB_KEYSTORE_ENV]: 'none' }, depsOn('macos', { [DB_KEYSTORE_ENV]: 'none' })).name).toBe('keychain')
   expect(newDbKey()).toMatch(/^[0-9a-f]{64}$/)
 })
 
@@ -108,6 +109,21 @@ test('a file that cannot be read is an error, never a new store', () => {
   } finally {
     chmodSync(path, 0o600)
   }
+})
+
+function depsOn(os: 'macos' | 'linux', envVars: Readonly<Record<string, string | undefined>> = {}): KeyStoreDeps {
+  return { platform: { os, wsl: false, node: os === 'macos' ? 'darwin' : 'linux' }, homeDir: dataDir, dataDir, envVars, security: () => ({ exitCode: 51, stdout: '' }) }
+}
+
+test('the key store comes from the folder of the opened file', () => {
+  const linuxDeps = depsOn('linux')
+  expect(dbKeyStoreFor(dataDir, {}, linuxDeps)).toBe(NO_DB_KEYS)
+  const record = join(dataDir, KEY_STORE_FILE)
+  writeFileSync(record, '{"store":"keychain"')
+  expect(() => dbKeyStoreFor(dataDir, {}, linuxDeps)).toThrow(recordUnreadableMessage(record))
+  // openStoreFile reads the record beside the file it opens, before it creates anything.
+  expect(() => openStoreFile(join(dataDir, 'memory.db'), { env: {} })).toThrow(recordUnreadableMessage(record))
+  expect(existsSync(join(dataDir, 'memory.db'))).toBe(false)
 })
 
 const STOCK = '/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib'

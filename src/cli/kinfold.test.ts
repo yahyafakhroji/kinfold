@@ -222,7 +222,7 @@ test('kinfold hook with empty stdin finishes inside the host hook timeout', asyn
     const started = performance.now()
     const child = Bun.spawn([process.execPath, join(import.meta.dir, 'kinfold.ts'), 'hook'], {
       cwd: join(import.meta.dir, '..', '..'),
-      env: { PATH: process.env.PATH ?? '', HOME: home, KINFOLD_DATA_DIR: home },
+      env: { PATH: process.env.PATH ?? '', HOME: home, KINFOLD_DATA_DIR: home, NODE_ENV: 'test', KINFOLD_DB_KEYSTORE: 'none' },
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -253,7 +253,7 @@ test('the hook subcommand loads no installer module', async () => {
     ].join('\n'))
     const child = Bun.spawn([process.execPath, '--preload', probe, join(import.meta.dir, 'kinfold.ts'), 'hook'], {
       cwd: join(import.meta.dir, '..', '..'),
-      env: { PATH: process.env.PATH ?? '', HOME: home, KINFOLD_DATA_DIR: home },
+      env: { PATH: process.env.PATH ?? '', HOME: home, KINFOLD_DATA_DIR: home, NODE_ENV: 'test', KINFOLD_DB_KEYSTORE: 'none' },
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -417,7 +417,7 @@ test('a fatal mcp error logs only its name, not the message', async () => {
   try {
     const child = Bun.spawn([process.execPath, join(import.meta.dir, 'kinfold.ts'), 'mcp'], {
       cwd: join(import.meta.dir, '..', '..'),
-      env: { PATH: process.env.PATH ?? '', HOME: home, KINFOLD_DATA_DIR: 'relative/path' },
+      env: { PATH: process.env.PATH ?? '', HOME: home, KINFOLD_DATA_DIR: 'relative/path', NODE_ENV: 'test', KINFOLD_DB_KEYSTORE: 'none' },
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
