@@ -28,39 +28,48 @@ import { listSubKeyEpochs, subKeyDir } from '../store/hmac-key'
 import { checkHealth, readDaemonInfo } from './daemon-client'
 import { type InstallEnv, errorMessage } from './env'
 import { existingBackups, writeFileAtomic } from './files'
-import { keyStoreOf, secretDeleteAction } from './key-store-choice'
+import { keyStoreOf, noStoreWord, secretDeleteAction } from './key-store-choice'
 import type { Action, StepNote } from './plan'
 
-export const BACKUP_REMOVAL_SUMMARY = `plain-text backup of epoch 0; the value is in keychain entry ${HMAC_LEGACY_REF}`
+export function backupRemovalSummary(storeLabel: string): string {
+  return `plain-text backup of epoch 0; the value is in ${storeLabel} entry ${HMAC_LEGACY_REF}`
+}
 export const REMOVE_HMAC_CONSEQUENCE = 'stored refs can no longer be checked, and a later install starts a new master'
 
 function legacyFromKeychain(env: InstallEnv): string | null {
   return keyStoreOf(env)?.get(HMAC_LEGACY_REF) ?? null
 }
 
+/** Reached only with a store in hand; the fallback keeps a message readable if the store went away. */
+function storeLabelOf(env: InstallEnv): string {
+  return keyStoreOf(env)?.label ?? noStoreWord(env)
+}
+
 /** One guarded removal per backup: those already on disk plus the one this run writes. */
 export function hmacBackupRemovals(env: InstallEnv, plannedBackup: string | null): Action[] {
-  if (keyStoreOf(env) === null) return []
+  const store = keyStoreOf(env)
+  if (store === null) return []
   const existing = existingBackups(join(env.dataDir, HMAC_KEY_FILE))
   const paths = [...new Set([...existing, ...(plannedBackup !== null ? [plannedBackup] : [])])]
-  return paths.map((path): Action => ({ kind: 'remove-hmac-backup', path }))
+  return paths.map((path): Action => ({ kind: 'remove-hmac-backup', path, storeLabel: store.label }))
 }
 
 function backupMismatch(env: InstallEnv, path: string): string | null {
+  const label = storeLabelOf(env)
   let stored: string | null
   try {
     stored = legacyFromKeychain(env)
   } catch (error: unknown) {
-    return `the keychain read-back of ${HMAC_LEGACY_REF} failed (${errorMessage(error)})`
+    return `the ${label} read-back of ${HMAC_LEGACY_REF} failed (${errorMessage(error)})`
   }
-  if (stored === null) return `keychain entry ${HMAC_LEGACY_REF} is missing`
+  if (stored === null) return `${label} entry ${HMAC_LEGACY_REF} is missing`
   let backup: string
   try {
     backup = readFileSync(path, 'utf8').trim()
   } catch (error: unknown) {
     return `it could not be read (${error instanceof Error ? error.name : 'error'})`
   }
-  return backup === stored ? null : `it differs from keychain entry ${HMAC_LEGACY_REF}`
+  return backup === stored ? null : `it differs from ${label} entry ${HMAC_LEGACY_REF}`
 }
 
 /** Null when the backup may go; else why it stays. */
@@ -96,7 +105,7 @@ export function removeRedundantBackup(path: string, legacyPath: string): StepNot
 /** Epoch 0's key back on disk as the pre-rotation file (hex, no newline, 0600). Throws, so no later step runs. */
 export function restoreLegacyKey(env: InstallEnv, path: string): void {
   const value = legacyFromKeychain(env)
-  if (value === null || !isHexKey(value)) throw new Error(`keychain entry ${HMAC_LEGACY_REF} is missing or not a key; nothing was deleted`)
+  if (value === null || !isHexKey(value)) throw new Error(`${storeLabelOf(env)} entry ${HMAC_LEGACY_REF} is missing or not a key; nothing was deleted`)
   writeFileAtomic(path, value, DATA_FILE_MODE)
 }
 
@@ -110,7 +119,7 @@ function removalActions(env: InstallEnv, store: KeyStore, hasMaster: boolean, ha
   const dir = subKeyDir(env.dataDir)
   const files = listSubKeyEpochs(env.dataDir).length
   return [
-    ...(restore ? [{ kind: 'restore-hmac-legacy', path: legacyPath } as const] : []),
+    ...(restore ? [{ kind: 'restore-hmac-legacy', path: legacyPath, storeLabel: store.label } as const] : []),
     ...existingBackups(legacyPath).map((path) => ({ kind: 'remove-redundant-hmac-backup', path, legacyPath }) as const),
     ...(hasMaster ? [secretDeleteAction(store, HMAC_MASTER_REF, `the HMAC master; ${REMOVE_HMAC_CONSEQUENCE}`)] : []),
     ...(hasLegacy ? [secretDeleteAction(store, HMAC_LEGACY_REF, `epoch 0's key; its value stays in ${legacyPath}`)] : []),
@@ -123,17 +132,17 @@ function removalActions(env: InstallEnv, store: KeyStore, hasMaster: boolean, ha
 /** `kinfold uninstall --remove-hmac-keys`: restore hmac.key, delete both entries, remove hmac.d/. */
 export function hmacRemoval(env: InstallEnv, dryRun: boolean): HmacRemoval {
   const store = keyStoreOf(env)
-  if (store === null) return { actions: [], notes: [`hmac keys: no keychain on ${env.platform}; nothing to remove`] }
+  if (store === null) return { actions: [], notes: [`hmac keys: no ${noStoreWord(env)} on ${env.platform}; nothing to remove`] }
   const legacyPath = join(env.dataDir, HMAC_KEY_FILE)
   const hasLegacy = store.exists(HMAC_LEGACY_REF)
   const restore = hasLegacy && !existsSync(legacyPath)
   const removals = removalActions(env, store, store.exists(HMAC_MASTER_REF), hasLegacy, restore)
-  if (removals.length === 0) return { actions: removals, notes: ['hmac keys: no keychain entries or sub-keys to remove'] }
+  if (removals.length === 0) return { actions: removals, notes: [`hmac keys: no ${store.label} entries or sub-keys to remove`] }
   const { pid, port } = readDaemonInfo(env.dataDir)
   const actions: Action[] = [{ kind: 'hmac-daemon-down', pid, port }, ...removals]
   const verb = dryRun ? 'a real run writes' : 'wrote'
   const notes = restore
-    ? [`${verb} ${legacyPath} from keychain entry ${HMAC_LEGACY_REF}, so a later install still verifies refs stored before the migration; if you do not want that, delete it yourself: rm ${legacyPath}`]
+    ? [`${verb} ${legacyPath} from ${store.label} entry ${HMAC_LEGACY_REF}, so a later install still verifies refs stored before the migration; if you do not want that, delete it yourself: rm ${legacyPath}`]
     : []
   return { actions, notes }
 }

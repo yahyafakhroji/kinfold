@@ -6,7 +6,7 @@
 // again, or under --yes ends the install with a non-zero exit.
 
 import { type CredentialProvider, NO_CREDENTIALS, assertStorableValue, isSystemCredentialRef } from '../secrets/credentials'
-import { credentialProviderOf } from '../secrets/key-store'
+import { type KeyStore, credentialProviderOf } from '../secrets/key-store'
 import { CHECK_PROMPT } from '../observer/check-prompt'
 import { OPENROUTER_CREDENTIAL_REF, builtInSettings, credentialRefFor, providerTakesKey } from '../observer/settings'
 import { runPlantedCheck } from '../observer/planted-check'
@@ -48,7 +48,7 @@ export interface PendingCredential {
 export interface ObserverChoice {
   input: ObserverSettingsInput
   origin: 'default' | 'flag' | 'prompt' | 'saved'
-  /** A key entered this run, stored in the keychain only once the plan runs. */
+  /** A key entered this run, stored in the key store only once the plan runs. */
   credential: PendingCredential | null
   credentialNote: string
   check: 'ok' | 'skipped' | 'unchanged' | 'not run (dry run)'
@@ -154,14 +154,19 @@ async function pickCandidate(env: InstallEnv, host: InstallHost, options: Choice
   throw new ChoiceError(`cannot ask about the ${host} observer without a TTY; pass --yes or --observer ${host}=<provider>:<model>`)
 }
 
-type CredentialState = { kind: 'none' } | { kind: 'keychain' } | { kind: 'entered'; value: string } | { kind: 'dry-run' }
+type CredentialState = { kind: 'none' } | { kind: 'stored'; label: string } | { kind: 'entered'; value: string; label: string } | { kind: 'dry-run'; label: string }
 
 export interface CredentialSession {
   entered: Map<string, string>
   stdinUsed: boolean
 }
 
-async function readCredentialValue(env: InstallEnv, ref: string, options: ChoiceOptions, session: CredentialSession): Promise<string> {
+/** The Keychain keeps today's wording; any other store names its own place. */
+function promptPlace(store: KeyStore): string {
+  return store.kind === 'keychain' ? 'the macOS Keychain' : store.place
+}
+
+async function readCredentialValue(env: InstallEnv, store: KeyStore, ref: string, options: ChoiceOptions, session: CredentialSession): Promise<string> {
   let value: string
   if (options.credentialStdin) {
     if (session.stdinUsed) throw new ChoiceError(`stdin was already read; cannot read another key for ${ref}`)
@@ -169,11 +174,11 @@ async function readCredentialValue(env: InstallEnv, ref: string, options: Choice
     value = await env.io.readStdin()
   } else if (options.yes) {
     // --yes never asks, even on a terminal: a child `install --yes` must not stop at a question.
-    throw new ChoiceError(`the ${ref} key is not in the keychain and --yes asks nothing; pass --credential-stdin`)
+    throw new ChoiceError(`the ${ref} key is not in the ${store.label} and --yes asks nothing; pass --credential-stdin`)
   } else if (env.io.interactive) {
-    value = await env.io.askSecret(`Key for ${ref} (stored in the macOS Keychain, not shown) > `)
+    value = await env.io.askSecret(`Key for ${ref} (stored in ${promptPlace(store)}, not shown) > `)
   } else {
-    throw new ChoiceError(`the ${ref} key is not in the keychain and there is no TTY to ask; pass --credential-stdin`)
+    throw new ChoiceError(`the ${ref} key is not in the ${store.label} and there is no TTY to ask; pass --credential-stdin`)
   }
   const trimmed = value.replace(/[\r\n]+$/, '').trim()
   try {
@@ -188,22 +193,23 @@ async function resolveCredential(env: InstallEnv, input: ObserverSettingsInput, 
   const ref = credentialRefFor(asSettings(input))
   if (ref === null) return { kind: 'none' }
   if (isSystemCredentialRef(ref)) throw new ChoiceError(`${ref} is a key Kinfold keeps for itself; choose another credential ref`)
-  const known = session.entered.get(ref)
-  if (known !== undefined) return { kind: 'entered', value: known }
   const store = keyStoreOf(env)
   if (store === null) throw new ChoiceError(`${input.provider} needs a key, and storing keys needs the macOS Keychain; ${env.platform} is not supported yet`)
-  if (store.exists(ref) && !options.replaceCredential) return { kind: 'keychain' }
-  if (options.dryRun) return { kind: 'dry-run' }
-  const value = await readCredentialValue(env, ref, options, session)
+  const label = store.label
+  const known = session.entered.get(ref)
+  if (known !== undefined) return { kind: 'entered', value: known, label }
+  if (store.exists(ref) && !options.replaceCredential) return { kind: 'stored', label }
+  if (options.dryRun) return { kind: 'dry-run', label }
+  const value = await readCredentialValue(env, store, ref, options, session)
   session.entered.set(ref, value)
-  return { kind: 'entered', value }
+  return { kind: 'entered', value, label }
 }
 
 function credentialNote(state: CredentialState, ref: string | null): string {
   if (state.kind === 'none' || ref === null) return 'no key needed'
-  if (state.kind === 'keychain') return `keychain entry ${ref} present`
-  if (state.kind === 'dry-run') return `keychain entry ${ref} missing or replaced: would ask for it (no echo) and store it`
-  return `new key for ${ref} will be stored in the keychain`
+  if (state.kind === 'stored') return `${state.label} entry ${ref} present`
+  if (state.kind === 'dry-run') return `${state.label} entry ${ref} missing or replaced: would ask for it (no echo) and store it`
+  return `new key for ${ref} will be stored in the ${state.label}`
 }
 
 function checkCredentials(env: InstallEnv, session: CredentialSession): CredentialProvider {

@@ -245,3 +245,25 @@ test('a first install on another folder records the store there, and an injected
   expect(lines.some((line) => line.includes(recordPath(w)))).toBe(false)
   expect(injected.seen).toEqual([])
 })
+
+test('a non-Keychain store never shows Keychain words in install, status or uninstall', async () => {
+  const w = make({ platform: 'linux', opencodeVersion: 'opencode v2.1.4', keychainRefs: [], stdin: 'sk-or-v1-0123456789abcdef', interactive: true })
+  const store = recordingKeyStore({ label: 'test store', place: 'the test store' })
+  w.env.keyStore = store
+  w.env.security = forbiddenSecurity()
+  w.env.io = { ...w.env.io, printsToTerminal: true }
+  writeFileSync(join(w.dataDir, HMAC_KEY_FILE), newDbKey(), { mode: 0o600 })
+
+  expect(await install(w.env, DRY)).toBe(EXIT_OK)
+  expect(await install(w.env, { ...YES, credentialStdin: true })).toBe(EXIT_OK)
+  expect(await status(w.env)).toBe(EXIT_OK)
+  expect(await install(w.env, DRY)).toBe(EXIT_OK)
+  expect(await uninstall(w.env, { dryRun: true, removeCredentials: false, removeHmacKeys: false })).toBe(EXIT_OK)
+  expect(await uninstall(w.env, { dryRun: true, removeCredentials: false, removeHmacKeys: true })).toBe(EXIT_OK)
+
+  expect(w.out.filter((line) => /keychain|Keychain|security /.test(line))).toEqual([])
+  expect(w.out.some((line) => line.includes('test store entry openrouter'))).toBe(true)
+  expect(w.out.some((line) => line.startsWith('hmac keys: test store master; test store hmac-master present'))).toBe(true)
+  expect(w.out.some((line) => line.includes('test store: create db-key'))).toBe(true)
+  expect(w.out.some((line) => line.includes('kept the test store entry hmac-master (marker refs in the data dir need it); rerun with --remove-hmac-keys to remove it'))).toBe(true)
+})

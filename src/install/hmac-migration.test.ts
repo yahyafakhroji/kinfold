@@ -114,7 +114,7 @@ test('uninstall keeps the HMAC entries, even with --remove-credentials, and says
 test('without a keychain (linux) nothing migrates and hmac.key stays', async () => {
   const w = oldUser('linux')
   expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
-  expect(w.out).toContain(`hmac keys: no keychain on linux; the marker key stays in ${legacyPath(w)}`)
+  expect(w.out).toContain(`hmac keys: no key store on linux; the marker key stays in ${legacyPath(w)}`)
   expect(readFileSync(legacyPath(w), 'utf8')).toBe(LEGACY)
 })
 

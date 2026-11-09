@@ -33,8 +33,8 @@ const withFdesetup = (env: InstallEnv, stdout: string, exitCode = 0): InstallEnv
 test('a new data dir plans a db-key, made only when the step runs: on stdin, never replacing an entry, never printed', () => {
   const w = world()
   const path = join(w.dataDir, DB_FILE)
-  expect(dbKeyActions(w.env)).toEqual([{ kind: 'create-db-key', path }])
-  expect(describeCreateDbKey(path)).not.toMatch(/[0-9a-f]{64}/)
+  expect(dbKeyActions(w.env)).toEqual([{ kind: 'create-db-key', path, storeLabel: 'keychain' }])
+  expect(describeCreateDbKey('keychain', path)).not.toMatch(/[0-9a-f]{64}/)
   createDbKey(w.env, path)
   expect(w.keychain.has(DB_KEY_REF)).toBe(true)
   const adds = w.securityCalls.filter((call) => call.stdin !== undefined)

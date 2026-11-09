@@ -25,6 +25,11 @@ export function keyStoreDepsOf(env: InstallEnv): KeyStoreDeps {
   return { platform: platformOf(env), homeDir: env.homeDir, dataDir: env.dataDir, envVars: env.envVars ?? {}, security: env.security }
 }
 
+/** What a line calls the missing store: macOS keeps "keychain", the only store it has. */
+export function noStoreWord(env: InstallEnv): string {
+  return platformOf(env).os === 'macos' ? 'keychain' : 'key store'
+}
+
 /** The injected store, else resolveKeyStore for env.dataDir. */
 export function keyStoreOf(env: InstallEnv): KeyStore | null {
   if (env.keyStore !== undefined) return env.keyStore

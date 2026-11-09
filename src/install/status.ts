@@ -11,7 +11,7 @@ import { dbStatusLines } from './db-encryption'
 import { detectHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
 import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
-import { keyStoreStatusLine, readKeyStore } from './key-store-choice'
+import { keyStoreStatusLine, noStoreWord, readKeyStore } from './key-store-choice'
 import { entryCommand } from './entry'
 import { readJsonObject, readTextOrNull } from './files'
 import { EXIT_OK, daemonSituation } from './install'
@@ -88,7 +88,7 @@ function keyStoreLines(env: InstallEnv, refs: readonly string[]): string[] {
   // The key store line above already names why the store is unknown.
   if (!read.ok) return []
   const store = read.store
-  if (store === null) return [`keychain: none on ${env.platform}`]
+  if (store === null) return [`${noStoreWord(env)}: none on ${env.platform}`]
   return refs.map((ref) => {
     try {
       return `${store.label} ${ref}: ${store.exists(ref) ? 'present' : 'missing'}`

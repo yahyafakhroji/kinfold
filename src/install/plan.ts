@@ -16,7 +16,7 @@ import { type InstallEnv, installPaths } from './env'
 import { NOT_FOUND_EXIT } from './system'
 import { requireKeyStore } from './key-store-choice'
 import { writeBackup, writeFileAtomic } from './files'
-import { BACKUP_REMOVAL_SUMMARY, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
+import { backupRemovalSummary, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
 import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
 import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbeddedSqlite3mc, installSqlite3mc } from './sqlite3mc-install'
 import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from './vec0-install'
@@ -54,9 +54,9 @@ export type Action =
   | { kind: 'secret-set'; ref: string; value: string; description: string }
   | { kind: 'secret-delete'; ref: string; description: string; summary?: string }
   /** Removed only after a key store read-back and a master-mode /health; else kept with the reason. */
-  | { kind: 'remove-hmac-backup'; path: string }
+  | { kind: 'remove-hmac-backup'; path: string; storeLabel: string }
   /** hmac.key written back from the key store's hmac-legacy before the HMAC entries go. */
-  | { kind: 'restore-hmac-legacy'; path: string }
+  | { kind: 'restore-hmac-legacy'; path: string; storeLabel: string }
   /** --remove-hmac-keys stops here while any daemon answers /health; a hand-started one would write a new sub-key afterwards. */
   | { kind: 'hmac-daemon-down'; pid: number | null; port: number }
   /** A kept install backup, removed only when it equals hmac.key on disk (restored by then); else kept. */
@@ -75,7 +75,7 @@ export type Action =
    * db-key for a store the daemon has yet to create, added without replacing any entry: made at run time,
    * or `key`, the one whose recovery code was shown (it prints as <hidden>).
    */
-  | { kind: 'create-db-key'; path: string; key?: string }
+  | { kind: 'create-db-key'; path: string; storeLabel: string; key?: string }
   /** --no-encrypt on a new store: an empty plaintext store, made before the daemon could create it encrypted. */
   | { kind: 'create-plain-store'; path: string }
   /** key-store.json: the store chosen at install, which every later process opens without probing. */
@@ -122,8 +122,8 @@ export function describeAction(action: Action): string {
     }
     case 'secret-set': return action.description
     case 'secret-delete': return `${action.description}${action.summary !== undefined ? `: ${action.summary}` : ''}`
-    case 'remove-hmac-backup': return `remove ${action.path}: ${BACKUP_REMOVAL_SUMMARY}`
-    case 'restore-hmac-legacy': return `write ${action.path} from keychain entry ${HMAC_LEGACY_REF} (mode 0600), so a later install still verifies epoch-0 refs`
+    case 'remove-hmac-backup': return `remove ${action.path}: ${backupRemovalSummary(action.storeLabel)}`
+    case 'restore-hmac-legacy': return `write ${action.path} from ${action.storeLabel} entry ${HMAC_LEGACY_REF} (mode 0600), so a later install still verifies epoch-0 refs`
     case 'hmac-daemon-down': return `check that no daemon answers /health on port ${action.port} (a hand-started one must be stopped first: ${stopCommand(action.pid, action.port)})`
     case 'remove-redundant-hmac-backup': return `remove ${action.path} if it equals ${action.legacyPath}: a kept install backup, redundant once hmac.key is back`
     case 'install-vec0': return `download ${action.asset.url} and write its ${action.asset.member} to ${action.path} (mode 0600), after checking both against the pinned sha256`
@@ -134,7 +134,7 @@ export function describeAction(action: Action): string {
       const check = action.check ? ` after checking ${action.assetName ?? 'it'} against SHA256SUMS` : ' (checksum check skipped for the development version)'
       return `install program ${action.to} from ${action.from}${check}`
     }
-    case 'create-db-key': return describeCreateDbKey(action.path, action.key)
+    case 'create-db-key': return describeCreateDbKey(action.storeLabel, action.path, action.key)
     case 'create-plain-store': return describeCreatePlainStore(action.path)
     case 'record-key-store': return `record the key store (${KEY_STORE_MODULES[action.record.store].label}) in ${action.path} (mode 0600)`
     case 'stop-legacy-agent': return `${legacyBootoutArgv(action.uid).join(' ')} (if loaded): stop the daemon installed under the old name`

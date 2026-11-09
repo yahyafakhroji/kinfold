@@ -45,7 +45,7 @@ export function dbKeyActions(env: InstallEnv): Action[] {
     return []
   }
   env.out(newKeyLine(store))
-  return [{ kind: 'create-db-key', path }]
+  return [{ kind: 'create-db-key', path, storeLabel: store.label }]
 }
 
 type StoreWords = Pick<KeyStore, 'place' | 'describeEntry'>
@@ -113,19 +113,19 @@ export function setupDbKeyActions(env: InstallEnv, encryption: EncryptionAnswer)
       return []
     }
     env.out(newKeyLine(store))
-    return [{ kind: 'create-db-key', path }]
+    return [{ kind: 'create-db-key', path, storeLabel: store.label }]
   }
   if (stored.kind === 'usable' && stored.key === encryption.key) {
     env.out(foundLine(store))
     return []
   }
   env.out('database: the new store is created encrypted with the key whose recovery code you confirmed')
-  return [{ kind: 'create-db-key', path, key: encryption.key }]
+  return [{ kind: 'create-db-key', path, storeLabel: store.label, key: encryption.key }]
 }
 
-export function describeCreateDbKey(path: string, key?: string): string {
-  if (key !== undefined) return `keychain: create ${DB_KEY_REF} (<hidden>, the key whose recovery code was shown) for the new store ${path}; stops if another entry is there`
-  return `keychain: create ${DB_KEY_REF} (32 random bytes, never shown) for the new store ${path}, unless an entry exists already`
+export function describeCreateDbKey(storeLabel: string, path: string, key?: string): string {
+  if (key !== undefined) return `${storeLabel}: create ${DB_KEY_REF} (<hidden>, the key whose recovery code was shown) for the new store ${path}; stops if another entry is there`
+  return `${storeLabel}: create ${DB_KEY_REF} (32 random bytes, never shown) for the new store ${path}, unless an entry exists already`
 }
 
 /**

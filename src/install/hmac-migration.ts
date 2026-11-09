@@ -27,7 +27,7 @@ import { listSubKeyEpochs, subKeyDir, subKeyPath } from '../store/hmac-key'
 import { type InstallEnv, errorMessage } from './env'
 import { BACKUP_INFIX, backupStamp, existingBackups } from './files'
 import { hmacBackupRemovals } from './hmac-cleanup'
-import { keyStoreOf, readKeyStore, secretSetAction } from './key-store-choice'
+import { type KeyStoreRead, keyStoreOf, noStoreWord, readKeyStore, secretSetAction } from './key-store-choice'
 import type { Action } from './plan'
 
 export interface HmacMigration {
@@ -48,7 +48,7 @@ function newMasterActions(env: InstallEnv, store: KeyStore): Action[] {
   const master = randomBytes(32).toString('hex')
   const epoch = epochAt(env.now())
   const dir = subKeyDir(env.dataDir)
-  if (listSubKeyEpochs(env.dataDir).length > 0) env.out('hmac keys: hmac.d holds sub-keys but the Keychain has no master; refs from those epochs cannot be rebuilt after this')
+  if (listSubKeyEpochs(env.dataDir).length > 0) env.out(`hmac keys: hmac.d holds sub-keys but ${store.place} has no master; refs from those epochs cannot be rebuilt after this`)
   return [
     secretSetAction(store, HMAC_MASTER_REF, master),
     ...(existsSync(dir) ? [] : [{ kind: 'mkdir', path: dir, mode: DATA_DIR_MODE } as const]),
@@ -60,7 +60,7 @@ function legacyActions(store: KeyStore, path: string, backup: string): Action[] 
   return [
     secretSetAction(store, HMAC_LEGACY_REF, legacyKeyValue(path)),
     { kind: 'backup', from: path, to: backup },
-    { kind: 'remove', path, summary: `the plain-text marker key; its value is now keychain entry ${HMAC_LEGACY_REF} (epoch 0)` },
+    { kind: 'remove', path, summary: `the plain-text marker key; its value is now ${store.label} entry ${HMAC_LEGACY_REF} (epoch 0)` },
   ]
 }
 
@@ -69,25 +69,24 @@ export function hmacMigrationActions(env: InstallEnv): HmacMigration {
   const store = keyStoreOf(env)
   const legacyPath = join(env.dataDir, HMAC_KEY_FILE)
   if (store === null) {
-    env.out(`hmac keys: no keychain on ${env.platform}; the marker key stays in ${legacyPath}`)
+    env.out(`hmac keys: no ${noStoreWord(env)} on ${env.platform}; the marker key stays in ${legacyPath}`)
     return { actions: [], restartDaemon: false, cleanup: [] }
   }
   const hasMaster = store.exists(HMAC_MASTER_REF)
   const backup = existsSync(legacyPath) ? `${legacyPath}${BACKUP_INFIX}${backupStamp(env.now())}` : null
   const legacy = backup !== null ? legacyActions(store, legacyPath, backup) : []
   const master = hasMaster ? [] : newMasterActions(env, store)
-  if (hasMaster && legacy.length === 0) env.out('hmac keys: master in keychain, no hmac.key; nothing to migrate')
+  if (hasMaster && legacy.length === 0) env.out(`hmac keys: master in ${store.label}, no hmac.key; nothing to migrate`)
   // The legacy put first, then the master and its sub-key, then the backup and the removal.
   const actions = [...legacy.slice(0, 1), ...master, ...legacy.slice(1)]
   return { actions, restartDaemon: master.length > 0, cleanup: hmacBackupRemovals(env, backup) }
 }
 
-function presence(env: InstallEnv, ref: string): string {
-  const read = readKeyStore(env)
-  if (!read.ok) return 'unknown (the key store is unknown)'
-  if (read.store === null) return 'none'
+function presence(env: InstallEnv, store: KeyStoreRead, ref: string): string {
+  if (!store.ok) return 'unknown (the key store is unknown)'
+  if (store.store === null) return 'none'
   try {
-    return read.store.exists(ref) ? 'present' : 'missing'
+    return store.store.exists(ref) ? 'present' : 'missing'
   } catch (error: unknown) {
     return `unknown (${errorMessage(error)})`
   }
@@ -97,14 +96,21 @@ function presence(env: InstallEnv, ref: string): string {
 export function hmacStatusLines(env: InstallEnv): string[] {
   const legacyPath = join(env.dataDir, HMAC_KEY_FILE)
   const epochs = listSubKeyEpochs(env.dataDir)
-  const master = presence(env, HMAC_MASTER_REF)
-  const mode = master === 'present' ? 'keychain master' : existsSync(legacyPath) ? 'hmac.key file (run kinfold install to move it to the keychain)' : 'none yet'
+  const read = readKeyStore(env)
+  const label = read.ok && read.store !== null ? read.store.label : noStoreWord(env)
+  const master = presence(env, read, HMAC_MASTER_REF)
+  const mode = master === 'present' ? `${label} master` : existsSync(legacyPath) ? `hmac.key file (run kinfold install to move it to the ${label})` : 'none yet'
   return [
-    `hmac keys: ${mode}; keychain ${HMAC_MASTER_REF} ${master}, ${HMAC_LEGACY_REF} ${presence(env, HMAC_LEGACY_REF)}`,
+    `hmac keys: ${mode}; ${label} ${HMAC_MASTER_REF} ${master}, ${HMAC_LEGACY_REF} ${presence(env, read, HMAC_LEGACY_REF)}`,
     `  sub-keys in ${subKeyDir(env.dataDir)}: ${epochs.length > 0 ? `epochs ${epochs.join(', ')}` : 'none'}`,
     ...(master === 'present' && existsSync(legacyPath) ? [`  warning: ${legacyPath} still exists; run kinfold install to finish the migration`] : []),
     ...existingBackups(legacyPath).map((path) => `  warning: plain-text key backup ${path}; delete it once you no longer need to roll back (rm ${path})`),
   ]
+}
+
+function keptHmacNote(store: KeyStore, ref: string): string {
+  if (store.kind === 'keychain') return `kept keychain entry ${ref} (marker refs in the data dir need it); remove it with: security delete-generic-password -s ${KEYCHAIN_SERVICE} -a ${ref}  (or rerun with --remove-hmac-keys)`
+  return `kept ${store.describeEntry(ref)} (marker refs in the data dir need it); rerun with --remove-hmac-keys to remove it`
 }
 
 /** `kinfold uninstall` keeps the HMAC entries unless --remove-hmac-keys: without them stored refs can never be checked again. */
@@ -114,5 +120,5 @@ export function hmacKeptNotes(env: InstallEnv): string[] {
   const store = read.store
   return [HMAC_MASTER_REF, HMAC_LEGACY_REF]
     .filter((ref) => store.exists(ref))
-    .map((ref) => `kept keychain entry ${ref} (marker refs in the data dir need it); remove it with: security delete-generic-password -s ${KEYCHAIN_SERVICE} -a ${ref}  (or rerun with --remove-hmac-keys)`)
+    .map((ref) => keptHmacNote(store, ref))
 }
