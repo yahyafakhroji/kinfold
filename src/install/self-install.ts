@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readEnv } from '../env-names'
 import { fsyncDirectory } from '../fs/atomic'
+import { compareVersions, parseVersion } from '../update/version-order'
 import { VERSION } from '../version'
 import type { InstallEnv } from './env'
 import type { Action } from './plan'
@@ -211,6 +212,21 @@ export async function checkProgram(env: InstallEnv, options: ProgramCheckOptions
   return { sourceHash, assetName, expectedSha256: expected, check: true }
 }
 
+const INSTALLED_VERSION_TIMEOUT_MS = 5_000
+
+/** What the installed program says its version is; null when it does not answer with one. */
+async function installedVersion(env: InstallEnv, binPath: string): Promise<string | null> {
+  if (!existsSync(binPath)) return null
+  try {
+    const result = await env.run({ argv: [binPath, '--version'], timeoutMs: INSTALLED_VERSION_TIMEOUT_MS })
+    if (result.exitCode !== 0 || result.timedOut === true) return null
+    const text = result.stdout.trim()
+    return parseVersion(text) === null ? null : text
+  } catch {
+    return null
+  }
+}
+
 /**
  * The install-program step, in program mode only. The check passed in was taken
  * before the plan was built, so a mismatch has already stopped the install with
@@ -223,6 +239,14 @@ export async function programInstallActions(env: InstallEnv, options: ProgramIns
   const destination = env.mode.binPath
   const expected = check.expectedSha256 ?? check.sourceHash
   if (!(await differs(destination, expected))) return { actions: [] }
+  // npx and bunx reuse a cached package, so the running program can be older
+  // than one kinfold update put in place; copying it would be a downgrade.
+  const running = options.version ?? VERSION
+  const installed = await installedVersion(env, destination)
+  if (installed !== null && parseVersion(running) !== null && compareVersions(installed, running) > 0) {
+    env.out(`program: ${destination} is ${installed}, newer than this one (${running}); kept it. Run npx kinfold@latest to use the newest`)
+    return { actions: [] }
+  }
   return {
     actions: [{ kind: 'install-program', from: options.source, to: destination, assetName: check.assetName, expectedSha256: check.expectedSha256, check: check.check }],
   }

@@ -5,11 +5,11 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { newDbKey } from '../sqlite/keys'
 import { checkHealth, readDaemonInfo } from './daemon-client'
-import { installPaths } from './env'
+import { type CommandResult, installPaths } from './env'
 import { installedProgramPath } from './entry'
 import { EXIT_OK, install } from './install'
 import { LAUNCHCTL } from './launch-agent'
-import { parseSha256Sums, releaseAssetName, releaseSumsUrl, verifyProgram } from './self-install'
+import { parseSha256Sums, programInstallActions, releaseAssetName, releaseSumsUrl, verifyProgram } from './self-install'
 import { type FakeWorld, YES, createWorld, fakeService, snapshotTree, startWorldDaemon } from './test-support'
 import { uninstall } from './uninstall'
 
@@ -378,4 +378,56 @@ test('uninstall removes the program and library folders and keeps the rest of th
   expect(existsSync(join(w.dataDir, 'lib'))).toBe(false)
   expect(existsSync(w.dataDir)).toBe(true)
   expect(existsSync(join(w.dataDir, 'logs', 'daemon.log'))).toBe(true)
+})
+
+// A release candidate that is not a development build, so the version comparison applies.
+const RUNNING = '0.2.0-rc.1'
+
+/** A program world whose installed program answers `--version` with `answer`, and the plan for installing `source` over it. */
+async function planOver(answer: CommandResult): Promise<{ w: FakeWorld; binPath: string; source: string; actions: string[] }> {
+  const { w, binPath, source } = programWorld()
+  mkdirSync(join(w.dataDir, 'bin'), { recursive: true, mode: 0o700 })
+  writeFileSync(binPath, 'installed program\n', { mode: 0o755 })
+  const run = w.env.run
+  w.env = { ...w.env, run: async (request) => (request.argv[0] === binPath ? (w.commands.push(request), answer) : run(request)) }
+  const sourceHash = sha(readFileSync(source))
+  const check = { sourceHash, assetName: ASSET, expectedSha256: sourceHash, check: true }
+  const plan = await programInstallActions(w.env, { source, dryRun: false, version: RUNNING, check })
+  return { w, binPath, source, actions: plan.actions.map((action) => action.kind) }
+}
+
+test('an installed program newer than the running one is kept, said in one line', async () => {
+  const { w, binPath, actions } = await planOver({ exitCode: 0, stdout: '0.3.0\n' })
+  expect(actions).toEqual([])
+  expect(w.out).toEqual([`program: ${binPath} is 0.3.0, newer than this one (${RUNNING}); kept it. Run npx kinfold@latest to use the newest`])
+  const version = w.commands.filter((c) => c.argv[0] === binPath)
+  expect(version.map((c) => c.argv)).toEqual([[binPath, '--version']])
+  expect(version[0]?.timeoutMs).toBeGreaterThan(0)
+})
+
+for (const [name, answer] of [
+  ['older', { exitCode: 0, stdout: '0.1.0\n' }],
+  ['equal', { exitCode: 0, stdout: `${RUNNING}\n` }],
+  ['unreadable', { exitCode: 0, stdout: 'kinfold, some version\n' }],
+  ['failed', { exitCode: 1, stdout: '0.3.0\n' }],
+  ['timed out', { exitCode: 143, stdout: '0.3.0\n', timedOut: true }],
+  ['not found', { exitCode: 127, stdout: '' }],
+] as const) {
+  test(`an installed program whose version is ${name} is replaced as before`, async () => {
+    const { w, actions } = await planOver(answer)
+    expect(actions).toEqual(['install-program'])
+    expect(w.out.join('\n')).not.toContain('kept it')
+  })
+}
+
+test('a kept newer program leaves the rest of the install to run, pointed at it', async () => {
+  const { w, binPath, source } = programWorld()
+  mkdirSync(join(w.dataDir, 'bin'), { recursive: true, mode: 0o700 })
+  writeFileSync(binPath, 'installed program\n', { mode: 0o755 })
+  const run = w.env.run
+  w.env = { ...w.env, run: async (request) => (request.argv[0] === binPath ? { exitCode: 0, stdout: '9.0.0\n' } : run(request)) }
+  expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
+  expect(readFileSync(binPath, 'utf8')).toBe('installed program\n')
+  expect(w.out.join('\n')).toContain('newer than this one (0.0.0-dev); kept it')
+  expect(w.out).toContain(`installed. Check it with: ${binPath} status`)
 })
