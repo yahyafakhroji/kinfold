@@ -10,6 +10,7 @@
 import { randomBytes } from 'node:crypto'
 import { envName, readEnv } from '../env-names'
 import { LEGACY_KEYCHAIN_SERVICE } from '../names'
+import { currentPlatform, osOf } from '../platform/platform'
 import { type CredentialProvider, DB_KEY_REF } from '../secrets/credentials'
 import { isHexKey } from '../secrets/hmac-keys'
 import { ITEM_NOT_FOUND_EXIT, type SecurityResult, createKeychainProvider, runSecurity } from '../secrets/keychain'
@@ -54,9 +55,9 @@ function keychainHasEntry(result: SecurityResult): boolean {
 }
 
 /** The store for this platform: the Keychain on macOS, none elsewhere until E4, none when KINFOLD_DB_KEYSTORE=none. */
-export function platformDbKeyStore(env: Readonly<Record<string, string | undefined>> = process.env, platform: string = process.platform): DbKeyStore {
+export function platformDbKeyStore(env: Readonly<Record<string, string | undefined>> = process.env, platform: string = currentPlatform().node): DbKeyStore {
   if (readEnv(env, 'DB_KEYSTORE') === 'none' && env.NODE_ENV === 'test') return NO_DB_KEYS
-  if (platform !== 'darwin') return NO_DB_KEYS
+  if (osOf(platform) !== 'macos') return NO_DB_KEYS
   return credentialDbKeyStore('keychain', createKeychainProvider(), () => keychainHasEntry(runSecurity(existsArgs(DB_KEY_REF))) || keychainHasEntry(runSecurity(existsArgs(DB_KEY_REF, LEGACY_KEYCHAIN_SERVICE))))
 }
 

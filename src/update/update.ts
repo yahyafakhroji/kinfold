@@ -11,7 +11,7 @@
 import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { envName } from '../env-names'
-import type { InstallEnv } from '../install/env'
+import { type InstallEnv, platformOf } from '../install/env'
 import { serviceOf } from '../install/service/control'
 import { installedProgramPath } from '../install/entry'
 import { restartService } from '../install/install'
@@ -68,7 +68,7 @@ function binDir(env: InstallEnv): string {
 }
 
 function tempPath(env: InstallEnv): string {
-  const suffix = env.platform === 'win32' ? '.exe' : ''
+  const suffix = platformOf(env).os === 'windows' ? '.exe' : ''
   return join(binDir(env), `.kinfold-update-${process.pid}${suffix}`)
 }
 

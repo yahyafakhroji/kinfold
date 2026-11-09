@@ -244,7 +244,9 @@ export async function programInstallActions(env: InstallEnv, options: ProgramIns
   const running = options.version ?? VERSION
   const installed = await installedVersion(env, destination)
   if (installed !== null && parseVersion(running) !== null && compareVersions(installed, running) > 0) {
-    env.out(`program: ${destination} is ${installed}, newer than this one (${running}); kept it. Run npx kinfold@latest to use the newest`)
+    // npx cannot fetch a development build, so pointing one there would not get it installed.
+    if (running === DEVELOPMENT_VERSION) env.out(`program: ${destination} is ${installed}, newer than this development build; kept it. Remove ${destination} first to install this build`)
+    else env.out(`program: ${destination} is ${installed}, newer than this one (${running}); kept it. Run npx kinfold@latest to use the newest`)
     return { actions: [] }
   }
   return {

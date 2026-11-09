@@ -29,7 +29,7 @@ import { HMAC_LEGACY_REF, HMAC_MASTER_REF } from '../secrets/hmac-keys'
 import { readKeychainValue } from '../secrets/keychain'
 import { type CredentialWriter, credentialWriterFor } from '../secrets/keychain-writer'
 import { checkHealth, readDaemonInfo } from './daemon-client'
-import { type InstallEnv, errorMessage, installPaths } from './env'
+import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
 import { readJsonObject, readTextOrNull } from './files'
 import { isAgentLoaded, legacyBootoutArgv, legacyPrintArgv } from './launch-agent'
 import { hasOurMcpEntryNamed } from './mcp-config'
@@ -128,7 +128,7 @@ export function renameMigrationActions(env: InstallEnv, options: MigrationOption
   const paths = installPaths(env)
   const writer = credentialWriterFor(env.platform, env.security)
   const refs = legacyRefs(writer)
-  const plist = env.platform === 'darwin' && existsSync(paths.legacyLaunchAgentPlist)
+  const plist = platformOf(env).os === 'macos' && existsSync(paths.legacyLaunchAgentPlist)
   const move = dataDirMove(env, refs.length > 0 || plist)
   if (!plist && refs.length === 0 && move.length === 0) return []
   const waitMs = options.takeover === true ? TAKEOVER_WAIT_MS : MIGRATION_HEALTH_WAIT_MS

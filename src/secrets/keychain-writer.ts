@@ -8,6 +8,7 @@
 
 import { KEYCHAIN_SERVICE, assertCredentialRef } from './credentials'
 import { LEGACY_KEYCHAIN_SERVICE } from '../names'
+import { osOf } from '../platform/platform'
 import { ITEM_NOT_FOUND_EXIT, type SecurityResult, readKeychainValue } from './keychain'
 
 export const SECURITY_BINARY = '/usr/bin/security'
@@ -130,5 +131,5 @@ export function createKeychainWriter(run: SecurityRunner): CredentialWriter {
 
 /** macOS only; elsewhere there is no supported store, and the caller must refuse rather than fall back to a file. */
 export function credentialWriterFor(platform: NodeJS.Platform, run: SecurityRunner): CredentialWriter | null {
-  return platform === 'darwin' ? createKeychainWriter(run) : null
+  return osOf(platform) === 'macos' ? createKeychainWriter(run) : null
 }

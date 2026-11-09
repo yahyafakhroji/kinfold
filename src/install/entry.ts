@@ -12,6 +12,7 @@
 // arguments therefore never matches.
 
 import { join } from 'node:path'
+import { osOf } from '../platform/platform'
 
 export { isCompiledProgram } from '../runtime/program'
 
@@ -41,7 +42,7 @@ const CHECKOUT_SCRIPTS: Readonly<Record<EntryRole, string>> = {
 const PROGRAM_SUBCOMMANDS: readonly EntryRole[] = ['hook', 'mcp', 'daemon']
 
 export function installedProgramPath(dataDir: string, platform: string): string {
-  return join(dataDir, 'bin', platform === 'win32' ? 'kinfold.exe' : 'kinfold')
+  return join(dataDir, 'bin', osOf(platform) === 'windows' ? 'kinfold.exe' : 'kinfold')
 }
 
 export function entryCommand(mode: InstallMode, role: EntryRole, dataDir: string, host?: string): EntryCommand {

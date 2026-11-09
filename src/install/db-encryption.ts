@@ -16,7 +16,7 @@ import { foundBackupPath } from '../sqlite/convert'
 import { fileState, maintenancePath } from '../sqlite/open'
 import { DB_FILE } from '../store/data-dir'
 import { openStore } from '../store/db'
-import { type InstallEnv, errorMessage } from './env'
+import { type InstallEnv, errorMessage, platformOf } from './env'
 import { ChoiceError } from './observer-choice'
 import type { Action } from './plan'
 import type { EncryptionAnswer } from './setup/wizard'
@@ -155,7 +155,7 @@ function keyPresence(env: InstallEnv): string {
 }
 
 async function diskEncryptionLine(env: InstallEnv): Promise<string | null> {
-  if (env.platform !== 'darwin') return null
+  if (platformOf(env).os !== 'macos') return null
   const result = await env.run({ argv: [FDESETUP, 'status'], timeoutMs: 5_000 })
   if (result.exitCode !== 0) return `disk encryption: could not check (fdesetup exit ${result.exitCode})`
   if (result.stdout.includes('FileVault is On')) return 'disk encryption: FileVault on'

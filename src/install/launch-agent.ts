@@ -10,7 +10,7 @@ import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { DEFAULT_PORT } from '../daemon/daemon'
 import { envName } from '../env-names'
 import { LEGACY_LAUNCH_AGENT_LABEL } from '../names'
-import { type InstallEnv, LAUNCH_AGENT_LABEL, installPaths } from './env'
+import { type InstallEnv, LAUNCH_AGENT_LABEL, installPaths, platformOf } from './env'
 import { entryCommand } from './entry'
 
 /** 0o077 as launchd's decimal Umask key. */
@@ -118,7 +118,7 @@ export function legacyBootoutArgv(uid: number): string[] {
 
 /** `launchctl print` is read-only; exit 0 means launchd knows the service. */
 export async function isAgentLoaded(env: InstallEnv, argv: readonly string[] = printArgv(env.uid)): Promise<boolean> {
-  if (env.platform !== 'darwin') return false
+  if (platformOf(env).os !== 'macos') return false
   try {
     return (await env.run({ argv, timeoutMs: 5_000 })).exitCode === 0
   } catch {

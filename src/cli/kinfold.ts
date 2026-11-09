@@ -17,6 +17,7 @@ import type { Parsed } from '../context/types'
 import { envName, readEnv } from '../env-names'
 import type { InstallEnv } from '../install/env'
 import type { InstallMode } from '../install/entry'
+import { currentPlatform, osOf } from '../platform/platform'
 import { DAEMON_INFO_FILE, DB_FILE, resolveDataDir, resolveInstallDataDir } from '../store/data-dir'
 import { VERSION } from '../version'
 
@@ -219,7 +220,7 @@ async function withDataDir(dataDir: string | null, run: () => Promise<void>): Pr
  * not load the installer.
  */
 export function envForDataDir(env: InstallEnv, dataDir: string): InstallEnv {
-  const mode: InstallMode = env.mode.kind === 'program' ? { kind: 'program', binPath: join(dataDir, 'bin', env.platform === 'win32' ? 'kinfold.exe' : 'kinfold') } : env.mode
+  const mode: InstallMode = env.mode.kind === 'program' ? { kind: 'program', binPath: join(dataDir, 'bin', osOf(env.platform) === 'windows' ? 'kinfold.exe' : 'kinfold') } : env.mode
   return { ...env, dataDir, mode, unflaggedDataDir: env.unflaggedDataDir ?? env.dataDir }
 }
 
@@ -281,6 +282,7 @@ async function systemEnv(args: readonly string[], configuredDataDir: string | nu
     import('../install/prompt/terminal'),
   ])
   const homeDir = homedir()
+  const platform = currentPlatform()
   const program = { compiled: isCompiledProgram(), execPath: process.execPath }
   const dataDir = dataDirForCommand(args[0], configuredDataDir, process.env, homeDir, program)
   const unflaggedDataDir = dataDirForCommand(args[0], null, process.env, homeDir, program)
@@ -290,13 +292,14 @@ async function systemEnv(args: readonly string[], configuredDataDir: string | nu
   // folder, not to where this copy happens to run; a checkout run keeps
   // pointing bun at the checkout's scripts.
   const mode: InstallMode = isCompiledProgram()
-    ? { kind: 'program', binPath: installedProgramPath(dataDir, process.platform) }
+    ? { kind: 'program', binPath: installedProgramPath(dataDir, platform.node) }
     : { kind: 'checkout', bunPath: process.execPath, projectRoot }
   return {
     homeDir,
     dataDir,
     unflaggedDataDir,
-    platform: process.platform,
+    platform: platform.node,
+    wsl: platform.wsl,
     mode,
     projectRoot,
     cwd: process.cwd(),

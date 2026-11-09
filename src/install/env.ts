@@ -17,6 +17,7 @@ import type { ServiceControl } from './service/control'
 import type { BuildInput } from '../sqlite/build'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
 import type { ObserverRunner, ObserverSettings } from '../observer/types'
+import { type PlatformInfo, requireOs } from '../platform/platform'
 
 export interface CommandRequest {
   argv: readonly string[]
@@ -55,6 +56,8 @@ export interface InstallEnv {
   /** The folder this run would use without --data-dir; the installed one is looked for there too, since --data-dir replaces dataDir. */
   unflaggedDataDir?: string
   platform: NodeJS.Platform
+  /** Linux under WSL; read through platformOf, which ignores it on other OSes. */
+  wsl?: boolean
   /** The checkout or installed program every host entry runs (entry.ts). */
   mode: InstallMode
   /** The checkout whose src/ the plugin shim and legacy paths use; program installs keep it for those developer paths. */
@@ -153,6 +156,12 @@ export function installPaths(env: Pick<InstallEnv, 'homeDir' | 'dataDir' | 'proj
     hostVersionsFile: join(env.dataDir, HOST_VERSIONS_FILE),
     legacyDataDir: join(env.homeDir, LEGACY_DATA_DIR_NAME),
   }
+}
+
+/** The platform this env describes; WSL counts only on Linux. */
+export function platformOf(env: Pick<InstallEnv, 'platform' | 'wsl'>): PlatformInfo {
+  const os = requireOs(env.platform)
+  return { os, wsl: os === 'linux' && env.wsl === true, node: env.platform }
 }
 
 export function errorMessage(error: unknown): string {

@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
+import { currentPlatform, osOf } from '../platform/platform'
 import { AMALGAMATION_MEMBERS, MAX_SQLITE3MC_ZIP_BYTES, SQLITE3MC_DEFINES, SQLITE3MC_ZIP_SHA256 } from './release'
 
 export const MAX_MEMBER_BYTES = 40_000_000
@@ -80,18 +81,19 @@ function readMembers(zip: Uint8Array, names: readonly string[]): Map<string, Uin
 /** The compiler command for this platform, or null on a platform Kinfold does not build for. */
 export function compileCommand(platform: string, source: string, output: string, cc: string): string[] | null {
   const common = ['-O2', '-fPIC', ...SQLITE3MC_DEFINES, '-o', output, source, '-lm']
-  if (platform === 'darwin') return [cc, '-dynamiclib', ...common]
-  if (platform === 'linux') return [cc, '-shared', '-Wl,-Bsymbolic', ...common, '-lpthread']
+  const os = osOf(platform)
+  if (os === 'macos') return [cc, '-dynamiclib', ...common]
+  if (os === 'linux') return [cc, '-shared', '-Wl,-Bsymbolic', ...common, '-lpthread']
   // Windows has no -fPIC or -lm, and MinGW gcc links a DLL that exports every global
   // symbol; MSVC would need a .def file to export the SQLite API. libgcc is linked
   // statically so the DLL does not depend on the MinGW runtime being installed.
-  if (platform === 'win32') return [cc, '-shared', '-O2', ...SQLITE3MC_DEFINES, '-o', output, source, '-static-libgcc']
+  if (os === 'windows') return [cc, '-shared', '-O2', ...SQLITE3MC_DEFINES, '-o', output, source, '-static-libgcc']
   return null
 }
 
 /** The C compiler assumed when the caller names none. */
 export function defaultCompiler(platform: string): string {
-  return platform === 'win32' ? 'gcc' : 'cc'
+  return osOf(platform) === 'windows' ? 'gcc' : 'cc'
 }
 
 /** Runs the compiler in `cwd`; a compiler that cannot be started or exits nonzero throws a BuildError. */
@@ -124,7 +126,7 @@ export function buildSqlite3mc(input: BuildInput): string {
   mkdirSync(input.workDir, { recursive: true, mode: 0o700 })
   if (readdirSync(input.workDir).length > 0) throw new BuildError('build directory is not empty')
   for (const [name, bytes] of zipMembers(input.zip, AMALGAMATION_MEMBERS)) writeFileSync(join(input.workDir, name), bytes, { mode: 0o600 })
-  const platform = input.platform ?? process.platform
+  const platform = input.platform ?? currentPlatform().node
   const command = compileCommand(platform, join(input.workDir, 'sqlite3mc_amalgamation.c'), input.output, input.cc ?? defaultCompiler(platform))
   if (command === null) throw new BuildError(`no local sqlite3mc build for ${platform}`)
   runCompiler(command, input.workDir)

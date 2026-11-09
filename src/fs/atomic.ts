@@ -5,6 +5,7 @@
 
 import { chmodSync, closeSync, fsyncSync, openSync, renameSync, rmSync, writeSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { currentPlatform, osOf } from '../platform/platform'
 
 export interface DirSyncOptions {
   /** Default: this process's. Windows cannot open a folder for fsync, so nothing is done there. */
@@ -20,7 +21,7 @@ export interface AtomicWriteOptions extends DirSyncOptions {
 
 /** Makes a rename in `dir` durable; the file's own fsync covers only its bytes, not the folder entry. */
 export function fsyncDirectory(dir: string, options: DirSyncOptions = {}): void {
-  if ((options.platform ?? process.platform) === 'win32') return
+  if (osOf(options.platform ?? currentPlatform().node) === 'windows') return
   const fd = openSync(dir, 'r')
   try {
     ;(options.fsyncDir ?? fsyncSync)(fd)

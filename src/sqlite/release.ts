@@ -3,6 +3,8 @@
 // the pin covers the source, and the built library's own hash is recorded
 // next to it.
 
+import { type OsName, osOf } from '../platform/platform'
+
 export const SQLITE3MC_VERSION = '2.6.1'
 export const SQLITE3MC_SQLITE_VERSION = '3.54.0'
 export const SQLITE3MC_ZIP_NAME = `sqlite3mc-${SQLITE3MC_VERSION}-sqlite-${SQLITE3MC_SQLITE_VERSION}-amalgamation.zip`
@@ -28,10 +30,10 @@ export const SQLITE3MC_DEFINES = [
   '-DSQLITE_USE_URI=1',
 ] as const
 
+const LIBRARY_EXTENSIONS: Readonly<Record<OsName, string>> = { macos: 'dylib', linux: 'so', windows: 'dll' }
+
 /** The shared-library extension on this platform, or null where there is no build yet. */
 export function sqlite3mcLibraryExtension(platform: string): string | null {
-  if (platform === 'darwin') return 'dylib'
-  if (platform === 'linux') return 'so'
-  if (platform === 'win32') return 'dll'
-  return null
+  const os = osOf(platform)
+  return os === null ? null : LIBRARY_EXTENSIONS[os]
 }

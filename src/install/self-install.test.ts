@@ -384,7 +384,7 @@ test('uninstall removes the program and library folders and keeps the rest of th
 const RUNNING = '0.2.0-rc.1'
 
 /** A program world whose installed program answers `--version` with `answer`, and the plan for installing `source` over it. */
-async function planOver(answer: CommandResult): Promise<{ w: FakeWorld; binPath: string; source: string; actions: string[] }> {
+async function planOver(answer: CommandResult, version: string = RUNNING): Promise<{ w: FakeWorld; binPath: string; source: string; actions: string[] }> {
   const { w, binPath, source } = programWorld()
   mkdirSync(join(w.dataDir, 'bin'), { recursive: true, mode: 0o700 })
   writeFileSync(binPath, 'installed program\n', { mode: 0o755 })
@@ -392,7 +392,7 @@ async function planOver(answer: CommandResult): Promise<{ w: FakeWorld; binPath:
   w.env = { ...w.env, run: async (request) => (request.argv[0] === binPath ? (w.commands.push(request), answer) : run(request)) }
   const sourceHash = sha(readFileSync(source))
   const check = { sourceHash, assetName: ASSET, expectedSha256: sourceHash, check: true }
-  const plan = await programInstallActions(w.env, { source, dryRun: false, version: RUNNING, check })
+  const plan = await programInstallActions(w.env, { source, dryRun: false, version, check })
   return { w, binPath, source, actions: plan.actions.map((action) => action.kind) }
 }
 
@@ -403,6 +403,13 @@ test('an installed program newer than the running one is kept, said in one line'
   const version = w.commands.filter((c) => c.argv[0] === binPath)
   expect(version.map((c) => c.argv)).toEqual([[binPath, '--version']])
   expect(version[0]?.timeoutMs).toBeGreaterThan(0)
+})
+
+test('a development build is told how to replace a newer program', async () => {
+  const { w, binPath, actions } = await planOver({ exitCode: 0, stdout: '0.3.0\n' }, '0.0.0-dev')
+  expect(actions).toEqual([])
+  expect(w.out).toEqual([`program: ${binPath} is 0.3.0, newer than this development build; kept it. Remove ${binPath} first to install this build`])
+  expect(w.out.some((line) => line.includes('npx kinfold@latest'))).toBe(false)
 })
 
 for (const [name, answer] of [
@@ -428,6 +435,6 @@ test('a kept newer program leaves the rest of the install to run, pointed at it'
   w.env = { ...w.env, run: async (request) => (request.argv[0] === binPath ? { exitCode: 0, stdout: '9.0.0\n' } : run(request)) }
   expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
   expect(readFileSync(binPath, 'utf8')).toBe('installed program\n')
-  expect(w.out.join('\n')).toContain('newer than this one (0.0.0-dev); kept it')
+  expect(w.out.join('\n')).toContain('newer than this development build; kept it')
   expect(w.out).toContain(`installed. Check it with: ${binPath} status`)
 })

@@ -2,7 +2,7 @@
 // Everything platform-specific (launchctl, lsof, the plist) lives behind this
 // interface, so the encrypt and update flows never name an OS tool.
 
-import type { InstallEnv } from '../env'
+import { type InstallEnv, platformOf } from '../env'
 import { LaunchAgentService } from './launch-agent-service'
 
 export interface ServiceControl {
@@ -26,7 +26,7 @@ export interface ServiceControl {
 
 /** The service for this platform; null where none exists yet. */
 export function serviceFor(env: InstallEnv): ServiceControl | null {
-  return env.platform === 'darwin' ? new LaunchAgentService(env) : null
+  return platformOf(env).os === 'macos' ? new LaunchAgentService(env) : null
 }
 
 /** The injected service, else this platform's. An injected null means "no service". */

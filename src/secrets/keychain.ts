@@ -7,6 +7,7 @@
 
 import { readEnv } from '../env-names'
 import { LEGACY_KEYCHAIN_SERVICE } from '../names'
+import { currentPlatform, osOf } from '../platform/platform'
 import { type CredentialProvider, KEYCHAIN_SERVICE, NO_CREDENTIALS, assertCredentialRef } from './credentials'
 
 export interface SecurityResult {
@@ -58,10 +59,10 @@ export function createKeychainProvider(run: SecurityCommand = runSecurity): Cred
  * off too, as it does the database key store, so a test never reads the real one.
  */
 export function platformCredentialProvider(
-  platform: NodeJS.Platform = process.platform,
+  platform: NodeJS.Platform = currentPlatform().node,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): CredentialProvider {
-  if (platform !== 'darwin') return NO_CREDENTIALS
+  if (osOf(platform) !== 'macos') return NO_CREDENTIALS
   if (readEnv(env, 'DB_KEYSTORE') === 'none' && env.NODE_ENV === 'test') return NO_CREDENTIALS
   return createKeychainProvider()
 }

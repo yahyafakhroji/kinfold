@@ -4,6 +4,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { readEnv } from '../env-names'
+import { currentPlatform } from '../platform/platform'
 import { openWithLibrary } from './driver'
 import { SQLITE3MC_LIB_ENV } from './library'
 import { sqlite3mcLibraryExtension } from './release'
@@ -14,7 +15,7 @@ export const TEST_LIBRARY_DIR = join(import.meta.dir, '..', '..', '.cache', 'sql
 export function testLibraryPath(): string {
   const override = readEnv(process.env, 'SQLITE3MC_LIB')
   if (override !== undefined && override !== '') return override
-  const path = join(TEST_LIBRARY_DIR, `libsqlite3mc.${sqlite3mcLibraryExtension(process.platform) ?? 'missing'}`)
+  const path = join(TEST_LIBRARY_DIR, `libsqlite3mc.${sqlite3mcLibraryExtension(currentPlatform().node) ?? 'missing'}`)
   if (!existsSync(path)) throw new Error(`no sqlite3mc build at ${path}; run: bun tools/build-sqlite3mc.ts`)
   return path
 }

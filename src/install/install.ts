@@ -20,7 +20,7 @@ import { type Health, checkHealth, getObserverSettings, readDaemonInfo, waitForS
 import { setupDbKeyActions } from './db-encryption'
 import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from './detect'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
-import { type InstallEnv, errorMessage, installPaths } from './env'
+import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
 import { entryCommand } from './entry'
 import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import { bootoutArgv, bootstrapArgv, isAgentLoaded, legacyPrintArgv, plistContent } from './launch-agent'
@@ -161,7 +161,7 @@ function daemonCommandLine(env: InstallEnv): string {
  * a bare health wait would only report the failure.
  */
 function launchAgentActions(env: InstallEnv, situation: DaemonSituation, takeover: boolean, restart: boolean, port: number): Action[] {
-  if (env.platform !== 'darwin') {
+  if (platformOf(env).os !== 'macos') {
     const portEnv = port === DEFAULT_PORT ? '' : `${envName('PORT')}=${port} `
     env.out(`LaunchAgent: macOS only; start the daemon yourself with: ${portEnv}${daemonCommandLine(env)}`)
     return [{ kind: 'wait-health' }]
@@ -291,7 +291,7 @@ export async function buildPlan(
   })
   // The running service starts the program being replaced, so it stops before
   // the copy and the LaunchAgent step below starts it again from the new file.
-  const stopped = program.actions.length > 0 && env.platform === 'darwin' && situation.loaded
+  const stopped = program.actions.length > 0 && platformOf(env).os === 'macos' && situation.loaded
   const plannedSituation = stopped ? { ...situation, loaded: false } : situation
   return {
     actions: [
