@@ -117,12 +117,16 @@ test('an event spooled while the daemon was down lands on the next start', async
   expect(body.sessions.map((session) => session.hostSessionId)).toEqual([sessionId])
 })
 
-test('a /read/ path answers 404 until read routes exist', async () => {
-  expect((await fetch(url('/read/search'), authed({ method: 'POST', body: '{}' }))).status).toBe(404)
+test('a /read/ path answers 404 when no read route takes it, and the route answer otherwise', async () => {
+  // Mocked both ways, so the test holds whatever the real read routes answer.
   const real = { ...readRoutes }
+  const declined = mock(async () => null)
   const stub = mock(async () => ({ status: 200, body: { from: 'read-route' } }))
-  mock.module('./read-routes', () => ({ ...real, readRoute: stub }))
+  mock.module('./read-routes', () => ({ ...real, readRoute: declined }))
   try {
+    expect((await fetch(url('/read/search'), authed({ method: 'POST', body: '{}' }))).status).toBe(404)
+    expect(declined).toHaveBeenCalledTimes(1)
+    mock.module('./read-routes', () => ({ ...real, readRoute: stub }))
     expect((await fetch(url('/read/search'), { method: 'POST', body: '{}' })).status).toBe(401)
     expect(stub).not.toHaveBeenCalled()
     const answer = await fetch(url('/read/search'), authed({ method: 'POST', body: '{}' }))
