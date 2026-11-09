@@ -194,7 +194,10 @@ function manualStartReason(service: ServiceControl | null): string | null {
 export function serviceActions(env: InstallEnv, service: ServiceControl | null, situation: DaemonSituation, takeover: boolean, restart: boolean, port: number): Action[] {
   const reason = manualStartReason(service)
   if (service === null || reason !== null) {
-    env.out(manualStartLine(env, service?.label ?? 'service', reason ?? '', port))
+    const label = service?.label ?? 'service'
+    env.out(manualStartLine(env, label, reason ?? '', port))
+    // A daemon someone started by hand keeps the old key or library until they restart it.
+    if (restart && situation.health.up) env.out(`${label}: restart the daemon you started so it picks up the new key or library`)
     return []
   }
   const path = service.configPath()

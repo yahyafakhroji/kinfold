@@ -10,7 +10,7 @@ import { LaunchAgentService } from './service/launch-agent-service'
 import { StubService } from './service/stub-service'
 import { entryCommand } from './entry'
 import { shimContent } from './opencode-shim'
-import { BUN, type FakeWorld, UID, YES, countingService, createWorld, startWorldDaemon } from './test-support'
+import { BUN, type FakeWorld, UID, YES, countingService, createWorld, recordingKeyStore, startWorldDaemon } from './test-support'
 import { DEFAULT_PORT } from '../daemon/daemon'
 import { NO_DB_KEYS } from '../sqlite/keys'
 import { openStore } from '../store/db'
@@ -295,6 +295,27 @@ test('with an unavailable service a running daemon still gets the settings', asy
   } finally {
     await daemon.stop()
   }
+})
+
+const RESTART_LINE = 'test service: restart the daemon you started so it picks up the new key or library'
+
+test('with an unavailable service, a new HMAC master tells the user to restart the daemon they started', async () => {
+  const { w, service } = stubWorld()
+  w.env = { ...w.env, keyStore: recordingKeyStore() }
+  openStore(w.dataDir, { keys: NO_DB_KEYS }).db.close()
+  const daemon = startWorldDaemon(w, w.dataDir)
+  try {
+    expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+    expect(planLines(w).some((line) => line.includes('hmac-master'))).toBe(true)
+    expect(w.out).toContain(RESTART_LINE)
+    expect(service.steps).toEqual([])
+  } finally {
+    await daemon.stop()
+  }
+  // With nothing running there is nothing to restart.
+  w.out.length = 0
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  expect(w.out).not.toContain(RESTART_LINE)
 })
 
 interface WslCalls {
