@@ -107,8 +107,12 @@ function main() {
   const argv = process.argv.slice(2)
   // `npx kinfold` with no subcommand opens the installer.
   const args = argv.length === 0 ? ['install'] : argv
-  // The program records how it was installed; Bun runs this launcher for bunx and Node for npx.
-  const channel = process.versions.bun !== undefined ? 'bunx' : 'npx'
+  // The program records how it was installed. bunx follows the `node` shebang
+  // when Node is installed, so Bun's version alone misses it; the user agent
+  // bunx gives its child says `bun/`.
+  const agent = process.env.npm_config_user_agent
+  const underBun = process.versions.bun !== undefined || (typeof agent === 'string' && agent.startsWith('bun/'))
+  const channel = underBun ? 'bunx' : 'npx'
   const result = spawnSync(program, args, { stdio: 'inherit', env: { ...process.env, KINFOLD_INSTALL_CHANNEL: channel } })
   if (result.error !== undefined) {
     process.stderr.write(`kinfold: could not run ${program}: ${result.error.message}\n`)

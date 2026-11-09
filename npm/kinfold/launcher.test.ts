@@ -81,6 +81,8 @@ async function launch(options: {
   musl?: boolean
   /** Runs as Node would: no Bun version, with the glibc report left alone. */
   node?: boolean
+  /** npm_config_user_agent for the launcher; default unset. */
+  userAgent?: string
 }): Promise<Launched> {
   const root = temp('kinfold-launcher-')
   const program = installLauncher(root)
@@ -102,6 +104,7 @@ async function launch(options: {
       KINFOLD_TEST_STDIN: join(root, 'stdin.txt'),
       KINFOLD_TEST_EXIT: String(options.exitCode ?? 0),
       KINFOLD_TEST_SIGNAL: options.signal ?? '',
+      ...(options.userAgent === undefined ? {} : { npm_config_user_agent: options.userAgent }),
     },
     stdin: options.stdin === undefined ? 'ignore' : new TextEncoder().encode(options.stdin),
     stdout: 'pipe',
@@ -155,6 +158,18 @@ shellTest('the launcher tells the program how it was installed', async () => {
   // Darwin, because a Linux run without Bun's version would be read as musl.
   const node = await launch({ platform: 'darwin', arch: 'arm64', packages: ['@kinfold/cli-darwin-arm64'], argv: ['status'], node: true })
   expect(readFileSync(`${node.argsPath}.channel`, 'utf8')).toBe('npx\n')
+})
+
+const DARWIN = { platform: 'darwin', arch: 'arm64', packages: ['@kinfold/cli-darwin-arm64'], argv: ['status'], node: true }
+
+shellTest('bunx that follows the node shebang is still bunx, by its user agent', async () => {
+  const run = await launch({ ...DARWIN, userAgent: 'bun/1.4.4 npm/? node/v22.0.0 darwin arm64' })
+  expect(readFileSync(`${run.argsPath}.channel`, 'utf8')).toBe('bunx\n')
+})
+
+shellTest('a node run with an npm user agent is npx', async () => {
+  const run = await launch({ ...DARWIN, userAgent: 'npm/10.8.0 node/v22.0.0 darwin arm64' })
+  expect(readFileSync(`${run.argsPath}.channel`, 'utf8')).toBe('npx\n')
 })
 
 shellTest('a bare launcher runs install', async () => {

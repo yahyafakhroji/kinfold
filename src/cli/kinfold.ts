@@ -204,7 +204,7 @@ async function withDataDir(dataDir: string | null, run: () => Promise<void>): Pr
  */
 export function envForDataDir(env: InstallEnv, dataDir: string): InstallEnv {
   const mode: InstallMode = env.mode.kind === 'program' ? { kind: 'program', binPath: join(dataDir, 'bin', env.platform === 'win32' ? 'kinfold.exe' : 'kinfold') } : env.mode
-  return { ...env, dataDir, mode }
+  return { ...env, dataDir, mode, unflaggedDataDir: env.unflaggedDataDir ?? env.dataDir }
 }
 
 /** What tells the program run by hand which folder it was installed into. */
@@ -265,7 +265,9 @@ async function systemEnv(args: readonly string[], configuredDataDir: string | nu
     import('../install/prompt/terminal'),
   ])
   const homeDir = homedir()
-  const dataDir = dataDirForCommand(args[0], configuredDataDir, process.env, homeDir, { compiled: isCompiledProgram(), execPath: process.execPath })
+  const program = { compiled: isCompiledProgram(), execPath: process.execPath }
+  const dataDir = dataDirForCommand(args[0], configuredDataDir, process.env, homeDir, program)
+  const unflaggedDataDir = dataDirForCommand(args[0], null, process.env, homeDir, program)
   const pathEnv = process.env.PATH ?? '/usr/bin:/bin'
   const projectRoot = resolve(import.meta.dir, '..', '..')
   // A compiled program wires hosts to the program installed in the data
@@ -277,6 +279,7 @@ async function systemEnv(args: readonly string[], configuredDataDir: string | nu
   return {
     homeDir,
     dataDir,
+    unflaggedDataDir,
     platform: process.platform,
     mode,
     projectRoot,

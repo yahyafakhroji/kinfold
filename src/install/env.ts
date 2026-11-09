@@ -52,6 +52,8 @@ export type RunnerBuilder = (settings: ObserverSettings, credentials: Credential
 export interface InstallEnv {
   homeDir: string
   dataDir: string
+  /** The folder this run would use without --data-dir; the installed one is looked for there too, since --data-dir replaces dataDir. */
+  unflaggedDataDir?: string
   platform: NodeJS.Platform
   /** The checkout or installed program every host entry runs (entry.ts). */
   mode: InstallMode

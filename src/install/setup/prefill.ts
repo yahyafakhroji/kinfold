@@ -6,6 +6,7 @@
 // deliberate: when the saved observers cannot be read, the caller is told so
 // and never gets the built-in defaults in their place.
 
+import { existsSync, realpathSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { OBSERVER_PROVIDERS } from '../../observer/types'
 import { DB_KEY_REF } from '../../secrets/credentials'
@@ -109,23 +110,36 @@ function readStoreRows(env: InstallEnv, dataDir: string): RowLike[] {
 async function savedObservers(env: InstallEnv, dataDir: string): Promise<{ map: Map<InstallHost, ObserverSettingsInput>; error: string | null }> {
   const read = await getObserverSettings(env)
   if (read.ok) return { map: toMap(read.view.rows), error: null }
-  if (fileState(join(dataDir, DB_FILE)) === 'new') return { map: new Map(), error: null }
   try {
+    if (fileState(join(dataDir, DB_FILE)) === 'new') return { map: new Map(), error: null }
     return { map: toMap(readStoreRows(env, dataDir)), error: null }
   } catch {
     return { map: new Map(), error: UNREADABLE_OBSERVERS }
   }
 }
 
+/** The installed folder: the service's, else the first candidate holding install.json; null when none does. */
+function installedFolder(env: InstallEnv, configured: string | null): { dataDir: string; record: ReturnType<typeof readInstallRecord> } | null {
+  if (configured !== null) return { dataDir: configured, record: readInstallRecord(configured) }
+  // --data-dir replaces env.dataDir, so the folder this run would have used without it is checked first.
+  for (const dir of new Set([env.unflaggedDataDir, env.dataDir])) {
+    const record = dir === undefined ? null : readInstallRecord(dir)
+    if (dir !== undefined && record !== null) return { dataDir: dir, record }
+  }
+  return null
+}
+
 export async function readSetupState(env: InstallEnv): Promise<SetupState> {
   const service = serviceOf(env)
   const configured = service !== null && service.isConfigured() ? service.configuredDataDir() : null
-  const dataDir = configured ?? env.dataDir
-  const record = readInstallRecord(dataDir)
-  const installed = configured !== null || record !== null
+  const found = installedFolder(env, configured)
+  const dataDir = found?.dataDir ?? env.dataDir
+  const record = found?.record ?? null
+  const installed = found !== null
   const at: InstallEnv = { ...env, dataDir }
   const wiredHosts = INSTALL_HOSTS.filter((host) => WIRED_STATES.includes(hostState(at, host)))
-  const observers = installed ? await savedObservers(at, dataDir) : { map: new Map<InstallHost, ObserverSettingsInput>(), error: null }
+  // Whatever `installed` says: a store with saved rows and no install.json (a pre-wizard install off macOS) must not read as empty.
+  const observers = await savedObservers(at, dataDir)
   return {
     installed,
     dataDir,
@@ -140,10 +154,16 @@ export async function readSetupState(env: InstallEnv): Promise<SetupState> {
   }
 }
 
+/** The same folder by its real path when both exist, else by its text. */
+function sameFolder(a: string, b: string): boolean {
+  const real = (path: string): string => (existsSync(path) ? realpathSync(path) : resolve(path))
+  return real(a) === real(b)
+}
+
 /** The refusal for a folder other than the installed one; null for the same folder, no request, or a first install. */
 export function lockedFolderProblem(state: SetupState, requested: string | null): string | null {
   if (!state.installed || requested === null) return null
-  if (resolve(requested) === resolve(state.dataDir)) return null
+  if (sameFolder(requested, state.dataDir)) return null
   return `the memory folder is ${state.dataDir}, not ${requested}. ${LOCKED_FOLDER_NOTE}`
 }
 

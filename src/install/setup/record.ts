@@ -55,5 +55,7 @@ export function currentChannel(env: InstallEnv, saved: InstallRecord | null): In
   if (env.mode.kind === 'checkout') return 'checkout'
   const named = readEnv(env.envVars ?? {}, 'INSTALL_CHANNEL')
   const launcher = LAUNCHER_CHANNELS.find((channel) => channel === named)
-  return launcher ?? saved?.channel ?? DEFAULT_CHANNEL
+  // A saved `checkout` belongs to the checkout run that wrote it; a program is never that.
+  const savedChannel = saved?.channel === 'checkout' ? null : saved?.channel
+  return launcher ?? savedChannel ?? DEFAULT_CHANNEL
 }

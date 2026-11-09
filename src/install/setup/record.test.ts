@@ -49,6 +49,11 @@ test('channel from the launcher env wins over the saved one', () => {
   expect(currentChannel(programEnv(world, { SAM_INSTALL_CHANNEL: 'npx' }), null)).toBe('curl')
 })
 
+test('a saved checkout channel is ignored by a program', () => {
+  world = createWorld()
+  expect(currentChannel(programEnv(world), { ...RECORD, channel: 'checkout' })).toBe('curl')
+})
+
 test('checkout mode is always checkout', () => {
   world = createWorld()
   const env = { ...world.env, envVars: { [envName('INSTALL_CHANNEL')]: 'npx' } }

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DB_KEY_REF } from '../../secrets/credentials'
 import { type DbKeyStore, NO_DB_KEYS, newDbKey } from '../../sqlite/keys'
@@ -14,6 +14,7 @@ import { hostHookInstallActions } from '../host-wiring'
 import { plistContent } from '../launch-agent'
 import { ChoiceError, chooseObservers } from '../observer-choice'
 import { runPlan } from '../plan'
+import { envForDataDir } from '../../cli/kinfold'
 import { type FakeWorld, YES, createWorld, fakeService, startWorldDaemon } from '../test-support'
 import { UNREADABLE_OBSERVERS, lockedFolderProblem, readSetupState, savedObserversForYes } from './prefill'
 import { installRecordAction } from './record'
@@ -103,6 +104,18 @@ test('observers come from the store when the daemon is down', async () => {
   expect(state.encryption).toBe('off')
 })
 
+test('saved rows with no install.json and no plist still reach --yes', async () => {
+  const w = make()
+  seedPlainStore(w, HAIKU)
+  const env: InstallEnv = { ...w.env, service: null }
+  const state = await readSetupState(env)
+  expect(state.installed).toBe(false)
+  expect(state.observers.get('opencode')).toEqual(HAIKU)
+  const [choice] = await chooseObservers(env, ['opencode'], { ...YES, saved: savedObserversForYes(state, ['opencode'], []) })
+  expect(choice?.input).toEqual(HAIKU)
+  expect(choice?.origin).toBe('saved')
+})
+
 test('an encrypted store is read through the Keychain key when the daemon is down', async () => {
   const w = make({ keychainRefs: [DB_KEY_REF] })
   await markInstalled(w)
@@ -111,9 +124,13 @@ test('an encrypted store is read through the Keychain key when the daemon is dow
   const store = openStore(w.dataDir, { keys: holding(key) })
   upsertObserverSettings(store.db, HAIKU, 1)
   store.db.close()
+  const before = readFileSync(join(w.dataDir, DB_FILE))
   const state = await readSetupState(w.env)
   expect(state.encryption).toBe('on')
   expect(state.observers.get('opencode')).toEqual(HAIKU)
+  expect(readFileSync(join(w.dataDir, DB_FILE)).equals(before)).toBe(true)
+  expect(w.out.join('\n')).not.toContain(key)
+  expect(w.securityCalls.every((call) => !call.args.includes('add-generic-password'))).toBe(true)
 })
 
 test('--yes on a re-run keeps the saved observer', async () => {
@@ -207,4 +224,18 @@ test('a different --data-dir on an installed machine is refused', async () => {
   expect(lockedFolderProblem(state, null)).toBeNull()
   const first = await readSetupState({ ...w.env, dataDir: join(w.root, 'fresh') })
   expect(lockedFolderProblem(first, '/anywhere/at/all')).toBeNull()
+})
+
+test('the lock fires when --data-dir names another folder, even with no service to name the installed one', async () => {
+  const w = make()
+  await markInstalled(w)
+  const other = join(w.root, 'elsewhere')
+  // runKinfold applies envForDataDir before install runs; there is no plist and no service here.
+  const env = envForDataDir({ ...w.env, service: null }, other)
+  expect(env.dataDir).toBe(other)
+  const state = await readSetupState(env)
+  expect(state).toMatchObject({ installed: true, dataDir: w.dataDir })
+  const problem = lockedFolderProblem(state, other)
+  expect(problem).toContain('Chosen at first install. To use another folder, uninstall and reinstall.')
+  expect(lockedFolderProblem(state, w.dataDir)).toBeNull()
 })
