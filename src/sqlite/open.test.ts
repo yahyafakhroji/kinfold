@@ -10,6 +10,7 @@ import { openStore } from '../store/db'
 import { upsertProject } from '../store/writes'
 import { DB_KEYSTORE_ENV, type DbKeyStore, NO_DB_KEYS, credentialDbKeyStore, dbKeyStoreFor, newDbKey } from './keys'
 import { fileState, openEncrypted, openStoreFile } from './open'
+import { posixOnly } from '../../test/platform-guards'
 
 let dataDir: string
 beforeEach(() => {
@@ -100,7 +101,7 @@ test('a new store with no key is refused where a real key store exists, so the k
   expect(fileState(join(dataDir, 'memory.db'))).toBe('new')
 })
 
-test('a file that cannot be read is an error, never a new store', () => {
+posixOnly('file modes')('a file that cannot be read is an error, never a new store', () => {
   const path = join(dataDir, 'locked.db')
   writeFileSync(path, 'SQLite format 3\0 and more bytes')
   chmodSync(path, 0o000)

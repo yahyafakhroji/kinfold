@@ -19,6 +19,7 @@ import { upsertObserverSettings } from '../store/observer-settings-store'
 import { hostStatusLines, status } from './status'
 import { uninstall } from './uninstall'
 import type { WslStatus } from '../wsl/entry'
+import { posixOnly } from '../../test/platform-guards'
 
 // The real hooks, put back after each swap: mock.module lasts for the whole
 // process, and other test files use the real module.
@@ -165,7 +166,7 @@ test('--observer sets one host and --yes keeps the default for the other', async
   ])
 })
 
-test('the data dir permission fix reports each path with its old and new mode', async () => {
+posixOnly('file modes')('the data dir permission fix reports each path with its old and new mode', async () => {
   const w = both({ opencodeVersion: null })
   mkdirSync(join(w.dataDir, 'spool'), { recursive: true })
   writeFileSync(join(w.dataDir, 'memory.db'), '', { mode: 0o644 })

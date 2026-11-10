@@ -14,6 +14,7 @@ import { MCP_SERVER_NAME, claudeMcpEntry, openCodeMcpEntry } from './mcp-config'
 import { mcpPaths, mcpTarget } from './mcp-wiring'
 import { pluginFileContent, shimContent } from './opencode-shim'
 import { type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
+import { posixOnly } from '../../test/platform-guards'
 
 const CLAUDE = '2.1.310 (Claude Code)'
 const OPENCODE = 'opencode v2.1.4'
@@ -226,7 +227,7 @@ test('the plist points at the program and the service restarts', async () => {
   expect((await checkHealth(w.env, readDaemonInfo(w.dataDir).port)).up).toBe(true)
 })
 
-test('the move plans no key, data folder or database action, and a real move applies none', async () => {
+posixOnly('file modes')('the move plans no key, data folder or database action, and a real move applies none', async () => {
   const move = await checkoutInstalled()
   const { w, program } = move
   useMode(move, program)
@@ -298,7 +299,7 @@ test('a checkout install afterwards moves the wiring back', async () => {
   expect(planLines(w).some((line) => line.includes('install program'))).toBe(false)
 })
 
-test('a second program install writes nothing but still checks the daemon', async () => {
+posixOnly('file modes')('a second program install writes nothing but still checks the daemon', async () => {
   const move = await checkoutInstalled()
   const { w, program, checkout } = move
   useMode(move, program)

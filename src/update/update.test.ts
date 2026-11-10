@@ -333,7 +333,7 @@ test('a file or link already at the temp name is refused, not followed or remove
   expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
 })
 
-test('a write error before the hand-off says nothing was changed', async () => {
+posixOnly('file modes')('a write error before the hand-off says nothing was changed', async () => {
   const { w, binPath, service } = updateWorld()
   chmodSync(dirname(binPath), 0o500)
   try {

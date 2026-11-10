@@ -56,7 +56,7 @@ test('before install: hosts detected but not wired, daemon down, nothing created
   expect(w.securityCalls.every((call) => !call.args.includes('-w'))).toBe(true)
 })
 
-test('after install: wired, loaded, healthy, observers with their source, modes ok', async () => {
+posixOnly('file modes')('after install: wired, loaded, healthy, observers with their source, modes ok', async () => {
   const w = make()
   expect(await install(w.env, YES)).toBe(EXIT_OK)
   w.out.length = 0
@@ -124,7 +124,7 @@ function programInstallWorld(): { w: FakeWorld; binPath: string; options: typeof
   return { w, binPath, options: { ...YES, programSource: source } }
 }
 
-test('status reports modes ok after a program install', async () => {
+posixOnly('file modes')('status reports modes ok after a program install', async () => {
   const { w, options } = programInstallWorld()
   expect(await install(w.env, options)).toBe(EXIT_OK)
   w.out.length = 0
@@ -135,7 +135,7 @@ test('status reports modes ok after a program install', async () => {
   expect(text).not.toContain('bin/kinfold 0755 -> 0600')
 })
 
-test('status shows the program-form wiring', async () => {
+posixOnly('file modes')('status shows the program-form wiring', async () => {
   const { w, binPath, options } = programInstallWorld()
   expect(await install(w.env, options)).toBe(EXIT_OK)
   w.out.length = 0
