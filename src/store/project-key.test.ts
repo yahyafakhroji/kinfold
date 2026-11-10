@@ -1,17 +1,14 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
-import { type GitRunner, GitTimeoutError, createProjectKeyResolver, gitRunnerWithTimeout, remoteSlug, resolveProjectKey } from './project-key'
+import { basename, join, posix, win32 } from 'node:path'
+import { type GitRunner, GitTimeoutError, createProjectKeyResolver, gitRunnerWithTimeout, nativeTopLevel, remoteSlug, resolveProjectKey } from './project-key'
 
 let root: string
 beforeEach(() => {
   // native expands Windows 8.3 short names (RUNNER~1), as git does.
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sam-project-')))
 })
-
-/** The top level as git prints it: forward slashes on every OS. */
-const gitTopLevel = (path: string): string => path.replace(/\\/g, '/')
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
 function git(cwd: string, ...args: string[]): void {
@@ -43,7 +40,7 @@ test.each(['https://example.com/', '/srv/git/acme/widgets.git', 'file:///srv/git
 test('a repo whose remote is a filesystem path keys on its top level', () => {
   git(root, 'init', '-q')
   git(root, 'remote', 'add', 'origin', '/srv/git/acme/widgets.git')
-  expect(resolveProjectKey(root)).toMatchObject({ key: gitTopLevel(root), kind: 'git-root' })
+  expect(resolveProjectKey(root)).toMatchObject({ key: root, kind: 'git-root' })
 })
 
 test('a git repo with a remote keys on the slug, from any subdirectory', () => {
@@ -59,7 +56,7 @@ test('a git repo without a remote keys on its top level', () => {
   git(root, 'init', '-q')
   const nested = join(root, 'pkg')
   mkdirSync(nested)
-  expect(resolveProjectKey(nested)).toMatchObject({ key: gitTopLevel(root), kind: 'git-root' })
+  expect(resolveProjectKey(nested)).toMatchObject({ key: root, kind: 'git-root' })
 })
 
 test('a directory outside git keys on the path itself', () => {
@@ -104,4 +101,22 @@ test('the resolver runs git once per cwd', () => {
   resolve('/a')
   resolve('/b')
   expect(calls).toEqual(['/a config --get remote.origin.url', '/b config --get remote.origin.url'])
+})
+
+test("git's slash-form top level and the path key of the same folder are one key, on Windows and on POSIX", () => {
+  // git prints C:/Users/me/proj on Windows; a cwd arrives as C:\Users\me\proj.
+  expect(nativeTopLevel('C:/Users/me/proj', win32.normalize)).toBe('C:\\Users\\me\\proj')
+  expect(nativeTopLevel('/home/me/proj', posix.normalize)).toBe('/home/me/proj')
+})
+
+test('a git root keys the same as the path key a git timeout falls back to', () => {
+  git(root, 'init', '-q')
+  const fromGit = resolveProjectKey(root)
+  const timedOut = createProjectKeyResolver(() => {
+    throw new GitTimeoutError(500)
+  })(root)
+  expect(fromGit.kind).toBe('git-root')
+  expect(timedOut.kind).toBe('path')
+  expect(fromGit.key).toBe(timedOut.key)
+  expect(fromGit.displayName).toBe(timedOut.displayName)
 })
