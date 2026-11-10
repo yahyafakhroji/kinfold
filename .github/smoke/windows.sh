@@ -77,35 +77,11 @@ remove_shim_from_user_path() {
   " || true
 }
 
-
-# Temporary probe: how long Get-Acl takes in PowerShell under the two-variable
-# environment status gives its children, and which variable makes it quick.
-probe_one() {
-  label="$1"; shift
-  start=$(date +%s)
-  out=$(timeout 60 env -i "$@" "$PROBE_PS" -NoProfile -NonInteractive -Command "$PROBE_SCRIPT" 2>&1 | tr -d '\r' | head -3) || true
-  echo "probe $label seconds=$(( $(date +%s) - start )) out=$out"
-}
-probe_acl_env() {
-  PROBE_PS='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
-  home_win="$(cygpath -w "$HOME")"
-  PROBE_SCRIPT="\$a = Get-Acl -LiteralPath '$home_win'; 'ok ' + \$a.Access.Count"
-  base=(PATH="$(cygpath -w -p "$PATH")" HOME="$home_win")
-  probe_one base "${base[@]}"
-  probe_one SystemRoot "${base[@]}" SystemRoot="$SYSTEMROOT"
-  probe_one PSModulePath "${base[@]}" PSModulePath="$PSMODULEPATH"
-  probe_one SystemRoot+PSModulePath "${base[@]}" SystemRoot="$SYSTEMROOT" PSModulePath="$PSMODULEPATH"
-  probe_one TEMP "${base[@]}" TEMP="$(cygpath -w "$TEMP")" TMP="$(cygpath -w "$TEMP")"
-  probe_one SystemRoot+TEMP+profile "${base[@]}" SystemRoot="$SYSTEMROOT" TEMP="$(cygpath -w "$TEMP")" TMP="$(cygpath -w "$TEMP")" USERPROFILE="$home_win" LOCALAPPDATA="$LOCALAPPDATA" APPDATA="$APPDATA"
-  echo "probe vars SYSTEMROOT=${SYSTEMROOT:-unset} PSMODULEPATH set=${PSMODULEPATH:+yes}"
-}
-
 case "${1:-}" in
   setup)
     install_agent_clis
     install_pywinpty
     run_live_tests
-    probe_acl_env || true
     ;;
   cleanup)
     # Git Bash would rewrite /Delete and /delete:... into Windows paths.
