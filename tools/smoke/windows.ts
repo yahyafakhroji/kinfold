@@ -10,7 +10,7 @@
 // runner script installs the real CLIs outside the machine PATH and its
 // cleanup takes the folder off the user PATH again.
 
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, win32 } from 'node:path'
 import { TASK_NAME, taskConfigPath } from '../../src/install/service/scheduled-task-service'
 import { windowsSystemTool } from '../../src/install/windows-system-path'
@@ -24,6 +24,7 @@ const BUILD_TIMEOUT_MS = 120_000
 const REGISTRY_TIMEOUT_MS = 60_000
 const SHIM_SOURCE_FILE = 'claude-shim.ts'
 const DRIVER_FILE = 'conpty-drive.py'
+const READ_ROUTE_TIMEOUT_MS = 10_000
 
 function systemTool(env: Readonly<Record<string, string | undefined>>, relativePath: string): string {
   const envVars: Record<string, string> = {}
@@ -282,7 +283,53 @@ function python(world: SmokeWorld): string {
   return found
 }
 
+export type SmokeFetch = (url: string, init: RequestInit) => Promise<Response>
+
+/**
+ * The daemon's /read/search, which a linked WSL distro reads through: the
+ * hook event comes back with the bearer token, and the same call without it,
+ * or with a session cookie in its place, gets 401. Only statuses reach a
+ * failure message; the token and the answer never do.
+ */
+export async function checkReadRoute(world: SmokeWorld, fetcher: SmokeFetch = fetch): Promise<void> {
+  const fail = (message: string): never => {
+    throw new SmokeError('read-route', message)
+  }
+  let port: unknown
+  let token: string
+  try {
+    port = (JSON.parse(readFileSync(join(world.dataDir, 'daemon.json'), 'utf8')) as { port?: unknown }).port
+    token = readFileSync(join(world.dataDir, 'daemon.token'), 'utf8').trim()
+  } catch {
+    return fail('daemon.json or daemon.token could not be read')
+  }
+  if (typeof port !== 'number' || token === '') return fail('daemon.json names no port, or daemon.token is empty')
+  const post = async (headers: Record<string, string>): Promise<Response> => {
+    try {
+      return await fetcher(`http://127.0.0.1:${port}/read/search`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify({ args: { query: world.marker }, cwd: world.project }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(READ_ROUTE_TIMEOUT_MS),
+      })
+    } catch (error: unknown) {
+      return fail(`POST /read/search did not answer (${error instanceof Error ? error.name : 'error'})`)
+    }
+  }
+  const withToken = await post({ authorization: `Bearer ${token}` })
+  if (withToken.status !== 200) fail(`POST /read/search with the token answered ${withToken.status}`)
+  if (!(await withToken.text()).includes(world.marker)) fail('POST /read/search with the token did not return the hook event')
+  const refused = { 'no token': {}, 'a cookie in place of the token': { cookie: 'kinfold_session=smoke', origin: `http://127.0.0.1:${port}` } }
+  for (const [name, headers] of Object.entries(refused)) {
+    const response = await post(headers)
+    if (response.status !== 401) fail(`POST /read/search with ${name} answered ${response.status}, not 401`)
+  }
+}
+
 async function runConversion(world: SmokeWorld, operation: 'encrypt' | 'decrypt'): Promise<SmokeResult> {
+  // The daemon is up with the hook event stored until the conversion stops it.
+  await checkReadRoute(world)
   const driver = join(world.root, DRIVER_FILE)
   writeFileSync(driver, conptyDriverSource(), { mode: 0o600 })
   const result = await capture([python(world), driver, world.program, operation], world.project, world.env, CONVERSION_TIMEOUT_MS)
