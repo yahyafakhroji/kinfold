@@ -6,9 +6,9 @@ import { randomBytes } from 'node:crypto'
 import {
   type Stats,
   accessSync,
-  chmodSync,
   closeSync,
   constants,
+  fchmodSync,
   fstatSync,
   fsyncSync,
   linkSync,
@@ -16,11 +16,13 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeSync,
 } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fsyncDirectory, writeFileAtomic } from '../../fs/atomic'
 import { CLI_NAME } from '../../names'
 import { assertCredentialRef, assertStorableValue } from '../credentials'
@@ -111,9 +113,31 @@ function currentUid(): number {
   return process.getuid?.() ?? -1
 }
 
-function isInside(dir: string, dataDir: string): boolean {
-  const rel = relative(resolve(dataDir), resolve(dir))
+function within(child: string, parent: string): boolean {
+  const rel = relative(parent, child)
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+/** The real path of the nearest ancestor that exists, with the missing segments appended. */
+function canonical(path: string): string {
+  let existing = resolve(path)
+  const missing: string[] = []
+  for (;;) {
+    try {
+      return join(realpathSync(existing), ...missing)
+    } catch {
+      const parent = dirname(existing)
+      if (parent === existing) return resolve(path)
+      missing.unshift(basename(existing))
+      existing = parent
+    }
+  }
+}
+
+// Both forms: the lexical one holds before the data dir exists, the canonical one
+// catches a symlink on either side that leads into the memory folder.
+function isInside(dir: string, dataDir: string): boolean {
+  return within(resolve(dir), resolve(dataDir)) || within(canonical(dir), canonical(dataDir))
 }
 
 /** The reason a folder that exists is unsafe, or null when it is fine. */
@@ -143,17 +167,53 @@ function writeNewFile(path: string, content: string): void {
   const fd = openSync(path, 'wx', KEY_FILE_MODE)
   try {
     writeSync(fd, content)
+    // On the descriptor, so a swapped name can never redirect the mode change.
+    fchmodSync(fd, KEY_FILE_MODE)
     fsyncSync(fd)
   } finally {
     closeSync(fd)
   }
-  chmodSync(path, KEY_FILE_MODE)
+}
+
+/** True when the link made `path`; false when the name was taken. */
+function linkNew(temp: string, path: string): boolean {
+  try {
+    linkSync(temp, path)
+    return true
+  } catch (error: unknown) {
+    if (errnoOf(error) === 'EEXIST') return false
+    throw failure('create', path, error)
+  }
+}
+
+/** Undoes a stricter umask on a folder this call made, without following a symlink planted in its place. */
+function tightenFolder(dir: string): void {
+  const fd = openSync(dir, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_DIRECTORY ?? 0))
+  try {
+    fchmodSync(fd, KEY_DIR_MODE)
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/** A temp file left behind holds a whole key; the error text would name it, so only the errno leaves. */
+function removeTemp(temp: string, path: string): void {
+  try {
+    rmSync(temp, { force: true })
+  } catch (error: unknown) {
+    throw failure('create', path, error)
+  }
 }
 
 export function createKeyFileStore(dir: string, options: KeyFileOptions): KeyStore {
   const trace = options.trace ?? (() => {})
   const pathOf = (account: string) => keyFilePath(dir, account)
 
+  // Only the leaf is checked, not its parents. The parents are the user's own
+  // config home or a folder they named. A parent another user can write could
+  // swap the leaf between these checks and a write. That redirects or destroys
+  // the write but never exposes a key: every key file is created 0600 and owned
+  // by this user, and a read fstats the open file and refuses another owner's.
   /** Checks the folder; false when it does not exist. Never creates it. */
   const folderExists = (op: string): boolean => {
     if (isInside(dir, options.dataDir)) throw new KeyFileError(reasons.inside(dir, options.dataDir))
@@ -173,7 +233,7 @@ export function createKeyFileStore(dir: string, options: KeyFileOptions): KeySto
       mkdirSync(dirname(dir), { recursive: true })
       try {
         mkdirSync(dir, { mode: KEY_DIR_MODE })
-        chmodSync(dir, KEY_DIR_MODE)
+        tightenFolder(dir)
       } catch (error: unknown) {
         if (errnoOf(error) !== 'EEXIST') throw error
       }
@@ -256,21 +316,22 @@ export function createKeyFileStore(dir: string, options: KeyFileOptions): KeySto
     ensureFolder('create')
     const path = pathOf(account)
     const temp = join(dir, `.${account}.key.kinfold-new-${process.pid}-${randomBytes(6).toString('hex')}`)
+    let linked: boolean
     try {
       trace(`write ${account}`)
       fsCall('create', path, () => writeNewFile(temp, `${value}\n`))
       trace(`link ${account}`)
+      linked = linkNew(temp, path)
+    } catch (error: unknown) {
+      // The first failure is the one to report; a cleanup failure must not mask it.
       try {
-        linkSync(temp, path)
-      } catch (error: unknown) {
-        if (errnoOf(error) === 'EEXIST') return false
-        throw failure('create', path, error)
-      }
-    } finally {
-      rmSync(temp, { force: true })
+        rmSync(temp, { force: true })
+      } catch {}
+      throw error
     }
-    syncFolder('create')
-    return true
+    removeTemp(temp, path)
+    if (linked) syncFolder('create')
+    return linked
   }
 
   const remove = (account: string): boolean => {
@@ -311,14 +372,18 @@ export function createKeyFileStore(dir: string, options: KeyFileOptions): KeySto
 
 type Nearest = { path: string; stats: Stats } | { path: string; code: string }
 
+// The leaf is lstat'ed, since a symlinked key folder is refused. Ancestors are
+// stat'ed: a ~/.config linked into a dotfiles repo is a folder mkdir -p follows.
 function nearestExisting(path: string): Nearest {
   let current = path
   for (;;) {
     try {
-      return { path: current, stats: lstatSync(current) }
+      return { path: current, stats: current === path ? lstatSync(current) : statSync(current) }
     } catch (error: unknown) {
       const code = errnoOf(error) ?? 'unknown'
       const parent = dirname(current)
+      // A dangling symlink: stat says ENOENT, but mkdir -p cannot make a folder there.
+      if (code === 'ENOENT' && current !== path && lstatOrNull(current) !== null) return { path: current, code }
       if (code !== 'ENOENT' || parent === current) return { path: current, code }
       current = parent
     }

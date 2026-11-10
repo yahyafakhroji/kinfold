@@ -204,6 +204,45 @@ posixOnly('file modes')('a key folder inside the memory folder is refused', () =
   expect(messageOf(() => keyFileModule.open(recorded).set('db-key', VALUE))).toBe(`key file: ${inside(recordedDir)}`)
 })
 
+posixOnly('file modes')('a memory folder reached through a symlink still keeps the key folder out', () => {
+  const home = tempHome()
+  const sync = join(home, 'Sync')
+  mkdirSync(sync)
+  const dataDir = join(home, 'mem')
+  symlinkSync(sync, dataDir)
+  const deps = depsFor(home, { dataDir, envVars: { XDG_CONFIG_HOME: join(sync, 'cfg') } })
+  const reason = `the key folder ${join(sync, 'cfg', 'kinfold')} is inside the memory folder ${dataDir}; set XDG_CONFIG_HOME to a folder outside it`
+  expect(probeKeyFile(deps)).toEqual({ usable: false, reason })
+  expect(messageOf(() => keyFileModule.open(deps).set('db-key', VALUE))).toBe(`key file: ${reason}`)
+  expect(readdirSync(sync)).toEqual([])
+})
+
+posixOnly('file modes')('a key folder reached through a symlink into the memory folder is refused', () => {
+  const home = tempHome()
+  const dataDir = join(home, 'Sync')
+  mkdirSync(dataDir)
+  const link = join(home, 'link')
+  symlinkSync(dataDir, link)
+  const deps = depsFor(home, { dataDir, envVars: { XDG_CONFIG_HOME: join(link, 'cfg') } })
+  const reason = `the key folder ${join(link, 'cfg', 'kinfold')} is inside the memory folder ${dataDir}; set XDG_CONFIG_HOME to a folder outside it`
+  expect(probeKeyFile(deps)).toEqual({ usable: false, reason })
+  expect(messageOf(() => keyFileModule.open(deps).set('db-key', VALUE))).toBe(`key file: ${reason}`)
+  expect(readdirSync(dataDir)).toEqual([])
+})
+
+posixOnly('file modes')('a ~/.config linked into a dotfiles folder is usable', () => {
+  const home = tempHome()
+  const target = join(home, 'dotfiles', 'config')
+  mkdirSync(target, { recursive: true })
+  symlinkSync(target, join(home, '.config'))
+  const deps = depsFor(home)
+  expect(probeKeyFile(deps)).toEqual({ usable: true })
+  const store = keyFileModule.open(deps)
+  store.set('db-key', VALUE)
+  expect(store.get('db-key')).toBe(VALUE)
+  expect(modeOf(join(target, 'kinfold'))).toBe(0o700)
+})
+
 posixOnly('file modes')('the probe never creates the folder', () => {
   const home = tempHome()
   expect(probeKeyFile(depsFor(home))).toEqual({ usable: true })
