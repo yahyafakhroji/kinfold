@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EXIT_OK, install } from '../../install/install'
+import { refusalLines } from '../../install/key-store-choice'
 import { type FakeWorld, YES, createWorld, forbiddenSecurity } from '../../install/test-support'
 import { dbKeyStoreOf } from '../../sqlite/keys'
 import { openStoreFile } from '../../sqlite/open'
@@ -28,7 +29,7 @@ import {
   credentialTarget,
   packCredential,
 } from './credential-manager'
-import { KEY_STORE_MODULES } from './select'
+import { KEY_STORE_MODULES, probeKeyStores } from './select'
 
 type ModuleTable = Readonly<Record<KeyStoreKind, KeyStoreModule>>
 
@@ -183,17 +184,29 @@ test('the packed CREDENTIALW has the x64 layout', () => {
   expect([...packed.targetName.slice(-2)]).toEqual([0, 0])
 })
 
+test('the lines install prints for a refused store name Credential Manager once', () => {
+  const lines = (load: () => CredApi): string[] => {
+    const probed = probeKeyStores(depsOn('windows'), { ...KEY_STORE_MODULES, 'credential-manager': createCredentialManagerModule(load) })
+    return refusalLines({ kind: 'none', os: 'windows', store: null, refused: 'refused' in probed ? probed.refused : [] })
+  }
+  expect(lines(() => fakeCredApi(ERROR_NO_SUCH_LOGON_SESSION))).toEqual(['Credential Manager: not available in this logon session (error 1312)'])
+  expect(lines(() => {
+    throw new TypeError('no such library')
+  })).toEqual(['Credential Manager: could not be loaded (TypeError)'])
+  expect(lines(() => fakeCredApi())).toEqual([])
+})
+
 test('probe reads the logon-session error', async () => {
   const api = fakeCredApi(ERROR_NO_SUCH_LOGON_SESSION)
   const module = createCredentialManagerModule(() => api)
-  expect(module.probe(depsOn('windows'))).toEqual({ usable: false, reason: 'Credential Manager is not available in this logon session (error 1312)' })
+  expect(module.probe(depsOn('windows'))).toEqual({ usable: false, reason: 'not available in this logon session (error 1312)' })
   expect(api.log).toEqual(['peek kinfold/probe'])
-  expect(createCredentialManagerModule(() => fakeCredApi(31)).probe(depsOn('windows'))).toEqual({ usable: false, reason: 'Credential Manager is not available in this logon session (error 31)' })
+  expect(createCredentialManagerModule(() => fakeCredApi(31)).probe(depsOn('windows'))).toEqual({ usable: false, reason: 'not available in this logon session (error 31)' })
   expect(createCredentialManagerModule(() => fakeCredApi()).probe(depsOn('windows'))).toEqual({ usable: true })
   const unloadable = createCredentialManagerModule(() => {
     throw new TypeError('no such library')
   })
-  expect(unloadable.probe(depsOn('windows'))).toEqual({ usable: false, reason: 'Credential Manager could not be loaded (TypeError)' })
+  expect(unloadable.probe(depsOn('windows'))).toEqual({ usable: false, reason: 'could not be loaded (TypeError)' })
 
   const world: FakeWorld = createWorld({ platform: 'win32', keychainRefs: [] })
   cleanup = () => world.cleanup()

@@ -166,8 +166,13 @@ function failure(action: 'read' | 'write' | 'delete', ref: string, error: number
   return new Error(`Credential Manager: could not ${action} ${credentialTarget(ref)} (error ${codeText(error)})`)
 }
 
+/** A probe's reason: install prints it after the store's label, so it does not name the store again. */
+function loadFailureReason(error: unknown): string {
+  return `could not be loaded (${error instanceof Error ? error.name : 'unknown'})`
+}
+
 function loadFailure(error: unknown): string {
-  return `Credential Manager could not be loaded (${error instanceof Error ? error.name : 'unknown'})`
+  return `${LABEL} ${loadFailureReason(error)}`
 }
 
 /** UTF-8 bytes. Too long is refused before any call, and no error quotes the value. */
@@ -279,12 +284,12 @@ function probeWith(load: () => CredApi, deps: KeyStoreDeps): KeyStoreProbe {
   try {
     api = load()
   } catch (error: unknown) {
-    return { usable: false, reason: loadFailure(error) }
+    return { usable: false, reason: loadFailureReason(error) }
   }
   // A read only, never a write: an answer, even "not found", shows the store works in this session.
   const result = api.peek(PROBE_TARGET)
   if (result.ok || result.error === ERROR_NOT_FOUND) return { usable: true }
-  return { usable: false, reason: `Credential Manager is not available in this logon session (error ${codeText(result.error)})` }
+  return { usable: false, reason: `not available in this logon session (error ${codeText(result.error)})` }
 }
 
 /** The module over a loader; the default opens advapi32, tests pass a fake. */
