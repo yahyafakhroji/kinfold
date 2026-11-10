@@ -345,4 +345,10 @@ export const smokePlatform: SmokePlatform = {
   },
   writeObserverShim,
   runConversion,
+  statusLines(world) {
+    return [
+      'service (scheduled task): config present; running: yes',
+      `data dir ${world.dataDir}: access list ok (only you, SYSTEM and Administrators can read it)`,
+    ]
+  },
 }

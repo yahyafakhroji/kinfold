@@ -2,8 +2,9 @@
 // run on every OS and start no process.
 
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { SmokeWorld } from './platform'
 import { PYWINPTY_VERSION, conptyDriverSource, observerShimSource, smokePlatform } from './windows'
 
 const RUNNER_SCRIPT = join(import.meta.dir, '..', '..', '.github', 'smoke', 'windows.sh')
@@ -72,5 +73,29 @@ describe('windows smoke platform', () => {
       expect(script).toMatch(new RegExp(`\\b${ref}\\b`))
     }
     expect(script).toContain("cmdkey /delete:kinfold/")
+    expect(script).toContain('kinfold/live-')
+  })
+
+  test('setup runs every Windows live test with its flag', () => {
+    const script = readFileSync(RUNNER_SCRIPT, 'utf8')
+    for (const flag of ['KINFOLD_TEST_CREDENTIAL_MANAGER=1', 'KINFOLD_TEST_WINDOWS_DISK=1', 'KINFOLD_TEST_WINDOWS_ACL=1']) {
+      expect(script).toContain(flag)
+    }
+    for (const file of [
+      './src/secrets/stores/credential-manager.live.test.ts',
+      './src/install/disk/bitlocker.live.test.ts',
+      './src/install/access/windows-acl.live.test.ts',
+    ]) {
+      expect(script).toContain(file)
+      expect(existsSync(join(import.meta.dir, '..', '..', file))).toBe(true)
+    }
+  })
+
+  test('status after install must show the running task and the ok access list', () => {
+    const world = { dataDir: 'C:\\h\\.kinfold' } as SmokeWorld
+    expect(smokePlatform.statusLines?.(world)).toEqual([
+      'service (scheduled task): config present; running: yes',
+      'data dir C:\\h\\.kinfold: access list ok (only you, SYSTEM and Administrators can read it)',
+    ])
   })
 })

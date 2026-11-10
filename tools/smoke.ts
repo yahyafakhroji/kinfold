@@ -531,6 +531,7 @@ async function steps(ctx: Run): Promise<void> {
   expectContains('status', status.stdout, /^ {2}claude-code: .*wired: yes/m)
   expectContains('status', status.stdout, /^ {2}opencode: .*wired: yes/m)
   expectContains('status', status.stdout, encryptedLine(platform))
+  for (const line of platform.statusLines?.(world) ?? []) expectContains('status', status.stdout, line)
 
   process.stdout.write('smoke: hook\n')
   const hook = await kinfold(world, ['hook', '--host', 'claude-code'], `${JSON.stringify({

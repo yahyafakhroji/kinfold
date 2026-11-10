@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # The Windows runner's setup and cleanup around tools/smoke.ts. setup installs
 # the agent CLIs and pywinpty for the ConPTY driver; cleanup removes the
-# scheduled task, every Credential Manager entry Kinfold can write, and the
-# smoke's shim folder from the user PATH.
+# scheduled task, every Credential Manager entry Kinfold or the live tests can
+# write, and the smoke's shim folder from the user PATH. setup also runs the
+# live tests against the real Credential Manager, BitLocker and access list,
+# which the smoke itself reaches only through install and status.
 #
 # Usage: bash .github/smoke/windows.sh setup|cleanup
 set -eo pipefail
@@ -37,6 +39,14 @@ install_pywinpty() {
   python -m pip install --disable-pip-version-check pywinpty==2.0.15
 }
 
+run_live_tests() {
+  KINFOLD_TEST_CREDENTIAL_MANAGER=1 KINFOLD_TEST_WINDOWS_DISK=1 KINFOLD_TEST_WINDOWS_ACL=1 \
+    bun test \
+      ./src/secrets/stores/credential-manager.live.test.ts \
+      ./src/install/disk/bitlocker.live.test.ts \
+      ./src/install/access/windows-acl.live.test.ts
+}
+
 remove_task() {
   schtasks /Delete /TN KinfoldDaemon /F || true
 }
@@ -44,6 +54,10 @@ remove_task() {
 remove_credentials() {
   for ref in db-key db-key-next hmac-master hmac-legacy openrouter; do
     cmdkey /delete:kinfold/$ref || true
+  done
+  # A live test that stopped before its own cleanup leaves kinfold/live-* targets.
+  for target in $(cmdkey /list | grep -o 'kinfold/live-[a-z0-9._-]*' | sort -u || true); do
+    cmdkey /delete:$target || true
   done
 }
 
@@ -60,11 +74,11 @@ remove_shim_from_user_path() {
   " || true
 }
 
-
 case "${1:-}" in
   setup)
     install_agent_clis
     install_pywinpty
+    run_live_tests
     ;;
   cleanup)
     # Git Bash would rewrite /Delete and /delete:... into Windows paths.
