@@ -2,7 +2,7 @@
 // read-only PowerShell query and warns when an account other than the user,
 // SYSTEM or Administrators can read it. Install never changes an ACL, so it
 // plans no fixes. Accounts are matched by SID and rights by number, since
-// account names are localized.
+// account names are localized, and a warning names them by SID.
 
 import { existsSync } from 'node:fs'
 import type { CommandResult, InstallEnv } from '../env'
@@ -43,7 +43,7 @@ export const TRUSTED_SIDS: readonly string[] = ['S-1-5-18', 'S-1-5-32-544', 'S-1
 export const READ_RIGHTS = 0x0000_0001 | 0x8000_0000 | 0x1000_0000
 
 /** Without a BOM, so the first line parses; Windows PowerShell's default code page would mangle non-ASCII names. */
-const UTF8_OUTPUT = '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false'
+const UTF8_OUTPUT = '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)'
 
 export function aclScript(path: string): string {
   return [
@@ -52,10 +52,13 @@ export function aclScript(path: string): string {
     '$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
     '"user`t$user"',
     `$path = ${psDecodedString(path)}`,
-    '$acl = Get-Acl -LiteralPath $path',
+    // .NET rather than Get-Acl: status gives its children only PATH and HOME,
+    // and without PSModulePath loading Get-Acl's module outlasts the timeout.
+    "$acl = [System.IO.DirectoryInfo]::new($path).GetAccessControl('Access')",
     'foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {',
+    // The SID is the name: translating it can wait on a domain controller.
     '  $sid = $rule.IdentityReference.Value',
-    '  try { $name = $rule.IdentityReference.Translate([System.Security.Principal.NTAccount]).Value } catch { $name = $sid }',
+    '  $name = $sid',
     "  $type = if ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow) { 'Allow' } else { 'Deny' }",
     '  $inheritOnly = if (($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { 1 } else { 0 }',
     '  "ace`t$sid`t$type`t$([int]$rule.FileSystemRights)`t$inheritOnly`t$name"',

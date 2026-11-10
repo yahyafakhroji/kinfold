@@ -59,10 +59,10 @@ test('the access query takes the path as a literal, never from env', async () =>
   expect(argv.slice(0, -1)).toEqual([POWERSHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'])
   const script = decodedScript(argv)
   expect(pathIn(script)).toBe(tricky)
-  expect(script).toContain('Get-Acl -LiteralPath $path')
+  expect(script).toContain("[System.IO.DirectoryInfo]::new($path).GetAccessControl('Access')")
   expect(script).not.toContain('José')
   expect(script.indexOf('[Console]::OutputEncoding')).toBeGreaterThanOrEqual(0)
-  expect(script.indexOf('[Console]::OutputEncoding')).toBeLessThan(script.indexOf('Get-Acl'))
+  expect(script.indexOf('[Console]::OutputEncoding')).toBeLessThan(script.indexOf('GetAccessControl'))
   expect(script).not.toContain('$env:')
   expect(pathIn(decodedScript(powershellArgv({}, aclScript("C:\\it's"))))).toBe("C:\\it's")
 
@@ -75,6 +75,17 @@ test('the access query takes the path as a literal, never from env', async () =>
   expect(Object.keys(seen[0]!).sort()).toEqual(['argv', 'timeoutMs'])
   expect(seen[0]!.timeoutMs).toBe(WINDOWS_QUERY_TIMEOUT_MS)
   expect(pathIn(decodedScript(seen[0]!.argv))).toBe(world.dataDir)
+})
+
+test('the access query loads no module and translates no names', () => {
+  // status hands its children only PATH and HOME; without PSModulePath a
+  // module cmdlet such as Get-Acl spends longer loading than the query may take.
+  const script = decodedScript(powershellArgv({}, aclScript('C:\\plain')))
+  expect(script).not.toMatch(/\b(Get|Set)-Acl\b/)
+  expect(script).not.toMatch(/\b[A-Z][a-z]+-[A-Z][A-Za-z]+\b/)
+  expect(script).not.toContain('Translate')
+  expect(script).not.toContain('NTAccount')
+  expect(script).toContain('GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])')
 })
 
 test('curly quotes in the path stay data, never code', () => {
