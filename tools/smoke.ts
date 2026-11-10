@@ -90,7 +90,10 @@ export function childEnvironment(home: string, fakeBin: string, platform: SmokeP
     if (value !== undefined) env[key] = value
   }
   env.HOME = home
-  env.PATH = `${fakeBin}${delimiter}${process.env.PATH ?? '/usr/bin:/bin'}`.trim()
+  // Windows spells the key Path; a second PATH entry beside it would leave
+  // which one the child sees to chance, so the inherited spelling is reused.
+  const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'
+  env[pathKey] = `${fakeBin}${delimiter}${env[pathKey] ?? '/usr/bin:/bin'}`.trim()
   // The data folder and the port are fixed by the smoke, so a caller's
   // environment must not move the run to another store or another daemon.
   delete env.KINFOLD_DATA_DIR
