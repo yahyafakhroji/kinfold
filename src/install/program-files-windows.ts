@@ -29,7 +29,8 @@ const defaultDeps = (): ProgramFsDeps => ({
 })
 
 // The codes Windows gives for a file some process still has mapped or open.
-const LOCKED_CODES = new Set(['EBUSY', 'EPERM', 'EACCES'])
+// Bun reports a non-recursive rm of a running image as EFAULT, so it counts too.
+const LOCKED_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'EFAULT'])
 
 function isLocked(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException | null)?.code
@@ -52,7 +53,7 @@ export function createWindowsProgramFiles(overrides: Partial<ProgramFsDeps> = {}
     if (!deps.existsSync(dir)) return
     for (const name of deps.readdirSync(dir).filter(isOldProgram)) {
       try {
-        deps.rmSync(childOf(dir, name), { force: true })
+        deps.rmSync(childOf(dir, name), { force: true, recursive: true })
       } catch (error) {
         if (!isLocked(error)) throw error
       }

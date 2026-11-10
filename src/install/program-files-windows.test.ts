@@ -74,8 +74,8 @@ const TEMP = `${DIR}\\kinfold.exe.tmp-1`
 const OLD = `${DIR}\\${OLD_PROGRAM_PREFIX}7-1000.exe`
 
 test('a running program is moved aside, not overwritten', () => {
-  // The moved-aside program is still running, so its cleanup is refused.
-  const fs = fakeFs([TARGET, TEMP], { rmError: (path) => (path === OLD ? fsError('EBUSY') : null) })
+  // The moved-aside program is still running, so its cleanup is refused. Bun on Windows says EFAULT for that.
+  const fs = fakeFs([TARGET, TEMP], { rmError: (path) => (path === OLD ? fsError('EFAULT') : null) })
   createWindowsProgramFiles(fs.deps).replace(TEMP, TARGET)
   expect(fs.renames).toEqual([[TARGET, OLD], [TEMP, TARGET]])
   expect([...fs.files].sort()).toEqual([OLD, TARGET].sort())
