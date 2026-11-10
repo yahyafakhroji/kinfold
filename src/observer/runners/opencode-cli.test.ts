@@ -483,7 +483,7 @@ function fakeOpencodeOnPath(): string {
   return bin
 }
 
-test('createCliRunner and createRunner build the opencode-cli runner', async () => {
+posixOnly('sh scripts')('createCliRunner and createRunner build the opencode-cli runner', async () => {
   for (const build of [createCliRunner, createRunner]) {
     const spawn = recordingSpawn([VERSION_OK, { stdout: OK_RUN }, {}])
     const runner = build(settings('opencode-cli'), { dataDir: temp.dataDir, credentials: NO_CREDENTIALS, spawn, parentEnv: { PATH: fakeOpencodeOnPath(), XDG_DATA_HOME: '/d' } })

@@ -518,7 +518,7 @@ test('a listModels failure keeps only its class and removes the folder', async (
 
 // integration: a real process through spawnProcess
 
-test('a real script gets the prompt on stdin, sees EOF, and only the allowed env names', async () => {
+posixOnly('sh scripts')('a real script gets the prompt on stdin, sees EOF, and only the allowed env names', async () => {
   const scriptDir = mkdtempSync(join(tmpdir(), 'kinfold-cli-script-'))
   try {
     const script = join(scriptDir, 'fakecli')

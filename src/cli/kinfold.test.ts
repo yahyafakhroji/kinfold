@@ -15,6 +15,7 @@ import { installPaths } from '../install/env'
 import { entryCommand } from '../install/entry'
 import { envForDataDir } from './data-dir-env'
 import { EXIT_CANCELLED, type SubcommandRunners, dataDirFor, runKinfold } from './kinfold'
+import { posixOnly } from '../../test/platform-guards'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -325,7 +326,7 @@ test('--data-dir elsewhere on an installed machine is refused with the locked-fo
   expect(changed.filter((path) => !/^home\/\.kinfold\/memory\.db(-wal|-shm)?$/.test(path))).toEqual([])
 })
 
-test('the daemon subcommand stays up and stops cleanly on SIGTERM', async () => {
+posixOnly('POSIX signals')('the daemon subcommand stays up and stops cleanly on SIGTERM', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kinfold-daemon-cli-'))
   const dataDir = join(root, 'data')
   const child = Bun.spawn([process.execPath, join(import.meta.dir, 'kinfold.ts'), '--data-dir', dataDir, 'daemon'], {

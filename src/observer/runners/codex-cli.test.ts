@@ -8,6 +8,7 @@ import { createCliObserverRunner } from './cli-core'
 import { recordingSpawn } from './cli-test-support'
 import { CODEX_MIN_VERSION, codexAdapter, tomlBasicString } from './codex-cli'
 import { createCliRunner, createRunner } from '.'
+import { posixOnly } from '../../../test/platform-guards'
 
 let temp: TempStore
 beforeEach(() => {
@@ -316,7 +317,7 @@ function fakeCodexOnPath(): string {
   return bin
 }
 
-test('createCliRunner builds the codex-cli runner with the deps spawn, env and data dir', async () => {
+posixOnly('sh scripts')('createCliRunner builds the codex-cli runner with the deps spawn, env and data dir', async () => {
   const spawn = recordingSpawn([{ stdout: 'codex-cli 0.166.0\n' }, { stdout: OK_RUN }])
   const runner = createCliRunner(settings('codex-cli'), { dataDir: temp.dataDir, credentials: NO_CREDENTIALS, spawn, parentEnv: { PATH: fakeCodexOnPath(), CODEX_HOME: '/c' } })
   expect(typeof runner.probe).toBe('function')
@@ -334,7 +335,7 @@ test('createCliRunner refuses providers that are not CLI login observers with co
   }
 })
 
-test('createRunner routes codex-cli through createCliRunner', async () => {
+posixOnly('sh scripts')('createRunner routes codex-cli through createCliRunner', async () => {
   const spawn = recordingSpawn([{ stdout: 'codex-cli 0.166.0\n' }, { stdout: OK_RUN }])
   const runner = createRunner(settings('codex-cli'), { dataDir: temp.dataDir, credentials: NO_CREDENTIALS, spawn, parentEnv: { PATH: fakeCodexOnPath() } })
   expect((await runner.run(PROMPT)).text).toBe('{"observations":[]}')

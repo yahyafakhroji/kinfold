@@ -273,7 +273,7 @@ async function plantLeftovers(binPath: string): Promise<{ dead: string; deadExe:
   return paths
 }
 
-test("leftovers of dead update runs are swept, a live run's file is kept", async () => {
+posixOnly('sh scripts')("leftovers of dead update runs are swept, a live run's file is kept", async () => {
   const { w, binPath } = updateWorld({ tag: 'v0.1.0' })
   const { dead, deadExe, live, other } = await plantLeftovers(binPath)
   expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: noRun })).toBe(0)
@@ -285,7 +285,7 @@ test("leftovers of dead update runs are swept, a live run's file is kept", async
   expect(w.out).toEqual(['kinfold is up to date (0.1.0)'])
 })
 
-test('a dry run lists dead leftovers by name and removes nothing', async () => {
+posixOnly('sh scripts')('a dry run lists dead leftovers by name and removes nothing', async () => {
   const { w, binPath } = updateWorld()
   const paths = await plantLeftovers(binPath)
   expect(await runUpdate(w.env, { dryRun: true }, { version: '0.1.0', runProgram: noRun })).toBe(0)
@@ -299,7 +299,7 @@ test('a dry run lists dead leftovers by name and removes nothing', async () => {
   expect(line).not.toContain(basename(paths.other))
 })
 
-test('a folder with a temp name is skipped, and an unremovable leftover is named, not fatal', async () => {
+posixOnly('sh scripts')('a folder with a temp name is skipped, and an unremovable leftover is named, not fatal', async () => {
   const { w, binPath } = updateWorld({ tag: 'v0.1.0' })
   const bin = dirname(binPath)
   const folder = join(bin, `.kinfold-update-${await deadPid()}`)
