@@ -24,7 +24,7 @@ import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
 import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
 import { entryCommand } from './entry'
-import { type InstallKeyStore, chooseInstallKeyStore, keyStoreOf, keyStoreRecordActions, secretSetAction } from './key-store-choice'
+import { type InstallKeyStore, chooseInstallKeyStore, keyStoreOf, keyStoreRecordActions, refusalLines, secretSetAction } from './key-store-choice'
 import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import { isAgentLoaded, legacyPrintArgv } from './launch-agent'
 import { ChoiceError, type ChoiceOptions, type ObserverChoice } from './observer-choice'
@@ -508,12 +508,12 @@ interface InstallTarget extends FolderTarget {
 /** env with the store chosen for its own dataDir, and that choice. */
 function withChosenStore(env: InstallEnv, options: InstallOptions): { env: InstallEnv; keyStore: InstallKeyStore } {
   const keyStore = chooseInstallKeyStore(env, options.keyStoreModules)
-  return { env: { ...env, keyStore: keyStore.store }, keyStore }
+  return { env: { ...env, keyStore: keyStore.store, keyStoreRefusals: refusalLines(keyStore) }, keyStore }
 }
 
 async function folderTarget(env: InstallEnv, dataDir: string, options: InstallOptions): Promise<InstallTarget> {
   // The store chosen for the first folder is dropped: the new folder's own record, or a fresh choice, decides.
-  const { keyStore: _dropped, ...base } = envForDataDir(env, dataDir)
+  const { keyStore: _dropped, keyStoreRefusals: _droppedRefusals, ...base } = envForDataDir(env, dataDir)
   const chosen = withChosenStore(base, options)
   return { env: chosen.env, state: await readSetupState(chosen.env), keyStore: chosen.keyStore }
 }

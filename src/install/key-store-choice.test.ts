@@ -117,6 +117,8 @@ test('no usable store leaves a new store plaintext and records nothing', async (
   expect(await install(w.env, { ...DRY, keyStoreModules: modules })).toBe(EXIT_OK)
   expect(planLines(w).some((line) => line.includes('record the key store'))).toBe(false)
   expect(w.out).toContain('database: no key store on linux yet; the new store is created plaintext')
+  const plain = w.out.indexOf('database: no key store on linux yet; the new store is created plaintext')
+  expect(w.out.slice(plain + 1, plain + 3)).toEqual(['  libsecret: not supported on this platform yet', '  key file: not supported on this platform yet'])
   w.out.length = 0
   expect(await status(w.env)).toBe(EXIT_OK)
   expect(w.out).toContain('key store: none on linux; new stores are created plaintext')
@@ -143,6 +145,44 @@ test('a chosen store records its location', async () => {
   const [keychain] = keyStoreRecordActions(mac.env, chooseInstallKeyStore(mac.env))
   expect(keychain?.kind === 'record-key-store' ? keychain.record.store : null).toBe('keychain')
   expect(keychain?.kind === 'record-key-store' ? 'location' in keychain.record : true).toBe(false)
+})
+
+test('an install that loses the record race to a different store stops before any secret', async () => {
+  const w = make({ platform: 'linux', keychainRefs: [] })
+  const libsecret = recordingKeyStore({ kind: 'libsecret', label: 'libsecret' })
+  // The other install, with a different env, records the key file while this one is still choosing.
+  const theirs = { store: 'key-file', chosenAt: 1_792_900_000_000, location: '/elsewhere/.config/kinfold' }
+  const modules: ModuleTable = {
+    ...KEY_STORE_MODULES,
+    libsecret: {
+      kind: 'libsecret',
+      label: 'libsecret',
+      probe: () => (writeRecord(w, `${JSON.stringify(theirs)}\n`), { usable: true }),
+      open: () => libsecret,
+    },
+  }
+  expect(await install(w.env, { ...YES, keyStoreModules: modules })).toBe(EXIT_FAILED)
+  expect(w.out.some((line) => line.includes('another install already chose key file; run kinfold install again'))).toBe(true)
+  expect(libsecret.values.size).toBe(0)
+  expect(JSON.parse(readFileSync(recordPath(w), 'utf8'))).toEqual(theirs)
+})
+
+test('an install that loses the record race to the same store keeps the record and goes on', async () => {
+  const w = make({ platform: 'linux', keychainRefs: [] })
+  const libsecret = recordingKeyStore({ kind: 'libsecret', label: 'libsecret' })
+  const theirs = { store: 'libsecret', chosenAt: 1_792_900_000_000 }
+  const modules: ModuleTable = {
+    ...KEY_STORE_MODULES,
+    libsecret: {
+      kind: 'libsecret',
+      label: 'libsecret',
+      probe: () => (writeRecord(w, `${JSON.stringify(theirs)}\n`), { usable: true }),
+      open: () => libsecret,
+    },
+  }
+  expect(await install(w.env, { ...YES, keyStoreModules: modules })).toBe(EXIT_OK)
+  expect(JSON.parse(readFileSync(recordPath(w), 'utf8'))).toEqual(theirs)
+  expect(libsecret.values.has(DB_KEY_REF)).toBe(true)
 })
 
 const ENTER = '\r'

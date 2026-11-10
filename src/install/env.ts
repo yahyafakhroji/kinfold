@@ -106,6 +106,8 @@ export interface InstallEnv {
    * (key-store-choice.ts). null: none, so credentials are not stored. install sets it once, before the questions.
    */
   keyStore?: KeyStore | null
+  /** Set by install with keyStore null: "<label>: <reason>" per refused candidate, printed beside the plaintext line. */
+  keyStoreRefusals?: readonly string[]
   /** The disk-encryption check status runs; default this platform's (disk/check.ts). Tests inject a stub. */
   diskCheck?: DiskEncryptionCheck
   /** The data dir access check install and status run; default this platform's (access/check.ts). Tests inject a stub. */
