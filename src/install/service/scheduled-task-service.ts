@@ -1,12 +1,12 @@
 // The Windows service behind ServiceControl: a per-user scheduled task that
 // starts the daemon at logon, registered and removed through schtasks.exe.
 // schtasks prints localized text, so only exit codes are read; whether the
-// daemon runs comes from the pid in daemon.json.
+// daemon runs comes from the pid in daemon.json, checked against /health.
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DEFAULT_PORT } from '../../daemon/daemon'
-import { readDaemonInfo } from '../daemon-client'
+import { checkHealth, readDaemonInfo } from '../daemon-client'
 import type { InstallEnv } from '../env'
 import { HEALTH_WAIT_MS } from '../plan'
 import type { ServiceControl, ServiceStep } from './control'
@@ -249,10 +249,17 @@ export class ScheduledTaskService implements ServiceControl {
     return (await this.schtasks('/Query', '/TN', TASK_NAME)).exitCode === 0
   }
 
-  /** The pid the daemon wrote to daemon.json, when that process still exists. */
-  private livePid(): number | null {
-    const { pid } = readDaemonInfo(this.configuredDataDir() ?? this.env.dataDir)
-    return pid !== null && this.deps.pidAlive(pid) ? pid : null
+  /**
+   * daemon.json's pid, only while that process is our daemon: alive, and the
+   * /health on daemon.json's port names the same pid. A Windows stop
+   * terminates the daemon, so it never removes daemon.json, and Windows soon
+   * hands its pid to some other process.
+   */
+  private async daemonPid(): Promise<number | null> {
+    const { pid, port } = readDaemonInfo(this.configuredDataDir() ?? this.env.dataDir)
+    if (pid === null || !this.deps.pidAlive(pid)) return null
+    const health = await checkHealth(this.env, port)
+    return health.up && health.pid === pid ? pid : null
   }
 
   private readConfig(): string | null {
@@ -268,7 +275,7 @@ export class ScheduledTaskService implements ServiceControl {
   }
 
   async isRunning(): Promise<boolean> {
-    return (await this.isRegistered()) && this.livePid() !== null
+    return (await this.isRegistered()) && (await this.daemonPid()) !== null
   }
 
   async start(): Promise<void> {
@@ -280,11 +287,12 @@ export class ScheduledTaskService implements ServiceControl {
     if (!(await this.isRegistered())) return
     // /End fails when the task is not running, which is fine: the wait below decides.
     await this.schtasks('/End', '/TN', TASK_NAME)
-    let pid = this.livePid()
+    let pid = await this.daemonPid()
     for (let waited = 0; pid !== null && waited < HEALTH_WAIT_MS; waited += STOP_POLL_MS) {
       await this.env.sleep(STOP_POLL_MS)
-      pid = this.livePid()
+      pid = await this.daemonPid()
     }
+    // Only a pid that still answers as our daemon is killed; anything else has exited or is not ours.
     if (pid !== null) this.deps.kill(pid)
     await this.schtasksOrThrow('Delete', '/TN', TASK_NAME, '/F')
   }

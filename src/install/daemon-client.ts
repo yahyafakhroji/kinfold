@@ -31,8 +31,9 @@ export interface DaemonInfoFile {
 /**
  * hmacMode: master, legacy or degraded; null from a daemon too old to report it.
  * vectorSearch: whether sqlite-vec loaded; absent from a daemon before vector search.
+ * pid: the daemon's own process id; absent from a daemon before it reported one.
  */
-export type Health = { up: true; version: string; schemaVersion: number; hmacMode: string | null; vectorSearch?: 'on' | 'off' } | { up: false; reason: string }
+export type Health = { up: true; version: string; schemaVersion: number; hmacMode: string | null; vectorSearch?: 'on' | 'off'; pid?: number } | { up: false; reason: string }
 
 /** daemon.json's pid and port; the default port when the file is missing or unreadable. */
 export function readDaemonInfo(dataDir: string): DaemonInfoFile {
@@ -56,7 +57,8 @@ export async function checkHealth(env: InstallEnv, port: number): Promise<Health
     const hmacMode = typeof body.hmacMode === 'string' ? body.hmacMode : null
     const vectorSearch = body.vectorSearch
     const vectors: { vectorSearch?: 'on' | 'off' } = vectorSearch === 'on' || vectorSearch === 'off' ? { vectorSearch } : {}
-    return { up: true, version: String(body.version), schemaVersion: Number(body.schemaVersion), hmacMode, ...vectors }
+    const pid: { pid?: number } = typeof body.pid === 'number' && Number.isInteger(body.pid) && body.pid > 0 ? { pid: body.pid } : {}
+    return { up: true, version: String(body.version), schemaVersion: Number(body.schemaVersion), hmacMode, ...vectors, ...pid }
   } catch (error: unknown) {
     return { up: false, reason: `nothing answers on 127.0.0.1:${port} (${error instanceof Error ? error.name : 'error'})` }
   }

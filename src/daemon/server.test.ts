@@ -49,7 +49,20 @@ function spoolFixture(output: string): string {
 test('GET /health answers without a token', async () => {
   const response = await fetch(url('/health'))
   expect(response.status).toBe(200)
-  expect(await response.json()).toEqual({ ok: true, version: VERSION, schemaVersion: LATEST_SCHEMA_VERSION, hmacMode: 'legacy', vectorSearch: 'off' })
+  expect(await response.json()).toEqual({ ok: true, version: VERSION, schemaVersion: LATEST_SCHEMA_VERSION, pid: process.pid, hmacMode: 'legacy', vectorSearch: 'off' })
+})
+
+test('GET /health reports the pid the server was given', async () => {
+  const real = server.startServer
+  const serve = spyOn(server, 'startServer').mockImplementation((deps) => real({ ...deps, pid: 4242 }))
+  const other = startDaemon({ dataDir: join(root, 'other'), port: 0, fallbackDrainMs: 60_000, log: () => {} })
+  try {
+    const body = (await (await fetch(`http://127.0.0.1:${other.port}/health`)).json()) as { pid: unknown }
+    expect(body.pid).toBe(4242)
+  } finally {
+    serve.mockRestore()
+    await other.stop()
+  }
 })
 
 test('every other route is 401 without the token or with a wrong one', async () => {

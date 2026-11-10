@@ -48,6 +48,14 @@ function clockedPid(diesAt: number): { deps: TaskProcessDeps; kills: number[]; s
   }
 }
 
+/** /health as the daemon answers it, naming `pid`; null: nothing listens on the port. */
+function healthFetch(pid: number | null): InstallEnv['fetch'] {
+  return async () => {
+    if (pid === null) throw new TypeError('connection refused (test)')
+    return new Response(JSON.stringify({ ok: true, version: '0.0.1', schemaVersion: 1, pid }))
+  }
+}
+
 function windowsWorld(vars: Record<string, string> = USER_VARS): FakeWorld {
   world = createWorld({ platform: 'win32', keychainRefs: [] })
   world.env = { ...world.env, envVars: { ...vars, LOCALAPPDATA: join(world.root, 'LocalAppData') } }
@@ -141,10 +149,11 @@ test('no USERNAME means a manual start, not a broken task', async () => {
 test('stop waits for the daemon and kills only a pid that stays', async () => {
   const w = windowsWorld()
   writeDaemonInfo(w.dataDir, PID)
+  const ours = { ...w.env, fetch: healthFetch(PID) }
 
   const dies = clockedPid(1_000)
   const quick = schtasksRunner()
-  await new ScheduledTaskService({ ...w.env, run: quick.run, sleep: dies.sleep }, dies.deps).stop()
+  await new ScheduledTaskService({ ...ours, run: quick.run, sleep: dies.sleep }, dies.deps).stop()
   expect(dies.kills).toEqual([])
   expect(quick.argvs.map((argv) => argv[1])).toEqual(['/Query', '/End', '/Delete'])
   expect(quick.argvs[2]).toEqual([SCHTASKS, '/Delete', '/TN', TASK_NAME, '/F'])
@@ -153,26 +162,57 @@ test('stop waits for the daemon and kills only a pid that stays', async () => {
   const slow = schtasksRunner({ End: 1 })
   let slept = 0
   const sleep = async (ms: number) => (slept += ms, stays.sleep(ms))
-  await new ScheduledTaskService({ ...w.env, run: slow.run, sleep }, stays.deps).stop()
+  await new ScheduledTaskService({ ...ours, run: slow.run, sleep }, stays.deps).stop()
   expect(stays.kills).toEqual([PID])
   expect(slept).toBeGreaterThanOrEqual(HEALTH_WAIT_MS - STOP_POLL_MS)
   expect(slept).toBeLessThanOrEqual(HEALTH_WAIT_MS)
   expect(slow.argvs.map((argv) => argv[1])).toEqual(['/Query', '/End', '/Delete'])
 
   const unknown = schtasksRunner({ Query: 1 })
-  await new ScheduledTaskService({ ...w.env, run: unknown.run }, clockedPid(0).deps).stop()
+  await new ScheduledTaskService({ ...ours, run: unknown.run }, clockedPid(0).deps).stop()
   expect(unknown.argvs.map((argv) => argv[1])).toEqual(['/Query'])
   expect(new ScheduledTaskService(w.env).describe('stop')).toBe('schtasks /End /TN KinfoldDaemon, wait for the daemon to exit, then schtasks /Delete /TN KinfoldDaemon /F')
 })
 
-test('running means registered and alive', async () => {
+test('a stale daemon.json pid that another process now holds is never waited on or killed', async () => {
+  const w = windowsWorld()
+  writeDaemonInfo(w.dataDir, PID)
+  // The pid stays alive throughout: Windows gave it to some other process.
+  for (const fetch of [healthFetch(null), healthFetch(PID + 1)]) {
+    const reused = clockedPid(Number.POSITIVE_INFINITY)
+    let slept = 0
+    const sleep = async (ms: number) => (slept += ms, reused.sleep(ms))
+    const run = schtasksRunner()
+    const service = new ScheduledTaskService({ ...w.env, fetch, run: run.run, sleep }, reused.deps)
+    expect(await service.isRunning()).toBe(false)
+    await service.stop()
+    expect(reused.kills).toEqual([])
+    expect(slept).toBe(0)
+    expect(run.argvs.map((argv) => argv[1])).toEqual(['/Query', '/Query', '/End', '/Delete'])
+  }
+})
+
+test('running means registered, alive and answering /health with that pid', async () => {
   const w = windowsWorld()
   writeDaemonInfo(w.dataDir, PID)
   const alive: TaskProcessDeps = { pidAlive: (pid) => pid === PID, kill: () => {} }
   const dead: TaskProcessDeps = { pidAlive: () => false, kill: () => {} }
-  expect(await new ScheduledTaskService({ ...w.env, run: schtasksRunner().run }, alive).isRunning()).toBe(true)
-  expect(await new ScheduledTaskService({ ...w.env, run: schtasksRunner().run }, dead).isRunning()).toBe(false)
-  expect(await new ScheduledTaskService({ ...w.env, run: schtasksRunner({ Query: 1 }).run }, alive).isRunning()).toBe(false)
+  const ours = { ...w.env, fetch: healthFetch(PID) }
+  expect(await new ScheduledTaskService({ ...ours, run: schtasksRunner().run }, alive).isRunning()).toBe(true)
+  expect(await new ScheduledTaskService({ ...ours, run: schtasksRunner().run }, dead).isRunning()).toBe(false)
+  expect(await new ScheduledTaskService({ ...ours, run: schtasksRunner({ Query: 1 }).run }, alive).isRunning()).toBe(false)
+  expect(await new ScheduledTaskService({ ...w.env, fetch: healthFetch(null), run: schtasksRunner().run }, alive).isRunning()).toBe(false)
+  expect(await new ScheduledTaskService({ ...w.env, fetch: healthFetch(PID + 1), run: schtasksRunner().run }, alive).isRunning()).toBe(false)
+})
+
+test('an unset USERDOMAIN names the user by USERNAME alone', () => {
+  const w = windowsWorld({ USERNAME: 'me' })
+  const service = new ScheduledTaskService(w.env)
+  expect(service.unavailableReason()).toBeNull()
+  const xml = service.configContent(37811) ?? ''
+  expect(xml.match(/<UserId>[^<]*<\/UserId>/g)).toEqual(['<UserId>me</UserId>', '<UserId>me</UserId>'])
+  const empty = new ScheduledTaskService({ ...w.env, envVars: { USERNAME: 'me', USERDOMAIN: '' } })
+  expect(empty.configContent(37811)).toBe(xml)
 })
 
 test('the install plan writes the task file and starts the task', async () => {
@@ -200,8 +240,9 @@ test('the install plan writes the task file and starts the task', async () => {
   expect(await service.fileHolders(join(w.dataDir, 'memory.db'))).toBe('')
 
   writeDaemonInfo(w.dataDir, PID)
-  const running = new ScheduledTaskService({ ...w.env, run: schtasksRunner().run }, { pidAlive: (pid) => pid === PID, kill: () => {} })
+  const answering = { ...w.env, fetch: healthFetch(PID) }
+  const running = new ScheduledTaskService({ ...answering, run: schtasksRunner().run }, { pidAlive: (pid) => pid === PID, kill: () => {} })
   w.out.length = 0
-  expect(await status({ ...w.env, service: running })).toBe(EXIT_OK)
+  expect(await status({ ...answering, service: running })).toBe(EXIT_OK)
   expect(w.out).toContain('service (scheduled task): config present; running: yes')
 })
