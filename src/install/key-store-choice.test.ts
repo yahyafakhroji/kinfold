@@ -117,6 +117,8 @@ test('no usable store leaves a new store plaintext and records nothing', async (
   expect(await install(w.env, { ...DRY, keyStoreModules: modules })).toBe(EXIT_OK)
   expect(planLines(w).some((line) => line.includes('record the key store'))).toBe(false)
   expect(w.out).toContain('database: no key store on linux yet; the new store is created plaintext')
+  const plain = w.out.indexOf('database: no key store on linux yet; the new store is created plaintext')
+  expect(w.out.slice(plain + 1, plain + 3)).toEqual(['  libsecret: not supported on this platform yet', '  key file: not supported on this platform yet'])
   w.out.length = 0
   expect(await status(w.env)).toBe(EXIT_OK)
   expect(w.out).toContain('key store: none on linux; new stores are created plaintext')

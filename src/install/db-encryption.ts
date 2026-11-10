@@ -38,6 +38,7 @@ export function dbKeyActions(env: InstallEnv): Action[] {
   const store = keyStoreOf(env)
   if (store === null) {
     env.out(`database: no key store on ${env.platform} yet; the new store is created plaintext`)
+    for (const line of env.keyStoreRefusals ?? []) env.out(`  ${line}`)
     return []
   }
   if (store.exists(DB_KEY_REF)) {
