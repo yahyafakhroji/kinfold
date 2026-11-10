@@ -127,10 +127,15 @@ export SECRET_SERVICE_WAIT_SECONDS
 # The real libsecret binding against a real keyring, in a bus that ends with
 # the test. bunfig.toml preloads the sqlite3mc build, which the smoke job never
 # makes; this test opens no database, so any non-empty override satisfies it.
+# gnome-keyring keeps its login keyring under XDG_DATA_HOME, so the test gets
+# its own: one left in ~/.local/share would hold this run's password, and the
+# keyring under test could then not unlock it with its own.
 run_live_libsecret_test() {
   local log="$RUNNER_TEMP/libsecret-live.log"
+  local data="$RUNNER_TEMP/libsecret-live-data"
+  mkdir -p "$data"
   # shellcheck disable=SC2016 # the inner bash expands these
-  dbus-run-session -- bash -c '
+  XDG_DATA_HOME="$data" dbus-run-session -- bash -c '
     set -euo pipefail
     password="$(openssl rand -hex 24)"
     printf "%s" "$password" | gnome-keyring-daemon --unlock --components=secrets --daemonize > /dev/null
