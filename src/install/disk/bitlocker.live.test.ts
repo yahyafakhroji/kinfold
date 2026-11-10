@@ -63,19 +63,24 @@ describe.skipIf(!LIVE)('BitLocker (live)', () => {
         '',
       ].join('\n'))
       const conhost = windowsSystemTool({ envVars: process.env }, 'System32\\conhost.exe')
+      // A headless conhost reads its input from stdin and closes at its end,
+      // so stdin stays an open pipe until the child is done; its screen output
+      // arrives on stdout and is drained unread.
       const child = Bun.spawn([conhost, '--headless', process.execPath, script], {
         env: { ...childEnv(), KINFOLD_LIVE_OUT: out },
-        stdin: 'ignore',
-        stdout: 'ignore',
+        stdin: 'pipe',
+        stdout: 'pipe',
         stderr: 'ignore',
       })
       const timer = setTimeout(() => child.kill(), HEADLESS_TIMEOUT_MS)
+      let code: number
       try {
-        await child.exited
+        ;[, code] = await Promise.all([new Response(child.stdout).arrayBuffer(), child.exited])
       } finally {
         clearTimeout(timer)
+        await child.stdin.end()
       }
-      expect(existsSync(out)).toBe(true)
+      expect({ code, wrote: existsSync(out) }).toEqual({ code: 0, wrote: true })
       expect(readFileSync(out, 'utf8')).toMatch(READ_LINE)
     } finally {
       rmSync(dir, { recursive: true, force: true })
