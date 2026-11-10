@@ -39,7 +39,10 @@ install_pywinpty() {
   python -m pip install --disable-pip-version-check pywinpty==2.0.15
 }
 
+# The test preload wants a sqlite3mc build for the stores it opens; these tests
+# open none, so a named placeholder stands in for building one on this runner.
 run_live_tests() {
+  SQLITE3MC_LIB=not-opened-by-the-live-tests \
   KINFOLD_TEST_CREDENTIAL_MANAGER=1 KINFOLD_TEST_WINDOWS_DISK=1 KINFOLD_TEST_WINDOWS_ACL=1 \
     bun test \
       ./src/secrets/stores/credential-manager.live.test.ts \
