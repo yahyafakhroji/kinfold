@@ -25,6 +25,7 @@ import { SHOW_RECOVERY_LINE, applySetup, doneLines } from './apply'
 import { type SetupState, readSetupState } from './prefill'
 import { INSTALL_RECORD_FILE } from './record'
 import type { EncryptionAnswer, SetupAnswers } from './wizard'
+import { posixOnly } from '../../../test/platform-guards'
 
 const CLAUDE = '2.1.310 (Claude Code)'
 const OPENCODE = 'opencode v2.1.4'
@@ -80,7 +81,7 @@ async function applyWith(w: FakeWorld, encryption: EncryptionAnswer, options: In
   return { code: await applySetup(w.env, state, keeping(state, { encryption }), options), state }
 }
 
-test('unticking an agent unwires it and ticking one wires it', async () => {
+posixOnly('POSIX paths')('unticking an agent unwires it and ticking one wires it', async () => {
   const w = make({ opencodeVersion: OPENCODE, codexVersion: CODEX })
   const paths = installPaths(w.env)
   const opencodeConfig = mcpPaths(w.env).opencodeConfig
@@ -118,7 +119,7 @@ test('unticking an agent unwires it and ticking one wires it', async () => {
   expect((await readSetupState(w.env)).wiredHosts).toEqual(['claude-code', 'codex'])
 })
 
-test('a re-run with nothing changed writes nothing but the health check', async () => {
+posixOnly('file modes')('a re-run with nothing changed writes nothing but the health check', async () => {
   const w = make()
   expect(await install(w.env, YES)).toBe(EXIT_OK)
   const record = join(w.dataDir, INSTALL_RECORD_FILE)
@@ -355,7 +356,7 @@ test('a key asked between the questions goes through the same terminal session',
   expect(term.rawStates().at(-1)).toBe(false)
 })
 
-test('a first install on a typed folder plans against that folder as it is', async () => {
+posixOnly('POSIX paths')('a first install on a typed folder plans against that folder as it is', async () => {
   const w = make({ interactive: true })
   const other = join(w.root, 'other-memory')
   openStore(other, { keys: NO_DB_KEYS }).db.close()

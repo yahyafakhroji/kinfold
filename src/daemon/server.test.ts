@@ -15,6 +15,7 @@ import { type DbKeyStore, newDbKey } from '../sqlite/keys'
 import { PROJECT_A, seedMcpObservation, seedMcpSession } from '../mcp/test-support'
 import { LATEST_SCHEMA_VERSION } from '../store/schema'
 import { VERSION } from '../version'
+import { posixOnly } from '../../test/platform-guards'
 
 let root: string
 let dataDir: string
@@ -103,7 +104,7 @@ test('logs carry counts and ids, never the payload', async () => {
   expect(logs.join('\n')).not.toContain('very-distinct-output-marker')
 })
 
-test('daemon.json names the port and pid, and it and the token are 0600', () => {
+posixOnly('file modes')('daemon.json names the port and pid, and it and the token are 0600', () => {
   const info = JSON.parse(readFileSync(join(dataDir, 'daemon.json'), 'utf8'))
   expect(info).toEqual({ pid: process.pid, port: daemon.port })
   for (const file of ['daemon.json', 'daemon.token', 'hmac.key']) expect(statSync(join(dataDir, file)).mode & 0o777).toBe(0o600)

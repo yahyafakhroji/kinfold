@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { openStore } from '../store/db'
 import { READER_TTL_MS, createMcpServer } from './server'
 import { NOW, PROJECT_A, gitForProjectA, seedMcpObservation, seedMcpSession } from './test-support'
+import { posixOnly } from '../../test/platform-guards'
 
 let dataDir: string
 beforeEach(() => {
@@ -24,7 +25,7 @@ function writeDatabase(title: string): void {
   }
 }
 
-test('the reader is reopened after READER_TTL_MS, so a long-lived server sees a database it did not open', async () => {
+posixOnly('unlink while open')('the reader is reopened after READER_TTL_MS, so a long-lived server sees a database it did not open', async () => {
   writeDatabase('Original memory title')
   let clock = NOW
   const server = createMcpServer({ dataDir, cwd: '/work/repo', git: gitForProjectA, now: () => clock })

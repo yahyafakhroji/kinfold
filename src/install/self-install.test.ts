@@ -16,6 +16,7 @@ import { posixProgramFiles } from './program-files'
 import { currentPlatform } from '../platform/platform'
 import { type FakeWorld, YES, countingService, createWorld, fakeService, snapshotTree, startWorldDaemon } from './test-support'
 import { uninstall } from './uninstall'
+import { posixOnly } from '../../test/platform-guards'
 
 const HEX = 'a'.repeat(64)
 const ASSET = 'kinfold-darwin-arm64'
@@ -145,7 +146,7 @@ test('the release checksum URL is overridden only for a release candidate', () =
   expect(releaseSumsUrl({}, '0.4.0')).toBe(`${GITHUB}/v0.4.0/SHA256SUMS`)
 })
 
-test('a development version copies the program without a checksum and says so', async () => {
+posixOnly('file modes')('a development version copies the program without a checksum and says so', async () => {
   const { w, binPath, source } = programWorld()
   expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
   expect(readFileSync(binPath, 'utf8')).toBe(readFileSync(source, 'utf8'))
@@ -163,7 +164,7 @@ test('an unchanged program plans no copy', async () => {
   expect(w.out.join('\n')).not.toContain(`install program ${binPath}`)
 })
 
-test('a second install never makes the program non-executable', async () => {
+posixOnly('file modes')('a second install never makes the program non-executable', async () => {
   const { w, binPath, source } = programWorld()
   expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
   w.out.length = 0
@@ -172,7 +173,7 @@ test('a second install never makes the program non-executable', async () => {
   expect(w.out.join('\n')).not.toContain('chmod <dataDir>/bin/kinfold')
 })
 
-test('install restores 0755 on a program someone made 0600', async () => {
+posixOnly('file modes')('install restores 0755 on a program someone made 0600', async () => {
   const { w, binPath, source } = programWorld()
   expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
   chmodSync(binPath, 0o600)

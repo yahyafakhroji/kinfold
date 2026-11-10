@@ -5,6 +5,7 @@ import { envName } from '../../env-names'
 import { runPlan } from '../plan'
 import { type FakeWorld, createWorld } from '../test-support'
 import { INSTALL_RECORD_FILE, type InstallRecord, currentChannel, installRecordAction, readInstallRecord } from './record'
+import { posixOnly } from '../../../test/platform-guards'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -15,7 +16,7 @@ afterEach(async () => {
 const RECORD: InstallRecord = { channel: 'curl', updateCheck: true, firstInstalledAt: 1_792_900_000_000 }
 const programEnv = (w: FakeWorld, vars: Record<string, string> = {}): FakeWorld['env'] => ({ ...w.env, mode: { kind: 'program', binPath: join(w.dataDir, 'bin', 'kinfold') }, envVars: vars })
 
-test('install.json round-trips at 0600', async () => {
+posixOnly('file modes')('install.json round-trips at 0600', async () => {
   world = createWorld()
   mkdirSync(world.dataDir, { recursive: true })
   await runPlan(world.env, [installRecordAction(world.dataDir, RECORD)], false)

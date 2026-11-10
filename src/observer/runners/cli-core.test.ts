@@ -7,6 +7,7 @@ import { ObserverError, type ObserverPrompt } from '../types'
 import { type SpawnFn, type SpawnRequest, spawnProcess } from './claude-cli'
 import { type CliAdapter, type CliRunContext, RUNS_DIR, cliEnv, createCliObserverRunner } from './cli-core'
 import { fakeCliAdapter, recordingSpawn } from './cli-test-support'
+import { posixOnly } from '../../../test/platform-guards'
 
 let temp: TempStore
 beforeEach(() => {
@@ -86,7 +87,7 @@ test('cliEnv keeps the base and extra keys, drops empty values, adds both observ
 
 // run: the private run folder
 
-test('run spawns in a new 0700 folder under <dataDir>/observer/runs with the user text on stdin, then removes it', async () => {
+posixOnly('file modes')('run spawns in a new 0700 folder under <dataDir>/observer/runs with the user text on stdin, then removes it', async () => {
   const { adapter, cleanups } = harness()
   const spawn = recordingSpawn([VERSION_OK, { stdout: OK_OUTPUT }])
   let seenMode = -1
@@ -517,7 +518,7 @@ test('a listModels failure keeps only its class and removes the folder', async (
 
 // integration: a real process through spawnProcess
 
-test('a real script gets the prompt on stdin, sees EOF, and only the allowed env names', async () => {
+posixOnly('sh scripts')('a real script gets the prompt on stdin, sees EOF, and only the allowed env names', async () => {
   const scriptDir = mkdtempSync(join(tmpdir(), 'kinfold-cli-script-'))
   try {
     const script = join(scriptDir, 'fakecli')

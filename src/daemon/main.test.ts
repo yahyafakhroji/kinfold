@@ -12,6 +12,7 @@ import { SqliteError } from '../sqlite/types'
 import { loadMarkerKey } from '../store/hmac-key'
 import { envName } from '../env-names'
 import { daemonSecrets, fileSink, runDaemon } from './main'
+import { posixOnly } from '../../test/platform-guards'
 
 let dir = ''
 beforeEach(() => {
@@ -98,7 +99,7 @@ async function inProcessDaemon(argv: readonly string[]): Promise<{ dataDir: stri
   }
 }
 
-test('a log file gets every log line at 0600, in a logs folder made for it', async () => {
+posixOnly('file modes')('a log file gets every log line at 0600, in a logs folder made for it', async () => {
   const logFile = join(dir, 'logs', 'daemon.log')
   expect(existsSync(join(dir, 'logs'))).toBe(false)
   const daemon = await inProcessDaemon(['--log-file', logFile])

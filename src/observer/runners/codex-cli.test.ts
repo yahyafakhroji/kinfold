@@ -8,6 +8,7 @@ import { createCliObserverRunner } from './cli-core'
 import { recordingSpawn } from './cli-test-support'
 import { CODEX_MIN_VERSION, codexAdapter, tomlBasicString } from './codex-cli'
 import { createCliRunner, createRunner } from '.'
+import { posixOnly } from '../../../test/platform-guards'
 
 let temp: TempStore
 beforeEach(() => {
@@ -277,7 +278,8 @@ test('a run through the core sends the user text on stdin only and returns text 
   expect(request.cmd.some((arg) => arg.includes(USER_TEXT))).toBe(false)
   expect(request.cmd.at(-1)).toBe('-')
   expect(request.cmd[request.cmd.indexOf('-C') + 1]).toBe(request.cwd)
-  expect(request.cmd).toContain(`model_instructions_file="${request.cwd}/instructions.md"`)
+  // A TOML string: a Windows folder's backslashes arrive escaped.
+  expect(request.cmd).toContain(`model_instructions_file=${tomlBasicString(`${request.cwd}/instructions.md`)}`)
   expect(request.env.CODEX_HOME).toBe('/Users/dev/.codex')
   expect(request.env.OPENAI_API_KEY).toBeUndefined()
 })
@@ -316,7 +318,7 @@ function fakeCodexOnPath(): string {
   return bin
 }
 
-test('createCliRunner builds the codex-cli runner with the deps spawn, env and data dir', async () => {
+posixOnly('sh scripts')('createCliRunner builds the codex-cli runner with the deps spawn, env and data dir', async () => {
   const spawn = recordingSpawn([{ stdout: 'codex-cli 0.166.0\n' }, { stdout: OK_RUN }])
   const runner = createCliRunner(settings('codex-cli'), { dataDir: temp.dataDir, credentials: NO_CREDENTIALS, spawn, parentEnv: { PATH: fakeCodexOnPath(), CODEX_HOME: '/c' } })
   expect(typeof runner.probe).toBe('function')
@@ -334,7 +336,7 @@ test('createCliRunner refuses providers that are not CLI login observers with co
   }
 })
 
-test('createRunner routes codex-cli through createCliRunner', async () => {
+posixOnly('sh scripts')('createRunner routes codex-cli through createCliRunner', async () => {
   const spawn = recordingSpawn([{ stdout: 'codex-cli 0.166.0\n' }, { stdout: OK_RUN }])
   const runner = createRunner(settings('codex-cli'), { dataDir: temp.dataDir, credentials: NO_CREDENTIALS, spawn, parentEnv: { PATH: fakeCodexOnPath() } })
   expect((await runner.run(PROMPT)).text).toBe('{"observations":[]}')

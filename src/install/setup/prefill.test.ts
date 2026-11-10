@@ -19,6 +19,7 @@ import { envForDataDir } from '../../cli/data-dir-env'
 import { type FakeWorld, YES, createWorld, fakeService, startWorldDaemon } from '../test-support'
 import { UNREADABLE_OBSERVERS, lockedFolderProblem, readSetupState, savedObserversForYes } from './prefill'
 import { installRecordAction } from './record'
+import { posixOnly } from '../../../test/platform-guards'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -289,7 +290,7 @@ test('an empty lone -wal is read with immutable, as nothing in it can be missed'
   expect(state.observers.get('opencode')).toEqual(HAIKU)
 })
 
-test('with both side files there, a failed plain open refuses instead of falling back to immutable', async () => {
+posixOnly('file modes')('with both side files there, a failed plain open refuses instead of falling back to immutable', async () => {
   const w = make()
   await markInstalled(w)
   seedPlainStore(w, HAIKU)

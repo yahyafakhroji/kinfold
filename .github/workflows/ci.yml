@@ -30,7 +30,7 @@ jobs:
           - os: ubuntu-latest
             required: false
           - os: windows-latest
-            required: false
+            required: true
     steps:
       - uses: actions/checkout@v5
 
@@ -91,7 +91,7 @@ jobs:
           - os: ubuntu-latest
             required: false
           - os: windows-latest
-            required: false
+            required: true
     steps:
       - uses: actions/checkout@v5
 

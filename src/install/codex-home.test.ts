@@ -8,6 +8,7 @@ import { EXIT_OK, install } from './install'
 import { status } from './status'
 import { type FakeWorld, YES, createWorld } from './test-support'
 import { uninstall } from './uninstall'
+import { posixOnly } from '../../test/platform-guards'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -23,7 +24,7 @@ function codexWorld(codexHomeEnv: string | undefined): FakeWorld {
 }
 const samEvents = (path: string): string[] => Object.keys((JSON.parse(readFileSync(path, 'utf8')) as { hooks: Record<string, unknown> }).hooks)
 
-test('resolveCodexHome follows Codex: unset or empty is ~/.codex; set must be an existing directory, canonicalized', () => {
+posixOnly('POSIX paths')('resolveCodexHome follows Codex: unset or empty is ~/.codex; set must be an existing directory, canonicalized', () => {
   const w = codexWorld(undefined)
   expect(resolveCodexHome(undefined, w.home, w.home)).toEqual({ ok: true, dir: join(w.home, '.codex'), fromEnv: false })
   expect(resolveCodexHome('', w.home, w.home)).toEqual({ ok: true, dir: join(w.home, '.codex'), fromEnv: false })
@@ -37,7 +38,7 @@ test('resolveCodexHome follows Codex: unset or empty is ~/.codex; set must be an
   expect(resolveCodexHome(join(w.home, 'a-file'), w.home, w.home)).toMatchObject({ ok: false, reason: expect.stringContaining('is not a directory') })
 })
 
-test('install wires $CODEX_HOME/hooks.json, leaves ~/.codex alone, status names the file, uninstall removes ours', async () => {
+posixOnly('POSIX paths')('install wires $CODEX_HOME/hooks.json, leaves ~/.codex alone, status names the file, uninstall removes ours', async () => {
   const w = codexWorld(undefined)
   const home = join(w.home, 'work-codex')
   mkdirSync(home)

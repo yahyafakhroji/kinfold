@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { launchdPath } from './launch-agent'
+import { posixOnly } from '../../test/platform-guards'
 
 const BUN = '/opt/bun/bin/bun'
 const SYSTEM = '/usr/bin:/bin:/usr/sbin:/sbin'
@@ -8,7 +9,7 @@ function whichFrom(found: Record<string, string>): (command: string) => string |
   return (command) => found[command] ?? null
 }
 
-test('the plist PATH adds the dirs of codex, the node it runs on, and opencode, in a stable deduplicated order', () => {
+posixOnly('POSIX paths')('the plist PATH adds the dirs of codex, the node it runs on, and opencode, in a stable deduplicated order', () => {
   const which = whichFrom({
     claude: '/home/u/.local/bin/claude',
     git: '/opt/homebrew/bin/git',
@@ -28,7 +29,7 @@ test('the plist PATH adds the dirs of codex, the node it runs on, and opencode, 
   expect(launchdPath({ bunPath: BUN, pathEnv: '/anything' }, which)).toBe(expected)
 })
 
-test('a CLI in a dir already on the plist PATH adds no second entry', () => {
+posixOnly('POSIX paths')('a CLI in a dir already on the plist PATH adds no second entry', () => {
   const which = whichFrom({
     claude: '/opt/homebrew/bin/claude',
     git: '/opt/homebrew/bin/git',
@@ -39,7 +40,7 @@ test('a CLI in a dir already on the plist PATH adds no second entry', () => {
   expect(launchdPath({ bunPath: BUN, pathEnv: '/anything' }, which)).toBe(`/opt/bun/bin:/opt/homebrew/bin:${SYSTEM}`)
 })
 
-test('without codex or opencode on PATH the plist PATH is unchanged, and node is not added on its own', () => {
+posixOnly('POSIX paths')('without codex or opencode on PATH the plist PATH is unchanged, and node is not added on its own', () => {
   const which = whichFrom({
     claude: '/home/u/.local/bin/claude',
     git: '/opt/homebrew/bin/git',

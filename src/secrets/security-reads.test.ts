@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { posixOnly } from '../../test/platform-guards'
 
 const SRC = join(import.meta.dir, '..')
 const KEYCHAIN_MODULE = 'secrets/stores/keychain.ts'
@@ -22,7 +23,7 @@ function sourceFiles(dir: string): string[] {
   })
 }
 
-test('only the Keychain module runs security', () => {
+posixOnly('POSIX paths')('only the Keychain module runs security', () => {
   const offenders = sourceFiles(SRC).flatMap((path) => {
     const name = relative(SRC, path)
     if (name === KEYCHAIN_MODULE) return []

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { type TempStore, openTempStore } from '../test-support'
 import { ObserverError, type ObserverPrompt } from '../types'
 import { type SpawnFn, type SpawnRequest, createClaudeCliRunner } from './claude-cli'
+import { posixOnly } from '../../../test/platform-guards'
 
 let temp: TempStore
 beforeEach(() => {
@@ -60,7 +61,7 @@ test('the child gets a minimal env with KINFOLD_OBSERVER=1 (and SAM_OBSERVER=1 f
   expect(requests[0]!.env).toEqual({ PATH: '/usr/bin:/bin', HOME: '/Users/dev', USER: 'dev', TMPDIR: '/tmp/x', KINFOLD_OBSERVER: '1', SAM_OBSERVER: '1' })
 })
 
-test('the child runs in <dataDir>/observer, created 0700, never a project folder', async () => {
+posixOnly('file modes')('the child runs in <dataDir>/observer, created 0700, never a project folder', async () => {
   const { spawn, requests } = capture()
   await runner(spawn).run(PROMPT)
   expect(requests[0]!.cwd).toBe(join(temp.dataDir, 'observer'))

@@ -69,9 +69,10 @@ test('a hook run with only the legacy dir spools there and does not create ~/.ki
     stdin: new TextEncoder().encode(readFileSync(join(FIXTURES, 'post-tool-use.bash.json'), 'utf8')),
     stdout: 'pipe',
     stderr: 'pipe',
-    // No KINFOLD_DATA_DIR or SAM_DATA_DIR: the hook resolves the data dir from HOME like a live one.
+    // No KINFOLD_DATA_DIR or SAM_DATA_DIR: the hook resolves the data dir from the home folder like a live one.
     // The temp dir has no daemon.json, so the hook only spools and never reaches a running daemon.
-    env: { PATH: process.env.PATH ?? '', HOME: home, NODE_ENV: 'test', KINFOLD_DB_KEYSTORE: 'none' },
+    // Windows finds the home folder through USERPROFILE, not HOME.
+    env: { PATH: process.env.PATH ?? '', HOME: home, USERPROFILE: home, NODE_ENV: 'test', KINFOLD_DB_KEYSTORE: 'none' },
   })
   expect(await child.exited).toBe(0)
   expect(existsSync(current)).toBe(false)

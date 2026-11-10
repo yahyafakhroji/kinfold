@@ -6,6 +6,7 @@ import { runPlan } from '../install/plan'
 import { createWorld } from '../install/test-support'
 import { KEY_STORE_FILE, readKeyStoreRecord } from '../secrets/key-store-record'
 import { writeFileAtomic } from './atomic'
+import { posixOnly } from '../../test/platform-guards'
 
 let dir = ''
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
@@ -26,7 +27,7 @@ test('the folder is flushed only when asked, and never on win32', () => {
   expect(readFileSync(path, 'utf8')).toBe('three')
 })
 
-test('key-store.json round-trips at 0600 and the folder is flushed', async () => {
+posixOnly('file modes')('key-store.json round-trips at 0600 and the folder is flushed', async () => {
   const world = createWorld({ withLibrary: false })
   try {
     mkdirSync(world.dataDir, { recursive: true, mode: 0o700 })

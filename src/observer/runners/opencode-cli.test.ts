@@ -9,6 +9,7 @@ import type { SpawnFn, SpawnRequest } from './claude-cli'
 import { recordingSpawn } from './cli-test-support'
 import { OBSERVER_AGENT, OPENCODE_MIN_VERSION, OPENCODE_SYSTEM_DIR, createOpencodeAdapter, opencodeAdapter } from './opencode-cli'
 import { createCliRunner, createRunner } from '.'
+import { posixOnly } from '../../../test/platform-guards'
 
 let temp: TempStore
 let runDir: string
@@ -72,7 +73,7 @@ test('invocation builds the exact opencode run argv, with no --auto, --server or
   expect(OBSERVER_AGENT).toBe('kinfold-observer')
 })
 
-test('invocation env redirects the config dir to an empty 0700 folder and sets the disable flags', () => {
+posixOnly('file modes')('invocation env redirects the config dir to an empty 0700 folder and sets the disable flags', () => {
   const { env } = invocation()
   const configDir = join(runDir, 'config')
   expect(env.OPENCODE_CONFIG_DIR).toBe(configDir)
@@ -482,7 +483,7 @@ function fakeOpencodeOnPath(): string {
   return bin
 }
 
-test('createCliRunner and createRunner build the opencode-cli runner', async () => {
+posixOnly('sh scripts')('createCliRunner and createRunner build the opencode-cli runner', async () => {
   for (const build of [createCliRunner, createRunner]) {
     const spawn = recordingSpawn([VERSION_OK, { stdout: OK_RUN }, {}])
     const runner = build(settings('opencode-cli'), { dataDir: temp.dataDir, credentials: NO_CREDENTIALS, spawn, parentEnv: { PATH: fakeOpencodeOnPath(), XDG_DATA_HOME: '/d' } })

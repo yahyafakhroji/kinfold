@@ -7,6 +7,7 @@ import type { Database } from '../sqlite/types'
 import { readOrCreateSecret } from './data-dir'
 import { type Store, migrate, openStore } from './db'
 import { LATEST_SCHEMA_VERSION, MIGRATIONS, MIGRATION_STEPS } from './schema'
+import { posixOnly } from '../../test/platform-guards'
 
 let root: string
 let dataDir: string
@@ -33,7 +34,7 @@ test('the store runs with WAL, secure_delete, incremental auto_vacuum and foreig
   expect(store.schemaVersion).toBe(LATEST_SCHEMA_VERSION)
 })
 
-test('the data dir is 0700 and the database, WAL and SHM files are 0600', () => {
+posixOnly('file modes')('the data dir is 0700 and the database, WAL and SHM files are 0600', () => {
   store.db.run("INSERT INTO projects (key, key_kind, display_name, created_at) VALUES ('k', 'path', 'k', 1)")
   expect(mode(dataDir)).toBe(0o700)
   for (const suffix of ['', '-wal', '-shm']) expect(mode(`${store.path}${suffix}`)).toBe(0o600)
@@ -71,7 +72,7 @@ test('observations_fts finds an inserted observation, follows an update and drop
   expect(search('tiebreak')).toHaveLength(0)
 })
 
-test('a secret file is created once at 0600 and read back unchanged', () => {
+posixOnly('file modes')('a secret file is created once at 0600 and read back unchanged', () => {
   const path = join(dataDir, 'daemon.token')
   const first = readOrCreateSecret(path)
   expect(first).toMatch(/^[0-9a-f]{64}$/)

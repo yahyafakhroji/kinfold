@@ -9,6 +9,7 @@ import { LAUNCHCTL } from './launch-agent'
 import { status } from './status'
 import { uninstall } from './uninstall'
 import { type FakeWorld, YES, createWorld, snapshotTree, worldSubKeyEpochs } from './test-support'
+import { posixOnly } from '../../test/platform-guards'
 
 const LEGACY = '4e'.repeat(32)
 let world: FakeWorld | null = null
@@ -30,7 +31,7 @@ const keyBytesIn = (w: FakeWorld, text: string): string[] =>
 const hmacPuts = (w: FakeWorld): string[] =>
   w.securityCalls.filter((call) => call.args[0] === '-i').map((call) => /-a (\S+)/.exec(call.stdin ?? '')?.[1] ?? '').filter((ref) => ref.startsWith('hmac-'))
 
-test('dry run: the migration shows in the plan, values hidden, and nothing changes', async () => {
+posixOnly('POSIX paths')('dry run: the migration shows in the plan, values hidden, and nothing changes', async () => {
   const w = oldUser()
   const before = snapshotTree(w.home)
   expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)

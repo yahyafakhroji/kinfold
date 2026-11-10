@@ -2,7 +2,7 @@
 // there is one, then the repo root, then the path. Two tools opened in different subdirectories or
 // worktrees of one repo land on the same project.
 
-import { basename } from 'node:path'
+import { basename, normalize } from 'node:path'
 
 export type ProjectKeyKind = 'git-remote' | 'git-root' | 'path'
 
@@ -91,13 +91,25 @@ export function remoteSlug(url: string): string | null {
   return [parts.host.toLowerCase(), ...segments].join('/')
 }
 
+/**
+ * git prints the top level with forward slashes on every OS (C:/Users/me/proj
+ * on Windows), while a cwd, and so the path key a git timeout falls back to,
+ * uses the native form. Normalizing keeps one folder on one key.
+ */
+export function nativeTopLevel(output: string, normalizePath: (path: string) => string = normalize): string {
+  return normalizePath(output)
+}
+
 export function resolveProjectKey(cwd: string, git: GitRunner = runGit): ProjectKey {
   const remote = git(cwd, ['config', '--get', 'remote.origin.url'])
   const slug = remote === null ? null : remoteSlug(remote)
   if (slug !== null) return { key: slug, kind: 'git-remote', displayName: basename(slug) }
 
-  const root = git(cwd, ['rev-parse', '--show-toplevel'])
-  if (root !== null) return { key: root, kind: 'git-root', displayName: basename(root) }
+  const topLevel = git(cwd, ['rev-parse', '--show-toplevel'])
+  if (topLevel !== null) {
+    const root = nativeTopLevel(topLevel)
+    return { key: root, kind: 'git-root', displayName: basename(root) }
+  }
 
   return pathKey(cwd)
 }

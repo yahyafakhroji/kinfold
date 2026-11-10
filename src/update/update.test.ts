@@ -8,6 +8,7 @@ import { type FakeService, type FakeWorld, countingService, createWorld, fakeSer
 import { StubService } from '../install/service/stub-service'
 import { LATEST_RELEASE_URL } from './check'
 import { programUrl, runUpdate } from './update'
+import { posixOnly } from '../../test/platform-guards'
 
 const ARCH = 'arm64'
 const ASSET = releaseAssetName('darwin', ARCH)!
@@ -150,7 +151,7 @@ test('the folder is flushed after the program rename', async () => {
   expect(synced).toEqual([])
 })
 
-test('a verified program is handed install --yes with the saved channel', async () => {
+posixOnly('file modes')('a verified program is handed install --yes with the saved channel', async () => {
   const { w, binPath, service } = updateWorld()
   writeFileSync(join(w.dataDir, 'install.json'), JSON.stringify({ channel: 'npx', updateCheck: true, firstInstalledAt: 1 }))
   const calls: { path: string; argv: readonly string[]; env: Readonly<Record<string, string>>; bytes: string; mode: number }[] = []
@@ -272,7 +273,7 @@ async function plantLeftovers(binPath: string): Promise<{ dead: string; deadExe:
   return paths
 }
 
-test("leftovers of dead update runs are swept, a live run's file is kept", async () => {
+posixOnly('sh scripts')("leftovers of dead update runs are swept, a live run's file is kept", async () => {
   const { w, binPath } = updateWorld({ tag: 'v0.1.0' })
   const { dead, deadExe, live, other } = await plantLeftovers(binPath)
   expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: noRun })).toBe(0)
@@ -284,7 +285,7 @@ test("leftovers of dead update runs are swept, a live run's file is kept", async
   expect(w.out).toEqual(['kinfold is up to date (0.1.0)'])
 })
 
-test('a dry run lists dead leftovers by name and removes nothing', async () => {
+posixOnly('sh scripts')('a dry run lists dead leftovers by name and removes nothing', async () => {
   const { w, binPath } = updateWorld()
   const paths = await plantLeftovers(binPath)
   expect(await runUpdate(w.env, { dryRun: true }, { version: '0.1.0', runProgram: noRun })).toBe(0)
@@ -298,7 +299,7 @@ test('a dry run lists dead leftovers by name and removes nothing', async () => {
   expect(line).not.toContain(basename(paths.other))
 })
 
-test('a folder with a temp name is skipped, and an unremovable leftover is named, not fatal', async () => {
+posixOnly('sh scripts')('a folder with a temp name is skipped, and an unremovable leftover is named, not fatal', async () => {
   const { w, binPath } = updateWorld({ tag: 'v0.1.0' })
   const bin = dirname(binPath)
   const folder = join(bin, `.kinfold-update-${await deadPid()}`)
@@ -332,7 +333,7 @@ test('a file or link already at the temp name is refused, not followed or remove
   expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
 })
 
-test('a write error before the hand-off says nothing was changed', async () => {
+posixOnly('file modes')('a write error before the hand-off says nothing was changed', async () => {
   const { w, binPath, service } = updateWorld()
   chmodSync(dirname(binPath), 0o500)
   try {

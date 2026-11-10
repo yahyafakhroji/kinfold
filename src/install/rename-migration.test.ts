@@ -21,6 +21,7 @@ import { fakeTerminal } from './prompt/fake-terminal'
 import { PromptCancelled } from './prompt/prompts'
 import { LOCKED_FOLDER_NOTE } from './setup/prefill'
 import { type FakeWorld, UID, YES, createWorld, placeBuiltLibrary, snapshotTree, startWorldDaemon } from './test-support'
+import { posixOnly } from '../../test/platform-guards'
 
 const CLAUDE = '2.1.310 (Claude Code)'
 const OPENCODE = 'opencode v2.1.4'
@@ -101,7 +102,7 @@ function expectLegacyUntouched(w: FakeWorld, opencodeBefore: string): void {
   expect(existsSync(paths.legacyOpencodePlugin)).toBe(true)
 }
 
-test('a legacy install moves: entries copied and read back before any delete, data dir renamed with a symlink, wiring renamed', async () => {
+posixOnly('POSIX paths')('a legacy install moves: entries copied and read back before any delete, data dir renamed with a symlink, wiring renamed', async () => {
   const w = legacyWorld({ running: true })
   const paths = installPaths(w.env)
   const storeInode = statSync(join(paths.legacyDataDir, 'memory.db')).ino
@@ -216,7 +217,7 @@ test('a second install after the migration plans no migration actions', async ()
   expect(later.some((c) => c.stdin !== undefined)).toBe(false)
 })
 
-test('a run after a partial migration finishes the remaining steps', async () => {
+posixOnly('POSIX paths')('a run after a partial migration finishes the remaining steps', async () => {
   const w = legacyWorld({ running: true })
   const realSecurity = w.env.security
   // The first legacy delete fails: the copies and the move are done, the old entries still there.
@@ -239,7 +240,7 @@ test('a run after a partial migration finishes the remaining steps', async () =>
   expectNoValueLeaked(w)
 })
 
-test('the dry run lists every step and shows no Keychain value', async () => {
+posixOnly('POSIX paths')('the dry run lists every step and shows no Keychain value', async () => {
   // The agent is loaded but no daemon runs, so every Keychain call below is the installer's own.
   const w = legacyWorld()
   w.launchd.legacyLoaded = true

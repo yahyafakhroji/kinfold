@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expectedMode, scanDataDirModes } from './permissions'
+import { posixOnly } from '../../test/platform-guards'
 
 const roots: string[] = []
 afterEach(() => {
@@ -36,15 +37,15 @@ test('expectedMode gives 0700 to every directory, bin included', () => {
   expect(expectedMode('bin/kinfold', 'dir')).toBe(0o700)
 })
 
-test('a program at 0755 needs no change', () => {
+posixOnly('file modes')('a program at 0755 needs no change', () => {
   expect(scanDataDirModes(dataDirWithProgram(0o755)).changes).toEqual([])
 })
 
-test('a program at 0600 is planned back to 0755', () => {
+posixOnly('file modes')('a program at 0600 is planned back to 0755', () => {
   expect(scanDataDirModes(dataDirWithProgram(0o600)).changes).toEqual([{ path: 'bin/kinfold', kind: 'file', from: 0o600, to: 0o755 }])
 })
 
-test('update temp programs are skipped by the scan', () => {
+posixOnly('file modes')('update temp programs are skipped by the scan', () => {
   const dir = dataDirWithProgram(0o755)
   writeFileSync(join(dir, 'bin', '.kinfold-update-abc'), 'temp')
   chmodSync(join(dir, 'bin', '.kinfold-update-abc'), 0o755)

@@ -19,6 +19,7 @@ import { upsertObserverSettings } from '../store/observer-settings-store'
 import { hostStatusLines, status } from './status'
 import { uninstall } from './uninstall'
 import type { WslStatus } from '../wsl/entry'
+import { posixOnly } from '../../test/platform-guards'
 
 // The real hooks, put back after each swap: mock.module lasts for the whole
 // process, and other test files use the real module.
@@ -45,7 +46,7 @@ async function savedRows(w: FakeWorld): Promise<{ host: string; provider: string
   return read.view.rows.map(({ host, provider, model, credentialRef }) => ({ host, provider, model, credentialRef }))
 }
 
-test('a fresh install wires both hosts, starts the LaunchAgent and saves both observers through the daemon', async () => {
+posixOnly('file modes')('a fresh install wires both hosts, starts the LaunchAgent and saves both observers through the daemon', async () => {
   const w = both()
   const paths = installPaths(w.env)
   expect(await install(w.env, YES)).toBe(EXIT_OK)
@@ -68,7 +69,7 @@ test('a fresh install wires both hosts, starts the LaunchAgent and saves both ob
   expect(w.fetches.filter((f) => f.startsWith('PUT'))).toEqual(['PUT /observer/settings', 'PUT /observer/settings'])
 })
 
-test('the plist names the absolute bun and main.ts, keeps the daemon alive and logs to <dataDir>/logs', async () => {
+posixOnly('POSIX paths')('the plist names the absolute bun and main.ts, keeps the daemon alive and logs to <dataDir>/logs', async () => {
   const w = both()
   await install(w.env, YES)
   const plist = readFileSync(installPaths(w.env).launchAgentPlist, 'utf8')
@@ -81,7 +82,7 @@ test('the plist names the absolute bun and main.ts, keeps the daemon alive and l
   expect(plist).toContain('<key>PATH</key><string>/opt/fake/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>')
 })
 
-test('the plist PATH holds bun, the dirs of claude and git, then system dirs, whatever else the shell PATH has', () => {
+posixOnly('POSIX paths')('the plist PATH holds bun, the dirs of claude and git, then system dirs, whatever else the shell PATH has', () => {
   const which = (command: string): string | null => ({ claude: '/home/u/.local/bin/claude', git: '/opt/homebrew/bin/git' })[command] ?? null
   const noisy = '/repo/node_modules/.bin:/home/u/.local/bin:/opt/homebrew/bin:/usr/local/games:relative/bin'
   const quiet = '/opt/homebrew/bin:/home/u/.local/bin'
@@ -90,7 +91,7 @@ test('the plist PATH holds bun, the dirs of claude and git, then system dirs, wh
   expect(launchdPath({ bunPath: '/opt/bun/bin/bun', pathEnv: quiet }, which)).toBe(expected)
 })
 
-test('unrelated keys and hooks survive, the backup is written once, and a re-run is byte-identical', async () => {
+posixOnly('file modes')('unrelated keys and hooks survive, the backup is written once, and a re-run is byte-identical', async () => {
   const w = both()
   const paths = installPaths(w.env)
   mkdirSync(paths.claudeDir, { recursive: true })
@@ -165,7 +166,7 @@ test('--observer sets one host and --yes keeps the default for the other', async
   ])
 })
 
-test('the data dir permission fix reports each path with its old and new mode', async () => {
+posixOnly('file modes')('the data dir permission fix reports each path with its old and new mode', async () => {
   const w = both({ opencodeVersion: null })
   mkdirSync(join(w.dataDir, 'spool'), { recursive: true })
   writeFileSync(join(w.dataDir, 'memory.db'), '', { mode: 0o644 })

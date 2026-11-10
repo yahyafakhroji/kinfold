@@ -2,8 +2,10 @@
 // bun:sqlite with strict binding, and src/sqlite/contract.test.ts holds both to
 // it. Text and blobs bind with SQLITE_TRANSIENT, so SQLite copies them and no
 // JS buffer outlives a call. A statement the cache drops may still be held by
-// a caller, so it is finalized only once unreachable; close() uses
-// sqlite3_close_v2, which waits for any statement still alive.
+// a caller, so it is finalized only once unreachable. close() finalizes every
+// statement the connection made, held or not, before sqlite3_close_v2: one left
+// alive turns the close into a zombie that keeps the file open, and Windows
+// then refuses to delete or rename it.
 
 import { CString, type Pointer, toArrayBuffer } from 'bun:ffi'
 import {
@@ -47,8 +49,15 @@ function bytesOf(view: ArrayBufferView): Uint8Array {
   return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
 }
 
+interface LiveStatement {
+  ref: WeakRef<FfiStatement>
+  handle: Pointer
+}
+
 class Connection {
   readonly cache = new Map<string, FfiStatement>()
+  /** Every statement not yet finalized, keyed by its unregister token. */
+  readonly live = new Map<object, LiveStatement>()
   private depth = 0
   closed = false
 
@@ -110,7 +119,8 @@ class Connection {
 }
 
 /** Finalizes statements nobody can reach any more: ones the cache dropped, or prepare() results never finalized. */
-const unreachable = new FinalizationRegistry<{ f: Sqlite3; handle: Pointer }>(({ f, handle }) => {
+const unreachable = new FinalizationRegistry<{ f: Sqlite3; handle: Pointer; live: Map<object, LiveStatement>; token: object }>(({ f, handle, live, token }) => {
+  live.delete(token)
   f.sqlite3_finalize(handle)
 })
 
@@ -130,12 +140,14 @@ class FfiStatement<Row = unknown, Params extends Bindings = Bindings> implements
     })
     this.columns = Array.from({ length: f.sqlite3_column_count(handle) }, (_, i) => String(f.sqlite3_column_name(handle, i)))
     this.readonly = f.sqlite3_stmt_readonly(handle) !== 0
-    unreachable.register(this, { f, handle }, this.token)
+    conn.live.set(this.token, { ref: new WeakRef(this), handle })
+    unreachable.register(this, { f, handle, live: conn.live, token: this.token }, this.token)
   }
 
   private start(given: readonly unknown[]): void {
-    if (this.finalized) throw new SqliteError('statement is finalized', 'SQLITE_MISUSE', 21, 'closed')
+    // The database first: close() finalizes its statements, and "closed" is the truer reason then.
     this.conn.check()
+    if (this.finalized) throw new SqliteError('statement is finalized', 'SQLITE_MISUSE', 21, 'closed')
     const f = this.conn.f
     f.sqlite3_reset(this.handle)
     f.sqlite3_clear_bindings(this.handle)
@@ -240,6 +252,7 @@ class FfiStatement<Row = unknown, Params extends Bindings = Bindings> implements
     if (this.finalized) return
     this.finalized = true
     unreachable.unregister(this.token)
+    this.conn.live.delete(this.token)
     this.conn.f.sqlite3_finalize(this.handle)
   }
 }
@@ -307,7 +320,16 @@ class FfiDatabase implements Database {
 
   close(): void {
     if (this.conn.closed) return
-    for (const statement of this.conn.cache.values()) statement.finalize()
+    for (const [token, { ref, handle }] of [...this.conn.live]) {
+      const statement = ref.deref()
+      if (statement !== undefined) statement.finalize()
+      else {
+        // Collected but not yet swept by the registry: finalize it here instead.
+        unreachable.unregister(token)
+        this.conn.live.delete(token)
+        this.conn.f.sqlite3_finalize(handle)
+      }
+    }
     this.conn.cache.clear()
     this.conn.closed = true
     this.conn.f.sqlite3_close_v2(this.conn.handle)
