@@ -7,7 +7,6 @@ import { DEFAULT_PORT } from '../../daemon/daemon'
 import { envName } from '../../env-names'
 import type { CommandResult, InstallEnv } from '../env'
 import { type FakeWorld, createWorld } from '../test-support'
-import { STOP_ATTEMPTS } from './launch-agent-service'
 import { SYSTEMCTL_CANDIDATES, SYSTEMD_UNIT, SystemdUserService, procFileHolders, systemctlArgv, systemdQuote, systemdUserDir, unitContent, unitEnvironment, userManagerOf } from './systemd-service'
 
 let world: FakeWorld | null = null
@@ -202,18 +201,61 @@ test('a unit the manager did not load is refused', async () => {
   expect(calls().some((argv) => argv.includes('enable'))).toBe(false)
 })
 
+/** Answers is-active from a script of states (the last one repeats); everything else exits 0 unless `others` says otherwise. */
+function scripted(states: readonly (string | 'timeout')[], others: Answer = () => ({ exitCode: 0, stdout: '' })): Answer {
+  const queue = [...states]
+  return (args) => {
+    if (args[0] !== 'is-active') return others(args)
+    const state = queue.length > 1 ? queue.shift() : queue[0]
+    if (state === 'timeout') return { exitCode: 143, stdout: '', timedOut: true }
+    return { exitCode: state === 'active' ? 0 : 3, stdout: `${state}\n` }
+  }
+}
+
+const verbs = (calls: string[][]): string[] => calls.map((argv) => argv.slice(ARGV_PREFIX).join(' '))
+
 test('stop disables and waits until the unit is inactive', async () => {
-  const activeExits = [0, 0, 3]
-  const { service, runtimeDir, calls } = managerWorld((args) => ({ exitCode: args[0] === 'is-active' ? (activeExits.shift() ?? 3) : 0, stdout: '' }))
+  const { service, runtimeDir, calls } = managerWorld(scripted(['deactivating', 'deactivating', 'inactive']))
   await service.stop()
   const manager = { runtimeDir, systemctl: SYSTEMCTL }
-  const isActive = systemctlArgv(manager, ['is-active', '--quiet', SYSTEMD_UNIT])
+  const isActive = systemctlArgv(manager, ['is-active', SYSTEMD_UNIT])
   expect(calls()).toEqual([systemctlArgv(manager, ['disable', '--now', SYSTEMD_UNIT]), isActive, isActive, isActive])
+})
 
-  await world?.cleanup()
-  const stuck = managerWorld(() => ({ exitCode: 0, stdout: '' }))
-  await expect(stuck.service.stop()).rejects.toThrow('the systemd user service is still active after disable --now (exit 0)')
-  expect(stuck.calls().filter((argv) => argv.includes('is-active'))).toHaveLength(STOP_ATTEMPTS)
+test('a unit that keeps running after disable --now is refused', async () => {
+  const { service } = managerWorld(scripted(['active']))
+  await expect(service.stop()).rejects.toThrow('the systemd user service is still active after disable --now; it may still be running')
+})
+
+test('a disable cut off by its timeout while systemd is still stopping is refused, never reported as stopped', async () => {
+  const { service, calls } = managerWorld(scripted(['deactivating'], (args) => (args[0] === 'disable' ? { exitCode: 143, stdout: '', timedOut: true } : { exitCode: 0, stdout: '' })))
+  const failure = await service.stop().then(() => null, (error: unknown) => error as Error)
+  expect(failure?.message).toBe('the systemd user service is still deactivating after disable --now; it may still be running')
+  expect(failure?.message).not.toContain('exit')
+  expect(verbs(calls()).filter((verb) => verb.startsWith('is-active')).length).toBeGreaterThan(1)
+})
+
+test('after a cut-off disable the unit is disabled again once it has stopped', async () => {
+  const { service, calls } = managerWorld(scripted(['deactivating', 'inactive'], (args) => (args[0] === 'disable' && args[1] === '--now' ? { exitCode: 143, stdout: '', timedOut: true } : { exitCode: 0, stdout: '' })))
+  await service.stop()
+  expect(verbs(calls())).toEqual([`disable --now ${SYSTEMD_UNIT}`, `is-active ${SYSTEMD_UNIT}`, `is-active ${SYSTEMD_UNIT}`, `disable ${SYSTEMD_UNIT}`])
+})
+
+test('a failing disable is reported, not swallowed', async () => {
+  const { service, calls } = managerWorld(scripted(['inactive'], (args) => (args[0] === 'disable' ? { exitCode: 1, stdout: 'token=abc' } : { exitCode: 0, stdout: '' })))
+  await expect(service.stop()).rejects.toThrow(`systemd user service: systemctl --user disable --now ${SYSTEMD_UNIT} failed (exit 1)`)
+  expect(verbs(calls())).toEqual([`disable --now ${SYSTEMD_UNIT}`])
+})
+
+test('a unit that ends failed is reset so it is not left listed as failed', async () => {
+  const { service, calls } = managerWorld(scripted(['deactivating', 'failed']))
+  await service.stop()
+  expect(verbs(calls()).at(-1)).toBe(`reset-failed ${SYSTEMD_UNIT}`)
+})
+
+test('a state systemctl never reports during stop is refused', async () => {
+  const { service } = managerWorld(scripted(['timeout']))
+  await expect(service.stop()).rejects.toThrow('the systemd user service is in a state systemctl did not report after disable --now; it may still be running')
 })
 
 test('a failing systemctl reports its exit code only', async () => {
@@ -231,12 +273,34 @@ test('start and stop describe their systemctl steps', () => {
   expect(service.describe('stop')).toBe('systemd user service: systemctl --user disable --now kinfold.service')
 })
 
-test('isRunning is is-active exit 0', async () => {
-  let exit = 0
-  const { service } = managerWorld(() => ({ exitCode: exit, stdout: '' }))
-  expect(await service.isRunning()).toBe(true)
-  exit = 3
-  expect(await service.isRunning()).toBe(false)
+test('isRunning reads the printed state, and an enabled unit counts as loaded', async () => {
+  for (const state of ['active', 'activating', 'deactivating', 'reloading', 'refreshing']) {
+    const { service, calls } = managerWorld(scripted([state]))
+    expect(await service.isRunning()).toBe(true)
+    expect(verbs(calls())).toEqual([`is-active ${SYSTEMD_UNIT}`])
+    await world?.cleanup()
+  }
+  for (const [state, enabled, expected] of [['inactive', 'enabled', true], ['failed', 'enabled', true], ['inactive', 'disabled', false], ['failed', 'disabled', false], ['inactive', 'not-found', false]] as const) {
+    const { service } = managerWorld(scripted([state], (args) => ({ exitCode: enabled === 'enabled' ? 0 : 1, stdout: args[0] === 'is-enabled' ? `${enabled}\n` : '' })))
+    expect(await service.isRunning()).toBe(expected)
+    await world?.cleanup()
+  }
+})
+
+test('isRunning refuses to guess when systemctl gives no state', async () => {
+  const unknown = 'systemd user service: systemctl --user is-active kinfold.service gave no known state; the service state is unknown'
+  for (const state of ['timeout', '', 'something-new']) {
+    const { service } = managerWorld(scripted([state]))
+    await expect(service.isRunning()).rejects.toThrow(unknown)
+    await world?.cleanup()
+  }
+  const { service } = managerWorld(scripted(['inactive'], () => ({ exitCode: 143, stdout: '', timedOut: true })))
+  await expect(service.isRunning()).rejects.toThrow('systemd user service: systemctl --user is-enabled kinfold.service did not answer; the service state is unknown')
+})
+
+test('a timed-out systemctl step names no exit code', async () => {
+  const { service } = managerWorld((args) => (args[0] === 'daemon-reload' ? { exitCode: 143, stdout: '', timedOut: true } : loaded(args)))
+  await expect(service.start()).rejects.toThrow('systemd user service: systemctl --user daemon-reload did not finish within 15 s')
 })
 
 test('no reachable user manager means no unit and no systemctl', async () => {

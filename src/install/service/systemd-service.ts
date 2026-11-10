@@ -12,7 +12,8 @@ import { entryCommand } from '../entry'
 import type { CommandResult, InstallEnv } from '../env'
 import { launchdPath } from '../launch-agent'
 import type { ServiceControl, ServiceStep } from './control'
-import { STOP_ATTEMPTS, STOP_RETRY_MS } from './launch-agent-service'
+import { HEALTH_WAIT_MS } from '../plan'
+import { STOP_RETRY_MS } from './launch-agent-service'
 
 export const SYSTEMD_UNIT = 'kinfold.service'
 const LABEL = 'systemd user service'
@@ -24,6 +25,20 @@ const MIN_INSTALL_PORT = 1024
 const CONTROL_CHARACTER = /[\x00-\x1f\x7f]/
 const SYSTEMCTL_TIMEOUT_MS = 15_000
 const ENV = '/usr/bin/env'
+/**
+ * How long stop waits for the unit to leave a running state: the daemon's own
+ * health wait plus one systemctl timeout, since disable --now can be cut off
+ * by that timeout while systemd is still stopping the daemon.
+ */
+const STOP_WAIT_MS = HEALTH_WAIT_MS + SYSTEMCTL_TIMEOUT_MS
+/** What `systemctl is-active` prints for a unit systemd runs, starts, restarts or stops: the daemon may be alive. */
+const RUNNING_STATES: ReadonlySet<string> = new Set(['active', 'activating', 'deactivating', 'reloading', 'refreshing', 'maintenance'])
+const STOPPED_STATES: ReadonlySet<string> = new Set(['inactive', 'failed'])
+/** What `systemctl is-enabled` prints for a unit that starts with the user's session. */
+const ENABLED_STATES: ReadonlySet<string> = new Set(['enabled', 'enabled-runtime'])
+
+/** The unit's state, or 'unknown' when systemctl did not answer or printed a state this file does not know. */
+type UnitState = { kind: 'running' | 'stopped'; name: string } | { kind: 'unknown' }
 
 export const SYSTEMCTL_CANDIDATES: readonly string[] = ['/usr/bin/systemctl', '/bin/systemctl']
 
@@ -249,22 +264,49 @@ export class SystemdUserService implements ServiceControl {
   /** Never quotes systemctl's output: a unit's status can carry environment values. */
   private async mustCall(manager: { runtimeDir: string; systemctl: string }, args: readonly string[]): Promise<CommandResult> {
     const result = await this.call(manager, args)
-    if (result.exitCode !== 0 || result.timedOut === true) throw new Error(`${LABEL}: systemctl --user ${args.join(' ')} failed (exit ${result.exitCode})`)
+    // A killed call's exit code says only that it was killed, so it is not quoted.
+    if (result.timedOut === true) throw new Error(`${LABEL}: systemctl --user ${args.join(' ')} did not finish within ${SYSTEMCTL_TIMEOUT_MS / 1000} s`)
+    if (result.exitCode !== 0) throw new Error(`${LABEL}: systemctl --user ${args.join(' ')} failed (exit ${result.exitCode})`)
     return result
   }
 
-  private async isActive(manager: { runtimeDir: string; systemctl: string }): Promise<boolean> {
-    const result = await this.call(manager, ['is-active', '--quiet', SYSTEMD_UNIT])
-    return result.exitCode === 0 && result.timedOut !== true
+  /**
+   * is-active's printed state, not its exit code: the exit is non-zero for
+   * activating and deactivating too, and a Restart=always unit that keeps
+   * crashing spends its time in activating.
+   */
+  private async unitState(manager: { runtimeDir: string; systemctl: string }): Promise<UnitState> {
+    const result = await this.call(manager, ['is-active', SYSTEMD_UNIT])
+    if (result.timedOut === true) return { kind: 'unknown' }
+    const name = result.stdout.trim()
+    if (RUNNING_STATES.has(name)) return { kind: 'running', name }
+    if (STOPPED_STATES.has(name)) return { kind: 'stopped', name }
+    return { kind: 'unknown' }
+  }
+
+  private async isEnabled(manager: { runtimeDir: string; systemctl: string }): Promise<boolean> {
+    const result = await this.call(manager, ['is-enabled', SYSTEMD_UNIT])
+    if (result.timedOut === true) throw new Error(`${LABEL}: systemctl --user is-enabled ${SYSTEMD_UNIT} did not answer; the service state is unknown`)
+    return ENABLED_STATES.has(result.stdout.trim())
   }
 
   isConfigured(): boolean {
     return existsSync(this.unitPath)
   }
 
+  /**
+   * "Loaded" in the LaunchAgent's sense: the unit runs or is on its way up or
+   * down, or it is enabled, so the session would start it again. Uninstall and
+   * encrypt stop exactly what this reports, which is how an enabled unit that
+   * is inactive or failed still gets disabled. A state systemctl could not
+   * report throws, so no caller proceeds on a guess.
+   */
   async isRunning(): Promise<boolean> {
     const manager = this.manager()
-    return manager.reachable && (await this.isActive(manager))
+    if (!manager.reachable) return false
+    const state = await this.unitState(manager)
+    if (state.kind === 'unknown') throw new Error(`${LABEL}: systemctl --user is-active ${SYSTEMD_UNIT} gave no known state; the service state is unknown`)
+    return state.kind === 'running' || (await this.isEnabled(manager))
   }
 
   async start(): Promise<void> {
@@ -279,12 +321,33 @@ export class SystemdUserService implements ServiceControl {
     await this.mustCall(manager, ['enable', '--now', SYSTEMD_UNIT])
   }
 
-  /** disable --now also drops the default.target.wants link, so uninstall leaves none behind. */
+  /**
+   * disable --now also drops the default.target.wants link, so uninstall
+   * leaves none behind. systemd may take longer to stop the daemon than the
+   * systemctl timeout allows, so the state is polled until it is inactive or
+   * failed; a cut-off disable is then run again to be sure the link is gone.
+   */
   async stop(): Promise<void> {
     const manager = this.reachableManager()
-    const { exitCode } = await this.call(manager, ['disable', '--now', SYSTEMD_UNIT])
-    for (let attempt = 1; await this.isActive(manager); attempt += 1) {
-      if (attempt >= STOP_ATTEMPTS) throw new Error(`the ${LABEL} is still active after disable --now (exit ${exitCode})`)
+    const disabled = await this.call(manager, ['disable', '--now', SYSTEMD_UNIT])
+    if (disabled.timedOut !== true && disabled.exitCode !== 0) {
+      throw new Error(`${LABEL}: systemctl --user disable --now ${SYSTEMD_UNIT} failed (exit ${disabled.exitCode})`)
+    }
+    const state = await this.waitUntilStopped(manager)
+    if (state.kind !== 'stopped') {
+      const still = state.kind === 'running' ? `still ${state.name}` : 'in a state systemctl did not report'
+      throw new Error(`the ${LABEL} is ${still} after disable --now; it may still be running`)
+    }
+    if (disabled.timedOut === true) await this.mustCall(manager, ['disable', SYSTEMD_UNIT])
+    // A failed unit stays listed by systemctl --user --failed until this clears it.
+    if (state.name === 'failed') await this.mustCall(manager, ['reset-failed', SYSTEMD_UNIT])
+  }
+
+  private async waitUntilStopped(manager: { runtimeDir: string; systemctl: string }): Promise<UnitState> {
+    const deadline = this.env.now() + STOP_WAIT_MS
+    for (;;) {
+      const state = await this.unitState(manager)
+      if (state.kind === 'stopped' || this.env.now() >= deadline) return state
       await this.env.sleep(STOP_RETRY_MS)
     }
   }
