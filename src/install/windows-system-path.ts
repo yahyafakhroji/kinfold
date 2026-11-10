@@ -12,8 +12,13 @@ export function windowsJoin(base: string, ...parts: string[]): string {
   return [base.replace(/[\\/]+$/, ''), ...parts].join('\\')
 }
 
-/** <SystemRoot>\<relativePath>, with C:\Windows when SystemRoot is unset or empty. Never a bare name. */
+/** A drive or UNC root with no `..` part: anything else would turn a tool back into a path under the current folder. */
+function isAbsoluteWindowsRoot(root: string): boolean {
+  return /^(?:[A-Za-z]:[\\/]|\\\\[^\\/])/.test(root) && !root.split(/[\\/]/).includes('..')
+}
+
+/** <SystemRoot>\<relativePath>, with C:\Windows when SystemRoot is unset, empty or not an absolute path. Never a bare name. */
 export function windowsSystemTool(env: Pick<InstallEnv, 'envVars'>, relativePath: string): string {
   const root = env.envVars?.SystemRoot
-  return windowsJoin(root !== undefined && root !== '' ? root : DEFAULT_SYSTEM_ROOT, relativePath)
+  return windowsJoin(root !== undefined && isAbsoluteWindowsRoot(root) ? root : DEFAULT_SYSTEM_ROOT, relativePath)
 }
