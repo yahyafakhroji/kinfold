@@ -204,8 +204,19 @@ cleanup() {
   sudo loginctl disable-linger "$(id -un)" || true
 }
 
+# cleanup stops the keyring daemon, deletes ~/.config/kinfold (which can hold
+# a real key file) and turns linger off; setup installs system packages. Both
+# belong only on a hosted Actions runner, which is thrown away after the job.
+refuse_outside_hosted_runner() {
+  if [ "${GITHUB_ACTIONS:-}" != true ] || [ "${RUNNER_ENVIRONMENT:-}" != github-hosted ]; then
+    echo "linux.sh runs only on a GitHub-hosted Actions runner (GITHUB_ACTIONS=true, RUNNER_ENVIRONMENT=github-hosted)" >&2
+    exit 1
+  fi
+}
+
 case "${1:-}" in
   setup)
+    refuse_outside_hosted_runner
     install_packages
     refuse_xdg_config_home
     start_user_manager
@@ -216,6 +227,7 @@ case "${1:-}" in
     start_store_under_test
     ;;
   cleanup)
+    refuse_outside_hosted_runner
     cleanup
     ;;
   *)

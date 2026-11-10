@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createLinuxPlatform, smokePlatform } from './linux'
@@ -7,7 +7,8 @@ import type { LinuxSmokeDeps } from './linux'
 import { SmokeError } from './platform'
 import type { SmokePlatform, SmokeResult, SmokeWorld } from './platform'
 
-const SCRIPT = readFileSync(join(import.meta.dir, '..', '..', '.github', 'smoke', 'linux.sh'), 'utf8')
+const SCRIPT_PATH = join(import.meta.dir, '..', '..', '.github', 'smoke', 'linux.sh')
+const SCRIPT = readFileSync(SCRIPT_PATH, 'utf8')
 const X64_SHA = '08bb21d6326ce740d91cce7ebe88a6536933f6e1e30353b91a06b01f25da306c'
 const ARM64_SHA = 'f2d27600c367e45057d6a16f6a5c2aa8d77b41a9b10d4bc3d849c2f88870e944'
 const KEY_STORE_MESSAGE = 'KINFOLD_SMOKE_KEY_STORE must be libsecret or key file; .github/smoke/linux.sh setup sets it'
@@ -239,5 +240,55 @@ describe('linux.sh', () => {
     const extract = SCRIPT.indexOf('tar -x')
     expect(check).toBeGreaterThan(0)
     expect(extract).toBeGreaterThan(check)
+  })
+
+  // Stubs stand in for every command cleanup and setup would run, so a broken
+  // guard records calls instead of touching this machine; HOME is a temp folder.
+  function runScriptOutsideRunner(mode: string, extraEnv: Record<string, string>): { code: number, calls: string, keyFolderKept: boolean } {
+    const root = mkdtempSync(join(tmpdir(), 'kinfold-linux-sh-'))
+    roots.push(root)
+    const home = join(root, 'home')
+    const bin = join(root, 'bin')
+    const log = join(root, 'calls.log')
+    mkdirSync(join(home, '.config', 'kinfold'), { recursive: true })
+    mkdirSync(bin)
+    writeFileSync(log, '')
+    for (const name of ['systemctl', 'pkill', 'kill', 'rm', 'sudo', 'loginctl', 'apt-get', 'npm', 'curl', 'dbus-send', 'gnome-keyring-daemon']) {
+      const stub = join(bin, name)
+      writeFileSync(stub, `#!/bin/sh\necho "${name} $*" >> "${log}"\n`)
+      chmodSync(stub, 0o755)
+    }
+    const result = Bun.spawnSync(['bash', SCRIPT_PATH, mode], {
+      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, RUNNER_TEMP: root, ...extraEnv },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    return {
+      code: result.exitCode ?? -1,
+      calls: readFileSync(log, 'utf8'),
+      keyFolderKept: existsSync(join(home, '.config', 'kinfold')),
+    }
+  }
+
+  const hasBash = process.platform !== 'win32' && Bun.which('bash') !== null
+
+  test.skipIf(!hasBash).each([
+    ['cleanup', {}],
+    ['cleanup', { GITHUB_ACTIONS: 'true' }],
+    ['cleanup', { RUNNER_ENVIRONMENT: 'github-hosted' }],
+    ['cleanup', { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'self-hosted' }],
+    ['setup', {}],
+  ] as const)('linux.sh %s refuses outside a hosted Actions runner (%o)', (mode, extraEnv) => {
+    const run = runScriptOutsideRunner(mode, extraEnv)
+    expect(run.code).not.toBe(0)
+    expect(run.calls).toBe('')
+    expect(run.keyFolderKept).toBe(true)
+  })
+
+  test('setup and cleanup each check for a hosted runner first', () => {
+    for (const mode of ['setup', 'cleanup']) {
+      const branch = SCRIPT.match(new RegExp(`^  ${mode}\\)\\n([^\\n]*)`, 'm'))
+      expect(branch?.[1]?.trim()).toBe('refuse_outside_hosted_runner')
+    }
   })
 })
