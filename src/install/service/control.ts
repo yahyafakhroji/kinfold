@@ -3,6 +3,7 @@
 // interface, so the install, encrypt and update flows never name an OS tool.
 
 import { type InstallEnv, platformOf } from '../env'
+import type { TextEncoding } from '../files'
 import { LaunchAgentService } from './launch-agent-service'
 import { ScheduledTaskService } from './scheduled-task-service'
 import { SystemdUserService } from './systemd-service'
@@ -30,6 +31,8 @@ export interface ServiceControl {
   configPath(): string | null
   /** That file's content for this port; null where configPath is null. */
   configContent(port: number): string | null
+  /** How install writes that file; absent means UTF-8. */
+  readonly configEncoding?: TextEncoding
   /** The dry-run line for a step: the launchctl argv on macOS. */
   describe(step: ServiceStep): string
   /** Why install cannot set the service up here, for the manual-start line; null when it can. */

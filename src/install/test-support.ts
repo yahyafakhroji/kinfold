@@ -403,6 +403,7 @@ export function countingService(inner: ServiceControl, reason?: string): Countin
     fileHolders: (path) => inner.fileHolders(path),
     configPath: () => inner.configPath(),
     configContent: (port) => inner.configContent(port),
+    ...(inner.configEncoding !== undefined ? { configEncoding: inner.configEncoding } : {}),
     describe: (step) => inner.describe(step),
     unavailableReason: () => (reason !== undefined ? reason : inner.unavailableReason()),
   }

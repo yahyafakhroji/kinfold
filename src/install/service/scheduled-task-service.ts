@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DEFAULT_PORT } from '../../daemon/daemon'
 import { checkHealth, readDaemonInfo } from '../daemon-client'
+import { decodeText } from '../files'
 import type { InstallEnv } from '../env'
 import { HEALTH_WAIT_MS } from '../plan'
 import { windowsJoin, windowsSystemTool } from '../windows-system-path'
@@ -153,7 +154,7 @@ export function taskXml(input: TaskXmlInput): string {
   const user = escapeXml(input.user)
   const args = escapeXml(['--headless', ...daemonArgs(input).map(windowsArg)].join(' '))
   return [
-    '\uFEFF<?xml version="1.0" encoding="UTF-8"?>',
+    '\uFEFF<?xml version="1.0" encoding="UTF-16"?>',
     '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
     '  <RegistrationInfo>',
     '    <Description>Kinfold memory daemon for this user</Description>',
@@ -221,6 +222,8 @@ export function taskPort(xml: string): number | null {
 
 export class ScheduledTaskService implements ServiceControl {
   readonly label = 'scheduled task'
+  /** schtasks /Create /XML rejects a UTF-8 file as malformed; it reads UTF-16LE with a BOM. */
+  readonly configEncoding = 'utf16le' as const
 
   constructor(
     private readonly env: InstallEnv,
@@ -259,7 +262,8 @@ export class ScheduledTaskService implements ServiceControl {
 
   private readConfig(): string | null {
     try {
-      return readFileSync(this.path, 'utf8')
+      // UTF-16LE since schtasks refused the UTF-8 file; an older UTF-8 one still reads.
+      return decodeText(readFileSync(this.path))
     } catch {
       return null
     }

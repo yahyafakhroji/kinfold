@@ -214,7 +214,7 @@ export function serviceActions(env: InstallEnv, service: ServiceControl | null, 
   }
   const write: Action[] = path === null || content === null || change === null ? [] : [
     ...mkdirIfMissing(dirname(path), DIR_MODE),
-    { kind: 'write', path, content, mode: FILE_MODE, summary: change },
+    { kind: 'write', path, content, mode: FILE_MODE, summary: change, ...(service.configEncoding !== undefined ? { encoding: service.configEncoding } : {}) },
   ]
   const wait: Action[] = situation.foreign && takeover ? [{ kind: 'wait-takeover', pid: situation.pid, port: situation.port }] : []
   let load: Action[] = []

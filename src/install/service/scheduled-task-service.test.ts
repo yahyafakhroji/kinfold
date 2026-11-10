@@ -1,10 +1,11 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DAEMON_INFO_FILE } from '../../store/data-dir'
 import type { CommandRequest, InstallEnv } from '../env'
-import { EXIT_OK, install } from '../install'
-import { HEALTH_WAIT_MS } from '../plan'
+import { readTextOrNull } from '../files'
+import { EXIT_OK, install, serviceActions } from '../install'
+import { HEALTH_WAIT_MS, applyAction } from '../plan'
 import { status } from '../status'
 import { BUN, type FakeWorld, YES, createWorld } from '../test-support'
 import {
@@ -71,7 +72,7 @@ const planLines = (w: FakeWorld): string[] => w.out.filter((line) => /^ {2}\d+\.
 
 test('the task runs at logon for this user without admin', () => {
   const xml = taskXml({ user: 'HOST\\me', program: PROGRAM, dataDir: 'C:\\Users\\me\\.kinfold', port: 37811, logFile: 'C:\\Users\\me\\.kinfold\\logs\\daemon.log' })
-  expect(xml.startsWith('\uFEFF<?xml version="1.0" encoding="UTF-8"?>')).toBe(true)
+  expect(xml.startsWith('\uFEFF<?xml version="1.0" encoding="UTF-16"?>')).toBe(true)
   expect(xml).toContain('<LogonType>InteractiveToken</LogonType>')
   expect(xml).toContain('<RunLevel>LeastPrivilege</RunLevel>')
   expect(xml).toMatch(/<LogonTrigger>[\s\S]*<UserId>HOST\\me<\/UserId>[\s\S]*<\/LogonTrigger>/)
@@ -213,6 +214,36 @@ test('an unset USERDOMAIN names the user by USERNAME alone', () => {
   expect(xml.match(/<UserId>[^<]*<\/UserId>/g)).toEqual(['<UserId>me</UserId>', '<UserId>me</UserId>'])
   const empty = new ScheduledTaskService({ ...w.env, envVars: { USERNAME: 'me', USERDOMAIN: '' } })
   expect(empty.configContent(37811)).toBe(xml)
+})
+
+test('install writes the task file as UTF-16LE with a BOM, and the service reads it back', async () => {
+  const w = windowsWorld()
+  const service = new ScheduledTaskService(w.env)
+  const situation = { health: { up: false, reason: 'down' } as const, loaded: false, pid: null, port: 40000, legacyLoaded: false, foreign: false }
+  const actions = serviceActions(w.env, service, situation, false, false, 40000)
+  const write = actions.find((action) => action.kind === 'write')
+  if (write?.kind !== 'write') throw new Error('no write action')
+  expect(write.encoding).toBe('utf16le')
+  for (const action of actions.filter((action) => action.kind === 'mkdir')) await applyAction(w.env, action)
+  await applyAction(w.env, write)
+
+  const path = taskConfigPath(w.env)
+  const content = service.configContent(40000) ?? ''
+  const bytes = readFileSync(path)
+  expect([...bytes.subarray(0, 4)]).toEqual([0xff, 0xfe, 0x3c, 0x00])
+  expect(bytes.equals(Buffer.from(content, 'utf16le'))).toBe(true)
+  expect(bytes.length).toBe(content.length * 2)
+  expect(content).toContain('encoding="UTF-16"')
+  // The same text comes back, so a re-install sees no change and rewrites nothing.
+  expect(readTextOrNull(path)).toBe(content)
+  expect(service.configuredDataDir()).toBe(w.dataDir)
+  expect(service.configuredPort()).toBe(40000)
+
+  // A file an earlier install wrote as UTF-8 still reads.
+  writeFileSync(path, Buffer.from(content.replace('encoding="UTF-16"', 'encoding="UTF-8"'), 'utf8'))
+  expect(service.configuredDataDir()).toBe(w.dataDir)
+  expect(service.configuredPort()).toBe(40000)
+  expect(serviceActions(w.env, service, situation, false, false, 40000).some((action) => action.kind === 'write')).toBe(true)
 })
 
 test('the install plan writes the task file and starts the task', async () => {

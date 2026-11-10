@@ -15,7 +15,7 @@ import { createDbKey, createPlainStore, describeCreateDbKey, describeCreatePlain
 import { type InstallEnv, installPaths } from './env'
 import { NOT_FOUND_EXIT } from './system'
 import { requireKeyStore } from './key-store-choice'
-import { writeBackup, writeFileAtomic } from './files'
+import { type TextEncoding, encodeText, writeBackup, writeFileAtomic } from './files'
 import { backupRemovalSummary, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
 import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
 import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbeddedSqlite3mc, installSqlite3mc } from './sqlite3mc-install'
@@ -36,7 +36,7 @@ export type Action =
   | { kind: 'chmod'; dataDir: string; change: ModeChange }
   | { kind: 'touch'; path: string; mode: number }
   | { kind: 'backup'; from: string; to: string }
-  | { kind: 'write'; path: string; content: string; mode: number; summary: string }
+  | { kind: 'write'; path: string; content: string; mode: number; summary: string; encoding?: TextEncoding }
   /** recursive: a directory and everything in it (hmac.d/ on --remove-hmac-keys). */
   | { kind: 'remove'; path: string; summary: string; recursive?: boolean }
   /** <dataDir>/bin, through the platform's program files: a file a running program holds is named and left. */
@@ -242,7 +242,7 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'chmod': return applyModeChange(action.dataDir, action.change)
     case 'touch': return touch(action.path, action.mode)
     case 'backup': return writeBackup(action.from, action.to)
-    case 'write': return writeFileAtomic(action.path, action.content, action.mode)
+    case 'write': return writeFileAtomic(action.path, action.encoding === undefined ? action.content : encodeText(action.content, action.encoding), action.mode)
     case 'remove': return rmSync(action.path, { force: true, recursive: action.recursive === true })
     case 'remove-program-dir': return removeProgramDir(env, action.path)
     case 'service': return runServiceStep(env, action.step)
