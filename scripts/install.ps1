@@ -31,13 +31,18 @@
 
   # A prefix test would also admit http://127.0.0.1.evil.com, http://127.0.0.10 and
   # the userinfo form http://127.0.0.1@evil.com, so the whole origin is checked:
-  # host exactly 127.0.0.1, an optional numeric port, then the end or a path. A
-  # file URL needs a path after file:///, since a bare one trims to file:.
+  # host exactly 127.0.0.1, an optional numeric port, then the end or a path.
+  # A file URL must name a local drive path. A backslash or a %-escape could
+  # turn it into a UNC path on another host (file:///\\host\share), and a ..
+  # segment could step out of the folder it names, so neither is allowed.
   function Test-LocalBase([string] $candidate) {
     if ($candidate -cmatch '^http://127\.0\.0\.1(?::[0-9]+)?(?:/[^\r\n]*)?\z') {
       return $true
     }
-    return $candidate -cmatch '^file:///[^/\r\n][^\r\n]*\z'
+    if ($candidate -match '/\.\.(?:/|\z)') {
+      return $false
+    }
+    return $candidate -cmatch '^file:///[A-Za-z]:/[^\\%\r\n]*\z'
   }
 
   function ReleaseBase {

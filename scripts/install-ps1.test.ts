@@ -35,8 +35,12 @@ interface Run {
   tempEntries: string[]
 }
 
-/** Runs pwsh with its temp folder pointed at a fresh empty one and no inherited KINFOLD_* settings. */
-function runPwsh(args: string[], vars: Record<string, string>): Run {
+/**
+ * Runs pwsh with its temp folder pointed at a fresh empty one and no inherited
+ * KINFOLD_* settings. It runs async so a server in this process can answer it,
+ * and a run that outlives PWSH_TIMEOUT_MS is killed and throws, so a hang fails.
+ */
+async function runPwsh(args: string[], vars: Record<string, string>): Promise<Run> {
   const tempDir = temp('kinfold-ps1-tmp-')
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
@@ -44,60 +48,96 @@ function runPwsh(args: string[], vars: Record<string, string>): Run {
     env[key] = value
   }
   Object.assign(env, { TMPDIR: tempDir, TEMP: tempDir, TMP: tempDir, POWERSHELL_TELEMETRY_OPTOUT: '1', POWERSHELL_UPDATECHECK: 'Off' }, vars)
-  const result = Bun.spawnSync([PWSH!, '-NoProfile', '-NonInteractive', ...args], { env, stdout: 'pipe', stderr: 'pipe', timeout: PWSH_TIMEOUT_MS })
-  return {
-    code: result.exitCode,
-    stdout: result.stdout.toString(),
-    stderr: result.stderr.toString(),
-    tempEntries: readdirSync(tempDir).filter((name) => name.startsWith('kinfold-install-')),
+  const proc = Bun.spawn([PWSH!, '-NoProfile', '-NonInteractive', ...args], { env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    proc.kill()
+  }, PWSH_TIMEOUT_MS)
+  try {
+    const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
+    if (timedOut) throw new Error(`pwsh ${args.join(' ')} did not finish within ${PWSH_TIMEOUT_MS} ms`)
+    return { code, stdout, stderr, tempEntries: readdirSync(tempDir).filter((name) => name.startsWith('kinfold-install-')) }
+  } finally {
+    clearTimeout(timer)
   }
 }
 
-function pipedIntoIex(vars: Record<string, string>): Run {
+function pipedIntoIex(vars: Record<string, string>, after = "'still-here'; $LASTEXITCODE"): Promise<Run> {
   const script = INSTALL_PS1.replaceAll("'", "''")
-  return runPwsh(['-Command', `Get-Content -Raw -LiteralPath '${script}' | Invoke-Expression; 'still-here'; $LASTEXITCODE`], vars)
+  return runPwsh(['-Command', `Get-Content -Raw -LiteralPath '${script}' | Invoke-Expression; ${after}`], vars)
 }
 
 const outputLines = (stdout: string) => stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '')
 const count = (haystack: string, needle: string) => haystack.split(needle).length - 1
 
-pwshTest('irm | iex keeps the session open', () => {
-  const run = pipedIntoIex({ PROCESSOR_ARCHITECTURE: 'ARM64' })
+pwshTest('irm | iex keeps the session open', async () => {
+  const run = await pipedIntoIex({ PROCESSOR_ARCHITECTURE: 'ARM64' })
   expect(outputLines(run.stdout)).toEqual(['still-here', '1'])
   expect(count(run.stderr, 'kinfold: no build for win32-arm64.')).toBe(1)
+  expect(run.code).toBe(0)
 }, TEST_TIMEOUT_MS)
 
-pwshTest('iex leaves the session\'s own functions and settings alone', () => {
-  const script = INSTALL_PS1.replaceAll("'", "''")
-  const run = runPwsh(['-Command', `Get-Content -Raw -LiteralPath '${script}' | Invoke-Expression; $ErrorActionPreference; [bool](Get-Command Fail -ErrorAction SilentlyContinue)`], { PROCESSOR_ARCHITECTURE: 'ARM64' })
+pwshTest("iex leaves the session's own functions and settings alone", async () => {
+  const run = await pipedIntoIex({ PROCESSOR_ARCHITECTURE: 'ARM64' }, '$ErrorActionPreference; [bool](Get-Command Fail -ErrorAction SilentlyContinue)')
   expect(outputLines(run.stdout)).toEqual(['Continue', 'False'])
+  expect(run.code).toBe(0)
 }, TEST_TIMEOUT_MS)
 
-pwshTest('a file run still exits with the code', () => {
-  const run = runPwsh(['-File', INSTALL_PS1], { PROCESSOR_ARCHITECTURE: 'ARM64' })
+pwshTest('a file run still exits with the code', async () => {
+  const run = await runPwsh(['-File', INSTALL_PS1], { PROCESSOR_ARCHITECTURE: 'ARM64' })
   expect(run.code).toBe(1)
   expect(count(run.stderr, 'kinfold: no build for win32-arm64.')).toBe(1)
 }, TEST_TIMEOUT_MS)
 
-const REFUSED_BASES = ['http://127.0.0.1.evil.com', 'http://127.0.0.10', 'http://127.0.0.1@evil.com', 'HTTP://127.0.0.1', 'file:///']
-const ACCEPTED_BASES = ['http://127.0.0.1:8080/r', 'file:///C:/rel/']
+const REFUSED_BASES = [
+  'http://127.0.0.1.evil.com',
+  'http://127.0.0.10',
+  'http://127.0.0.1@evil.com',
+  'HTTP://127.0.0.1',
+  'file:///',
+  // Both name a UNC share on another host once Windows resolves them.
+  'file:///\\\\evil\\share',
+  'file:///%5C%5Cevil%5Cshare',
+  'file://host/x',
+  'file:///C:/rel/../x',
+]
 
-pwshTest('local bases are checked as whole origins', () => {
+pwshTest('local bases are checked as whole origins', async () => {
   for (const base of REFUSED_BASES) {
-    const run = runPwsh(['-File', INSTALL_PS1], { PROCESSOR_ARCHITECTURE: 'AMD64', KINFOLD_RELEASE_BASE: base })
+    const run = await runPwsh(['-File', INSTALL_PS1], { PROCESSOR_ARCHITECTURE: 'AMD64', KINFOLD_RELEASE_BASE: base })
     expect({ base, code: run.code, stderr: run.stderr.trim() }).toEqual({ base, code: 1, stderr: BASE_REFUSAL })
     expect(run.tempEntries).toEqual([])
   }
-  for (const base of ACCEPTED_BASES) {
-    // Nothing serves these, so the download fails; the point is that the base check let them through.
-    const run = runPwsh(['-File', INSTALL_PS1], { PROCESSOR_ARCHITECTURE: 'AMD64', KINFOLD_RELEASE_BASE: base })
-    expect({ base, refused: run.stderr.includes(BASE_REFUSAL) }).toEqual({ base, refused: false })
-    expect(run.code).not.toBe(0)
-    expect(run.tempEntries).toEqual([])
-  }
-}, TEST_TIMEOUT_MS * 4)
 
-windowsOnly('powershell child')("the program's exit code comes back under iex", () => {
+  // A local server that has nothing: the base passes the check, and the download is a 404.
+  const requests: string[] = []
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: (request) => {
+      requests.push(new URL(request.url).pathname)
+      return new Response('not found', { status: 404 })
+    },
+  })
+  try {
+    const run = await runPwsh(['-File', INSTALL_PS1], { PROCESSOR_ARCHITECTURE: 'AMD64', KINFOLD_RELEASE_BASE: `http://127.0.0.1:${server.port}/r` })
+    expect(run.stderr).not.toContain(BASE_REFUSAL)
+    expect(requests).toEqual(['/r/SHA256SUMS'])
+    expect(run.code).toBe(1)
+    expect(run.tempEntries).toEqual([])
+  } finally {
+    server.stop(true)
+  }
+
+  // Nothing is at C:/rel, so the copy fails; the point is that the check let the drive path through.
+  const run = await runPwsh(['-File', INSTALL_PS1], { PROCESSOR_ARCHITECTURE: 'AMD64', KINFOLD_RELEASE_BASE: 'file:///C:/rel/' })
+  expect(run.stderr).not.toContain(BASE_REFUSAL)
+  expect(run.code).toBe(1)
+  expect(run.tempEntries).toEqual([])
+}, TEST_TIMEOUT_MS * 6)
+
+windowsOnly('powershell child')("the program's exit code comes back under iex", async () => {
   const whoami = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'whoami.exe')
   const release = temp('kinfold-ps1-release-')
   const asset = 'kinfold-windows-x64.exe'
@@ -107,7 +147,8 @@ windowsOnly('powershell child')("the program's exit code comes back under iex", 
   const expected = Bun.spawnSync([whoami, 'install'], { stdout: 'ignore', stderr: 'ignore' }).exitCode
   expect(expected).not.toBe(0)
 
-  const run = pipedIntoIex({ PROCESSOR_ARCHITECTURE: 'AMD64', KINFOLD_RELEASE_BASE: pathToFileURL(release).href })
+  const run = await pipedIntoIex({ PROCESSOR_ARCHITECTURE: 'AMD64', KINFOLD_RELEASE_BASE: pathToFileURL(release).href })
   expect(outputLines(run.stdout).slice(-2)).toEqual(['still-here', String(expected)])
+  expect(run.code).toBe(0)
   expect(run.tempEntries).toEqual([])
 }, TEST_TIMEOUT_MS)

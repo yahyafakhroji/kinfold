@@ -74,7 +74,8 @@ const TEMP = `${DIR}\\kinfold.exe.tmp-1`
 const OLD = `${DIR}\\${OLD_PROGRAM_PREFIX}7-1000.exe`
 
 test('a running program is moved aside, not overwritten', () => {
-  const fs = fakeFs([TARGET, TEMP])
+  // The moved-aside program is still running, so its cleanup is refused.
+  const fs = fakeFs([TARGET, TEMP], { rmError: (path) => (path === OLD ? fsError('EBUSY') : null) })
   createWindowsProgramFiles(fs.deps).replace(TEMP, TARGET)
   expect(fs.renames).toEqual([[TARGET, OLD], [TEMP, TARGET]])
   expect([...fs.files].sort()).toEqual([OLD, TARGET].sort())
@@ -86,12 +87,42 @@ test('a first install has nothing to move aside', () => {
   expect(fs.renames).toEqual([[TEMP, TARGET]])
 })
 
-test('a failed swap puts the old program back', () => {
-  const fs = fakeFs([TARGET, TEMP], { renameError: (from) => (from === TEMP ? fsError('EIO') : null) })
+test('a failure between the move and the install puts kinfold.exe back and keeps the old copies', () => {
+  const older = `${DIR}\\${OLD_PROGRAM_PREFIX}3-10.exe`
+  const fs = fakeFs([TARGET, TEMP, older], { renameError: (from) => (from === TEMP ? fsError('EIO') : null) })
   expect(() => createWindowsProgramFiles(fs.deps).replace(TEMP, TARGET)).toThrow('EIO')
   expect(fs.renames).toEqual([[TARGET, OLD], [TEMP, TARGET], [OLD, TARGET]])
   expect(fs.files.has(TARGET)).toBe(true)
   expect(fs.files.has(OLD)).toBe(false)
+  expect(fs.files.has(older)).toBe(true)
+  expect(fs.removed).toEqual([])
+})
+
+test('a rollback that throws still reports the swap error', () => {
+  const fs = fakeFs([TARGET, TEMP], {
+    renameError: (from) => (from === TEMP ? fsError('EIO') : from === OLD ? fsError('EACCES') : null),
+  })
+  expect(() => createWindowsProgramFiles(fs.deps).replace(TEMP, TARGET)).toThrow('EIO: fake')
+  expect(fs.renames).toEqual([[TARGET, OLD], [TEMP, TARGET], [OLD, TARGET]])
+  // The aside copy is the only program now; the next replace restores it.
+  expect(fs.files.has(OLD)).toBe(true)
+})
+
+test('the run after a crash restores the newest old program and never deletes the only copy', () => {
+  // A crash between the move and the install left no kinfold.exe, only old names.
+  const oldest = `${DIR}\\${OLD_PROGRAM_PREFIX}9-500.exe`
+  const newest = `${DIR}\\${OLD_PROGRAM_PREFIX}3-900.exe`
+  const failing = fakeFs([TEMP, oldest, newest], { renameError: (from) => (from === TEMP ? fsError('EIO') : null) })
+  expect(() => createWindowsProgramFiles(failing.deps).replace(TEMP, TARGET)).toThrow('EIO')
+  expect(failing.renames[0]).toEqual([newest, TARGET])
+  expect(failing.files.has(TARGET)).toBe(true)
+  expect(failing.files.has(oldest)).toBe(true)
+  expect(failing.removed).toEqual([])
+
+  const fs = fakeFs([TEMP, oldest, newest])
+  createWindowsProgramFiles(fs.deps).replace(TEMP, TARGET)
+  expect(fs.renames).toEqual([[newest, TARGET], [TARGET, OLD], [TEMP, TARGET]])
+  expect([...fs.files]).toEqual([TARGET])
 })
 
 test('old programs still running are left for later', () => {
@@ -99,16 +130,18 @@ test('old programs still running are left for later', () => {
   const done = `${DIR}\\${OLD_PROGRAM_PREFIX}4-20.exe`
   const fs = fakeFs([TARGET, TEMP, busy, done], { rmError: (path) => (path === busy ? fsError('EBUSY') : null) })
   expect(() => createWindowsProgramFiles(fs.deps).replace(TEMP, TARGET)).not.toThrow()
-  expect(fs.removed).toEqual([done])
+  expect(fs.removed.sort()).toEqual([done, OLD].sort())
   expect(fs.files.has(busy)).toBe(true)
   expect(fs.files.has(TARGET)).toBe(true)
 })
 
-test('a cleanup error that is not a lock still fails the replace before anything moves', () => {
+test('old programs are removed only after the new one is in place', () => {
   const stale = `${DIR}\\${OLD_PROGRAM_PREFIX}3-10.exe`
   const fs = fakeFs([TARGET, TEMP, stale], { rmError: () => fsError('EIO') })
+  // A cleanup error that is not a lock is still reported, but the swap already happened.
   expect(() => createWindowsProgramFiles(fs.deps).replace(TEMP, TARGET)).toThrow('EIO')
-  expect(fs.renames).toEqual([])
+  expect(fs.renames).toEqual([[TARGET, OLD], [TEMP, TARGET]])
+  expect(fs.files.has(TARGET)).toBe(true)
 })
 
 test('removeBinDir renames a locked program aside, returns it and keeps the folder', () => {

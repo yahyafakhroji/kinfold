@@ -59,17 +59,43 @@ export function createWindowsProgramFiles(overrides: Partial<ProgramFsDeps> = {}
     }
   }
 
+  /** The most recently moved-aside program: the largest time in its .kinfold-old-<pid>-<time>.exe name. */
+  function newestOldProgram(dir: string): string | null {
+    if (!deps.existsSync(dir)) return null
+    const timeOf = (name: string) => Number(/-(\d+)\.exe$/i.exec(name)?.[1] ?? -1)
+    const names = deps.readdirSync(dir).filter(isOldProgram)
+    const newest = names.reduce<string | null>((best, name) => (best === null || timeOf(name) > timeOf(best) ? name : best), null)
+    return newest === null ? null : childOf(dir, newest)
+  }
+
+  // An earlier replace stopped between moving the program aside and putting
+  // the new one in place, so the only program has an old name. Restoring it
+  // first means the swap below has a program to roll back to.
+  function restoreAfterCrash(dir: string, target: string): void {
+    if (deps.existsSync(target)) return
+    const newest = newestOldProgram(dir)
+    if (newest !== null) deps.renameSync(newest, target)
+  }
+
   function replace(temp: string, target: string): void {
     const dir = win32.dirname(target)
-    removeOldPrograms(dir)
+    restoreAfterCrash(dir, target)
     const aside = deps.existsSync(target) ? asideName(dir) : null
     if (aside !== null) deps.renameSync(target, aside)
     try {
       deps.renameSync(temp, target)
     } catch (error) {
-      if (aside !== null) deps.renameSync(aside, target)
+      if (aside !== null) {
+        try {
+          deps.renameSync(aside, target)
+        } catch {
+          // The swap's own error is the one to report; the next replace restores the aside copy.
+        }
+      }
       throw error
     }
+    // Only now is there a new program in place, so the old copies are no longer the fallback.
+    removeOldPrograms(dir)
   }
 
   /** Removes one entry; a locked one is renamed aside when it is not already, and its path returned. */
