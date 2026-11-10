@@ -59,7 +59,14 @@ const CASES: Record<string, (db: Database) => unknown> = {
   'get() with no row is null, all() is []': (db) => [db.query('SELECT 1 WHERE 0').get(), db.query('SELECT 1 WHERE 0').all()],
   'values() returns arrays': (db) => db.query('SELECT 1 AS x, 2 AS y UNION ALL SELECT 3, 4').values(),
   'a repeated column name keeps the last': (db) => db.query('SELECT 1 AS x, 2 AS x').get(),
-  'query() caches per SQL text, prepare() does not': (db) => [db.query('SELECT 1') === db.query('SELECT 1'), db.prepare('SELECT 1') === db.prepare('SELECT 1')],
+  'query() caches per SQL text, prepare() does not': (db) => {
+    const first = db.prepare('SELECT 1'), second = db.prepare('SELECT 1')
+    const result = [db.query('SELECT 1') === db.query('SELECT 1'), first === second]
+    // bun:sqlite defers its close while a prepared statement lives, which keeps the file open on Windows.
+    first.finalize()
+    second.finalize()
+    return result
+  },
   'exec() runs several statements': (db) => { db.exec('CREATE TABLE a(x); INSERT INTO a VALUES (1); INSERT INTO a VALUES (2)'); return db.query('SELECT count(*) AS n FROM a').get() },
   'a constraint error carries the extended code': (db) => { setup(db); db.run('INSERT INTO t(id) VALUES (1)'); db.run('INSERT INTO t(id) VALUES (1)') },
   'a NOT NULL error carries its code': (db) => { setup(db); db.query('INSERT INTO u(x) VALUES (?)').run(null) },
