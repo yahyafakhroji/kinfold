@@ -116,12 +116,12 @@ posixOnly('POSIX paths')('an unreadable mountinfo means cannot-check', async () 
   expect(await checkWith(roots)).toEqual({ kind: 'cannot-check' })
 })
 
-test('a slave whose dev file is missing means sysfs cannot say', () => {
+posixOnly('POSIX paths')('a slave whose dev file is missing means sysfs cannot say', () => {
   const roots = fixture([], { 'dev/block/253:1/dm/uuid': 'LVM-x\n', 'dev/block/253:1/slaves/dm-0': '' })
   expect(isCryptBacked(roots.sys, '253:1')).toBeNull()
 })
 
-test('a device chain deeper than the limit means sysfs cannot say', () => {
+posixOnly('POSIX paths')('a device chain deeper than the limit means sysfs cannot say', () => {
   const files: Record<string, string> = {}
   for (let i = 0; i < 12; i++) {
     files[`dev/block/253:${i}/dm/uuid`] = 'LVM-x\n'
@@ -132,7 +132,7 @@ test('a device chain deeper than the limit means sysfs cannot say', () => {
   expect(isCryptBacked(fixture([], files).sys, '253:0')).toBeNull()
 })
 
-test('a device name that is not major:minor is refused', () => {
+posixOnly('POSIX paths')('a device name that is not major:minor is refused', () => {
   expect(isCryptBacked(fixture([], PLAIN_PARTITION).sys, '../8:2')).toBeNull()
 })
 
