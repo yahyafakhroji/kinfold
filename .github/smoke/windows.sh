@@ -16,14 +16,16 @@ OPENCODE_VERSION=2.2.6
 # that PATH, so the daemon finds only the smoke's shim, which the smoke adds
 # to the user PATH.
 install_agent_clis() {
-  prefix="$RUNNER_TEMP/agent-clis"
+  # RUNNER_TEMP is a Windows path; bash needs the POSIX spelling and npm the
+  # Windows one, or the sh shims npm writes name a drive that does not exist.
+  prefix="$(cygpath -u "$RUNNER_TEMP")/agent-clis"
   mkdir -p "$prefix"
-  npm install --global --prefix "$prefix" --no-audit --no-fund \
-    @anthropic-ai/claude-code "@opencode/cli@$OPENCODE_VERSION"
   prefix_win="$(cygpath -w "$prefix")"
+  npm install --global --prefix "$prefix_win" --no-audit --no-fund \
+    @anthropic-ai/claude-code "@opencode/cli@$OPENCODE_VERSION"
   echo "$prefix_win" >> "$GITHUB_PATH"
   export PATH="$prefix:$PATH"
-  echo "claude: $(claude --version)"
+  claude --version
   opencode --version | tee "$RUNNER_TEMP/opencode-version.txt"
   if ! grep -Eq '(^|[^0-9])2\.[0-9]+\.[0-9]+' "$RUNNER_TEMP/opencode-version.txt"; then
     echo "opencode did not report a 2.x version; Kinfold will not wire it"
