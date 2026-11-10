@@ -1,17 +1,18 @@
 // The Linux (WSL included) user service: a systemd user unit that runs the
 // daemon the way the macOS LaunchAgent does. This file writes and reads the
-// unit; until the user manager is driven, starting and stopping refuse.
+// unit, drives it through `systemctl --user`, and reads /proc for who holds a
+// file. Where no user manager is reachable (a container, WSL without systemd,
+// a shell with no login session) it sets nothing up and runs no systemctl.
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, readlinkSync, realpathSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { DEFAULT_PORT } from '../../daemon/daemon'
 import { envName } from '../../env-names'
-import { notSupportedYet } from '../../platform/platform'
 import { entryCommand } from '../entry'
-import type { InstallEnv } from '../env'
+import type { CommandResult, InstallEnv } from '../env'
 import { launchdPath } from '../launch-agent'
 import type { ServiceControl, ServiceStep } from './control'
-import { NOT_SET_UP_REASON } from './stub-service'
+import { STOP_ATTEMPTS, STOP_RETRY_MS } from './launch-agent-service'
 
 export const SYSTEMD_UNIT = 'kinfold.service'
 const LABEL = 'systemd user service'
@@ -21,6 +22,89 @@ const MIN_INSTALL_PORT = 1024
 // A newline would end the assignment early and let the rest of the value
 // become a line of its own; no quoting form carries one.
 const CONTROL_CHARACTER = /[\x00-\x1f\x7f]/
+const SYSTEMCTL_TIMEOUT_MS = 15_000
+const ENV = '/usr/bin/env'
+
+export const SYSTEMCTL_CANDIDATES: readonly string[] = ['/usr/bin/systemctl', '/bin/systemctl']
+
+export interface SystemdOptions {
+  /** Test seam; default the first existing SYSTEMCTL_CANDIDATES entry, else null. */
+  systemctl?: string | null
+  /** Test seam; default '/proc'. */
+  procRoot?: string
+}
+
+export type UserManager = { reachable: true; runtimeDir: string; systemctl: string } | { reachable: false; reason: string }
+
+/**
+ * Whether `systemctl --user` can reach this user's manager. XDG_RUNTIME_DIR is
+ * read from env.envVars only, so a test world never reaches a real manager;
+ * the private socket under it exists only while the manager runs.
+ */
+export function userManagerOf(env: Pick<InstallEnv, 'envVars'>, systemctl: string | null): UserManager {
+  const runtimeDir = env.envVars?.XDG_RUNTIME_DIR
+  if (runtimeDir === undefined || runtimeDir === '') return { reachable: false, reason: 'XDG_RUNTIME_DIR is not set' }
+  if (systemctl === null) return { reachable: false, reason: 'systemctl is not installed' }
+  const socket = `${runtimeDir}/systemd/private`
+  if (!existsSync(socket)) return { reachable: false, reason: `${socket} does not exist` }
+  return { reachable: true, runtimeDir, systemctl }
+}
+
+/** The command runner gives children only PATH and HOME, so the runtime dir travels in argv. It is not a secret. */
+export function systemctlArgv(manager: { runtimeDir: string; systemctl: string }, args: readonly string[]): string[] {
+  return [ENV, `XDG_RUNTIME_DIR=${manager.runtimeDir}`, manager.systemctl, '--user', ...args]
+}
+
+/** True when some fd link under the folder points at target; an unreadable folder or link counts as none. */
+function holdsFile(fdDir: string, target: string): boolean {
+  let fds: string[]
+  try {
+    fds = readdirSync(fdDir)
+  } catch {
+    return false
+  }
+  return fds.some((fd) => {
+    try {
+      return readlinkSync(join(fdDir, fd)) === target
+    } catch {
+      return false
+    }
+  })
+}
+
+/** A process name for a message; another user's process picks its own, so control characters go. */
+function commandName(pidDir: string): string {
+  try {
+    return readFileSync(join(pidDir, 'comm'), 'utf8').trim().replace(/[\x00-\x1f\x7f]/g, '?')
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * `<pid> <comm>` for each process with the file open, joined by '; '. Reads
+ * /proc rather than running lsof, which a minimal Linux often lacks; skips
+ * this process and every entry it cannot read.
+ */
+export function procFileHolders(procRoot: string, path: string, selfPid: number): string {
+  let target: string
+  let pids: string[]
+  try {
+    target = realpathSync(path)
+    pids = readdirSync(procRoot)
+  } catch {
+    return ''
+  }
+  const found: string[] = []
+  for (const pid of pids) {
+    if (!/^\d+$/.test(pid) || Number(pid) === selfPid) continue
+    const pidDir = join(procRoot, pid)
+    if (!holdsFile(join(pidDir, 'fd'), target)) continue
+    const name = commandName(pidDir)
+    found.push(name === '' ? pid : `${pid} ${name}`)
+  }
+  return found.join('; ')
+}
 
 /** $XDG_CONFIG_HOME/systemd/user when it is absolute (the spec ignores a relative one), else ~/.config/systemd/user. */
 export function systemdUserDir(env: Pick<InstallEnv, 'homeDir' | 'envVars'>): string {
@@ -136,11 +220,42 @@ export function unitEnvironment(text: string): Map<string, string> {
 
 export class SystemdUserService implements ServiceControl {
   readonly label = LABEL
+  private readonly systemctl: string | null
+  private readonly procRoot: string
 
-  constructor(private readonly env: InstallEnv) {}
+  constructor(private readonly env: InstallEnv, options: SystemdOptions = {}) {
+    this.systemctl = options.systemctl !== undefined ? options.systemctl : SYSTEMCTL_CANDIDATES.find((path) => existsSync(path)) ?? null
+    this.procRoot = options.procRoot ?? '/proc'
+  }
 
   private get unitPath(): string {
     return join(systemdUserDir(this.env), SYSTEMD_UNIT)
+  }
+
+  private manager(): UserManager {
+    return userManagerOf(this.env, this.systemctl)
+  }
+
+  private reachableManager(): { runtimeDir: string; systemctl: string } {
+    const manager = this.manager()
+    if (!manager.reachable) throw new Error(`${LABEL}: no user service manager is reachable (${manager.reason})`)
+    return manager
+  }
+
+  private call(manager: { runtimeDir: string; systemctl: string }, args: readonly string[]): Promise<CommandResult> {
+    return this.env.run({ argv: systemctlArgv(manager, args), timeoutMs: SYSTEMCTL_TIMEOUT_MS })
+  }
+
+  /** Never quotes systemctl's output: a unit's status can carry environment values. */
+  private async mustCall(manager: { runtimeDir: string; systemctl: string }, args: readonly string[]): Promise<CommandResult> {
+    const result = await this.call(manager, args)
+    if (result.exitCode !== 0 || result.timedOut === true) throw new Error(`${LABEL}: systemctl --user ${args.join(' ')} failed (exit ${result.exitCode})`)
+    return result
+  }
+
+  private async isActive(manager: { runtimeDir: string; systemctl: string }): Promise<boolean> {
+    const result = await this.call(manager, ['is-active', '--quiet', SYSTEMD_UNIT])
+    return result.exitCode === 0 && result.timedOut !== true
   }
 
   isConfigured(): boolean {
@@ -148,15 +263,30 @@ export class SystemdUserService implements ServiceControl {
   }
 
   async isRunning(): Promise<boolean> {
-    return false
+    const manager = this.manager()
+    return manager.reachable && (await this.isActive(manager))
   }
 
   async start(): Promise<void> {
-    throw new Error(notSupportedYet(this.label))
+    const manager = this.reachableManager()
+    await this.mustCall(manager, ['daemon-reload'])
+    // A unit written where this manager does not look would make enable fail
+    // with a message about a missing unit; this names the likely cause.
+    const shown = await this.mustCall(manager, ['show', '--property=LoadState', '--value', SYSTEMD_UNIT])
+    if (shown.stdout.trim() !== 'loaded') {
+      throw new Error(`${LABEL}: the user manager did not load ${this.unitPath}; it reads units from another config folder (check XDG_CONFIG_HOME). Nothing was started`)
+    }
+    await this.mustCall(manager, ['enable', '--now', SYSTEMD_UNIT])
   }
 
+  /** disable --now also drops the default.target.wants link, so uninstall leaves none behind. */
   async stop(): Promise<void> {
-    throw new Error(notSupportedYet(this.label))
+    const manager = this.reachableManager()
+    const { exitCode } = await this.call(manager, ['disable', '--now', SYSTEMD_UNIT])
+    for (let attempt = 1; await this.isActive(manager); attempt += 1) {
+      if (attempt >= STOP_ATTEMPTS) throw new Error(`the ${LABEL} is still active after disable --now (exit ${exitCode})`)
+      await this.env.sleep(STOP_RETRY_MS)
+    }
   }
 
   private readEnvironment(): Map<string, string> | null {
@@ -179,23 +309,27 @@ export class SystemdUserService implements ServiceControl {
     return port >= 1 && port <= MAX_PORT ? port : null
   }
 
-  async fileHolders(_path: string): Promise<string> {
-    return ''
+  async fileHolders(path: string): Promise<string> {
+    return procFileHolders(this.procRoot, path, process.pid)
   }
 
-  configPath(): string {
-    return this.unitPath
+  /** No unit is written where no manager could load it. */
+  configPath(): string | null {
+    return this.manager().reachable ? this.unitPath : null
   }
 
-  configContent(port: number): string {
-    return unitContent(this.env, port)
+  configContent(port: number): string | null {
+    return this.configPath() === null ? null : unitContent(this.env, port)
   }
 
-  describe(_step: ServiceStep): string {
-    return notSupportedYet(this.label)
+  describe(step: ServiceStep): string {
+    return step === 'start'
+      ? `${LABEL}: systemctl --user daemon-reload, then systemctl --user enable --now ${SYSTEMD_UNIT}`
+      : `${LABEL}: systemctl --user disable --now ${SYSTEMD_UNIT}`
   }
 
   unavailableReason(): string | null {
-    return NOT_SET_UP_REASON
+    const manager = this.manager()
+    return manager.reachable ? null : `no user service manager is reachable (${manager.reason})`
   }
 }

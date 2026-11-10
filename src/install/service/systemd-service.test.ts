@@ -1,12 +1,14 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { posixOnly } from '../../../test/platform-guards'
 import { DEFAULT_PORT } from '../../daemon/daemon'
 import { envName } from '../../env-names'
-import type { InstallEnv } from '../env'
+import type { CommandResult, InstallEnv } from '../env'
 import { type FakeWorld, createWorld } from '../test-support'
-import { SYSTEMD_UNIT, SystemdUserService, systemdQuote, systemdUserDir, unitContent, unitEnvironment } from './systemd-service'
+import { STOP_ATTEMPTS } from './launch-agent-service'
+import { SYSTEMCTL_CANDIDATES, SYSTEMD_UNIT, SystemdUserService, procFileHolders, systemctlArgv, systemdQuote, systemdUserDir, unitContent, unitEnvironment, userManagerOf } from './systemd-service'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -14,10 +16,18 @@ afterEach(async () => {
   world = null
 })
 
+const SYSTEMCTL = '/usr/bin/systemctl'
+
+/** A Linux env whose user manager is reachable, so the service writes and reads its unit. */
 function linuxEnv(overrides: Partial<InstallEnv> = {}): InstallEnv {
   world = createWorld({ platform: 'linux', withLibrary: false })
-  return { ...world.env, ...overrides }
+  const runtimeDir = join(world.root, 'run')
+  mkdirSync(join(runtimeDir, 'systemd'), { recursive: true })
+  writeFileSync(join(runtimeDir, 'systemd', 'private'), '')
+  return { ...world.env, ...overrides, envVars: { XDG_RUNTIME_DIR: runtimeDir, ...overrides.envVars } }
 }
+
+const serviceFor = (env: InstallEnv): SystemdUserService => new SystemdUserService(env, { systemctl: SYSTEMCTL })
 
 function programEnv(dataDir: string, overrides: Partial<InstallEnv> = {}): InstallEnv {
   // A literal POSIX path, so the expected ExecStart holds no Windows separator to escape.
@@ -61,7 +71,7 @@ posixOnly('POSIX paths')('awkward paths survive the unit file', () => {
   expect(lineStarting(unit, 'WorkingDirectory=')).toBe('WorkingDirectory=/tmp/a b/"q"/50%%/$x\\y')
   expect(lineStarting(unit, 'StandardOutput=')).toBe('StandardOutput=append:/tmp/a b/"q"/50%%/$x\\y/logs/daemon.log')
 
-  const service = new SystemdUserService(env)
+  const service = serviceFor(env)
   expect(service.isConfigured()).toBe(false)
   expect(service.configuredDataDir()).toBeNull()
   writeUnit(service, unit)
@@ -79,7 +89,7 @@ test('a control character is refused before anything is written', () => {
   const env = programEnv('/tmp/a\nb')
   const refusal = 'systemd user service: the data folder holds a control character and cannot go in a unit file'
   expect(() => unitContent(env, DEFAULT_PORT)).toThrow(refusal)
-  expect(() => new SystemdUserService(env).configContent(DEFAULT_PORT)).toThrow(refusal)
+  expect(() => serviceFor(env).configContent(DEFAULT_PORT)).toThrow(refusal)
   expect(() => systemdQuote('x\x7fy')).toThrow('holds a control character and cannot go in a unit file')
   expect(() => systemdQuote('x\ty', { field: 'the home folder' })).toThrow('systemd user service: the home folder holds a control character')
   expect(world?.commands).toEqual([])
@@ -90,7 +100,7 @@ test('a data folder ending in a backslash or whitespace is refused without echoi
   for (const dataDir of ['/tmp/kf\\', '/tmp/kf ', '/tmp/kf\t']) {
     const env = programEnv(dataDir)
     expect(() => unitContent(env, DEFAULT_PORT)).toThrow(refusal)
-    expect(() => new SystemdUserService(env).configContent(DEFAULT_PORT)).toThrow(refusal)
+    expect(() => serviceFor(env).configContent(DEFAULT_PORT)).toThrow(refusal)
   }
   expect(world?.commands).toEqual([])
 })
@@ -106,7 +116,7 @@ test('a port the installer would refuse never goes in the unit', () => {
 
 posixOnly('POSIX paths')('the unit folder follows an absolute XDG_CONFIG_HOME', () => {
   const env = linuxEnv({ envVars: { XDG_CONFIG_HOME: '/c' } })
-  const service = new SystemdUserService(env)
+  const service = serviceFor(env)
   expect(service.configPath()).toBe(`/c/systemd/user/${SYSTEMD_UNIT}`)
   expect(service.configContent(DEFAULT_PORT)).toBe(unitContent(env, DEFAULT_PORT))
   expect(unitContent(env, DEFAULT_PORT)).not.toContain('XDG_CONFIG_HOME')
@@ -118,7 +128,7 @@ posixOnly('POSIX paths')('the unit folder follows an absolute XDG_CONFIG_HOME', 
 
 test('a port that is not a port reads as null', () => {
   const env = linuxEnv()
-  const service = new SystemdUserService(env)
+  const service = serviceFor(env)
   const unit = unitContent(env, 40000)
   const portLine = `Environment="${envName('PORT')}=40000"`
   expect(unit.split('\n')).toContain(portLine)
@@ -133,23 +143,156 @@ test('a port that is not a port reads as null', () => {
 
 test('a unit with no data folder line reads as null', () => {
   const env = linuxEnv()
-  const service = new SystemdUserService(env)
+  const service = serviceFor(env)
   writeUnit(service, '[Service]\nEnvironment="HOME=/h"\n')
   expect(service.configuredDataDir()).toBeNull()
   writeUnit(service, `[Service]\nEnvironment="${envName('DATA_DIR')}="\n`)
   expect(service.configuredDataDir()).toBeNull()
 })
 
-test('the service still refuses to start, stop or describe a step', async () => {
-  const env = linuxEnv()
-  const service = new SystemdUserService(env)
-  const refusal = 'systemd user service: not supported on this platform yet'
-  expect(service.label).toBe('systemd user service')
-  await expect(service.start()).rejects.toThrow(refusal)
-  await expect(service.stop()).rejects.toThrow(refusal)
-  expect(service.describe('start')).toBe(refusal)
+/** env, XDG_RUNTIME_DIR=, systemctl, --user: what comes before the systemctl arguments. */
+const ARGV_PREFIX = 4
+
+type Answer = (args: readonly string[]) => CommandResult | undefined
+
+/** A Linux world whose user manager is reachable; `answer` gets the systemctl arguments only. */
+function managerWorld(answer: Answer = () => ({ exitCode: 0, stdout: '' })): { service: SystemdUserService; runtimeDir: string; calls: () => string[][] } {
+  let runtimeDir = ''
+  world = createWorld({
+    platform: 'linux',
+    withLibrary: false,
+    commandOverride: (argv) => (argv[2] === SYSTEMCTL ? answer(argv.slice(ARGV_PREFIX)) : undefined),
+  })
+  runtimeDir = join(world.root, 'run')
+  mkdirSync(join(runtimeDir, 'systemd'), { recursive: true })
+  writeFileSync(join(runtimeDir, 'systemd', 'private'), '')
+  const env = { ...world.env, envVars: { XDG_RUNTIME_DIR: runtimeDir } }
+  const recorded = world
+  return {
+    service: new SystemdUserService(env, { systemctl: SYSTEMCTL }),
+    runtimeDir,
+    calls: () => recorded.commands.map((c) => [...c.argv]),
+  }
+}
+
+const loaded: Answer = (args) => ({ exitCode: 0, stdout: args[0] === 'show' ? 'loaded\n' : '' })
+
+test('systemctl runs through env with the runtime dir, and the candidates are the usual two', () => {
+  expect(SYSTEMCTL_CANDIDATES).toEqual(['/usr/bin/systemctl', '/bin/systemctl'])
+  expect(systemctlArgv({ runtimeDir: '/run/user/1000', systemctl: SYSTEMCTL }, ['is-active', '--quiet', SYSTEMD_UNIT]))
+    .toEqual(['/usr/bin/env', 'XDG_RUNTIME_DIR=/run/user/1000', SYSTEMCTL, '--user', 'is-active', '--quiet', SYSTEMD_UNIT])
+})
+
+test('start reloads, checks the unit loaded, then enables it', async () => {
+  const { service, runtimeDir, calls } = managerWorld(loaded)
+  await service.start()
+  const manager = { runtimeDir, systemctl: SYSTEMCTL }
+  expect(calls()).toEqual([
+    systemctlArgv(manager, ['daemon-reload']),
+    systemctlArgv(manager, ['show', '--property=LoadState', '--value', SYSTEMD_UNIT]),
+    systemctlArgv(manager, ['enable', '--now', SYSTEMD_UNIT]),
+  ])
+  expect(world?.commands.every((c) => c.timeoutMs === 15_000)).toBe(true)
+})
+
+test('a unit the manager did not load is refused', async () => {
+  const { service, calls } = managerWorld((args) => ({ exitCode: 0, stdout: args[0] === 'show' ? 'not-found\n' : '' }))
+  const path = service.configPath()
+  await expect(service.start()).rejects.toThrow(`systemd user service: the user manager did not load ${path}; it reads units from another config folder (check XDG_CONFIG_HOME). Nothing was started`)
+  expect(calls().some((argv) => argv.includes('enable'))).toBe(false)
+})
+
+test('stop disables and waits until the unit is inactive', async () => {
+  const activeExits = [0, 0, 3]
+  const { service, runtimeDir, calls } = managerWorld((args) => ({ exitCode: args[0] === 'is-active' ? (activeExits.shift() ?? 3) : 0, stdout: '' }))
+  await service.stop()
+  const manager = { runtimeDir, systemctl: SYSTEMCTL }
+  const isActive = systemctlArgv(manager, ['is-active', '--quiet', SYSTEMD_UNIT])
+  expect(calls()).toEqual([systemctlArgv(manager, ['disable', '--now', SYSTEMD_UNIT]), isActive, isActive, isActive])
+
+  await world?.cleanup()
+  const stuck = managerWorld(() => ({ exitCode: 0, stdout: '' }))
+  await expect(stuck.service.stop()).rejects.toThrow('the systemd user service is still active after disable --now (exit 0)')
+  expect(stuck.calls().filter((argv) => argv.includes('is-active'))).toHaveLength(STOP_ATTEMPTS)
+})
+
+test('a failing systemctl reports its exit code only', async () => {
+  const { service } = managerWorld((args) => (args[0] === 'enable' ? { exitCode: 1, stdout: 'token=abc' } : loaded(args)))
+  const failure = await service.start().then(() => null, (error: unknown) => error)
+  expect(failure).toBeInstanceOf(Error)
+  const message = (failure as Error).message
+  expect(message).toBe('systemd user service: systemctl --user enable --now kinfold.service failed (exit 1)')
+  expect(message).not.toContain('abc')
+})
+
+test('start and stop describe their systemctl steps', () => {
+  const { service } = managerWorld()
+  expect(service.describe('start')).toBe('systemd user service: systemctl --user daemon-reload, then systemctl --user enable --now kinfold.service')
+  expect(service.describe('stop')).toBe('systemd user service: systemctl --user disable --now kinfold.service')
+})
+
+test('isRunning is is-active exit 0', async () => {
+  let exit = 0
+  const { service } = managerWorld(() => ({ exitCode: exit, stdout: '' }))
+  expect(await service.isRunning()).toBe(true)
+  exit = 3
   expect(await service.isRunning()).toBe(false)
-  expect(await service.fileHolders('/x/memory.db')).toBe('')
-  expect(service.unavailableReason()).toBe('not set up on this platform yet')
-  expect(world?.commands).toEqual([])
+})
+
+test('no reachable user manager means no unit and no systemctl', async () => {
+  const reachable = managerWorld(loaded)
+  expect(reachable.service.unavailableReason()).toBeNull()
+  expect(reachable.service.configPath()).toBe(join(systemdUserDir(world!.env), SYSTEMD_UNIT))
+  const runtimeDir = reachable.runtimeDir
+  const recorded = world!
+  const base = world!.env
+  const missing = `${join(recorded.root, 'nowhere')}/systemd/private`
+  const cases: { envVars: Record<string, string>; systemctl: string | null; reason: string }[] = [
+    { envVars: {}, systemctl: SYSTEMCTL, reason: 'XDG_RUNTIME_DIR is not set' },
+    { envVars: { XDG_RUNTIME_DIR: '' }, systemctl: SYSTEMCTL, reason: 'XDG_RUNTIME_DIR is not set' },
+    { envVars: { XDG_RUNTIME_DIR: runtimeDir }, systemctl: null, reason: 'systemctl is not installed' },
+    { envVars: { XDG_RUNTIME_DIR: join(recorded.root, 'nowhere') }, systemctl: SYSTEMCTL, reason: `${missing} does not exist` },
+  ]
+  for (const { envVars, systemctl, reason } of cases) {
+    expect(userManagerOf({ envVars }, systemctl)).toEqual({ reachable: false, reason })
+    const service = new SystemdUserService({ ...base, envVars }, { systemctl })
+    const unreachable = `no user service manager is reachable (${reason})`
+    expect(service.unavailableReason()).toBe(unreachable)
+    expect(service.configPath()).toBeNull()
+    expect(service.configContent(37_811)).toBeNull()
+    expect(await service.isRunning()).toBe(false)
+    await expect(service.start()).rejects.toThrow(`systemd user service: ${unreachable}`)
+    await expect(service.stop()).rejects.toThrow(`systemd user service: ${unreachable}`)
+  }
+  expect(recorded.commands).toEqual([])
+})
+
+posixOnly('file modes')('fileHolders reads /proc', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sam-proc-'))
+  const procRoot = join(root, 'proc')
+  try {
+    const store = join(root, 'memory.db')
+    writeFileSync(store, '')
+    const real = realpathSync(store)
+    mkdirSync(join(procRoot, '123', 'fd'), { recursive: true })
+    symlinkSync(real, join(procRoot, '123', 'fd', '4'))
+    symlinkSync('/dev/null', join(procRoot, '123', 'fd', '0'))
+    writeFileSync(join(procRoot, '123', 'comm'), 'kinfold\n')
+    mkdirSync(join(procRoot, String(process.pid), 'fd'), { recursive: true })
+    symlinkSync(real, join(procRoot, String(process.pid), 'fd', '3'))
+    mkdirSync(join(procRoot, '456', 'fd'), { recursive: true })
+    chmodSync(join(procRoot, '456', 'fd'), 0o000)
+    mkdirSync(join(procRoot, 'self'))
+    expect(procFileHolders(procRoot, store, process.pid)).toBe('123 kinfold')
+
+    world = createWorld({ platform: 'linux', withLibrary: false })
+    const service = new SystemdUserService(world.env, { systemctl: SYSTEMCTL, procRoot })
+    expect(await service.fileHolders(store)).toBe('123 kinfold')
+    expect(world.commands).toEqual([])
+    expect(procFileHolders(join(root, 'no-proc'), store, process.pid)).toBe('')
+    expect(procFileHolders(procRoot, join(root, 'gone.db'), process.pid)).toBe('')
+  } finally {
+    chmodSync(join(procRoot, '456', 'fd'), 0o700)
+    rmSync(root, { recursive: true, force: true })
+  }
 })
