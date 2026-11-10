@@ -22,14 +22,21 @@ export interface SecretServiceBinding {
   lookup(account: string): SecretLookup
   /** Replaces the unlocked item in place, else creates one in the default collection. Throws 'locked' for a locked item or collection. */
   store(account: string, label: string, value: string): void
+  /**
+   * Creates an item only when the account has none, locked or not; true when this call created it.
+   * Throws 'raced' after withdrawing its own item when another process created one at the same moment.
+   */
+  create(account: string, label: string, value: string): boolean
   /** Deletes every item for the account; true when one went. */
   remove(account: string): boolean
 }
 
 export type SecretOperation = 'connect' | 'search' | 'lookup' | 'store' | 'delete'
 
+export type SecretFailure = number | 'locked' | 'unloadable' | 'missing' | 'raced'
+
 export class SecretServiceError extends Error {
-  constructor(readonly operation: SecretOperation, readonly reason: number | 'locked' | 'unloadable') {
+  constructor(readonly operation: SecretOperation, readonly reason: SecretFailure) {
     super(`libsecret: ${operation} failed (${typeof reason === 'number' ? `code ${reason}` : reason})`)
     this.name = 'SecretServiceError'
   }
@@ -50,6 +57,8 @@ const messages = {
   unreachable: `${LABEL}: the Secret Service keyring chosen at install cannot be reached (no D-Bus session bus); nothing was read or written`,
   unloadable: `${LABEL}: ${LIBSECRET_SO} cannot be loaded; nothing was read or written`,
   locked: `${LABEL}: the keyring is locked; unlock it and run the command again. Nothing was read or written`,
+  missing: `${LABEL}: the keyring has no default collection; nothing was read or written`,
+  raced: `${LABEL}: another kinfold install created this key at the same time; run install again`,
   failed: (operation: string, code: number | string) => `${LABEL}: ${operation} failed (code ${code})`,
   invalid: (account: string) => `${LABEL}: the keyring item "${itemLabel(account)}" does not hold a valid value`,
 }
@@ -64,6 +73,8 @@ function fixedMessage(error: unknown, operation: SecretOperation): string {
   if (!(error instanceof SecretServiceError)) return messages.failed(operation, 'unknown')
   if (error.reason === 'locked') return messages.locked
   if (error.reason === 'unloadable') return messages.unloadable
+  if (error.reason === 'missing') return messages.missing
+  if (error.reason === 'raced') return messages.raced
   return messages.failed(error.operation, error.reason)
 }
 
@@ -100,15 +111,9 @@ export function createLibsecretStore(deps: KeyStoreDeps, load: BindingLoader): K
     assertStorableValue(value)
   }
 
-  // Check then store: the Secret Service has no create-only call, so two
-  // processes creating one account at the same moment could both store.
   const create = (account: string, value: string): boolean => {
     checked(account, value)
-    return call(account, 'store', (service) => {
-      if (service.exists(account)) return false
-      service.store(account, itemLabel(account), value)
-      return true
-    })
+    return call(account, 'store', (service) => service.create(account, itemLabel(account), value))
   }
 
   const named = (account: string): string => {
@@ -162,6 +167,63 @@ export function createLibsecretModule(load: BindingLoader = ffiSecretService): K
 }
 
 export const libsecretModule: KeyStoreModule = createLibsecretModule()
+
+/** The keyring calls create-only needs, over this process's own item handle `I`. */
+export interface CreateOnlySteps<I> {
+  /** Items for the account, locked or not. */
+  count(): number
+  /** Makes this process's item and hands it back, still held. */
+  create(): I
+  /** Deletes this process's own item; never another one. */
+  remove(own: I): void
+  /** Lets go of the handle; runs on every path once `create` returned. */
+  release(own: I): void
+}
+
+/**
+ * Create-only across processes. The Secret Service has no create-if-absent
+ * call, so each creator counts again after its own create: a creator that
+ * sees a second item withdraws its own. The later of two creators always sees
+ * both; two that count at the same moment both withdraw, so the account ends
+ * with one item or none, never two. Yields between keyring calls so a test can
+ * interleave two runs.
+ */
+export function* createOnlySteps<I>(steps: CreateOnlySteps<I>): Generator<void, boolean, void> {
+  if (steps.count() > 0) return false
+  yield
+  const own = steps.create()
+  try {
+    yield
+    let others: number
+    try {
+      others = steps.count() - 1
+    } catch (error: unknown) {
+      // A recount can fail while another creator's item is going away. A run
+      // that reports failure keeps nothing, so its own item is withdrawn; the
+      // count's error is the one to report, not a cleanup failure.
+      try {
+        steps.remove(own)
+      } catch {}
+      throw error
+    }
+    if (others > 0) {
+      yield
+      steps.remove(own)
+      throw new SecretServiceError('store', 'raced')
+    }
+    return true
+  } finally {
+    steps.release(own)
+  }
+}
+
+export function createOnly<I>(steps: CreateOnlySteps<I>): boolean {
+  const run = createOnlySteps(steps)
+  for (;;) {
+    const next = run.next()
+    if (next.done === true) return next.value
+  }
+}
 
 // SecretServiceFlags, SecretSearchFlags, SecretSchemaFlags and friends, from libsecret's headers.
 const SERVICE_OPEN_SESSION = 1 << 1
@@ -386,10 +448,11 @@ export function ffiSecretService(): SecretServiceBinding {
     }
   }
 
-  const createItem = (account: string, label: string, value: Pointer): void =>
+  /** The new item, still held: the caller unrefs it. */
+  const createItem = (account: string, label: string, value: Pointer): Pointer =>
     withDefault('store', (collection) => {
       // Creating a default keyring would prompt; the probe refuses a host without one.
-      if (collection === null) throw new SecretServiceError('store', 0)
+      if (collection === null) throw new SecretServiceError('store', 'missing')
       if (secret.secret_collection_get_locked(collection) !== 0) throw new SecretServiceError('store', 'locked')
       const labelText = cstring(label)
       const itemSchema = theSchema()
@@ -397,8 +460,12 @@ export function ffiSecretService(): SecretServiceBinding {
         withError('store', (errorOut) =>
           secret.secret_item_create_sync(collection, itemSchema, attributes, labelText, value, ITEM_CREATE_NONE, null, errorOut)))
       if (isNull(item)) throw new SecretServiceError('store', 0)
-      gobject.g_object_unref(item)
+      return item
     })
+
+  const createReleased = (account: string, label: string, value: Pointer): void => {
+    gobject.g_object_unref(createItem(account, label, value))
+  }
 
   const setAll = (items: readonly Pointer[], value: Pointer): void => {
     for (const item of items) {
@@ -426,7 +493,19 @@ export function ffiSecretService(): SecretServiceBinding {
     store: (account, label, text) =>
       search(account, SEARCH_ALL, 'store', (items) => {
         if (items.some(isLocked)) throw new SecretServiceError('store', 'locked')
-        withValue(text, (value) => (items.length === 0 ? createItem(account, label, value) : setAll(items, value)))
+        withValue(text, (value) => (items.length === 0 ? createReleased(account, label, value) : setAll(items, value)))
+      }),
+    create: (account, label, text) =>
+      createOnly<Pointer>({
+        count: () => search(account, SEARCH_ALL, 'store', (items) => items.length),
+        create: () => withValue(text, (value) => createItem(account, label, value)),
+        remove: (own) => {
+          // Only this run's own item, made unlocked a moment ago; a locked one could prompt, so it stays.
+          if (isLocked(own)) throw new SecretServiceError('delete', 'locked')
+          const ok = withError('delete', (errorOut) => secret.secret_item_delete_sync(own, null, errorOut))
+          if (ok === 0) throw new SecretServiceError('delete', 0)
+        },
+        release: (own) => gobject.g_object_unref(own),
       }),
     remove: (account) =>
       search(account, SEARCH_ALL, 'delete', (items) => {

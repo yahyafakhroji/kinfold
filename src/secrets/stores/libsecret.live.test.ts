@@ -39,6 +39,7 @@ function recordingLoader(calls: string[]): BindingLoader {
       exists: (account) => (note('exists', account), real.exists(account)),
       lookup: (account) => (note('lookup', account), real.lookup(account)),
       store: (account, label, value) => (note('store', account), real.store(account, label, value)),
+      create: (account, label, value) => (note('create', account), real.create(account, label, value)),
       remove: (account) => (note('remove', account), real.remove(account)),
     }
     return binding

@@ -8,6 +8,8 @@ import {
   type SecretServiceBinding,
   SecretServiceError,
   createLibsecretModule,
+  createOnly,
+  createOnlySteps,
   createLibsecretStore,
   libsecretModule,
   probeLibsecret,
@@ -41,6 +43,13 @@ function fakeSecretService(options: { collection?: SecretCollectionState; locked
       calls.push(`store ${account}`)
       values.set(account, value)
     },
+    create: (account, _label, value) =>
+      createOnly<string>({
+        count: () => (calls.push(`count ${account}`), values.has(account) ? 1 : 0),
+        create: () => (calls.push(`create ${account}`), values.set(account, value), account),
+        remove: (own) => void values.delete(own),
+        release: () => {},
+      }),
     remove: (account) => (calls.push(`remove ${account}`), values.delete(account)),
   }
   const load: BindingLoader = () => (loads++, binding)
@@ -64,7 +73,14 @@ function failingBinding(): SecretServiceBinding {
   const fail = (operation: 'connect' | 'search' | 'lookup' | 'store' | 'delete') => (): never => {
     throw new SecretServiceError(operation, 2)
   }
-  return { defaultCollection: fail('connect'), exists: fail('search'), lookup: fail('lookup'), store: fail('store'), remove: fail('delete') }
+  return {
+    defaultCollection: fail('connect'),
+    exists: fail('search'),
+    lookup: fail('lookup'),
+    store: fail('store'),
+    create: fail('store'),
+    remove: fail('delete'),
+  }
 }
 
 function messageOf(action: () => unknown): string {
@@ -115,8 +131,7 @@ test('create never replaces', () => {
   fake.values.set('db-key', VALUE)
   const store = createLibsecretStore(linuxDeps(), fake.load)
   expect(store.create('db-key', 'another-value-0123')).toBe(false)
-  expect(fake.calls).toContain('exists db-key')
-  expect(fake.calls.filter((call) => call.startsWith('store '))).toEqual([])
+  expect(fake.calls).toEqual(['count db-key'])
   expect(fake.values.get('db-key')).toBe(VALUE)
 })
 
@@ -161,4 +176,137 @@ test('the module names the keyring and records no location', () => {
   expect([libsecretModule.kind, libsecretModule.label, libsecretModule.location]).toEqual(['libsecret', 'libsecret', undefined])
   const store = libsecretModule.open(linuxDeps({}))
   expect([store.kind, store.label, store.place, store.notes]).toEqual(['libsecret', 'libsecret', 'the Secret Service keyring', []])
+})
+
+// Two creators of one account over a shared keyring, run step by step in every order.
+type Racer = 'A' | 'B'
+type Outcome = { result: boolean } | { error: string }
+
+function race(schedule: readonly Racer[]) {
+  const items: { id: number; owner: Racer; value: string }[] = []
+  const removed: number[] = []
+  const created = new Map<Racer, number>()
+  const released: Racer[] = []
+  let nextId = 1
+  const racer = (name: Racer) =>
+    createOnlySteps<number>({
+      count: () => items.length,
+      create: () => {
+        const id = nextId++
+        items.push({ id, owner: name, value: `value-of-${name}` })
+        created.set(name, id)
+        return id
+      },
+      remove: (own) => {
+        const at = items.findIndex((item) => item.id === own)
+        if (at >= 0) items.splice(at, 1)
+        removed.push(own)
+      },
+      release: () => void released.push(name),
+    })
+  const runs = { A: racer('A'), B: racer('B') }
+  const outcomes = new Map<Racer, Outcome>()
+  const step = (name: Racer): void => {
+    if (outcomes.has(name)) return
+    try {
+      const next = runs[name].next()
+      if (next.done === true) outcomes.set(name, { result: next.value })
+    } catch (error: unknown) {
+      outcomes.set(name, { error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  for (const name of schedule) step(outcomes.has(name) ? (name === 'A' ? 'B' : 'A') : name)
+  while (outcomes.size < 2) {
+    step('A')
+    step('B')
+  }
+  return { items, removed, created, released, outcomes }
+}
+
+function schedules(length: number): Racer[][] {
+  if (length === 0) return [[]]
+  return schedules(length - 1).flatMap((rest) => [['A', ...rest] as Racer[], ['B', ...rest] as Racer[]])
+}
+
+const RACED = 'libsecret: store failed (raced)'
+
+test('a create race leaves exactly one item or none, never two', () => {
+  const endings = new Set<number>()
+  for (const schedule of schedules(8)) {
+    const { items, outcomes } = race(schedule)
+    expect(items.length).toBeLessThanOrEqual(1)
+    endings.add(items.length)
+    const winners = [...outcomes.values()].filter((outcome) => 'result' in outcome && outcome.result)
+    expect(winners.length).toBe(items.length)
+  }
+  // Both endings happen: one creator wins, or both withdraw.
+  expect([...endings].sort()).toEqual([0, 1])
+})
+
+test("a create race deletes only the loser's own item", () => {
+  for (const schedule of schedules(8)) {
+    const { removed, created, outcomes, released } = race(schedule)
+    for (const name of ['A', 'B'] as const) {
+      const outcome = outcomes.get(name)
+      const own = created.get(name)
+      if (outcome !== undefined && 'error' in outcome) {
+        expect(outcome.error).toBe(RACED)
+        expect(removed).toContain(own ?? -1)
+      }
+      // Every handle a creator took is let go, whatever happened.
+      if (own !== undefined) expect(released).toContain(name)
+    }
+    // Nobody ever deletes an item it did not make.
+    for (const id of removed) expect([...created.values()].filter((own) => own === id)).toHaveLength(1)
+    expect(new Set(removed).size).toBe(removed.length)
+  }
+})
+
+test("a create race keeps the winner's value", () => {
+  for (const schedule of schedules(8)) {
+    const { items, outcomes } = race(schedule)
+    for (const item of items) {
+      expect(outcomes.get(item.owner)).toEqual({ result: true })
+      expect(item.value).toBe(`value-of-${item.owner}`)
+    }
+  }
+})
+
+test('a create that finds an item, locked or not, never creates', () => {
+  let creates = 0
+  const steps = { count: () => 1, create: () => (creates++, 0), remove: () => {}, release: () => {} }
+  expect(createOnly(steps)).toBe(false)
+  expect(creates).toBe(0)
+})
+
+test('a lost race and a missing default collection have their own messages', () => {
+  const throwing = (reason: 'raced' | 'missing'): SecretServiceBinding => {
+    const fail = (): never => {
+      throw new SecretServiceError('store', reason)
+    }
+    return { ...failingBinding(), store: fail, create: fail }
+  }
+  expect(messageOf(() => createLibsecretStore(linuxDeps(), () => throwing('raced')).create('db-key', VALUE))).toBe(
+    'libsecret: another kinfold install created this key at the same time; run install again',
+  )
+  expect(messageOf(() => createLibsecretStore(linuxDeps(), () => throwing('missing')).set('db-key', VALUE))).toBe(
+    'libsecret: the keyring has no default collection; nothing was read or written',
+  )
+})
+
+test('a create whose recount fails withdraws its own item', () => {
+  const items: number[] = []
+  let counts = 0
+  const steps = {
+    count: () => {
+      counts++
+      if (counts === 2) throw new SecretServiceError('store', 19)
+      return items.length
+    },
+    create: () => (items.push(7), 7),
+    remove: (own: number) => void items.splice(items.indexOf(own), 1),
+    release: () => {},
+  }
+  expect(messageOf(() => createOnly(steps))).toBe('libsecret: store failed (code 19)')
+  expect(items).toEqual([])
 })

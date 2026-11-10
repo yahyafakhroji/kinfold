@@ -48,6 +48,7 @@ function fakeKeyring(state: SecretCollectionState) {
     exists: (account) => values.has(account),
     lookup: (account) => (values.has(account) ? { found: true, locked: false, value: values.get(account) ?? null } : { found: false }),
     store: (account, _label, value) => void values.set(account, value),
+    create: (account, _label, value) => (values.has(account) ? false : (values.set(account, value), true)),
     remove: (account) => values.delete(account),
   }
   const load: BindingLoader = () => (loads++, binding)
