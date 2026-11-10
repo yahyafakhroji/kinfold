@@ -124,8 +124,9 @@ test('a linked install wires the WSL agents to the Windows folder', async () => 
   expect(settings).toContain(JSON.stringify(program))
   expect(settings).toContain(`${JSON.stringify('--data-dir')},${JSON.stringify(s.dataDir)}`)
   const mcp = s.world.commands.find((request) => request.argv[0] === 'claude' && request.argv.includes('mcp'))
-  expect(mcp?.argv.join(' ')).toContain(program)
-  expect(mcp?.argv.join(' ')).toContain(s.dataDir)
+  // The entry travels as JSON, so a Windows path in it has its backslashes escaped.
+  expect(mcp?.argv.join(' ')).toContain(JSON.stringify(program))
+  expect(mcp?.argv.join(' ')).toContain(JSON.stringify(s.dataDir))
   const linkPath = join(wslHomeDir(s.world.home), WSL_LINK_FILE)
   expect(statSync(linkPath).mode & 0o777).toBe(0o600)
   expect(Object.keys(JSON.parse(readFileSync(linkPath, 'utf8'))).sort()).toEqual(['dataDir', 'linkedAt', 'taskConfig', 'windowsDataDir'])
