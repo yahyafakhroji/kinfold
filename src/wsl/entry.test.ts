@@ -128,7 +128,8 @@ test('a linked install wires the WSL agents to the Windows folder', async () => 
   expect(mcp?.argv.join(' ')).toContain(JSON.stringify(program))
   expect(mcp?.argv.join(' ')).toContain(JSON.stringify(s.dataDir))
   const linkPath = join(wslHomeDir(s.world.home), WSL_LINK_FILE)
-  expect(statSync(linkPath).mode & 0o777).toBe(0o600)
+  // Windows has no POSIX modes; the distro that runs this code does.
+  if (process.platform !== 'win32') expect(statSync(linkPath).mode & 0o777).toBe(0o600)
   expect(Object.keys(JSON.parse(readFileSync(linkPath, 'utf8'))).sort()).toEqual(['dataDir', 'linkedAt', 'taskConfig', 'windowsDataDir'])
   expect(readWslLink(wslHomeDir(s.world.home))).toMatchObject({ windowsDataDir: WIN_DATA_DIR, dataDir: s.dataDir })
   expect(readFileSync(program, 'utf8')).toBe('the kinfold program stand-in')
