@@ -102,18 +102,23 @@ check_agent_clis() {
 }
 
 # gnome-keyring answers on the bus before its login collection exists, and a
-# write in that gap fails. The default alias names a collection once it does.
+# write in that gap fails. The default alias names a collection once it does,
+# and the collection must also be unlocked, since nothing here may prompt.
 wait_for_secret_service() {
-  local waited=0 reply
+  local waited=0 reply collection locked
   while [ "$waited" -lt "$SECRET_SERVICE_WAIT_SECONDS" ]; do
     reply="$(dbus-send --session --print-reply --dest=org.freedesktop.secrets /org/freedesktop/secrets org.freedesktop.Secret.Service.ReadAlias string:default 2>/dev/null || true)"
-    if printf '%s\n' "$reply" | grep -q 'object path "/org/freedesktop/secrets/collection/'; then
-      return 0
+    collection="$(printf '%s\n' "$reply" | sed -n 's|.*object path "\(/org/freedesktop/secrets/collection/[^"]*\)".*|\1|p' | head -n 1)"
+    if [ -n "$collection" ]; then
+      locked="$(dbus-send --session --print-reply --dest=org.freedesktop.secrets "$collection" org.freedesktop.DBus.Properties.Get string:org.freedesktop.Secret.Collection string:Locked 2>/dev/null || true)"
+      if printf '%s\n' "$locked" | grep -q 'boolean false'; then
+        return 0
+      fi
     fi
     sleep 1
     waited=$((waited + 1))
   done
-  echo "the Secret Service did not offer a default collection within ${SECRET_SERVICE_WAIT_SECONDS} s"
+  echo "the Secret Service did not offer an unlocked default collection within ${SECRET_SERVICE_WAIT_SECONDS} s"
   return 1
 }
 export -f wait_for_secret_service
@@ -138,6 +143,19 @@ run_live_libsecret_test() {
   fi
 }
 
+# install picks the key file when its probe finds the keyring unusable, and the
+# smoke would then fail far later on the status label. The same probe, run from
+# source here, names the reason at once. Its reasons are fixed strings.
+probe_libsecret() {
+  bun -e "
+    import { libsecretModule } from './src/secrets/stores/libsecret'
+    import { currentPlatform } from './src/platform/platform'
+    const probe = libsecretModule.probe({ platform: currentPlatform(), homeDir: process.env.HOME ?? '', dataDir: '', envVars: process.env, security: undefined as never })
+    console.log(probe.usable ? 'libsecret probe: usable' : 'libsecret probe: ' + probe.reason)
+    if (!probe.usable) process.exit(1)
+  "
+}
+
 start_store_under_test() {
   local address password
   case "${RUNNER_ARCH:-}" in
@@ -151,6 +169,7 @@ start_store_under_test() {
       echo "::add-mask::$password"
       printf '%s' "$password" | DBUS_SESSION_BUS_ADDRESS="$address" gnome-keyring-daemon --replace --unlock --components=secrets --daemonize > /dev/null
       DBUS_SESSION_BUS_ADDRESS="$address" wait_for_secret_service
+      DBUS_SESSION_BUS_ADDRESS="$address" probe_libsecret
       {
         echo "DBUS_SESSION_BUS_ADDRESS=$address"
         echo "KINFOLD_SMOKE_KEY_STORE=libsecret"
