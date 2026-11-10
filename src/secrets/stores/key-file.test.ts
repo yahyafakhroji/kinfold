@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { posixOnly, skipsOn } from '../../../test/platform-guards'
+import { posixOnly, skipsOn, windowsOnly } from '../../../test/platform-guards'
 import { currentPlatform } from '../../platform/platform'
 import type { KeyStoreDeps } from '../key-store'
 import { runKeyStoreContract } from './contract'
@@ -228,6 +228,10 @@ posixOnly('file modes')('the probe refuses an unsafe folder and an unwritable an
   } finally {
     chmodSync(locked, 0o700)
   }
+})
+
+windowsOnly('no POSIX file owners')('the probe is unusable on a host without POSIX file owners', () => {
+  expect(probeKeyFile(depsFor(tempHome()))).toEqual({ usable: false, reason: 'this host has no POSIX file owners' })
 })
 
 test('describe texts hide the value', () => {

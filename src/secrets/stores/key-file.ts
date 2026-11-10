@@ -36,6 +36,7 @@ export const KEY_FILE_NOTES: readonly [string, string] = [
 ]
 
 const LABEL = 'key file'
+const NO_FILE_OWNERS = 'this host has no POSIX file owners'
 const OPEN_TO_OTHERS = 0o077
 // Windows has no O_NOFOLLOW; the store is never usable there.
 const READ_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
@@ -337,6 +338,8 @@ function writableFolder(path: string, stats: Stats): boolean {
 /** Install only. Never creates anything. */
 export function probeKeyFile(deps: KeyStoreDeps): KeyStoreProbe {
   if (deps.platform.os !== 'linux') return { usable: false, reason: 'not Linux' }
+  // The owner and mode checks need a POSIX host; without them every read would be refused.
+  if (process.getuid === undefined) return { usable: false, reason: NO_FILE_OWNERS }
   const dir = keyFileDir(deps)
   if (isInside(dir, deps.dataDir)) return { usable: false, reason: reasons.inside(dir, deps.dataDir) }
   const found = nearestExisting(dir)
