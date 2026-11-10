@@ -7,6 +7,7 @@ import { samCommand, samCommandScript } from './host-hooks'
 import { DEFAULT_PORT } from '../daemon/daemon'
 import { plistContent } from './launch-agent'
 import { MCP_SERVER_NAME, claudeMcpEntry, inspectMcpEntry, openCodeMcpEntry } from './mcp-config'
+import { posixOnly } from '../../test/platform-guards'
 
 const HOME = '/Users/me'
 const DATA_DIR = '/Users/me/My Memory'
@@ -85,7 +86,7 @@ describe('recognising our entries', () => {
 })
 
 describe('a data folder with spaces', () => {
-  test('round-trips through Claude settings, both MCP entries and the plist', () => {
+  posixOnly('POSIX paths')('round-trips through Claude settings, both MCP entries and the plist', () => {
     const mode = { kind: 'program', binPath: installedProgramPath(DATA_DIR, 'darwin') } as const
     const hook = entryCommand(mode, 'hook', DATA_DIR)
     const settingsText = serializeJson(mergeSamHooks({}, { entry: hook }).settings, null)

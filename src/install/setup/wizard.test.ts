@@ -22,6 +22,7 @@ import { type FakeWorld, createWorld, snapshotTree, startWorldDaemon } from '../
 import { LOCKED_FOLDER_NOTE, type SetupState, readSetupState } from './prefill'
 import { installRecordAction } from './record'
 import { DRY_RUN_NO_CODE, NO_TTY_ENCRYPTION_CHANGE, STALE_DB_KEY, type SetupFlags, freePortFrom, runWizard } from './wizard'
+import { posixOnly } from '../../../test/platform-guards'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -134,7 +135,7 @@ test('--data-dir for another folder on a re-run is refused before any question',
   expect(term.output()).toBe('')
 })
 
-test('a first install asks for the folder and expands ~', async () => {
+posixOnly('POSIX paths')('a first install asks for the folder and expands ~', async () => {
   const { w } = setup(['~/notes\r', ...Array(3).fill(ENTER)])
   const state = await readSetupState(w.env)
   const answers = await runWizard(w.env, ask(w), state, flagsOf({ hosts: [], noEncrypt: true }), NO_CHOICE)

@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { install } from './install'
 import { type FakeWorld, YES, createWorld } from './test-support'
+import { posixOnly } from '../../test/platform-guards'
 
 const FIXTURE = join(import.meta.dir, 'install-dry-run.golden.txt')
 
@@ -32,7 +33,7 @@ function normalize(w: FakeWorld, lines: readonly string[]): string[] {
     .replace(/\bpid \d+/g, 'pid <pid>'))
 }
 
-test('the macOS dry run of a first install and of a re-run is unchanged', async () => {
+posixOnly('POSIX paths')('the macOS dry run of a first install and of a re-run is unchanged', async () => {
   const w = createWorld({ claudeVersion: '2.1.310 (Claude Code)', opencodeVersion: 'opencode v2.1.4', keychainRefs: ['openrouter'] })
   world = w
   const sections: string[] = []

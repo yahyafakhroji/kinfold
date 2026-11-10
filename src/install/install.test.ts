@@ -69,7 +69,7 @@ test('a fresh install wires both hosts, starts the LaunchAgent and saves both ob
   expect(w.fetches.filter((f) => f.startsWith('PUT'))).toEqual(['PUT /observer/settings', 'PUT /observer/settings'])
 })
 
-test('the plist names the absolute bun and main.ts, keeps the daemon alive and logs to <dataDir>/logs', async () => {
+posixOnly('POSIX paths')('the plist names the absolute bun and main.ts, keeps the daemon alive and logs to <dataDir>/logs', async () => {
   const w = both()
   await install(w.env, YES)
   const plist = readFileSync(installPaths(w.env).launchAgentPlist, 'utf8')
@@ -82,7 +82,7 @@ test('the plist names the absolute bun and main.ts, keeps the daemon alive and l
   expect(plist).toContain('<key>PATH</key><string>/opt/fake/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>')
 })
 
-test('the plist PATH holds bun, the dirs of claude and git, then system dirs, whatever else the shell PATH has', () => {
+posixOnly('POSIX paths')('the plist PATH holds bun, the dirs of claude and git, then system dirs, whatever else the shell PATH has', () => {
   const which = (command: string): string | null => ({ claude: '/home/u/.local/bin/claude', git: '/opt/homebrew/bin/git' })[command] ?? null
   const noisy = '/repo/node_modules/.bin:/home/u/.local/bin:/opt/homebrew/bin:/usr/local/games:relative/bin'
   const quiet = '/opt/homebrew/bin:/home/u/.local/bin'

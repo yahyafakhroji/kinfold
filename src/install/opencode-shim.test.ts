@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { InstallMode } from './entry'
 import { inspectShim, isOwnShim, pluginFileContent, shimContent } from './opencode-shim'
+import { posixOnly } from '../../test/platform-guards'
 
 const CHECKOUT: InstallMode = { kind: 'checkout', bunPath: '/opt/bun/bin/bun', projectRoot: '/repo' }
 const PROGRAM: InstallMode = { kind: 'program', binPath: '/home/u/.kinfold/bin/kinfold' }
@@ -14,7 +15,7 @@ const BUNDLE = [
   '',
 ].join('\n')
 
-test('checkout mode writes the shim that sets the data folder and loads the checkout plugin', () => {
+posixOnly('POSIX paths')('checkout mode writes the shim that sets the data folder and loads the checkout plugin', () => {
   const content = pluginFileContent(CHECKOUT, '/home/u/.kinfold', BUNDLE)
   expect(content).toBe(shimContent(PLUGIN_ENTRY, DATA))
   expect(content).toContain(`globalThis.KINFOLD_DATA_DIR = ${JSON.stringify(DATA)};`)

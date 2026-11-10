@@ -14,6 +14,8 @@ export type PosixReason =
   | 'pty via expect'
   /** Deleting or replacing a file another handle still has open. */
   | 'unlink while open'
+  /** An expected path written with '/' where the code builds it with node:path. */
+  | 'POSIX paths'
 /** Behaviour only macOS has. */
 export type MacosReason = 'launchd' | 'Keychain' | 'plist' | 'macOS paths'
 

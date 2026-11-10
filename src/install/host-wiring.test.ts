@@ -13,6 +13,7 @@ import { status } from './status'
 import { entryCommand } from './entry'
 import { BUN, type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
 import { uninstall } from './uninstall'
+import { posixOnly } from '../../test/platform-guards'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -105,7 +106,7 @@ test('an unparseable Cursor hooks.json stops the install and stays untouched', a
   expect(readdirSync(paths.cursorDir)).toEqual(['hooks.json'])
 })
 
-test('host_version is recorded for all four hosts, pinned to the binary or app, and a re-run writes nothing', async () => {
+posixOnly('POSIX paths')('host_version is recorded for all four hosts, pinned to the binary or app, and a re-run writes nothing', async () => {
   const bin = 'bin'
   const w = createWorld({ claudeVersion: '2.1.310 (Claude Code)', opencodeVersion: 'opencode v2.1.4', codexVersion: 'codex-cli 0.120.0', keychainRefs: ['openrouter'] })
   world = w

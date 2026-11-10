@@ -278,7 +278,8 @@ test('a run through the core sends the user text on stdin only and returns text 
   expect(request.cmd.some((arg) => arg.includes(USER_TEXT))).toBe(false)
   expect(request.cmd.at(-1)).toBe('-')
   expect(request.cmd[request.cmd.indexOf('-C') + 1]).toBe(request.cwd)
-  expect(request.cmd).toContain(`model_instructions_file="${request.cwd}/instructions.md"`)
+  // A TOML string: a Windows folder's backslashes arrive escaped.
+  expect(request.cmd).toContain(`model_instructions_file=${tomlBasicString(`${request.cwd}/instructions.md`)}`)
   expect(request.env.CODEX_HOME).toBe('/Users/dev/.codex')
   expect(request.env.OPENAI_API_KEY).toBeUndefined()
 })

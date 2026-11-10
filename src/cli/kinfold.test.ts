@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { USAGE, parseArgs } from '../install/args'
 import { HOOK_TIMEOUT_S } from '../install/claude-hooks'
 import { EXIT_USAGE } from '../install/install'
@@ -128,7 +128,7 @@ test('an injected env with --data-dir rebuilds the program path', async () => {
   world = createWorld()
   const program = (dir: string) => ({ kind: 'program', binPath: join(dir, 'bin', 'kinfold') }) as const
   const env = { ...world.env, dataDir: '/a', mode: program('/a') }
-  expect(envForDataDir(env, '/b')).toMatchObject({ dataDir: '/b', mode: { kind: 'program', binPath: '/b/bin/kinfold' } })
+  expect(envForDataDir(env, '/b')).toMatchObject({ dataDir: '/b', mode: { kind: 'program', binPath: join('/b', 'bin', 'kinfold') } })
   expect(envForDataDir(world.env, '/b').mode).toEqual(world.env.mode)
   // End to end: hooks wired for /b read as wired once status runs with --data-dir /b.
   const paths = installPaths(world.env)
@@ -323,7 +323,8 @@ test('--data-dir elsewhere on an installed machine is refused with the locked-fo
   const after = snapshotTree(world.root)
   // Only the running daemon's own store files may change meanwhile.
   const changed = Object.keys({ ...before, ...after }).filter((path) => JSON.stringify(before[path]) !== JSON.stringify(after[path]))
-  expect(changed.filter((path) => !/^home\/\.kinfold\/memory\.db(-wal|-shm)?$/.test(path))).toEqual([])
+  // Snapshot keys are relative paths with the OS separator; the store's names are matched in slash form.
+  expect(changed.filter((path) => !/^home\/\.kinfold\/memory\.db(-wal|-shm)?$/.test(path.split(sep).join('/')))).toEqual([])
 })
 
 posixOnly('POSIX signals')('the daemon subcommand stays up and stops cleanly on SIGTERM', async () => {

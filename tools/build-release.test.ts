@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type BuildToolchain, type Host, type ReleasePaths, buildRelease, programName, releasePaths } from './build-release'
+import { posixOnly } from '../test/platform-guards'
 
 const REPO = join(import.meta.dir, '..')
 /** The committed stubs, so a restore is compared with what the repository holds. */
@@ -50,7 +51,7 @@ test('a failed compile restores both committed stubs byte for byte', async () =>
   expect(readFileSync(paths.generated).equals(GENERATED_STUB)).toBe(true)
 })
 
-test('a stamped version file makes the build refuse before it writes anything', async () => {
+posixOnly('POSIX paths')('a stamped version file makes the build refuse before it writes anything', async () => {
   const paths = workspace()
   writeFileSync(paths.versionFile, VERSION_LEFTOVER)
   let generated = 0
@@ -71,7 +72,7 @@ test('a stamped version file makes the build refuse before it writes anything', 
   expect(readFileSync(paths.versionFile, 'utf8')).toBe(VERSION_LEFTOVER)
 })
 
-test('a generated asset file makes the build refuse before it writes anything', async () => {
+posixOnly('POSIX paths')('a generated asset file makes the build refuse before it writes anything', async () => {
   const paths = workspace()
   writeFileSync(paths.generated, GENERATED_LEFTOVER)
   let compiled = 0

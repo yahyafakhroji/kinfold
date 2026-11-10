@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { prepareForSpool } from '../capture/prepare'
 import { type NormalizedEvent, validateEvent } from '../contract/event'
 import { AdapterInputError } from './context'
@@ -29,7 +29,7 @@ describe('normalizeOpenCodeToolAfter on recorded events', () => {
   test('read resolves its relative path against the checkout', () => {
     const read = tool('tool.execute.after.read')
     expect(read.name).toBe('read')
-    expect(read.input).toEqual({ path: join(directory, 'package.json') })
+    expect(read.input).toEqual({ path: resolve(directory, 'package.json') })
     expect(read.output).toContain('"name": "shared-agent-memory"')
     expect(read.exitCode).toBeUndefined()
     expect(read.isError).toBeUndefined()
@@ -56,7 +56,9 @@ describe('normalizeOpenCodeToolAfter on recorded events', () => {
 
   test('a resolved path lets project-anchored .memignore rules apply', () => {
     const event = normalizeOpenCodeToolAfter({ ...fixture<Record<string, unknown>>('tool.execute.after.read'), input: { path: 'secrets/prod.yaml' } }, context)
-    const memignore = [new RegExp(`^${directory.replace(/[/.]/g, '\\$&')}/secrets/`)]
+    // Path rules match the slash form of the resolved path, whatever separator the OS uses.
+    const secrets = `${resolve(directory, 'secrets').replace(/\\/g, '/')}/`
+    const memignore = [new RegExp(`^${secrets.replace(/[/.]/g, '\\$&')}`)]
     expect(prepareForSpool(event, { hmacKey: 'test', extraPathPatterns: memignore }).tool?.withheld).toBe('sensitive_path')
   })
 

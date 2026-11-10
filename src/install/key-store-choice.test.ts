@@ -23,6 +23,7 @@ import { type SetupFlags, runWizard } from './setup/wizard'
 import { status } from './status'
 import { type FakeWorld, YES, createWorld, forbiddenSecurity, recordingKeyStore, snapshotTree } from './test-support'
 import { uninstall } from './uninstall'
+import { posixOnly } from '../../test/platform-guards'
 
 type ModuleTable = Readonly<Record<KeyStoreKind, KeyStoreModule>>
 
@@ -161,7 +162,7 @@ async function encryptionScreen(notes: readonly string[] | null): Promise<string
   return term.output().replace(CODE, '<code>')
 }
 
-test("the encryption step prints the chosen store's notes", async () => {
+posixOnly('POSIX paths')("the encryption step prints the chosen store's notes", async () => {
   const screen = await encryptionScreen(['note one', 'note two'])
   const question = screen.indexOf('Encrypt memory.db?')
   expect(question).toBeGreaterThanOrEqual(0)

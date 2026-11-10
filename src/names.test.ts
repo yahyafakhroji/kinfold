@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { join } from 'node:path'
 import { installPaths } from './install/env'
 import * as names from './names'
 
@@ -25,6 +26,6 @@ describe('names', () => {
     expect(paths.legacyLaunchAgentPlist.endsWith('dev.shared-agent-memory.daemon.plist')).toBe(true)
     expect(paths.opencodePlugin.endsWith('kinfold.js')).toBe(true)
     expect(paths.legacyOpencodePlugin.endsWith('shared-agent-memory.js')).toBe(true)
-    expect(paths.legacyDataDir).toBe('/home/u/.shared-agent-memory')
+    expect(paths.legacyDataDir).toBe(join('/home/u', '.shared-agent-memory'))
   })
 })

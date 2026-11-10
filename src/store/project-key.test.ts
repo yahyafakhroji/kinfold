@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { type GitRunner, GitTimeoutError, createProjectKeyResolver, gitRunnerWithTimeout, remoteSlug, resolveProjectKey } from './project-key'
 
 let root: string
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'sam-project-')))
+  // native expands Windows 8.3 short names (RUNNER~1), as git does.
+  root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sam-project-')))
 })
+
+/** The top level as git prints it: forward slashes on every OS. */
+const gitTopLevel = (path: string): string => path.replace(/\\/g, '/')
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
 function git(cwd: string, ...args: string[]): void {
@@ -39,7 +43,7 @@ test.each(['https://example.com/', '/srv/git/acme/widgets.git', 'file:///srv/git
 test('a repo whose remote is a filesystem path keys on its top level', () => {
   git(root, 'init', '-q')
   git(root, 'remote', 'add', 'origin', '/srv/git/acme/widgets.git')
-  expect(resolveProjectKey(root)).toMatchObject({ key: root, kind: 'git-root' })
+  expect(resolveProjectKey(root)).toMatchObject({ key: gitTopLevel(root), kind: 'git-root' })
 })
 
 test('a git repo with a remote keys on the slug, from any subdirectory', () => {
@@ -55,11 +59,11 @@ test('a git repo without a remote keys on its top level', () => {
   git(root, 'init', '-q')
   const nested = join(root, 'pkg')
   mkdirSync(nested)
-  expect(resolveProjectKey(nested)).toMatchObject({ key: root, kind: 'git-root' })
+  expect(resolveProjectKey(nested)).toMatchObject({ key: gitTopLevel(root), kind: 'git-root' })
 })
 
 test('a directory outside git keys on the path itself', () => {
-  expect(resolveProjectKey(root)).toEqual({ key: root, kind: 'path', displayName: root.split('/').pop()! })
+  expect(resolveProjectKey(root)).toEqual({ key: root, kind: 'path', displayName: basename(root) })
 })
 
 test('a cwd that no longer exists still resolves, to its path', () => {

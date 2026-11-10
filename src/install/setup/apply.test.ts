@@ -81,7 +81,7 @@ async function applyWith(w: FakeWorld, encryption: EncryptionAnswer, options: In
   return { code: await applySetup(w.env, state, keeping(state, { encryption }), options), state }
 }
 
-test('unticking an agent unwires it and ticking one wires it', async () => {
+posixOnly('POSIX paths')('unticking an agent unwires it and ticking one wires it', async () => {
   const w = make({ opencodeVersion: OPENCODE, codexVersion: CODEX })
   const paths = installPaths(w.env)
   const opencodeConfig = mcpPaths(w.env).opencodeConfig
@@ -356,7 +356,7 @@ test('a key asked between the questions goes through the same terminal session',
   expect(term.rawStates().at(-1)).toBe(false)
 })
 
-test('a first install on a typed folder plans against that folder as it is', async () => {
+posixOnly('POSIX paths')('a first install on a typed folder plans against that folder as it is', async () => {
   const w = make({ interactive: true })
   const other = join(w.root, 'other-memory')
   openStore(other, { keys: NO_DB_KEYS }).db.close()
