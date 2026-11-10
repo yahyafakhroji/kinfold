@@ -6,19 +6,32 @@
 
 import { existsSync } from 'node:fs'
 import type { CommandResult, InstallEnv } from '../env'
+import { windowsSystemTool } from '../windows-system-path'
 import type { DataDirAccess } from './check'
 
 export const WINDOWS_QUERY_TIMEOUT_MS = 15_000
 
-/** powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand <base64 of UTF-16LE script>. */
-export function powershellArgv(script: string): string[] {
+/** Windows PowerShell 5.1, present on every supported Windows; named by full path, never by bare name. */
+export const POWERSHELL_RELATIVE_PATH = 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+
+/** <SystemRoot>\...\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand <base64 of UTF-16LE script>. */
+export function powershellArgv(env: Pick<InstallEnv, 'envVars'>, script: string): string[] {
   const encoded = Buffer.from(script, 'utf16le').toString('base64')
-  return ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded]
+  return [windowsSystemTool(env, POWERSHELL_RELATIVE_PATH), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded]
 }
 
-/** A single-quoted PowerShell literal: ' doubled. */
+/** PowerShell ends a single-quoted string at any of these, not only at the ASCII one. */
+const PS_SINGLE_QUOTES = /['‘’‚‛]/g
+
+/** A single-quoted PowerShell literal: every single-quote character doubled. Only for fixed text; paths go through psDecodedString. */
 export function psLiteral(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`
+  return `'${value.replace(PS_SINGLE_QUOTES, (quote) => quote + quote)}'`
+}
+
+/** A PowerShell expression that yields `value`, carried as base64 so no character of it reaches the script text. */
+export function psDecodedString(value: string): string {
+  const encoded = Buffer.from(value, 'utf8').toString('base64')
+  return `[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${encoded}'))`
 }
 
 export interface AclEntry { sid: string; name: string; allow: boolean; rights: number; inheritOnly: boolean }
@@ -38,7 +51,8 @@ export function aclScript(path: string): string {
     "$ErrorActionPreference = 'Stop'",
     '$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
     '"user`t$user"',
-    `$acl = Get-Acl -LiteralPath ${psLiteral(path)}`,
+    `$path = ${psDecodedString(path)}`,
+    '$acl = Get-Acl -LiteralPath $path',
     'foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {',
     '  $sid = $rule.IdentityReference.Value',
     '  try { $name = $rule.IdentityReference.Translate([System.Security.Principal.NTAccount]).Value } catch { $name = $sid }',
@@ -87,7 +101,7 @@ function failureReason(result: CommandResult): string | null {
 }
 
 async function aclLines(env: InstallEnv, dataDir: string): Promise<string[]> {
-  const result = await env.run({ argv: powershellArgv(aclScript(dataDir)), timeoutMs: WINDOWS_QUERY_TIMEOUT_MS })
+  const result = await env.run({ argv: powershellArgv(env, aclScript(dataDir)), timeoutMs: WINDOWS_QUERY_TIMEOUT_MS })
   const parsed = failureReason(result) === null ? parseAclOutput(result.stdout) : null
   if (parsed === null) return [`data dir ${dataDir}: access list could not be read (${failureReason(result) ?? 'unexpected output'})`]
   const readers = otherReaders(parsed.user, parsed.entries)

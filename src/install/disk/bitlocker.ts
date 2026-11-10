@@ -23,6 +23,7 @@ export function bitlockerScript(drive: string): string {
 }
 
 export function bitlockerStateOf(result: CommandResult, drive: string): DiskEncryptionState {
+  if (result.timedOut === true) return { kind: 'unknown', detail: 'could not check (timed out)' }
   if (result.exitCode !== 0) return { kind: 'unknown', detail: `could not check (powershell exit ${result.exitCode})` }
   const value = result.stdout.replace(/^\uFEFF/, '').trim()
   if (!/^\d+$/.test(value)) return { kind: 'unknown', detail: 'BitLocker state unknown' }
@@ -37,7 +38,7 @@ export const bitlockerCheck: DiskEncryptionCheck = {
   async check(env) {
     const drive = dataDirDrive(env.dataDir)
     if (drive === null) return { kind: 'cannot-check' }
-    const result = await env.run({ argv: powershellArgv(bitlockerScript(drive)), timeoutMs: WINDOWS_QUERY_TIMEOUT_MS })
+    const result = await env.run({ argv: powershellArgv(env, bitlockerScript(drive)), timeoutMs: WINDOWS_QUERY_TIMEOUT_MS })
     return bitlockerStateOf(result, drive)
   },
 }

@@ -9,6 +9,7 @@ import { DEFAULT_PORT } from '../../daemon/daemon'
 import { checkHealth, readDaemonInfo } from '../daemon-client'
 import type { InstallEnv } from '../env'
 import { HEALTH_WAIT_MS } from '../plan'
+import { windowsJoin, windowsSystemTool } from '../windows-system-path'
 import type { ServiceControl, ServiceStep } from './control'
 
 export const TASK_NAME = 'KinfoldDaemon'
@@ -60,11 +61,6 @@ const processDeps: TaskProcessDeps = {
   },
 }
 
-/** Joined with backslashes whatever OS runs this, since the path is for Windows. */
-function windowsJoin(base: string, ...parts: string[]): string {
-  return [base.replace(/[\\/]+$/, ''), ...parts].join('\\')
-}
-
 export function taskConfigPath(env: Pick<InstallEnv, 'homeDir' | 'envVars'>): string {
   const localAppData = env.envVars?.LOCALAPPDATA
   const base = localAppData !== undefined && localAppData !== '' ? localAppData : windowsJoin(env.homeDir, 'AppData', 'Local')
@@ -72,8 +68,7 @@ export function taskConfigPath(env: Pick<InstallEnv, 'homeDir' | 'envVars'>): st
 }
 
 function schtasksPath(env: Pick<InstallEnv, 'envVars'>): string {
-  const root = env.envVars?.SystemRoot
-  return windowsJoin(root !== undefined && root !== '' ? root : 'C:\\Windows', 'System32', 'schtasks.exe')
+  return windowsSystemTool(env, 'System32\\schtasks.exe')
 }
 
 /** CommandLineToArgvW quoting: quotes when needed, doubles backslashes before a quote and at the end. */
