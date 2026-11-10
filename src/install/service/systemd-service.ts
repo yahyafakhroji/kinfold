@@ -177,6 +177,9 @@ export function unitContent(env: Pick<InstallEnv, 'mode' | 'pathEnv' | 'homeDir'
     '# Written by kinfold install; kinfold uninstall removes it.',
     '[Unit]',
     'Description=Kinfold memory daemon',
+    // No start limit: a daemon that exits at login, say while the keyring is
+    // still locked, would otherwise stay failed until the next login.
+    'StartLimitIntervalSec=0',
     '',
     '[Service]',
     'Type=simple',
@@ -190,7 +193,8 @@ export function unitContent(env: Pick<InstallEnv, 'mode' | 'pathEnv' | 'homeDir'
     `StandardError=append:${logFile}`,
     'UMask=0077',
     'Restart=always',
-    'RestartSec=2',
+    // Long enough that a daemon failing on every start does not flood its log.
+    'RestartSec=10',
     '',
     '[Install]',
     'WantedBy=default.target',

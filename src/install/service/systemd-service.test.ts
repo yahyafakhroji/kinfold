@@ -55,6 +55,15 @@ test('the unit runs the installed program with the data folder', () => {
   expect(unitEnvironment(unit).get('HOME')).toBe(env.homeDir)
 })
 
+test('a daemon that fails at start keeps being retried rather than left failed', () => {
+  const lines = unitContent(programEnv('/srv/kinfold'), DEFAULT_PORT).split('\n')
+  // systemd's default start limit would leave the unit failed for the session after five quick exits.
+  expect(lines.indexOf('StartLimitIntervalSec=0')).toBeGreaterThan(lines.indexOf('[Unit]'))
+  expect(lines.indexOf('StartLimitIntervalSec=0')).toBeLessThan(lines.indexOf('[Service]'))
+  expect(lines).toContain('Restart=always')
+  expect(lines).toContain('RestartSec=10')
+})
+
 posixOnly('POSIX paths')('awkward paths survive the unit file', () => {
   const dataDir = '/tmp/a b/"q"/50%/$x\\y'
   const env = programEnv(dataDir)
