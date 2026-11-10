@@ -20,7 +20,8 @@ function linuxEnv(overrides: Partial<InstallEnv> = {}): InstallEnv {
 }
 
 function programEnv(dataDir: string, overrides: Partial<InstallEnv> = {}): InstallEnv {
-  return linuxEnv({ dataDir, mode: { kind: 'program', binPath: join(dataDir, 'bin', 'kinfold') }, ...overrides })
+  // A literal POSIX path, so the expected ExecStart holds no Windows separator to escape.
+  return linuxEnv({ dataDir, mode: { kind: 'program', binPath: `${dataDir}/bin/kinfold` }, ...overrides })
 }
 
 function writeUnit(service: SystemdUserService, content: string): void {
@@ -36,8 +37,7 @@ test('the unit runs the installed program with the data folder', () => {
   const dataDir = '/srv/kinfold data'
   const env = programEnv(dataDir)
   const unit = unitContent(env, DEFAULT_PORT)
-  const binPath = join(dataDir, 'bin', 'kinfold')
-  expect(lineStarting(unit, 'ExecStart=')).toBe(`ExecStart="${binPath}" "--data-dir" "${dataDir}" "daemon"`)
+  expect(lineStarting(unit, 'ExecStart=')).toBe(`ExecStart="${dataDir}/bin/kinfold" "--data-dir" "${dataDir}" "daemon"`)
   expect(unit).not.toContain(envName('PORT'))
   expect(unit.split('\n')).toContain('UMask=0077')
   expect(unit.split('\n')).toContain('WantedBy=default.target')
