@@ -196,3 +196,12 @@ test.skipIf(process.platform === 'win32')("the daemon's reader opens an encrypte
   }
   expect(reads).toBe(1)
 })
+
+test('the server refuses a body over the cap before reading it', async () => {
+  const post = (pad: string): Promise<Response> => fetch(url('/context'), authed({ method: 'POST', body: JSON.stringify({ pad }) }))
+  // Three-byte characters: 6,000 of them are under the cap in characters and over it in bytes.
+  expect(new TextEncoder().encode('€'.repeat(6_000)).length).toBeGreaterThan(server.MAX_BODY_BYTES)
+  expect((await post('€'.repeat(6_000))).status).toBe(413)
+  expect((await post('x'.repeat(server.MAX_BODY_BYTES))).status).toBe(413)
+  expect((await post('x'.repeat(6_000))).status).toBe(400)
+})

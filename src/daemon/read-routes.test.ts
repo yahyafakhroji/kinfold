@@ -143,6 +143,15 @@ test('a bad read body is refused', async () => {
   expect((await request('/read/ingest', { body: { args: {}, cwd: CWD } })).status).toBe(404)
 })
 
+test('the body cap counts bytes, not characters', async () => {
+  // 6,000 three-byte characters: under the cap counted in characters, over it in bytes.
+  const wide = await request('/read/search', { body: { args: SEARCH, cwd: CWD, pad: '€'.repeat(6_000) } })
+  expect(wide.status).toBe(400)
+  expect(await wide.json()).toEqual({ error: 'body too large' })
+  const narrow = await request('/read/search', { body: { args: SEARCH, cwd: CWD, pad: 'x'.repeat(6_000) } })
+  expect(await narrow.json()).not.toEqual({ error: 'body too large' })
+})
+
 test('parseReadRequest takes POSIX and Windows absolute paths and refuses NUL', () => {
   expect(parseReadRequest({ args: {}, cwd: '/home/me/proj' })).toEqual({ ok: true, value: { args: {}, cwd: '/home/me/proj' } })
   expect(parseReadRequest({ args: {}, cwd: 'C:\\Users\\me\\proj' }).ok).toBe(true)
