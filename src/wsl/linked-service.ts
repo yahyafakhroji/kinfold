@@ -16,11 +16,11 @@ import type { InstallEnv } from '../install/env'
 import { readTextOrNull } from '../install/files'
 import type { ServiceControl, ServiceStep } from '../install/service/control'
 import { taskDataDir, taskPort } from '../install/service/scheduled-task-service'
-import { type WslLink, readWslLink, wslHomeDir } from './link'
+import { PREVIEW, type WslLink, readWslLink, wslHomeDir } from './link'
 import { isOnWindowsDrive } from './mcp-backend'
 import { windowsToolPath } from './windows-install'
 
-export const LINKED_SERVICE_REFUSAL = 'the daemon belongs to the Windows install; run this from Windows'
+export const LINKED_SERVICE_REFUSAL = `${PREVIEW}: the daemon belongs to the Windows install; run this from Windows`
 export const LINKED_SERVICE_LABEL = 'Windows scheduled task (from WSL)'
 
 export class WslLinkedService implements ServiceControl {

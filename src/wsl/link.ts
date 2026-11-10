@@ -7,6 +7,9 @@ import { join } from 'node:path'
 import { DATA_FILE_MODE } from '../store/data-dir'
 import type { Action } from '../install/plan'
 
+/** Starts every line Kinfold prints about WSL. */
+export const PREVIEW = 'WSL (preview)'
+
 /** ~/.kinfold-wsl: bin/kinfold, install.json, wsl-link.json. */
 export const WSL_HOME_DIR = '.kinfold-wsl'
 export const WSL_LINK_FILE = 'wsl-link.json'

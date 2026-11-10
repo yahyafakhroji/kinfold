@@ -24,7 +24,7 @@ import { hostStatusLines } from '../install/status'
 import { hostUnwireActions } from '../install/uninstall'
 import type { UninstallOptions } from '../install/uninstall'
 import { DATA_DIR_MODE } from '../store/data-dir'
-import { type WslLink, readWslLink, wslHomeDir, wslLinkAction } from './link'
+import { PREVIEW, type WslLink, readWslLink, wslHomeDir, wslLinkAction } from './link'
 import { type WindowsDaemonHealth, findWindowsInstall, networkingMode, windowsDaemonHealth } from './windows-install'
 
 export interface WslStatus {
@@ -33,7 +33,7 @@ export interface WslStatus {
   replaces: boolean
 }
 
-export const PREVIEW = 'WSL (preview)'
+export { PREVIEW }
 export const NOT_LINKED_LINE = `${PREVIEW}: this distro keeps its own memory; it is not linked to a Windows install`
 export const MIRRORED_ADVICE = 'WSL reaches it only with mirrored networking: add networkingMode=mirrored under [wsl2] in %UserProfile%\\.wslconfig, run wsl --shutdown, and install again'
 
@@ -140,9 +140,9 @@ function healthLine(health: WindowsDaemonHealth): string {
   return health.up ? `daemon /health from WSL: up on 127.0.0.1:${health.port} (${health.version})` : `daemon /health from WSL: not answering; ${MIRRORED_ADVICE}`
 }
 
-/** Lines printed before the status, or null for none. */
+/** Lines printed before the status, or null for none: outside WSL, and for a separate Linux memory named with --data-dir. */
 export async function wslStatus(env: InstallEnv): Promise<WslStatus | null> {
-  if (!platformOf(env).wsl) return null
+  if (!platformOf(env).wsl || separateMemoryAsked(env)) return null
   const link = readWslLink(wslHomeDir(env.homeDir))
   if (link === null) return { lines: [NOT_LINKED_LINE], replaces: false }
   const linked = linkedEnv(env, link.dataDir)
@@ -163,10 +163,12 @@ export async function wslStatus(env: InstallEnv): Promise<WslStatus | null> {
 /**
  * An exit code ends the uninstall there; null goes on with the plain uninstall.
  * A linked distro removes only its own wiring and ~/.kinfold-wsl: the Windows
- * folder holds the shared memory and belongs to the Windows install.
+ * folder holds the shared memory and belongs to the Windows install. A
+ * separate Linux memory named with --data-dir is the plain uninstall's, and
+ * the link stays.
  */
 export async function wslUninstall(env: InstallEnv, options: UninstallOptions): Promise<number | null> {
-  if (!platformOf(env).wsl) return null
+  if (!platformOf(env).wsl || separateMemoryAsked(env)) return null
   const wslHome = wslHomeDir(env.homeDir)
   const link = readWslLink(wslHome)
   if (link === null) return null

@@ -227,6 +227,28 @@ test('WSL uninstall never touches the Windows folder', async () => {
   expect(await wslUninstall(s.env, { dryRun: false, removeCredentials: false })).toBeNull()
 })
 
+test('status and uninstall with --data-dir act on that separate Linux memory, not on the link', async () => {
+  const s = await linked()
+  const separate: InstallEnv = { ...s.env, dataDir: join(s.world.root, 'linux-memory') }
+  const before = snapshotTree(s.driveC)
+  const settings = readFileSync(claudeSettings(s), 'utf8')
+  const commands = s.world.commands.length
+  s.world.out.length = 0
+
+  expect(await wslStatus(separate)).toBeNull()
+  expect(await wslUninstall(separate, { dryRun: false, removeCredentials: false })).toBeNull()
+  // Neither asked the Windows side anything, and the link and its wiring stay.
+  expect(s.world.commands.length).toBe(commands)
+  expect(s.world.out).toEqual([])
+  expect(readWslLink(wslHomeDir(s.world.home))?.windowsDataDir).toBe(WIN_DATA_DIR)
+  expect(readFileSync(claudeSettings(s), 'utf8')).toBe(settings)
+  expect(snapshotTree(s.driveC)).toEqual(before)
+
+  // Without the flag both still speak for the link.
+  expect((await wslStatus(s.env))?.replaces).toBe(true)
+  expect(await wslUninstall(s.env, { dryRun: true, removeCredentials: false })).toBe(EXIT_OK)
+})
+
 test('the service of a linked distro is the Windows task, which WSL never drives', async () => {
   const s = await linked()
   const service = serviceFor({ ...s.env, dataDir: s.dataDir })
@@ -267,6 +289,7 @@ test('encrypt or decrypt of a Windows store whose daemon WSL cannot reach writes
   const bytes = readFileSync(path)
   const store = recordingKeyStore()
   const refusal = `the ${LINKED_SERVICE_LABEL} did not stop (${LINKED_SERVICE_REFUSAL}); it is still running; nothing was changed`
+  expect(refusal).toBe('the Windows scheduled task (from WSL) did not stop (WSL (preview): the daemon belongs to the Windows install; run this from Windows); it is still running; nothing was changed')
   const env: InstallEnv = { ...keyCommandEnv(s, lastTwoGroups), keyStore: store }
   expect(await runKeyCommand(env, 'encrypt')).toBe(EXIT_FAILED)
   expect(s.world.out.at(-1)).toBe(`kinfold encrypt: ${refusal}`)
