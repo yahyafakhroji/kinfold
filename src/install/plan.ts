@@ -4,9 +4,12 @@
 // carry paths, counts, hosts and argv only; a stored secret prints as
 // <hidden>, and a file's content never prints at all.
 
-import { chmodSync, closeSync, mkdirSync, openSync, rmSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { chmodSync, closeSync, fsyncSync, linkSync, mkdirSync, openSync, rmSync, writeSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
+import { fsyncDirectory } from '../fs/atomic'
 import { HMAC_LEGACY_REF } from '../secrets/hmac-keys'
-import { type KeyStoreRecord, keyStoreRecordContent } from '../secrets/key-store-record'
+import { type KeyStoreRecord, keyStoreRecordContent, readKeyStoreRecord, recordUnreadableMessage } from '../secrets/key-store-record'
 import { KEY_STORE_MODULES } from '../secrets/stores/select'
 import type { EmbeddedAssets } from '../runtime/embedded'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
@@ -268,14 +271,59 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'install-program': return installProgram(env, action)
     case 'create-db-key': return createDbKey(env, action.path, action.key)
     case 'create-plain-store': return createPlainStore(env, action.path)
-    // The folder is flushed too: a record lost in a crash would leave the choice to the missing-record rule.
-    case 'record-key-store': return writeFileAtomic(action.path, keyStoreRecordContent(action.record), 0o600, { syncDir: true, fsyncDir: env.fsyncDir, platform: env.platform })
+    case 'record-key-store': return createKeyStoreRecord(env, action.path, action.record)
     case 'stop-legacy-agent': return stopLegacyAgent(env)
     case 'migration-daemon-down': return checkDaemonDown(env, action.port, action.waitMs)
     case 'copy-keychain-entry': return copyKeychainEntry(env, action.ref)
     case 'move-data-dir': return moveDataDir(env, action.from, action.to)
     case 'remove-legacy-keychain-entry': return removeLegacyEntry(env, action.ref)
   }
+}
+
+function sameStore(a: KeyStoreRecord, b: KeyStoreRecord): boolean {
+  return a.store === b.store && a.location === b.location
+}
+
+/**
+ * Create-only: two installs started from different envs can choose different
+ * stores or key folders, and each would then make its own key. The record goes
+ * in through a hard link, which fails with EEXIST when another install got
+ * there first, so the loser stops here, before any secret step, and a re-run
+ * follows the winner's record.
+ */
+function createKeyStoreRecord(env: InstallEnv, path: string, record: KeyStoreRecord): StepNote | undefined {
+  const temp = join(dirname(path), `.${basename(path)}.kinfold-new-${process.pid}-${randomBytes(6).toString('hex')}`)
+  let linked = true
+  try {
+    const fd = openSync(temp, 'wx', 0o600)
+    try {
+      writeSync(fd, keyStoreRecordContent(record))
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+    chmodSync(temp, 0o600)
+    try {
+      linkSync(temp, path)
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      linked = false
+    }
+  } finally {
+    rmSync(temp, { force: true })
+  }
+  if (linked) {
+    // The folder is flushed too: a record lost in a crash would leave the choice to the missing-record rule.
+    fsyncDirectory(dirname(path), { fsyncDir: env.fsyncDir, platform: env.platform })
+    return undefined
+  }
+  const read = readKeyStoreRecord(dirname(path))
+  if (read.state === 'unreadable') throw new Error(recordUnreadableMessage(path))
+  if (read.state === 'missing') throw new Error(`${path} appeared and went away while this install wrote it; nothing else was changed; run kinfold install again`)
+  if (!sameStore(read.record, record)) {
+    throw new Error(`another install already chose ${KEY_STORE_MODULES[read.record.store].label}; run kinfold install again. Nothing else was changed and no key was made`)
+  }
+  return { kept: `another install recorded the ${KEY_STORE_MODULES[read.record.store].label} first; kept its record` }
 }
 
 /**

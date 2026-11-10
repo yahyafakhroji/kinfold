@@ -145,6 +145,44 @@ test('a chosen store records its location', async () => {
   expect(keychain?.kind === 'record-key-store' ? 'location' in keychain.record : true).toBe(false)
 })
 
+test('an install that loses the record race to a different store stops before any secret', async () => {
+  const w = make({ platform: 'linux', keychainRefs: [] })
+  const libsecret = recordingKeyStore({ kind: 'libsecret', label: 'libsecret' })
+  // The other install, with a different env, records the key file while this one is still choosing.
+  const theirs = { store: 'key-file', chosenAt: 1_792_900_000_000, location: '/elsewhere/.config/kinfold' }
+  const modules: ModuleTable = {
+    ...KEY_STORE_MODULES,
+    libsecret: {
+      kind: 'libsecret',
+      label: 'libsecret',
+      probe: () => (writeRecord(w, `${JSON.stringify(theirs)}\n`), { usable: true }),
+      open: () => libsecret,
+    },
+  }
+  expect(await install(w.env, { ...YES, keyStoreModules: modules })).toBe(EXIT_FAILED)
+  expect(w.out.some((line) => line.includes('another install already chose key file; run kinfold install again'))).toBe(true)
+  expect(libsecret.values.size).toBe(0)
+  expect(JSON.parse(readFileSync(recordPath(w), 'utf8'))).toEqual(theirs)
+})
+
+test('an install that loses the record race to the same store keeps the record and goes on', async () => {
+  const w = make({ platform: 'linux', keychainRefs: [] })
+  const libsecret = recordingKeyStore({ kind: 'libsecret', label: 'libsecret' })
+  const theirs = { store: 'libsecret', chosenAt: 1_792_900_000_000 }
+  const modules: ModuleTable = {
+    ...KEY_STORE_MODULES,
+    libsecret: {
+      kind: 'libsecret',
+      label: 'libsecret',
+      probe: () => (writeRecord(w, `${JSON.stringify(theirs)}\n`), { usable: true }),
+      open: () => libsecret,
+    },
+  }
+  expect(await install(w.env, { ...YES, keyStoreModules: modules })).toBe(EXIT_OK)
+  expect(JSON.parse(readFileSync(recordPath(w), 'utf8'))).toEqual(theirs)
+  expect(libsecret.values.has(DB_KEY_REF)).toBe(true)
+})
+
 const ENTER = '\r'
 const CTRL_C = '\u0003'
 const CODE = /(?:[0-9A-Z]{5}-){10}[0-9A-Z]{5}/g
