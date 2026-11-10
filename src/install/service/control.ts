@@ -2,6 +2,7 @@
 // Everything platform-specific (launchctl, lsof, the plist) lives behind this
 // interface, so the install, encrypt and update flows never name an OS tool.
 
+import { linkedServiceFor } from '../../wsl/linked-service'
 import { type InstallEnv, platformOf } from '../env'
 import type { TextEncoding } from '../files'
 import { LaunchAgentService } from './launch-agent-service'
@@ -39,11 +40,12 @@ export interface ServiceControl {
   unavailableReason(): string | null
 }
 
-/** The service for this platform. */
+/** The service for this platform; a WSL distro linked to a Windows install sees that install's task. */
 export function serviceFor(env: InstallEnv): ServiceControl {
-  switch (platformOf(env).os) {
+  const platform = platformOf(env)
+  switch (platform.os) {
     case 'macos': return new LaunchAgentService(env)
-    case 'linux': return new SystemdUserService(env)
+    case 'linux': return (platform.wsl ? linkedServiceFor(env) : null) ?? new SystemdUserService(env)
     case 'windows': return new ScheduledTaskService(env)
   }
 }
