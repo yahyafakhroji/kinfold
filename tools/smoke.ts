@@ -394,7 +394,7 @@ function daemonLogTail(world: SmokeWorld): string {
 }
 
 /** The interval that converts memory.db needs a terminal; expect supplies one and answers its prompts. */
-async function runPty(world: SmokeWorld, operation: 'encrypt' | 'decrypt'): Promise<SmokeResult> {
+export async function runPty(world: SmokeWorld, operation: 'encrypt' | 'decrypt'): Promise<SmokeResult> {
   const scriptPath = join(world.root, `expect-${operation}.exp`)
   writeFileSync(scriptPath, operation === 'encrypt' ? ENCRYPT_EXPECT : DECRYPT_EXPECT, { mode: 0o600 })
   if (!existsSync('/usr/bin/expect')) throw new SmokeError('setup', '/usr/bin/expect is missing; the key commands need a terminal')

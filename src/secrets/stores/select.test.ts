@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import type { PlatformInfo } from '../../platform/platform'
 import { NO_DB_KEYS, dbKeyStoreOf } from '../../sqlite/keys'
 import { type KeyStoreDeps, type KeyStoreKind, type KeyStoreModule, credentialProviderOf } from '../key-store'
-import { KEY_STORE_MODULES, candidateKeyStores, chooseKeyStore, openKeyStore } from './select'
+import { KEY_STORE_MODULES, candidateKeyStores, chooseKeyStore, openKeyStore, probeKeyStores } from './select'
 
 const MAC: PlatformInfo = { os: 'macos', wsl: false, node: 'darwin' }
 const LINUX: PlatformInfo = { os: 'linux', wsl: false, node: 'linux' }
@@ -41,6 +41,16 @@ test('the first usable candidate is chosen', () => {
   expect(chooseKeyStore(depsOn(LINUX), withUsable({ libsecret: true, 'key-file': true }))).toBe('libsecret')
   expect(chooseKeyStore(depsOn(LINUX), withUsable({}))).toBeNull()
   expect(chooseKeyStore(depsOn(MAC), withUsable({ keychain: true, libsecret: true }))).toBe('keychain')
+})
+
+test('with no usable candidate every refusal is kept, in order, with its label', () => {
+  expect(probeKeyStores(depsOn(LINUX), withUsable({}))).toEqual({
+    refused: [
+      { label: KEY_STORE_MODULES.libsecret.label, reason: 'test says no' },
+      { label: KEY_STORE_MODULES['key-file'].label, reason: 'test says no' },
+    ],
+  })
+  expect(probeKeyStores(depsOn(LINUX), withUsable({ 'key-file': true }))).toEqual({ store: 'key-file' })
 })
 
 test('a store from another platform is refused', () => {

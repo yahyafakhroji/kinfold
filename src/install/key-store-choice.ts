@@ -15,7 +15,7 @@ import {
   recordUnreadableMessage,
   resolveKeyStore,
 } from '../secrets/key-store-record'
-import { KEY_STORE_MODULES, candidateKeyStores, chooseKeyStore, openKeyStore } from '../secrets/stores/select'
+import { KEY_STORE_MODULES, type KeyStoreRefusal, candidateKeyStores, openKeyStore, probeKeyStores } from '../secrets/stores/select'
 import { type InstallEnv, errorMessage, platformOf } from './env'
 import type { Action } from './plan'
 
@@ -39,10 +39,16 @@ export function keyStoreOf(env: InstallEnv): KeyStore | null {
 export type InstallKeyStore =
   | { kind: 'recorded'; store: KeyStore }
   | { kind: 'chosen'; store: KeyStore }
-  | { kind: 'none'; os: OsName; store: null }
+  /** refused: why each candidate was turned down; empty when none was probed. */
+  | { kind: 'none'; os: OsName; store: null; refused: readonly KeyStoreRefusal[] }
 
-function noStore(env: InstallEnv): InstallKeyStore {
-  return { kind: 'none', os: platformOf(env).os, store: null }
+function noStore(env: InstallEnv, refused: readonly KeyStoreRefusal[] = []): InstallKeyStore {
+  return { kind: 'none', os: platformOf(env).os, store: null, refused }
+}
+
+/** One "<label>: <reason>" line per refused candidate; reasons are the probes' fixed texts, paths and errno at most. */
+export function refusalLines(choice: InstallKeyStore): string[] {
+  return choice.kind === 'none' ? choice.refused.map(({ label, reason }) => `${label}: ${reason}`) : []
 }
 
 /** The location a module asks to record, or undefined when it records none. */
@@ -67,8 +73,9 @@ export function chooseInstallKeyStore(env: InstallEnv, modules: ModuleTable = KE
     if (!candidateKeyStores(deps.platform).includes(record.store)) throw new Error(recordMismatchMessage(path, record.store, deps.platform))
     return { kind: 'recorded', store: openKeyStore(record.store, { ...deps, location: record.location }, modules) }
   }
-  const kind = chooseKeyStore(deps, modules)
-  if (kind === null) return noStore(env)
+  const probed = probeKeyStores(deps, modules)
+  if (!('store' in probed)) return noStore(env, probed.refused)
+  const kind = probed.store
   return { kind: 'chosen', store: openKeyStore(kind, { ...deps, location: locationOf(modules[kind], deps) }, modules) }
 }
 

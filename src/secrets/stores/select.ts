@@ -33,9 +33,25 @@ export function keyStoreMismatch(kind: KeyStoreKind, platform: PlatformInfo): st
   return `the ${KEY_STORE_MODULES[kind].label} is not a key store on ${platform.os}`
 }
 
+export interface KeyStoreRefusal { label: string; reason: string }
+
+export type KeyStoreProbeResult = { store: KeyStoreKind } | { refused: KeyStoreRefusal[] }
+
+/** Install only: the first usable candidate, else why each was refused, in candidate order. Probing stops at the first usable one. */
+export function probeKeyStores(deps: KeyStoreDeps, modules: ModuleTable = KEY_STORE_MODULES): KeyStoreProbeResult {
+  const refused: KeyStoreRefusal[] = []
+  for (const kind of candidateKeyStores(deps.platform)) {
+    const probe = modules[kind].probe(deps)
+    if (probe.usable) return { store: kind }
+    refused.push({ label: modules[kind].label, reason: probe.reason })
+  }
+  return { refused }
+}
+
 /** Install only: the first usable candidate, else null. */
 export function chooseKeyStore(deps: KeyStoreDeps, modules: ModuleTable = KEY_STORE_MODULES): KeyStoreKind | null {
-  return candidateKeyStores(deps.platform).find((kind) => modules[kind].probe(deps).usable) ?? null
+  const result = probeKeyStores(deps, modules)
+  return 'store' in result ? result.store : null
 }
 
 /** Throws keyStoreMismatch when `kind` is not a candidate here. */
