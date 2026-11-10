@@ -3,5 +3,6 @@
 // it runs in without loading an installer module.
 
 export function isCompiledProgram(main: string = Bun.main): boolean {
-  return main.startsWith('/$bunfs/') || main.startsWith('B:\\~BUN\\')
+  // Windows spells the virtual drive with either separator; Bun 1.4 reports B:/~BUN/.
+  return main.startsWith('/$bunfs/') || main.startsWith('B:\\~BUN\\') || main.startsWith('B:/~BUN/')
 }
