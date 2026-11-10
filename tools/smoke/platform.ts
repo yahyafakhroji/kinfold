@@ -51,6 +51,8 @@ export interface SmokePlatform {
   childEnv?(home: string): Record<string, string>
   /** Replaces the driver's sh observer shim when present. */
   writeObserverShim?(world: SmokeWorld, realClaude: string | null): Promise<void>
+  /** Lines status must print after install, beyond the checks every OS shares, as text or a pattern; omit for none. */
+  statusLines?(world: SmokeWorld): (string | RegExp)[]
 }
 
 const PLATFORM_NAME = /^[a-z0-9]+$/

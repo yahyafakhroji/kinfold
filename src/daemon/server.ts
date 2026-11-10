@@ -31,6 +31,8 @@ export interface ServerDeps {
   token: string
   version: string
   schemaVersion: number
+  /** /health reports it so a service can tell its daemon from a process that reused a stale daemon.json pid. Default: this process's. */
+  pid?: number
   /** The HMAC key mode, live: /health reports it so `kinfold install` knows the daemon reads the master. Never key bytes. */
   hmacMode?: () => HmacMode
   /** Whether sqlite-vec loaded; /health reports it so `kinfold status` can say why search is keyword-only. */
@@ -96,10 +98,11 @@ export function hasToken(header: string | null, token: string): boolean {
 export const MAX_BODY_BYTES = 16_384
 
 async function readJson(request: Request): Promise<Parsed<unknown>> {
-  const text = await request.text()
-  if (text.length > MAX_BODY_BYTES) return { ok: false, error: 'body too large' }
+  // Counted in bytes before decoding: a body of multi-byte characters is several times its length in characters.
+  const bytes = await request.arrayBuffer()
+  if (bytes.byteLength > MAX_BODY_BYTES) return { ok: false, error: 'body too large' }
   try {
-    return { ok: true, value: JSON.parse(text) }
+    return { ok: true, value: JSON.parse(new TextDecoder().decode(bytes)) }
   } catch {
     return { ok: false, error: 'body is not JSON' }
   }
@@ -213,7 +216,7 @@ async function answer(request: Request, port: number, deps: ServerDeps): Promise
   if (url.pathname === '/health' && request.method === 'GET') {
     const hmac = deps.hmacMode !== undefined ? { hmacMode: deps.hmacMode() } : {}
     const vectors = deps.vectorSearch !== undefined ? { vectorSearch: deps.vectorSearch } : {}
-    return json(200, { ok: true, version: deps.version, schemaVersion: deps.schemaVersion, ...hmac, ...vectors })
+    return json(200, { ok: true, version: deps.version, schemaVersion: deps.schemaVersion, pid: deps.pid ?? process.pid, ...hmac, ...vectors })
   }
   const access = accessFor(url.pathname)
   const checked = checkAccess(request, access, { port, hasToken: (header) => hasToken(header, deps.token), auth: deps.auth })
@@ -236,6 +239,8 @@ export function startServer(deps: ServerDeps): RunningServer {
   const server = Bun.serve({
     hostname: LOOPBACK_HOST,
     port: deps.port,
+    // Bun's own cap is 128 MB, which any local process could make the daemon hold; past this one it answers 413 unread.
+    maxRequestBodySize: MAX_BODY_BYTES,
     fetch: (request, self) => handleRequest(request, self.port ?? deps.port, deps),
     error: (error) => {
       // The name only: a SQLite message can echo query fragments, and prompt terms are query fragments.

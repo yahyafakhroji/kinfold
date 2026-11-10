@@ -2,7 +2,9 @@
 // Everything platform-specific (launchctl, lsof, the plist) lives behind this
 // interface, so the install, encrypt and update flows never name an OS tool.
 
+import { linkedServiceFor } from '../../wsl/linked-service'
 import { type InstallEnv, platformOf } from '../env'
+import type { TextEncoding } from '../files'
 import { LaunchAgentService } from './launch-agent-service'
 import { ScheduledTaskService } from './scheduled-task-service'
 import { SystemdUserService } from './systemd-service'
@@ -16,6 +18,12 @@ export interface ServiceControl {
   isConfigured(): boolean
   /** The OS has the service loaded. */
   isRunning(): Promise<boolean>
+  /**
+   * The OS still knows the service though nothing of it runs, as a scheduled
+   * task does between runs; uninstall removes it then. Absent where a
+   * registered service is always a loaded one.
+   */
+  isRegistered?(): Promise<boolean>
   /** Loads and starts it; retries the busy exit as the install plan does. */
   start(): Promise<void>
   /** Stops and unloads it; resolves once the OS no longer runs it. */
@@ -30,17 +38,20 @@ export interface ServiceControl {
   configPath(): string | null
   /** That file's content for this port; null where configPath is null. */
   configContent(port: number): string | null
+  /** How install writes that file; absent means UTF-8. */
+  readonly configEncoding?: TextEncoding
   /** The dry-run line for a step: the launchctl argv on macOS. */
   describe(step: ServiceStep): string
   /** Why install cannot set the service up here, for the manual-start line; null when it can. */
   unavailableReason(): string | null
 }
 
-/** The service for this platform. */
+/** The service for this platform; a WSL distro linked to a Windows install sees that install's task. */
 export function serviceFor(env: InstallEnv): ServiceControl {
-  switch (platformOf(env).os) {
+  const platform = platformOf(env)
+  switch (platform.os) {
     case 'macos': return new LaunchAgentService(env)
-    case 'linux': return new SystemdUserService(env)
+    case 'linux': return (platform.wsl ? linkedServiceFor(env) : null) ?? new SystemdUserService(env)
     case 'windows': return new ScheduledTaskService(env)
   }
 }

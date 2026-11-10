@@ -49,7 +49,20 @@ function spoolFixture(output: string): string {
 test('GET /health answers without a token', async () => {
   const response = await fetch(url('/health'))
   expect(response.status).toBe(200)
-  expect(await response.json()).toEqual({ ok: true, version: VERSION, schemaVersion: LATEST_SCHEMA_VERSION, hmacMode: 'legacy', vectorSearch: 'off' })
+  expect(await response.json()).toEqual({ ok: true, version: VERSION, schemaVersion: LATEST_SCHEMA_VERSION, pid: process.pid, hmacMode: 'legacy', vectorSearch: 'off' })
+})
+
+test('GET /health reports the pid the server was given', async () => {
+  const real = server.startServer
+  const serve = spyOn(server, 'startServer').mockImplementation((deps) => real({ ...deps, pid: 4242 }))
+  const other = startDaemon({ dataDir: join(root, 'other'), port: 0, fallbackDrainMs: 60_000, log: () => {} })
+  try {
+    const body = (await (await fetch(`http://127.0.0.1:${other.port}/health`)).json()) as { pid: unknown }
+    expect(body.pid).toBe(4242)
+  } finally {
+    serve.mockRestore()
+    await other.stop()
+  }
 })
 
 test('every other route is 401 without the token or with a wrong one', async () => {
@@ -182,4 +195,13 @@ test.skipIf(process.platform === 'win32')("the daemon's reader opens an encrypte
     await other.stop()
   }
   expect(reads).toBe(1)
+})
+
+test('the server refuses a body over the cap before reading it', async () => {
+  const post = (pad: string): Promise<Response> => fetch(url('/context'), authed({ method: 'POST', body: JSON.stringify({ pad }) }))
+  // Three-byte characters: 6,000 of them are under the cap in characters and over it in bytes.
+  expect(new TextEncoder().encode('€'.repeat(6_000)).length).toBeGreaterThan(server.MAX_BODY_BYTES)
+  expect((await post('€'.repeat(6_000))).status).toBe(413)
+  expect((await post('x'.repeat(server.MAX_BODY_BYTES))).status).toBe(413)
+  expect((await post('x'.repeat(6_000))).status).toBe(400)
 })

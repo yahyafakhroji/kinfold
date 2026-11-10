@@ -396,6 +396,7 @@ export function countingService(inner: ServiceControl, reason?: string): Countin
     steps,
     isConfigured: () => inner.isConfigured(),
     isRunning: () => inner.isRunning(),
+    ...(inner.isRegistered !== undefined ? { isRegistered: () => inner.isRegistered?.() ?? Promise.resolve(false) } : {}),
     start: () => (steps.push('start'), inner.start()),
     stop: () => (steps.push('stop'), inner.stop()),
     configuredDataDir: () => inner.configuredDataDir(),
@@ -403,6 +404,7 @@ export function countingService(inner: ServiceControl, reason?: string): Countin
     fileHolders: (path) => inner.fileHolders(path),
     configPath: () => inner.configPath(),
     configContent: (port) => inner.configContent(port),
+    ...(inner.configEncoding !== undefined ? { configEncoding: inner.configEncoding } : {}),
     describe: (step) => inner.describe(step),
     unavailableReason: () => (reason !== undefined ? reason : inner.unavailableReason()),
   }

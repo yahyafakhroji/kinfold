@@ -15,7 +15,8 @@ Everything stays on your machine. The store is a SQLite file in `~/.kinfold`, en
 
 ## Requirements
 
-- macOS on Apple silicon. Linux and Windows are planned.
+- macOS on Apple silicon, or 64-bit Windows 10 or 11. Linux is planned.
+- WSL (preview): inside a WSL distro, install links the distro's agents to the Windows memory. It needs mirrored networking. Not supported for production use yet.
 - [Bun](https://bun.sh).
 - A C compiler (`xcode-select --install`). Install builds the encryption library from its pinned source.
 - At least one of Claude Code, OpenCode, Codex or Cursor.
@@ -39,6 +40,19 @@ bun src/cli/kinfold.ts dashboard
 ```
 
 To remove it, run `bun src/cli/kinfold.ts uninstall --dry-run`, then the same without `--dry-run`. Your data stays in `~/.kinfold` until you delete it.
+
+## WSL (preview)
+
+Run `kinfold install` inside a WSL distro after Kinfold is installed and running on Windows. Install finds the Windows install through WSL interop and wires the distro's agents to the same memory: hooks write into the Windows data folder through `/mnt/c`, and the MCP server reads through the Windows daemon. The distro keeps its own copy of the program in `~/.kinfold-wsl`. `kinfold status` there shows the link, and `kinfold uninstall` there removes only the distro's wiring; uninstall the Windows side from Windows.
+
+WSL reaches the Windows daemon only with mirrored networking. Under the default NAT networking, the distro's `127.0.0.1` is its own, so install refuses and memory search answers "unavailable". To switch, add this to `%UserProfile%\.wslconfig` on Windows, then run `wsl --shutdown`:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+`kinfold encrypt` and `decrypt` run from Windows only. A checkout under WSL is a different project from the same repository checked out on Windows.
 
 ## Choosing the observer model
 

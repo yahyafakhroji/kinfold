@@ -40,8 +40,28 @@ export function serializeJson(value: unknown, original: string | null): string {
   return original === null || original.endsWith('\n') ? `${body}\n` : body
 }
 
+/** How a text file is stored on disk: UTF-8, or UTF-16LE with a byte-order mark (the form schtasks /XML accepts). */
+export type TextEncoding = 'utf8' | 'utf16le'
+
+const UTF16LE_BOM = [0xff, 0xfe] as const
+
+/**
+ * Bytes as text: UTF-16LE when they start with its byte-order mark, else
+ * UTF-8. Either way a leading BOM stays in the text as U+FEFF, so a file and
+ * the content written to it compare equal whichever encoding holds it.
+ */
+export function decodeText(bytes: Uint8Array): string {
+  const isUtf16 = bytes.length >= 2 && bytes[0] === UTF16LE_BOM[0] && bytes[1] === UTF16LE_BOM[1]
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString(isUtf16 ? 'utf16le' : 'utf8')
+}
+
+/** Text as the bytes a file in that encoding holds; a leading U+FEFF becomes that encoding's BOM. */
+export function encodeText(content: string, encoding: TextEncoding): Uint8Array {
+  return Buffer.from(content, encoding)
+}
+
 export function readTextOrNull(path: string): string | null {
-  return existsSync(path) ? readFileSync(path, 'utf8') : null
+  return existsSync(path) ? decodeText(readFileSync(path)) : null
 }
 
 /** 20261025T101500Z */
