@@ -16,6 +16,8 @@ import { NOT_SET_UP_REASON } from './stub-service'
 export const SYSTEMD_UNIT = 'kinfold.service'
 const LABEL = 'systemd user service'
 const MAX_PORT = 65_535
+/** The lowest port the installer accepts; a unit never carries one it would refuse. */
+const MIN_INSTALL_PORT = 1024
 // A newline would end the assignment early and let the rest of the value
 // become a line of its own; no quoting form carries one.
 const CONTROL_CHARACTER = /[\x00-\x1f\x7f]/
@@ -60,8 +62,13 @@ const assignment = (name: string, value: string, field: string): string => `Envi
  */
 export function unitContent(env: Pick<InstallEnv, 'mode' | 'pathEnv' | 'homeDir' | 'dataDir' | 'envVars'>, port: number): string {
   // The named fields first, so a bad data folder is reported as one rather than as a daemon argument.
+  // WorkingDirectory= is unquoted: a trailing backslash joins the next line
+  // into it and trailing whitespace is stripped, so either would point the
+  // daemon somewhere other than KINFOLD_DATA_DIR.
+  if (/[\\\s]$/.test(env.dataDir)) throw new Error(`${LABEL}: the data folder ends in a backslash or a space and cannot go in a unit file`)
   refuseControl(env.dataDir, 'the data folder')
   refuseControl(env.homeDir, 'the home folder')
+  if (!Number.isInteger(port) || port < MIN_INSTALL_PORT || port > MAX_PORT) throw new Error(`${LABEL}: the port must be a whole number from ${MIN_INSTALL_PORT} to ${MAX_PORT}`)
   const daemon = entryCommand(env.mode, 'daemon', env.dataDir)
   const exec = [systemdQuote(daemon.command, { exec: true, field: 'the program path' }), ...daemon.args.map((arg) => systemdQuote(arg, { exec: true, field: 'a daemon argument' }))]
   const dataDir = escapePercent(env.dataDir, 'the data folder')

@@ -85,6 +85,25 @@ test('a control character is refused before anything is written', () => {
   expect(world?.commands).toEqual([])
 })
 
+test('a data folder ending in a backslash or whitespace is refused without echoing it', () => {
+  const refusal = 'systemd user service: the data folder ends in a backslash or a space and cannot go in a unit file'
+  for (const dataDir of ['/tmp/kf\\', '/tmp/kf ', '/tmp/kf\t']) {
+    const env = programEnv(dataDir)
+    expect(() => unitContent(env, DEFAULT_PORT)).toThrow(refusal)
+    expect(() => new SystemdUserService(env).configContent(DEFAULT_PORT)).toThrow(refusal)
+  }
+  expect(world?.commands).toEqual([])
+})
+
+test('a port the installer would refuse never goes in the unit', () => {
+  const env = linuxEnv()
+  for (const port of [0, 1023, 65_536, 40000.5, Number.NaN]) {
+    expect(() => unitContent(env, port)).toThrow('systemd user service: the port must be a whole number from 1024 to 65535')
+  }
+  expect(unitEnvironment(unitContent(env, 1024)).get(envName('PORT'))).toBe('1024')
+  expect(unitEnvironment(unitContent(env, 65_535)).get(envName('PORT'))).toBe('65535')
+})
+
 posixOnly('POSIX paths')('the unit folder follows an absolute XDG_CONFIG_HOME', () => {
   const env = linuxEnv({ envVars: { XDG_CONFIG_HOME: '/c' } })
   const service = new SystemdUserService(env)
