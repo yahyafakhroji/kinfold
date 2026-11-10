@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { NO_DB_KEYS } from '../../sqlite/keys'
 import { fileState } from '../../sqlite/open'
@@ -237,6 +237,28 @@ test('stop kills a daemon that answers late, and one that closed its server but 
   expect(await stopWith((clock) => clock < 1_000)).toEqual([PID])
 })
 
+test('stop waits for a daemon that had not answered yet when the task was ended', async () => {
+  const w = windowsWorld()
+  // The daemon writes daemon.json and answers /health only once its store is open, here 2 s into the stop.
+  const stopWith = async (state: number) => {
+    let clock = 0
+    const kills: number[] = []
+    const fetch: InstallEnv['fetch'] = (url, init) => healthFetch(clock >= 2_000 ? PID : null)(url, init)
+    const sleep = async (ms: number) => {
+      clock += ms
+      if (clock >= 2_000) writeDaemonInfo(w.dataDir, PID)
+    }
+    const run = schtasksRunner({}, state)
+    await new ScheduledTaskService({ ...w.env, fetch, run: run.run, sleep }, { pidAlive: () => true, kill: (pid) => void kills.push(pid) }).stop()
+    expect(run.argvs.map((argv) => argv[1])).toEqual(['/Query', '/End', '/Delete'])
+    rmSync(join(w.dataDir, DAEMON_INFO_FILE), { force: true })
+    return { kills, clock }
+  }
+  expect(await stopWith(RUNNING)).toEqual({ kills: [PID], clock: HEALTH_WAIT_MS })
+  // With no instance of the task there is no daemon of ours to wait for.
+  expect(await stopWith(READY)).toEqual({ kills: [], clock: 0 })
+})
+
 test('running is the task state Task Scheduler reports, whatever /health says', async () => {
   const w = windowsWorld()
   writeDaemonInfo(w.dataDir, PID)
@@ -268,7 +290,9 @@ test('running is the task state Task Scheduler reports, whatever /health says', 
   expect(query?.timeoutMs).toBe(15_000)
   expect(query?.argv.slice(0, -1)).toEqual([POWERSHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'])
   expect(Buffer.from(query?.argv.at(-1) ?? '', 'base64').toString('utf16le')).toBe(taskStateScript())
-  expect(taskStateScript()).toContain("New-Object -ComObject Schedule.Service")
+  expect(taskStateScript()).toContain("GetTypeFromProgID('Schedule.Service')")
+  // No cmdlet: loading one's module outlasts the timeout under the CLI's bare child environment.
+  expect(taskStateScript()).not.toMatch(/\b[A-Z][a-z]+-[A-Z][A-Za-z]+\b/)
   expect(taskStateScript()).toContain("GetFolder('\\').GetTask('KinfoldDaemon')")
   expect(taskStateScript()).not.toMatch(/schtasks|Register-|Start-|Stop-|\.Run\(|\.Stop\(|\.Delete/)
 })

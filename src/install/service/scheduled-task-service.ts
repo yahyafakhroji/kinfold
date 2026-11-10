@@ -226,12 +226,17 @@ export function taskPort(xml: string): number | null {
   return port >= 1 && port <= MAX_PORT ? port : null
 }
 
-/** Prints `state<TAB><TASK_STATE number>`; fails when Task Scheduler has no such task. Reads only. */
+/**
+ * Prints `state<TAB><TASK_STATE number>`; fails when Task Scheduler has no
+ * such task. Reads only. .NET calls throughout, no cmdlet: the CLI gives its
+ * children only PATH and HOME, and without PSModulePath loading New-Object's
+ * module outlasts the timeout.
+ */
 export function taskStateScript(): string {
   return [
-    '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false',
+    '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
     "$ErrorActionPreference = 'Stop'",
-    '$scheduler = New-Object -ComObject Schedule.Service',
+    "$scheduler = [System.Activator]::CreateInstance([System.Type]::GetTypeFromProgID('Schedule.Service'))",
     '$scheduler.Connect()',
     `$task = $scheduler.GetFolder('\\').GetTask(${psLiteral(TASK_NAME)})`,
     '"state`t$([int]$task.State)"',
@@ -280,26 +285,34 @@ export class ScheduledTaskService implements ServiceControl {
     return ACTIVE_TASK_STATES.includes(state) ? 'active' : 'idle'
   }
 
+  /** daemon.json's pid, when it is alive and the /health on daemon.json's port names it; 'other' when a different daemon answers there. */
+  private async answeringDaemon(dataDir: string): Promise<number | 'other' | null> {
+    const { pid, port } = readDaemonInfo(dataDir)
+    const health = await checkHealth(this.env, port)
+    if (!health.up) return null
+    return pid !== null && health.pid === pid && this.deps.pidAlive(pid) ? pid : 'other'
+  }
+
   /**
-   * Waits for the daemon that daemon.json names to exit, and returns its pid
-   * when it outlasts the wait; null when there is nothing of ours to kill.
-   * A pid is ours once the /health on daemon.json's port names it, and stays
-   * ours while it lives, so a daemon that has closed its server is still
-   * killed. A Windows stop terminates the daemon, so daemon.json is never
-   * removed and Windows soon hands its pid to some other process: a pid
-   * that /health does not name is waited on only while the task had an
-   * instance, since a daemon busy with a large store answers late.
+   * Waits for our daemon to exit and returns its pid when it outlasts the
+   * wait; null when there is nothing of ours to kill. A pid is ours once
+   * /health names it, and stays ours while it lives, so a daemon that has
+   * closed its server is still killed. A Windows stop terminates the daemon,
+   * so daemon.json is never removed and Windows soon hands its pid to some
+   * other process: a pid /health does not name is never killed. While the
+   * task had an instance and no daemon has answered yet, the wait goes on,
+   * since a daemon that is still opening its store answers late.
    */
-  private async daemonLeftRunning(taskWasActive: boolean): Promise<number | null> {
+  private async daemonLeftRunning(known: number | null, taskWasActive: boolean): Promise<number | null> {
     const dataDir = this.configuredDataDir() ?? this.env.dataDir
-    let ours: number | null = null
+    let ours = known
     for (let waited = 0; ; waited += STOP_POLL_MS) {
-      const { pid, port } = readDaemonInfo(dataDir)
-      if (pid === null || !this.deps.pidAlive(pid)) return null
-      if (pid !== ours) {
-        const health = await checkHealth(this.env, port)
-        if (health.up && health.pid === pid) ours = pid
-        else if (health.up || !taskWasActive) return null
+      if (ours !== null) {
+        if (!this.deps.pidAlive(ours)) return null
+      } else {
+        const answering = await this.answeringDaemon(dataDir)
+        if (typeof answering === 'number') ours = answering
+        else if (answering === 'other' || !taskWasActive) return null
       }
       if (waited >= HEALTH_WAIT_MS) return ours
       await this.env.sleep(STOP_POLL_MS)
@@ -331,10 +344,12 @@ export class ScheduledTaskService implements ServiceControl {
 
   async stop(): Promise<void> {
     if (!(await this.isRegistered())) return
-    const taskWasActive = (await this.activity()) !== 'idle'
+    // Read before /End: ending the task ends its console host and leaves the daemon running, with nothing but /health to tell it by.
+    const answering = await this.answeringDaemon(this.configuredDataDir() ?? this.env.dataDir)
+    const taskWasActive = answering === null && (await this.activity()) === 'active'
     // /End fails when the task is not running, which is fine: the wait below decides.
     await this.schtasks('/End', '/TN', TASK_NAME)
-    const pid = await this.daemonLeftRunning(taskWasActive)
+    const pid = answering === 'other' ? null : await this.daemonLeftRunning(answering, taskWasActive)
     if (pid !== null) this.deps.kill(pid)
     await this.schtasksOrThrow('Delete', '/TN', TASK_NAME, '/F')
   }
