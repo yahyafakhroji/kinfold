@@ -18,10 +18,11 @@ install_packages() {
 }
 
 # The smoke checks the unit at ~/.config/systemd/user; another config folder
-# would put it somewhere the checks do not look.
+# would put it somewhere the checks do not look. The hosted images export
+# XDG_CONFIG_HOME as that same folder, which names the same unit path.
 refuse_xdg_config_home() {
-  if [ -n "${XDG_CONFIG_HOME+set}" ]; then
-    echo "XDG_CONFIG_HOME is set; the smoke expects the unit under \$HOME/.config"
+  if [ -n "${XDG_CONFIG_HOME+set}" ] && [ "$XDG_CONFIG_HOME" != "$HOME/.config" ]; then
+    echo "XDG_CONFIG_HOME names a folder other than \$HOME/.config; the smoke expects the unit under \$HOME/.config"
     exit 1
   fi
 }
