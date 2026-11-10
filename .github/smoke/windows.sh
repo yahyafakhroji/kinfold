@@ -60,31 +60,11 @@ remove_shim_from_user_path() {
   " || true
 }
 
-# Temporary probe: prints what the compiled program sees as Bun.main and
-# schtasks' own message for the task XML Kinfold writes.
-probe() {
-  dir="$(cygpath -u "$RUNNER_TEMP")/probe"
-  mkdir -p "$dir"
-  echo 'console.log("Bun.main=" + Bun.main)' > "$dir/main.ts"
-  bun build --compile "$dir/main.ts" --outfile "$dir/main.exe" > /dev/null
-  "$dir/main.exe"
-  PROBE_XML="$(cygpath -w "$dir/task.xml")" bun -e "
-    import { taskXml } from './src/install/service/scheduled-task-service'
-    const user = process.env.USERDOMAIN ? process.env.USERDOMAIN + '\\\\' + process.env.USERNAME : process.env.USERNAME
-    console.log('task user=' + user)
-    await Bun.write(process.env.PROBE_XML, taskXml({ user, program: 'C:\\\\Windows\\\\System32\\\\cmd.exe', dataDir: 'C:\\\\x', port: 37811, logFile: 'C:\\\\x\\\\d.log' }))
-  "
-  MSYS_NO_PATHCONV=1 schtasks /Create /TN KinfoldProbe /XML "$(cygpath -w "$dir/task.xml")" /F 2>&1 || echo "create exit $?"
-  MSYS_NO_PATHCONV=1 schtasks /Run /TN KinfoldProbe 2>&1 || echo "run exit $?"
-  MSYS_NO_PATHCONV=1 schtasks /Delete /TN KinfoldProbe /F 2>&1 || true
-  head -c 400 "$dir/task.xml" | od -c | head -5
-}
 
 case "${1:-}" in
   setup)
     install_agent_clis
     install_pywinpty
-    probe || true
     ;;
   cleanup)
     # Git Bash would rewrite /Delete and /delete:... into Windows paths.
