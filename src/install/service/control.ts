@@ -18,6 +18,12 @@ export interface ServiceControl {
   isConfigured(): boolean
   /** The OS has the service loaded. */
   isRunning(): Promise<boolean>
+  /**
+   * The OS still knows the service though nothing of it runs, as a scheduled
+   * task does between runs; uninstall removes it then. Absent where a
+   * registered service is always a loaded one.
+   */
+  isRegistered?(): Promise<boolean>
   /** Loads and starts it; retries the busy exit as the install plan does. */
   start(): Promise<void>
   /** Stops and unloads it; resolves once the OS no longer runs it. */

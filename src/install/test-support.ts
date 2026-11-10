@@ -396,6 +396,7 @@ export function countingService(inner: ServiceControl, reason?: string): Countin
     steps,
     isConfigured: () => inner.isConfigured(),
     isRunning: () => inner.isRunning(),
+    ...(inner.isRegistered !== undefined ? { isRegistered: () => inner.isRegistered?.() ?? Promise.resolve(false) } : {}),
     start: () => (steps.push('start'), inner.start()),
     stop: () => (steps.push('stop'), inner.stop()),
     configuredDataDir: () => inner.configuredDataDir(),

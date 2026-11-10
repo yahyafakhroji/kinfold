@@ -3,8 +3,9 @@
 # the agent CLIs and pywinpty for the ConPTY driver; cleanup removes the
 # scheduled task, every Credential Manager entry Kinfold or the live tests can
 # write, and the smoke's shim folder from the user PATH. setup also runs the
-# live tests against the real Credential Manager, BitLocker and access list,
-# which the smoke itself reaches only through install and status.
+# live tests against the real Credential Manager, BitLocker, access list and
+# Task Scheduler, which the smoke itself reaches only through install and
+# status.
 #
 # Usage: bash .github/smoke/windows.sh setup|cleanup
 set -eo pipefail
@@ -44,10 +45,12 @@ install_pywinpty() {
 run_live_tests() {
   KINFOLD_SQLITE3MC_LIB=not-opened-by-the-live-tests \
   KINFOLD_TEST_CREDENTIAL_MANAGER=1 KINFOLD_TEST_WINDOWS_DISK=1 KINFOLD_TEST_WINDOWS_ACL=1 \
+  KINFOLD_TEST_WINDOWS_TASK=1 \
     bun test \
       ./src/secrets/stores/credential-manager.live.test.ts \
       ./src/install/disk/bitlocker.live.test.ts \
-      ./src/install/access/windows-acl.live.test.ts
+      ./src/install/access/windows-acl.live.test.ts \
+      ./src/install/service/scheduled-task-service.live.test.ts
 }
 
 remove_task() {

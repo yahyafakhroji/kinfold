@@ -1,19 +1,31 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { DAEMON_INFO_FILE } from '../../store/data-dir'
-import type { CommandRequest, InstallEnv } from '../env'
+import { NO_DB_KEYS } from '../../sqlite/keys'
+import { fileState } from '../../sqlite/open'
+import { DAEMON_INFO_FILE, DB_FILE } from '../../store/data-dir'
+import { openStore } from '../../store/db'
+import { START_WAIT_MS, waitForStart } from '../daemon-client'
+import { runKeyCommand } from '../encrypt'
+import type { CommandRequest, CommandResult, InstallEnv } from '../env'
 import { readTextOrNull } from '../files'
 import { EXIT_OK, install, serviceActions } from '../install'
+import { uninstall } from '../uninstall'
 import { HEALTH_WAIT_MS, applyAction } from '../plan'
 import { status } from '../status'
 import { BUN, type FakeWorld, YES, createWorld } from '../test-support'
 import {
   STOP_POLL_MS, ScheduledTaskService, TASK_CONFIG_FILE, TASK_NAME, type TaskProcessDeps,
-  splitWindowsArgs, taskConfigPath, taskDataDir, taskPort, taskXml, windowsArg,
+  splitWindowsArgs, taskConfigPath, taskDataDir, taskPort, taskStateOf, taskStateScript, taskXml, windowsArg,
 } from './scheduled-task-service'
 
 const SCHTASKS = 'C:\\Windows\\System32\\schtasks.exe'
+const POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+/** Task Scheduler's TASK_STATE numbers. */
+const DISABLED = 1
+const QUEUED = 2
+const READY = 3
+const RUNNING = 4
 const USER_VARS = { USERDOMAIN: 'HOST', USERNAME: 'me' }
 const AWKWARD = 'C:\\Users\\José Ä & Co\\.kinfold'
 const PROGRAM = 'C:\\Users\\me\\.kinfold\\bin\\kinfold.exe'
@@ -27,15 +39,24 @@ afterEach(async () => {
 
 type Verb = 'Create' | 'Run' | 'Query' | 'End' | 'Delete'
 
-/** A runner that records every argv and answers each schtasks verb with the exit code given, else 0. */
-function schtasksRunner(exits: Partial<Record<Verb, number>> = {}): { argvs: string[][]; run: InstallEnv['run'] } {
+/**
+ * A runner that records every schtasks argv and answers each verb with the
+ * exit code given, else 0. The task-state query is recorded apart and answers
+ * `state`: a TASK_STATE number, or a result to return as it is.
+ */
+function schtasksRunner(exits: Partial<Record<Verb, number>> = {}, state: number | CommandResult = RUNNING): { argvs: string[][]; queries: CommandRequest[]; run: InstallEnv['run'] } {
   const argvs: string[][] = []
-  const run = async (request: CommandRequest) => {
+  const queries: CommandRequest[] = []
+  const run = async (request: CommandRequest): Promise<CommandResult> => {
+    if (request.argv[0]?.endsWith('\\powershell.exe') === true) {
+      queries.push(request)
+      return typeof state === 'number' ? { exitCode: 0, stdout: `state\t${state}\r\n` } : state
+    }
     argvs.push([...request.argv])
     const verb = (request.argv[1] ?? '').slice(1) as Verb
     return { exitCode: request.argv[0]?.endsWith('\\System32\\schtasks.exe') === true ? exits[verb] ?? 0 : 127, stdout: '' }
   }
-  return { argvs, run }
+  return { argvs, queries, run }
 }
 
 /** Pid deps on a fake clock: the pid is alive until `diesAt` ms, and each kill is recorded. */
@@ -172,38 +193,167 @@ test('stop waits for the daemon and kills only a pid that stays', async () => {
   const unknown = schtasksRunner({ Query: 1 })
   await new ScheduledTaskService({ ...ours, run: unknown.run }, clockedPid(0).deps).stop()
   expect(unknown.argvs.map((argv) => argv[1])).toEqual(['/Query'])
+  expect(unknown.queries).toEqual([])
   expect(new ScheduledTaskService(w.env).describe('stop')).toBe('schtasks /End /TN KinfoldDaemon, wait for the daemon to exit, then schtasks /Delete /TN KinfoldDaemon /F')
 })
 
-test('a stale daemon.json pid that another process now holds is never waited on or killed', async () => {
+test('a stale daemon.json pid that another process now holds is never killed', async () => {
   const w = windowsWorld()
   writeDaemonInfo(w.dataDir, PID)
   // The pid stays alive throughout: Windows gave it to some other process.
-  for (const fetch of [healthFetch(null), healthFetch(PID + 1)]) {
+  const stopWith = async (fetch: InstallEnv['fetch'], state: number) => {
     const reused = clockedPid(Number.POSITIVE_INFINITY)
     let slept = 0
     const sleep = async (ms: number) => (slept += ms, reused.sleep(ms))
-    const run = schtasksRunner()
-    const service = new ScheduledTaskService({ ...w.env, fetch, run: run.run, sleep }, reused.deps)
-    expect(await service.isRunning()).toBe(false)
-    await service.stop()
+    const run = schtasksRunner({}, state)
+    await new ScheduledTaskService({ ...w.env, fetch, run: run.run, sleep }, reused.deps).stop()
     expect(reused.kills).toEqual([])
-    expect(slept).toBe(0)
-    expect(run.argvs.map((argv) => argv[1])).toEqual(['/Query', '/Query', '/End', '/Delete'])
+    expect(run.argvs.map((argv) => argv[1])).toEqual(['/Query', '/End', '/Delete'])
+    return slept
   }
+  // No instance of the task ran, so the pid is not waited on either.
+  expect(await stopWith(healthFetch(null), READY)).toBe(0)
+  expect(await stopWith(healthFetch(PID + 1), READY)).toBe(0)
+  // Another daemon answers on the port: the pid is not ours whatever the task does.
+  expect(await stopWith(healthFetch(PID + 1), RUNNING)).toBe(0)
+  // The task ran and nothing answers: the pid may be a daemon too busy to answer, so stop waits, and still kills nothing unproven.
+  expect(await stopWith(healthFetch(null), RUNNING)).toBe(HEALTH_WAIT_MS)
 })
 
-test('running means registered, alive and answering /health with that pid', async () => {
+test('stop kills a daemon that answers late, and one that closed its server but lives on', async () => {
   const w = windowsWorld()
   writeDaemonInfo(w.dataDir, PID)
-  const alive: TaskProcessDeps = { pidAlive: (pid) => pid === PID, kill: () => {} }
-  const dead: TaskProcessDeps = { pidAlive: () => false, kill: () => {} }
-  const ours = { ...w.env, fetch: healthFetch(PID) }
-  expect(await new ScheduledTaskService({ ...ours, run: schtasksRunner().run }, alive).isRunning()).toBe(true)
-  expect(await new ScheduledTaskService({ ...ours, run: schtasksRunner().run }, dead).isRunning()).toBe(false)
-  expect(await new ScheduledTaskService({ ...ours, run: schtasksRunner({ Query: 1 }).run }, alive).isRunning()).toBe(false)
-  expect(await new ScheduledTaskService({ ...w.env, fetch: healthFetch(null), run: schtasksRunner().run }, alive).isRunning()).toBe(false)
-  expect(await new ScheduledTaskService({ ...w.env, fetch: healthFetch(PID + 1), run: schtasksRunner().run }, alive).isRunning()).toBe(false)
+  const stopWith = async (answers: (clock: number) => boolean) => {
+    let clock = 0
+    const kills: number[] = []
+    const fetch: InstallEnv['fetch'] = (url, init) => healthFetch(answers(clock) ? PID : null)(url, init)
+    const run = schtasksRunner()
+    const env = { ...w.env, fetch, run: run.run, sleep: async (ms: number) => void (clock += ms) }
+    await new ScheduledTaskService(env, { pidAlive: () => true, kill: (pid) => void kills.push(pid) }).stop()
+    expect(run.argvs.map((argv) => argv[1])).toEqual(['/Query', '/End', '/Delete'])
+    return kills
+  }
+  expect(await stopWith((clock) => clock >= 3_000)).toEqual([PID])
+  expect(await stopWith((clock) => clock < 1_000)).toEqual([PID])
+})
+
+test('running is the task state Task Scheduler reports, whatever /health says', async () => {
+  const w = windowsWorld()
+  writeDaemonInfo(w.dataDir, PID)
+  const alive: TaskProcessDeps = { pidAlive: () => true, kill: () => {} }
+  const silent = { ...w.env, fetch: healthFetch(null) }
+  const answering = { ...w.env, fetch: healthFetch(PID) }
+  const running = (env: InstallEnv, runner: ReturnType<typeof schtasksRunner>) => new ScheduledTaskService({ ...env, run: runner.run }, alive).isRunning()
+
+  // A daemon that is still opening its store answers nothing, and its task runs.
+  const starting = schtasksRunner({}, RUNNING)
+  expect(await running(silent, starting)).toBe(true)
+  expect(await running(silent, schtasksRunner({}, QUEUED))).toBe(true)
+  // A task between runs is stopped, even while a daemon someone started by hand answers.
+  expect(await running(answering, schtasksRunner({}, READY))).toBe(false)
+  expect(await running(answering, schtasksRunner({}, DISABLED))).toBe(false)
+
+  const unregistered = schtasksRunner({ Query: 1 })
+  expect(await running(answering, unregistered)).toBe(false)
+  expect(unregistered.queries).toEqual([])
+
+  // A registered task whose state cannot be read counts as running.
+  for (const unreadable of [{ exitCode: 1, stdout: '' }, { exitCode: 0, stdout: '', timedOut: true }, { exitCode: 0, stdout: 'Bereit\r\n' }]) {
+    expect(await running(silent, schtasksRunner({}, unreadable))).toBe(true)
+  }
+
+  // One bounded, read-only query, named by full path, with the task name inside the encoded script.
+  expect(starting.queries).toHaveLength(1)
+  const [query] = starting.queries
+  expect(query?.timeoutMs).toBe(15_000)
+  expect(query?.argv.slice(0, -1)).toEqual([POWERSHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'])
+  expect(Buffer.from(query?.argv.at(-1) ?? '', 'base64').toString('utf16le')).toBe(taskStateScript())
+  expect(taskStateScript()).toContain("New-Object -ComObject Schedule.Service")
+  expect(taskStateScript()).toContain("GetFolder('\\').GetTask('KinfoldDaemon')")
+  expect(taskStateScript()).not.toMatch(/schtasks|Register-|Start-|Stop-|\.Run\(|\.Stop\(|\.Delete/)
+})
+
+test('the task state reads only from a clean answer', () => {
+  expect(taskStateOf({ exitCode: 0, stdout: 'state\t4\r\n' })).toBe(4)
+  expect(taskStateOf({ exitCode: 0, stdout: '\uFEFFstate\t3\n' })).toBe(3)
+  expect(taskStateOf({ exitCode: 1, stdout: 'state\t4\n' })).toBeNull()
+  expect(taskStateOf({ exitCode: 0, stdout: 'state\t4\n', timedOut: true })).toBeNull()
+  for (const stdout of ['', 'state\t', 'state\tRunning', 'Running', 'state\t4\nstate\t3']) expect(taskStateOf({ exitCode: 0, stdout })).toBeNull()
+})
+
+/** A clock the env's now and sleep share, with /health answering from `upAt` ms on. */
+function startingDaemon(upAt: number): Pick<InstallEnv, 'now' | 'sleep' | 'fetch'> {
+  let clock = 0
+  return {
+    now: () => clock,
+    sleep: async (ms) => void (clock += ms),
+    fetch: (url, init) => healthFetch(clock >= upAt ? PID : null)(url, init),
+  }
+}
+
+test('a start that takes longer than the first running check still gets the whole wait', async () => {
+  const w = windowsWorld()
+  const slow = { ...w.env, ...startingDaemon(6_000) }
+  const service = new ScheduledTaskService({ ...slow, run: schtasksRunner().run })
+  expect(await waitForStart(slow, service)).toEqual({ ok: true, waitedMs: 6_000 })
+
+  // A store that takes most of the allowance to open is still waited for.
+  const slower = { ...w.env, ...startingDaemon(START_WAIT_MS - 1_000) }
+  expect(await waitForStart(slower, new ScheduledTaskService({ ...slower, run: schtasksRunner().run }))).toEqual({ ok: true, waitedMs: START_WAIT_MS - 1_000 })
+
+  // A task that ended without a daemon answering stops the wait at the first check.
+  const never = { ...w.env, ...startingDaemon(Number.POSITIVE_INFINITY) }
+  expect(await waitForStart(never, new ScheduledTaskService({ ...never, run: schtasksRunner({}, READY).run }))).toEqual({ ok: false, reason: 'not-running' })
+})
+
+test('encrypt stops a task whose daemon is still starting, then starts it again', async () => {
+  world = createWorld({ keychainRefs: [] })
+  const w = world
+  openStore(w.dataDir, { keys: NO_DB_KEYS }).db.close()
+  // Nothing answers /health until the task is run again: the daemon has not opened its store yet.
+  let restarted = false
+  const runner = schtasksRunner()
+  const run: InstallEnv['run'] = (request) => {
+    if (request.argv[1] === '/Run') restarted = true
+    return runner.run(request)
+  }
+  const code = /([0-9A-HJKMNP-TV-Z]{5}-){10}[0-9A-HJKMNP-TV-Z]{5}/
+  const lastGroups = async () => (code.exec([...w.out].reverse().find((line) => code.test(line)) ?? '')?.[0] ?? '').split('-').slice(-2).join('-')
+  const base: InstallEnv = {
+    ...w.env,
+    envVars: { ...USER_VARS, LOCALAPPDATA: join(w.root, 'LocalAppData') },
+    run,
+    fetch: (url, init) => healthFetch(restarted ? PID : null)(url, init),
+    io: { ...w.env.io, interactive: true, ask: lastGroups, askSecret: lastGroups },
+  }
+  const env = { ...base, service: new ScheduledTaskService(base) }
+  expect(await runKeyCommand(env, 'encrypt')).toBe(EXIT_OK)
+  expect(fileState(join(w.dataDir, DB_FILE))).toBe('encrypted')
+  expect(runner.argvs.map((argv) => argv[1]).filter((verb) => verb !== '/Query')).toEqual(['/End', '/Delete', '/Create', '/Run'])
+  expect(w.out).toContain('daemon: stopped the scheduled task')
+  expect(w.out).toContain('daemon: started again')
+})
+
+test('uninstall deletes the task even when its daemon is not answering', async () => {
+  for (const state of [READY, RUNNING]) {
+    const w = windowsWorld()
+    const path = taskConfigPath(w.env)
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, new ScheduledTaskService(w.env).configContent(37811) ?? '')
+    const runner = schtasksRunner({}, state)
+    const env = { ...w.env, fetch: healthFetch(null), run: runner.run }
+    expect(await uninstall(env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
+    expect(runner.argvs).toContainEqual([SCHTASKS, '/Delete', '/TN', TASK_NAME, '/F'])
+    expect(readTextOrNull(path)).toBeNull()
+    await w.cleanup()
+  }
+  world = null
+
+  // With no task registered there is nothing to delete, and uninstall does not try.
+  const w = windowsWorld()
+  const none = schtasksRunner({ Query: 1 })
+  expect(await uninstall({ ...w.env, fetch: healthFetch(null), run: none.run }, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
+  expect(none.argvs.every((argv) => argv[1] === '/Query')).toBe(true)
 })
 
 test('an unset USERDOMAIN names the user by USERNAME alone', () => {

@@ -1,14 +1,18 @@
 // The Windows service behind ServiceControl: a per-user scheduled task that
 // starts the daemon at logon, registered and removed through schtasks.exe.
-// schtasks prints localized text, so only exit codes are read; whether the
-// daemon runs comes from the pid in daemon.json, checked against /health.
+// schtasks prints localized text, so only exit codes are read. Whether the
+// task runs comes from Task Scheduler's own state number, read through its COM
+// object: a daemon that is still opening a large store answers nothing yet,
+// and its task is running all the same. /health only decides which process a
+// stop may kill.
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DEFAULT_PORT } from '../../daemon/daemon'
+import { WINDOWS_QUERY_TIMEOUT_MS, powershellArgv, psLiteral } from '../access/windows-acl'
 import { checkHealth, readDaemonInfo } from '../daemon-client'
 import { decodeText } from '../files'
-import type { InstallEnv } from '../env'
+import type { CommandResult, InstallEnv } from '../env'
 import { HEALTH_WAIT_MS } from '../plan'
 import { windowsJoin, windowsSystemTool } from '../windows-system-path'
 import type { ServiceControl, ServiceStep } from './control'
@@ -19,6 +23,8 @@ export const TASK_CONFIG_FILE = 'kinfold-daemon.xml'
 export const STOP_POLL_MS = 250
 const SCHTASKS_TIMEOUT_MS = 15_000
 const MAX_PORT = 65_535
+/** Task Scheduler's TASK_STATE numbers for a task with an instance: queued, and running. */
+const ACTIVE_TASK_STATES: readonly number[] = [2, 4]
 const NO_USERNAME = 'USERNAME is not set, so the task cannot name its user'
 /** The checkout's CLI entry, which takes `--data-dir` and `daemon` the way the program does. */
 const CHECKOUT_CLI = 'src/cli/kinfold.ts'
@@ -220,6 +226,27 @@ export function taskPort(xml: string): number | null {
   return port >= 1 && port <= MAX_PORT ? port : null
 }
 
+/** Prints `state<TAB><TASK_STATE number>`; fails when Task Scheduler has no such task. Reads only. */
+export function taskStateScript(): string {
+  return [
+    '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false',
+    "$ErrorActionPreference = 'Stop'",
+    '$scheduler = New-Object -ComObject Schedule.Service',
+    '$scheduler.Connect()',
+    `$task = $scheduler.GetFolder('\\').GetTask(${psLiteral(TASK_NAME)})`,
+    '"state`t$([int]$task.State)"',
+  ].join('\n')
+}
+
+/** The state number the query printed; null when it failed, timed out or printed anything else. */
+export function taskStateOf(result: CommandResult): number | null {
+  if (result.timedOut === true || result.exitCode !== 0) return null
+  const match = /^state\t(\d+)$/.exec(result.stdout.replace(/^\uFEFF/, '').trim())
+  return match === null ? null : Number(match[1])
+}
+
+type TaskActivity = 'active' | 'idle' | 'unknown'
+
 export class ScheduledTaskService implements ServiceControl {
   readonly label = 'scheduled task'
   /** schtasks /Create /XML rejects a UTF-8 file as malformed; it reads UTF-16LE with a BOM. */
@@ -243,21 +270,40 @@ export class ScheduledTaskService implements ServiceControl {
     if (exitCode !== 0) throw new Error(`${this.label}: schtasks /${verb} failed (exit ${exitCode})`)
   }
 
-  private async isRegistered(): Promise<boolean> {
+  async isRegistered(): Promise<boolean> {
     return (await this.schtasks('/Query', '/TN', TASK_NAME)).exitCode === 0
   }
 
+  private async activity(): Promise<TaskActivity> {
+    const state = taskStateOf(await this.env.run({ argv: powershellArgv(this.env, taskStateScript()), timeoutMs: WINDOWS_QUERY_TIMEOUT_MS }))
+    if (state === null) return 'unknown'
+    return ACTIVE_TASK_STATES.includes(state) ? 'active' : 'idle'
+  }
+
   /**
-   * daemon.json's pid, only while that process is our daemon: alive, and the
-   * /health on daemon.json's port names the same pid. A Windows stop
-   * terminates the daemon, so it never removes daemon.json, and Windows soon
-   * hands its pid to some other process.
+   * Waits for the daemon that daemon.json names to exit, and returns its pid
+   * when it outlasts the wait; null when there is nothing of ours to kill.
+   * A pid is ours once the /health on daemon.json's port names it, and stays
+   * ours while it lives, so a daemon that has closed its server is still
+   * killed. A Windows stop terminates the daemon, so daemon.json is never
+   * removed and Windows soon hands its pid to some other process: a pid
+   * that /health does not name is waited on only while the task had an
+   * instance, since a daemon busy with a large store answers late.
    */
-  private async daemonPid(): Promise<number | null> {
-    const { pid, port } = readDaemonInfo(this.configuredDataDir() ?? this.env.dataDir)
-    if (pid === null || !this.deps.pidAlive(pid)) return null
-    const health = await checkHealth(this.env, port)
-    return health.up && health.pid === pid ? pid : null
+  private async daemonLeftRunning(taskWasActive: boolean): Promise<number | null> {
+    const dataDir = this.configuredDataDir() ?? this.env.dataDir
+    let ours: number | null = null
+    for (let waited = 0; ; waited += STOP_POLL_MS) {
+      const { pid, port } = readDaemonInfo(dataDir)
+      if (pid === null || !this.deps.pidAlive(pid)) return null
+      if (pid !== ours) {
+        const health = await checkHealth(this.env, port)
+        if (health.up && health.pid === pid) ours = pid
+        else if (health.up || !taskWasActive) return null
+      }
+      if (waited >= HEALTH_WAIT_MS) return ours
+      await this.env.sleep(STOP_POLL_MS)
+    }
   }
 
   private readConfig(): string | null {
@@ -273,8 +319,9 @@ export class ScheduledTaskService implements ServiceControl {
     return existsSync(this.path)
   }
 
+  /** A state that cannot be read counts as running: a wrong "stopped" would end a start wait early or skip a stop. */
   async isRunning(): Promise<boolean> {
-    return (await this.isRegistered()) && (await this.daemonPid()) !== null
+    return (await this.isRegistered()) && (await this.activity()) !== 'idle'
   }
 
   async start(): Promise<void> {
@@ -284,14 +331,10 @@ export class ScheduledTaskService implements ServiceControl {
 
   async stop(): Promise<void> {
     if (!(await this.isRegistered())) return
+    const taskWasActive = (await this.activity()) !== 'idle'
     // /End fails when the task is not running, which is fine: the wait below decides.
     await this.schtasks('/End', '/TN', TASK_NAME)
-    let pid = await this.daemonPid()
-    for (let waited = 0; pid !== null && waited < HEALTH_WAIT_MS; waited += STOP_POLL_MS) {
-      await this.env.sleep(STOP_POLL_MS)
-      pid = await this.daemonPid()
-    }
-    // Only a pid that still answers as our daemon is killed; anything else has exited or is not ours.
+    const pid = await this.daemonLeftRunning(taskWasActive)
     if (pid !== null) this.deps.kill(pid)
     await this.schtasksOrThrow('Delete', '/TN', TASK_NAME, '/F')
   }

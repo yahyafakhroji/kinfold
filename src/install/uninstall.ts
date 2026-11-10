@@ -44,7 +44,9 @@ export interface UninstallOptions {
 async function serviceActions(env: InstallEnv): Promise<Action[]> {
   const service = managedServiceOf(env)
   if (service === null) return []
-  const unload: Action[] = (await service.isRunning()) ? [{ kind: 'service', step: 'stop', description: service.describe('stop') }] : []
+  // A registered service goes even when nothing of it runs: left behind, the OS would start a removed program at every logon.
+  const present = (await service.isRegistered?.()) === true || (await service.isRunning())
+  const unload: Action[] = present ? [{ kind: 'service', step: 'stop', description: service.describe('stop') }] : []
   const path = service.configPath()
   const remove: Action[] = path !== null && existsSync(path) ? [{ kind: 'remove', path, summary: `the ${service.label}` }] : []
   return [...unload, ...remove]
