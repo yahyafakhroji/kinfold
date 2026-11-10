@@ -100,8 +100,8 @@ export function createLibsecretStore(deps: KeyStoreDeps, load: BindingLoader): K
     assertStorableValue(value)
   }
 
-  // Check then store. Two processes creating one account at the same moment
-  // could both store; install, the only creator, holds its own lock.
+  // Check then store: the Secret Service has no create-only call, so two
+  // processes creating one account at the same moment could both store.
   const create = (account: string, value: string): boolean => {
     checked(account, value)
     return call(account, 'store', (service) => {
