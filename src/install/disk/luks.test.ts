@@ -65,6 +65,11 @@ async function checkWith(roots: LuksRoots) {
 const PLAIN_PARTITION = { 'dev/block/8:2/partition': '2\n' }
 const CRYPT_ROOT = { 'dev/block/253:0/dm/uuid': 'CRYPT-LUKS2-abc-luks\n' }
 
+/** sysfs files listing one btrfs's members; the kernel makes each a symlink, and only the names are read. */
+function btrfsMembers(names: readonly string[], fsid = 'fsid-a'): Record<string, string> {
+  return Object.fromEntries(names.map((name) => [`fs/btrfs/${fsid}/devices/${name}`, '']))
+}
+
 sysfsFixtureTest('a plain partition is off with the advice', async () => {
   const state = await checkWith(fixture([mountLine(20, '8:2', '/', 'ext4')], { sys: PLAIN_PARTITION }))
   expect(state).toEqual({ kind: 'off', advice: LUKS_ADVICE })
@@ -114,15 +119,80 @@ sysfsFixtureTest('a mount without a block device prints nothing', async () => {
 
 sysfsFixtureTest('btrfs on LUKS is on', async () => {
   const roots = fixture([mountLine(20, '0:42', '/', 'btrfs', '/dev/mapper/luks-abc')], {
-    sys: { 'class/block/dm-0/dev': '253:0\n', ...CRYPT_ROOT },
+    sys: { 'class/block/dm-0/dev': '253:0\n', ...CRYPT_ROOT, ...btrfsMembers(['dm-0']) },
     dev: { 'dm-0': null, 'mapper/luks-abc': '../dm-0' },
   })
   expect(await checkWith(roots)).toEqual({ kind: 'on' })
 })
 
+const LUKS_AND_PLAIN = {
+  'class/block/dm-0/dev': '253:0\n',
+  'class/block/sdb1/dev': '8:17\n',
+  ...CRYPT_ROOT,
+  'dev/block/8:17/partition': '1\n',
+}
+
+sysfsFixtureTest('a multi-device btrfs with one plain member is off', async () => {
+  const roots = fixture([mountLine(20, '0:42', '/', 'btrfs', '/dev/mapper/luks-abc')], {
+    sys: { ...LUKS_AND_PLAIN, ...btrfsMembers(['dm-0', 'sdb1']), ...btrfsMembers(['sdc1'], 'fsid-b') },
+    dev: { 'dm-0': null, 'mapper/luks-abc': '../dm-0' },
+  })
+  expect(await checkWith(roots)).toEqual({ kind: 'off', advice: LUKS_ADVICE })
+})
+
+sysfsFixtureTest('a multi-device btrfs is on only when every member is on LUKS', async () => {
+  const roots = fixture([mountLine(20, '0:42', '/', 'btrfs', '/dev/mapper/luks-abc')], {
+    sys: {
+      'class/block/dm-0/dev': '253:0\n',
+      'class/block/dm-1/dev': '253:1\n',
+      ...CRYPT_ROOT,
+      'dev/block/253:1/dm/uuid': 'CRYPT-LUKS2-def-luks\n',
+      ...btrfsMembers(['dm-0', 'dm-1']),
+    },
+    dev: { 'dm-0': null, 'mapper/luks-abc': '../dm-0' },
+  })
+  expect(await checkWith(roots)).toEqual({ kind: 'on' })
+})
+
+sysfsFixtureTest('a multi-device btrfs with an unreadable member prints nothing', async () => {
+  const roots = fixture([mountLine(20, '0:42', '/', 'btrfs', '/dev/mapper/luks-abc')], {
+    sys: { 'class/block/dm-0/dev': '253:0\n', ...CRYPT_ROOT, ...btrfsMembers(['dm-0', 'sdb1']) },
+    dev: { 'dm-0': null, 'mapper/luks-abc': '../dm-0' },
+  })
+  expect(await checkWith(roots)).toEqual({ kind: 'cannot-check' })
+})
+
+sysfsFixtureTest('btrfs whose members sysfs cannot list prints nothing', async () => {
+  const roots = fixture([mountLine(20, '0:42', '/', 'btrfs', '/dev/mapper/luks-abc')], {
+    sys: { 'class/block/dm-0/dev': '253:0\n', ...CRYPT_ROOT },
+    dev: { 'dm-0': null, 'mapper/luks-abc': '../dm-0' },
+  })
+  expect(await checkWith(roots)).toEqual({ kind: 'cannot-check' })
+})
+
+sysfsFixtureTest('a btrfs source outside /dev is refused', async () => {
+  for (const [source, dev] of [
+    ['/dev/../outside/dm-0', {}],
+    ['/dev/mapper/escape', { 'mapper/escape': '../../outside/dm-0' }],
+  ] as const) {
+    const roots = fixture([mountLine(20, '0:42', '/', 'btrfs', source)], {
+      sys: { 'class/block/dm-0/dev': '253:0\n', ...CRYPT_ROOT, ...btrfsMembers(['dm-0']) },
+      dev,
+    })
+    // A crypt-backed device the source could reach if it were allowed out of /dev.
+    mkdirSync(join(dirname(roots.dev), 'outside'))
+    writeFileSync(join(dirname(roots.dev), 'outside', 'dm-0'), '')
+    expect(await checkWith(roots)).toEqual({ kind: 'cannot-check' })
+    await world?.cleanup()
+    world = null
+    if (fixtureRoot) rmSync(fixtureRoot, { recursive: true, force: true })
+    fixtureRoot = null
+  }
+})
+
 sysfsFixtureTest('btrfs on a plain partition is off', async () => {
   const roots = fixture([mountLine(20, '0:42', '/', 'btrfs', '/dev/sda2')], {
-    sys: { 'class/block/sda2/dev': '8:2\n', ...PLAIN_PARTITION },
+    sys: { 'class/block/sda2/dev': '8:2\n', ...PLAIN_PARTITION, ...btrfsMembers(['sda2']) },
     dev: { sda2: null },
   })
   expect(await checkWith(roots)).toEqual({ kind: 'off', advice: LUKS_ADVICE })

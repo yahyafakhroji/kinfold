@@ -127,21 +127,55 @@ function existingRealPath(path: string): string | null {
 }
 
 // btrfs reports an anonymous major-0 device per subvolume, so the real block
-// device comes from the mount source: /dev/mapper/x resolves to /dev/dm-0,
-// whose sysfs entry names its major:minor. A multi-device btrfs shows one member.
-function btrfsDevice(roots: LuksRoots, source: string): string | null {
+// device comes from the mount source: /dev/mapper/x resolves to /dev/dm-0.
+// The source names only one member of a multi-device btrfs, and data on any
+// plain member is unencrypted, so every member under /sys/fs/btrfs/<fsid>/devices
+// must be crypt-backed for the volume to count as on.
+function btrfsSourceName(roots: LuksRoots, source: string): string | null {
   if (!source.startsWith(DEV_PREFIX)) return null
+  const rest = source.slice(DEV_PREFIX.length)
+  // join() would fold ".." away and could read outside /dev.
+  if (rest.split('/').some((segment) => segment === '..')) return null
   try {
-    return blockDeviceOf(roots.sys, basename(realpathSync(join(roots.dev, source.slice(DEV_PREFIX.length)))))
+    const devRoot = realpathSync(roots.dev)
+    const resolved = realpathSync(join(roots.dev, rest))
+    if (!resolved.startsWith(`${devRoot}/`)) return null
+    return basename(resolved)
   } catch {
     return null
   }
 }
 
-function blockDeviceFor(roots: LuksRoots, entry: MountEntry): string | null {
-  if (entry.fsType === 'btrfs') return btrfsDevice(roots, entry.source)
-  // Any other major 0 has no block device to read: overlay, tmpfs, ecryptfs, zfs.
-  return entry.device.startsWith('0:') ? null : entry.device
+/** The member names of the btrfs holding `member`; null when sysfs cannot list them. */
+function btrfsMembers(sys: string, member: string): string[] | null {
+  const root = join(sys, 'fs', 'btrfs')
+  const filesystems = listDir(root)
+  if (filesystems === null) return null
+  for (const fsid of filesystems) {
+    const members = listDir(join(root, fsid, 'devices'))
+    if (members !== null && members.includes(member)) return members
+  }
+  return null
+}
+
+function btrfsCryptBacked(roots: LuksRoots, source: string): boolean | null {
+  const name = btrfsSourceName(roots, source)
+  const members = name === null ? null : btrfsMembers(roots.sys, name)
+  if (members === null) return null
+  let unknown = false
+  for (const member of members) {
+    const device = blockDeviceOf(roots.sys, member)
+    const backed = device === null ? null : isCryptBacked(roots.sys, device)
+    if (backed === false) return false
+    if (backed === null) unknown = true
+  }
+  return unknown ? null : true
+}
+
+// Any other major 0 has no block device to read: overlay, tmpfs, ecryptfs, zfs.
+function cryptBackedFor(roots: LuksRoots, entry: MountEntry): boolean | null {
+  if (entry.fsType === 'btrfs') return btrfsCryptBacked(roots, entry.source)
+  return entry.device.startsWith('0:') ? null : isCryptBacked(roots.sys, entry.device)
 }
 
 export function createLuksCheck(roots: LuksRoots): DiskEncryptionCheck {
@@ -152,9 +186,7 @@ export function createLuksCheck(roots: LuksRoots): DiskEncryptionCheck {
       const mountinfo = readTrimmed(roots.mountinfo)
       if (path === null || mountinfo === null) return { kind: 'cannot-check' }
       const entry = mountEntry(mountinfo, path)
-      const device = entry === null ? null : blockDeviceFor(roots, entry)
-      if (device === null) return { kind: 'cannot-check' }
-      const backed = isCryptBacked(roots.sys, device)
+      const backed = entry === null ? null : cryptBackedFor(roots, entry)
       if (backed === null) return { kind: 'cannot-check' }
       return backed ? { kind: 'on' } : { kind: 'off', advice: LUKS_ADVICE }
     },
