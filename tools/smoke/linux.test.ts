@@ -133,7 +133,7 @@ describe('the Linux smoke platform', () => {
   }, 30_000)
 })
 
-describe('the status check before the first conversion', () => {
+describe('the status lines and the unit check', () => {
   const statusOutput = [
     'service (systemd user service): config present; running: yes',
     'daemon /health: up on 127.0.0.1:37811 version 0.1.0 schema 9 pid 42, systemd user service',
@@ -149,7 +149,6 @@ describe('the status check before the first conversion', () => {
       calls,
       deps: {
         env: { KINFOLD_SMOKE_SERVICE: 'systemd', KINFOLD_SMOKE_KEY_STORE: 'libsecret' },
-        status: async () => { calls.push('status'); return ok(statusOutput) },
         verifyUnit: async (_world, unit) => { calls.push(`verify ${unit}`); return ok('') },
         runPty: async (_world, operation) => { calls.push(operation); return ok('') },
         ...overrides,
@@ -157,24 +156,26 @@ describe('the status check before the first conversion', () => {
     }
   }
 
-  test('checks status and the unit once, then hands every conversion to the pty run', async () => {
+  const matches = (platform: SmokePlatform, output: string): boolean[] =>
+    (platform.statusLines?.(world()) ?? []).map((line) => (typeof line === 'string' ? output.includes(line) : line.test(output)))
+
+  test('checks the unit once, then hands every conversion to the pty run', async () => {
     const { deps: d, calls } = deps()
     const platform = createLinuxPlatform(d)
     const w = world()
     await platform.runConversion?.(w, 'decrypt')
     await platform.runConversion?.(w, 'encrypt')
-    expect(calls).toEqual(['status', `verify ${w.home}/.config/systemd/user/kinfold.service`, 'decrypt', 'encrypt'])
+    expect(calls).toEqual([`verify ${w.home}/.config/systemd/user/kinfold.service`, 'decrypt', 'encrypt'])
   })
 
-  test('a missing status line stops the run before any conversion', async () => {
-    for (const missing of ['key store:', 'service (', 'LUKS']) {
+  test('the driver is given the key store, service and disk lines of status', () => {
+    const platform = createLinuxPlatform(deps().deps)
+    expect(matches(platform, statusOutput)).toEqual([true, true, true])
+    for (const [index, missing] of ['key store:', 'service (', 'LUKS'].entries()) {
       const output = statusOutput.split('\n').filter((line) => !line.includes(missing)).join('\n')
-      const { deps: d, calls } = deps({ status: async () => ({ code: 0, stdout: output, stderr: '' }) })
-      const error = await createLinuxPlatform(d).runConversion?.(world(), 'decrypt').catch((e: unknown) => e)
-      expect(error).toBeInstanceOf(SmokeError)
-      expect((error as SmokeError).step).toBe('status')
-      expect(calls).not.toContain('decrypt')
+      expect(matches(platform, output)).toEqual([0, 1, 2].map((line) => line !== index))
     }
+    expectSetupError(caught(() => createLinuxPlatform({ env: { KINFOLD_SMOKE_KEY_STORE: 'libsecret' } }).statusLines?.(world())), SERVICE_MESSAGE)
   })
 
   test('a unit systemd-analyze rejects stops the run', async () => {
@@ -196,12 +197,14 @@ describe('the status check before the first conversion', () => {
     const calls: string[] = []
     const { deps: d } = deps({
       env: { KINFOLD_SMOKE_SERVICE: 'foreground', KINFOLD_SMOKE_KEY_STORE: 'libsecret' },
-      status: async () => { calls.push('status'); return { code: 0, stdout: foregroundStatus, stderr: '' } },
       verifyUnit: async () => { calls.push('verify'); return { code: 0, stdout: '', stderr: '' } },
       runPty: async (_world, operation) => { calls.push(operation); return { code: 0, stdout: '', stderr: '' } },
     })
-    await createLinuxPlatform(d).runConversion?.(world(), 'decrypt')
-    expect(calls).toEqual(['status', 'decrypt'])
+    const platform = createLinuxPlatform(d)
+    expect(matches(platform, foregroundStatus)).toEqual([true, true, true])
+    expect(matches(platform, statusOutput)).toEqual([true, false, true])
+    await platform.runConversion?.(world(), 'decrypt')
+    expect(calls).toEqual(['decrypt'])
   })
 })
 

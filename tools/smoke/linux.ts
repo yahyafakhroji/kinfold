@@ -3,9 +3,10 @@
 // which through KINFOLD_SMOKE_KEY_STORE. A runner without a user manager falls
 // back to a hand-started daemon (KINFOLD_SMOKE_SERVICE=foreground).
 //
-// The driver has no status-line hook, so runConversion checks the Linux lines
-// of status and the installed unit once, before the first conversion, and then
-// hands every conversion to the driver's own pty run.
+// The Linux lines of status go to the driver through statusLines. The driver
+// has no hook for the installed unit, so runConversion checks it once, before
+// the first conversion, and then hands every conversion to the driver's own
+// pty run.
 
 import { posix } from 'node:path'
 import { runPty } from '../smoke'
@@ -19,7 +20,6 @@ const HEALTH_WAIT_MS = 60_000
 const HEALTH_POLL_MS = 250
 const HEALTH_REQUEST_MS = 2_000
 const STOP_WAIT_MS = 20_000
-const STATUS_TIMEOUT_MS = 180_000
 const VERIFY_TIMEOUT_MS = 60_000
 const OUTPUT_LIMIT = 4_000
 
@@ -36,8 +36,6 @@ type ForegroundStart = (world: SmokeWorld) => Promise<{ stop(): Promise<void> }>
 export interface LinuxSmokeDeps {
   /** Where the setup variables are read; default process.env. */
   env?: Readonly<Record<string, string | undefined>>
-  /** `kinfold status` in the world; default the installed program. */
-  status?: (world: SmokeWorld) => Promise<SmokeResult>
   /** `systemd-analyze --user verify <unit>`. */
   verifyUnit?: (world: SmokeWorld, unit: string) => Promise<SmokeResult>
   /** The pty conversion; default the driver's expect run. */
@@ -74,26 +72,18 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function expectedStatusLines(label: string, mode: ServiceMode): Array<{ name: string; pattern: RegExp }> {
+function expectedStatusLines(label: string, mode: ServiceMode): RegExp[] {
   const service = escapeRegExp(`service (${SERVICE_LABEL}): config `)
   return [
-    { name: 'key store', pattern: new RegExp(`^key store: ${escapeRegExp(label)} \\(recorded in key-store\\.json\\)$`, 'm') },
+    new RegExp(`^key store: ${escapeRegExp(label)} \\(recorded in key-store\\.json\\)$`, 'm'),
     mode === 'systemd'
-      ? { name: 'service', pattern: new RegExp(`^${service}present; running: yes$`, 'm') }
+      ? new RegExp(`^${service}present; running: yes$`, 'm')
       // A hand-started daemon answers /health while the unit is not running.
-      : { name: 'service', pattern: new RegExp(`^${service}\\w+; running: no$`, 'm') },
+      : new RegExp(`^${service}\\w+; running: no$`, 'm'),
     // A runner's disk is either a LUKS volume or not; a missing line means the
     // check could not read the mounts, which the smoke must notice.
-    { name: 'disk', pattern: /^(disk encryption: .+|warning: LUKS is off; .+)$/m },
+    /^(disk encryption: .+|warning: LUKS is off; .+)$/m,
   ]
-}
-
-async function checkStatus(world: SmokeWorld, label: string, mode: ServiceMode, status: NonNullable<LinuxSmokeDeps['status']>): Promise<void> {
-  const result = await status(world)
-  if (result.code !== 0) throw new SmokeError('status', `status exited ${result.code}\n${cap(result.stdout)}`)
-  for (const { name, pattern } of expectedStatusLines(label, mode)) {
-    if (!pattern.test(result.stdout)) throw new SmokeError('status', `the ${name} line did not match ${String(pattern)}\n${cap(result.stdout)}`)
-  }
 }
 
 async function checkUnit(world: SmokeWorld, verify: NonNullable<LinuxSmokeDeps['verifyUnit']>): Promise<void> {
@@ -165,7 +155,6 @@ export function createLinuxPlatform(deps: LinuxSmokeDeps = {}): SmokePlatform {
   const env = deps.env ?? process.env
   // Read once, as the module loads: setup writes it before the smoke starts.
   const mode = serviceModeOf(env.KINFOLD_SMOKE_SERVICE)
-  const status = deps.status ?? ((world: SmokeWorld) => runCommand([world.program, 'status'], world, STATUS_TIMEOUT_MS))
   const verifyUnit = deps.verifyUnit ?? ((world: SmokeWorld, unit: string) => runCommand(['systemd-analyze', '--user', 'verify', unit], world, VERIFY_TIMEOUT_MS))
   const pty = deps.runPty ?? runPty
   const checked = new WeakSet<SmokeWorld>()
@@ -192,10 +181,13 @@ export function createLinuxPlatform(deps: LinuxSmokeDeps = {}): SmokePlatform {
       if (mode === null) throw new SmokeError('setup', SERVICE_ERROR)
       return mode === 'foreground' ? startForegroundDaemon : undefined
     },
+    statusLines(_world: SmokeWorld): RegExp[] {
+      if (mode === null) throw new SmokeError('setup', SERVICE_ERROR)
+      return expectedStatusLines(platform.keyStoreLabel, mode)
+    },
     async runConversion(world: SmokeWorld, operation: Conversion): Promise<SmokeResult> {
       if (!checked.has(world)) {
         if (mode === null) throw new SmokeError('setup', SERVICE_ERROR)
-        await checkStatus(world, platform.keyStoreLabel, mode, status)
         if (mode === 'systemd') await checkUnit(world, verifyUnit)
         checked.add(world)
       }
