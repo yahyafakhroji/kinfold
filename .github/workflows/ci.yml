@@ -28,7 +28,7 @@ jobs:
           - os: macos-latest
             required: true
           - os: ubuntu-latest
-            required: false
+            required: true
           - os: windows-latest
             required: true
     steps:
@@ -89,7 +89,7 @@ jobs:
           - os: macos-latest
             required: true
           - os: ubuntu-latest
-            required: false
+            required: true
           - os: windows-latest
             required: true
     steps:
