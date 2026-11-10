@@ -46,7 +46,7 @@ async function savedRows(w: FakeWorld): Promise<{ host: string; provider: string
   return read.view.rows.map(({ host, provider, model, credentialRef }) => ({ host, provider, model, credentialRef }))
 }
 
-test('a fresh install wires both hosts, starts the LaunchAgent and saves both observers through the daemon', async () => {
+posixOnly('file modes')('a fresh install wires both hosts, starts the LaunchAgent and saves both observers through the daemon', async () => {
   const w = both()
   const paths = installPaths(w.env)
   expect(await install(w.env, YES)).toBe(EXIT_OK)
@@ -91,7 +91,7 @@ posixOnly('POSIX paths')('the plist PATH holds bun, the dirs of claude and git, 
   expect(launchdPath({ bunPath: '/opt/bun/bin/bun', pathEnv: quiet }, which)).toBe(expected)
 })
 
-test('unrelated keys and hooks survive, the backup is written once, and a re-run is byte-identical', async () => {
+posixOnly('file modes')('unrelated keys and hooks survive, the backup is written once, and a re-run is byte-identical', async () => {
   const w = both()
   const paths = installPaths(w.env)
   mkdirSync(paths.claudeDir, { recursive: true })

@@ -10,6 +10,7 @@ import { EXIT_FAILED, EXIT_OK, install } from './install'
 import { status } from './status'
 import { type FakeWorld, YES, createWorld, snapshotTree, worldSubKeyEpochs } from './test-support'
 import { uninstall } from './uninstall'
+import { posixOnly } from '../../test/platform-guards'
 
 const LEGACY = '4e'.repeat(32)
 const OTHER = '7a'.repeat(32)
@@ -64,7 +65,7 @@ test('a backup that differs from hmac-legacy stays, with the reason and the rm c
   expect(await statusOut(w)).toContain(`  warning: plain-text key backup ${old}; delete it once you no longer need to roll back (rm ${old})`)
 })
 
-test('a failed keychain read-back keeps the backup', async () => {
+posixOnly('file modes')('a failed keychain read-back keeps the backup', async () => {
   const w = oldUser()
   wrapSecurity(w, (inner) => (call) => (isLegacyRead(call.args) ? { exitCode: 36, stdout: '' } : inner(call)))
   expect(await install(w.env, YES)).toBe(EXIT_OK)
@@ -134,7 +135,7 @@ test('uninstall --remove-hmac-keys --dry-run shows restore, both deletes with th
   expect(plan).toContain(`a real run writes ${legacyPath(w)} from keychain entry hmac-legacy`)
 })
 
-test('uninstall --remove-hmac-keys restores hmac.key from hmac-legacy, deletes both entries and hmac.d; status after', async () => {
+posixOnly('file modes')('uninstall --remove-hmac-keys restores hmac.key from hmac-legacy, deletes both entries and hmac.d; status after', async () => {
   const w = await migrated()
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: false, removeHmacKeys: true })).toBe(EXIT_OK)
   expect(readFileSync(legacyPath(w), 'utf8')).toBe(LEGACY)
