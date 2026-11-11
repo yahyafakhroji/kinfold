@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { openTestDatabase } from '../sqlite/test-support'
 import { openStore } from './db'
 import { LATEST_SCHEMA_VERSION, MIGRATIONS } from './schema'
+import { embeddingInputs, vectorCounts } from './vector-store'
 
 let root: string
 beforeEach(() => {
@@ -47,6 +48,8 @@ test('migration 10 -> 11 indexes vectors by model, dims and observation, drops t
       { id: 2, model: 'm1', dims: 2 },
     ])
     expect((store.db.query('SELECT count(*) AS n FROM observations').get() as { n: number }).n).toBe(3)
+    expect(embeddingInputs(store.db, { model: 'm1', dims: 2 }, 10).map((input) => input.id)).toEqual([3])
+    expect(vectorCounts(store.db, { model: 'm1', dims: 2 })).toEqual({ indexed: 2, pending: 1 })
   } finally {
     store.db.close()
   }

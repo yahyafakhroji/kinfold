@@ -383,7 +383,7 @@ CREATE TABLE observer_safety (
 // on every indexer tick. The model-only index is a prefix of this one.
 const V11_VECTOR_SPACE_INDEX = `
 CREATE INDEX observation_vectors_by_space ON observation_vectors(model, dims, observation_id);
-DROP INDEX observation_vectors_by_model;
+DROP INDEX IF EXISTS observation_vectors_by_model;
 `
 
 /** Index i holds the migration that takes user_version from i to i + 1. */
