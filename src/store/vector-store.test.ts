@@ -3,7 +3,10 @@ import { seedObservation } from '../context/test-support'
 import { purge } from '../data-control/purge'
 import { PROJECT, T0, type TempStore, openTempStore, seedSession } from '../observer/test-support'
 import { FAKE_DIMS, fakeVector } from '../vectors/test-support'
-import { type EmbeddingInput, MAX_EMBED_CHARS, decodeVector, embeddingInputs, embeddingText, encodeVector, upsertVectors, vectorCounts } from './vector-store'
+import {
+  EMBEDDING_INPUTS_SQL, type EmbeddingInput, INDEXED_COUNT_SQL, MAX_EMBED_CHARS, PENDING_COUNT_SQL,
+  decodeVector, embeddingInputs, embeddingText, encodeVector, upsertVectors, vectorCounts,
+} from './vector-store'
 
 let temp: TempStore
 let session: number
@@ -18,6 +21,24 @@ const vectorRows = (): number => (temp.store.db.query('SELECT count(*) AS n FROM
 const space = (model: string) => ({ model, dims: FAKE_DIMS })
 const asVectors = (inputs: readonly EmbeddingInput[]) => inputs.map((input) => ({ id: input.id, contentHash: input.contentHash, vector: fakeVector(input.text) }))
 const embedAll = (model: string): number => upsertVectors(temp.store.db, model, asVectors(embeddingInputs(temp.store.db, space(model), 100)), T0)
+
+const planOf = (sql: string): string[] =>
+  (temp.store.db.query(`EXPLAIN QUERY PLAN ${sql}`).all({ model: 'm1', dims: FAKE_DIMS, limit: 16 }) as { detail: string }[]).map((row) => row.detail)
+
+test('the embedding queue and the pending count read only indexes, never every observation row and its vector row', () => {
+  // Every step that reads observations or their vectors must be a covering
+  // index, except the outer fetch of the few backlog rows by primary key.
+  const readsRows = (step: string): boolean =>
+    /^(SCAN|SEARCH) (o|observations|v|observation_vectors)\b/.test(step)
+    && !step.includes('COVERING INDEX')
+    && !/^SEARCH o USING INTEGER PRIMARY KEY/.test(step)
+  for (const sql of [EMBEDDING_INPUTS_SQL, PENDING_COUNT_SQL]) {
+    const plan = planOf(sql)
+    expect(plan.some((step) => step.includes('COVERING INDEX observation_vectors_by_space'))).toBe(true)
+    expect(plan.filter(readsRows)).toEqual([])
+  }
+  expect(planOf(INDEXED_COUNT_SQL).some((step) => step.includes('COVERING INDEX observation_vectors_by_space'))).toBe(true)
+})
 
 test('a vector survives the float32 round trip byte for byte', () => {
   const vector = Float32Array.from([0.5, -1.25, 3e-8, 0])
@@ -43,6 +64,14 @@ test('the queue is newest first, empties once embedded, and comes back for a new
   expect(embedAll('m2')).toBe(2)
   expect(vectorRows()).toBe(2)
   expect(vectorCounts(temp.store.db, space('m1'))).toEqual({ indexed: 0, pending: 2 })
+})
+
+test('a limit smaller than the backlog returns its newest rows, newest first', () => {
+  seed('first', T0)
+  const second = seed('second', T0 + 1)
+  const third = seed('third', T0 + 2)
+  expect(embeddingInputs(temp.store.db, space('m1'), 2).map((input) => input.id)).toEqual([third, second])
+  expect(vectorCounts(temp.store.db, space('m1'))).toEqual({ indexed: 0, pending: 3 })
 })
 
 test('a vector for an observation purged while it was at the embedder is not written', () => {

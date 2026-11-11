@@ -377,10 +377,19 @@ CREATE TABLE observer_safety (
 );
 `
 
+// v11: the vector backlog (which observations still need an embedding in the
+// current model and length) is read from this index alone. Without it each
+// observation cost a lookup of its vector row, whose embedding fills a page,
+// on every indexer tick. The model-only index is a prefix of this one.
+const V11_VECTOR_SPACE_INDEX = `
+CREATE INDEX observation_vectors_by_space ON observation_vectors(model, dims, observation_id);
+DROP INDEX IF EXISTS observation_vectors_by_model;
+`
+
 /** Index i holds the migration that takes user_version from i to i + 1. */
 export const MIGRATIONS: readonly string[] = [
   V1_CORE + V1_MEMORY + V1_DELIVERY, V2_OBSERVER, V3_CONTEXT, V4_DATA_CONTROL, V5_LINKS, V6_USAGE, V7_SHARED_SUMMARIES, V8_VECTORS, V9_RELATED_SERVED,
-  V10_OBSERVER_SAFETY,
+  V10_OBSERVER_SAFETY, V11_VECTOR_SPACE_INDEX,
 ]
 
 /**

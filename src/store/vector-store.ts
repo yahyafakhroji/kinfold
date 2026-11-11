@@ -67,20 +67,35 @@ export function embeddingText(row: { title: string; narrative: string; facts: st
   return text.length <= MAX_EMBED_CHARS ? text : text.slice(0, MAX_EMBED_CHARS)
 }
 
-const UNEMBEDDED = `FROM observations o LEFT JOIN observation_vectors v ON v.observation_id = o.id
-  WHERE v.observation_id IS NULL OR v.model <> $model OR v.dims <> $dims`
+/**
+ * Ids of observations with no vector in this model and length: a missing
+ * vector or one from another model or dims. Only indexes are read: a covering
+ * index of observations for the ids, and observation_vectors_by_space once for
+ * the embedded set (observation_id is the primary key, never NULL, so NOT IN
+ * is safe). Joining each observation to its vector row instead costs a page
+ * per observation, because each vector row carries its embedding, and the
+ * indexer asks every few seconds even when nothing is left to embed.
+ */
+const BACKLOG_IDS = `SELECT o.id FROM observations o WHERE o.id NOT IN (
+  SELECT observation_id FROM observation_vectors WHERE model = $model AND dims = $dims)`
+
+// `+o.id` keeps SQLite from walking the observations table in id order to
+// meet the ORDER BY: the backlog is sorted in a temp tree, and it is small.
+export const EMBEDDING_INPUTS_SQL = `SELECT o.id, o.content_hash AS contentHash, o.title, o.narrative, o.facts
+  FROM observations o WHERE o.id IN (${BACKLOG_IDS} ORDER BY +o.id DESC LIMIT $limit) ORDER BY o.id DESC`
+export const INDEXED_COUNT_SQL = 'SELECT count(*) AS n FROM observation_vectors WHERE model = $model AND dims = $dims'
+export const PENDING_COUNT_SQL = `SELECT count(*) AS n FROM (${BACKLOG_IDS})`
 
 /** Newest first, so what an agent just learned is searchable soonest. */
 export function embeddingInputs(db: Database, space: VectorSpace, limit: number): EmbeddingInput[] {
-  const rows = db.query<{ id: number; contentHash: string; title: string; narrative: string; facts: string }, Record<string, string | number>>(
-    `SELECT o.id, o.content_hash AS contentHash, o.title, o.narrative, o.facts ${UNEMBEDDED} ORDER BY o.id DESC LIMIT $limit`,
-  ).all({ ...space, limit })
+  const rows = db.query<{ id: number; contentHash: string; title: string; narrative: string; facts: string }, Record<string, string | number>>(EMBEDDING_INPUTS_SQL)
+    .all({ ...space, limit })
   return rows.map((row) => ({ id: row.id, contentHash: row.contentHash, text: embeddingText(row) }))
 }
 
 export function vectorCounts(db: Database, space: VectorSpace): VectorCounts {
-  const indexed = db.query<{ n: number }, Record<string, string | number>>('SELECT count(*) AS n FROM observation_vectors WHERE model = $model AND dims = $dims').get({ ...space })?.n ?? 0
-  const pending = db.query<{ n: number }, Record<string, string | number>>(`SELECT count(*) AS n ${UNEMBEDDED}`).get({ ...space })?.n ?? 0
+  const indexed = db.query<{ n: number }, Record<string, string | number>>(INDEXED_COUNT_SQL).get({ ...space })?.n ?? 0
+  const pending = db.query<{ n: number }, Record<string, string | number>>(PENDING_COUNT_SQL).get({ ...space })?.n ?? 0
   return { indexed, pending }
 }
 
