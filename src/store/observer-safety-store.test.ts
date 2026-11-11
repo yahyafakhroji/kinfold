@@ -34,9 +34,9 @@ test('migration 9 -> 10 adds observer_safety and moves user_version forward to t
 
   const store = openStore(dataDir)
   try {
-    expect(LATEST_SCHEMA_VERSION).toBe(10)
+    expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(10)
     expect(store.schemaVersion).toBe(LATEST_SCHEMA_VERSION)
-    expect(schemaVersionOf(store.db)).toBe(10)
+    expect(schemaVersionOf(store.db)).toBe(LATEST_SCHEMA_VERSION)
     const columns = store.db.query<{ name: string }, []>("SELECT name FROM pragma_table_info('observer_safety')").all().map((row) => row.name)
     expect(columns).toEqual(['provider', 'cli_version', 'binary_path', 'status', 'error_class', 'checked_at'])
     expect(store.db.query('SELECT key FROM projects').all()).toEqual([{ key: 'org/repo' }])
@@ -47,7 +47,7 @@ test('migration 9 -> 10 adds observer_safety and moves user_version forward to t
   // Opening again does not re-run or roll back anything.
   const again = openStore(dataDir)
   try {
-    expect(schemaVersionOf(again.db)).toBe(10)
+    expect(schemaVersionOf(again.db)).toBe(LATEST_SCHEMA_VERSION)
   } finally {
     again.db.close()
   }
