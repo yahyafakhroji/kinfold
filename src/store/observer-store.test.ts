@@ -93,10 +93,14 @@ test('queue stats count pending and due failed events per session, oldest first,
   set(seedEvent(temp.store, waiting, { kind: 'user_prompt', at: T0 }), `observer_state = 'failed', observer_attempts = 1, observer_retry_at = ${T0 + 500}`)
   set(seedEvent(temp.store, exhausted, { kind: 'user_prompt', at: T0 }), `observer_state = 'failed', observer_attempts = ${MAX_OBSERVER_ATTEMPTS}, observer_retry_at = ${T0}`)
   set(seedEvent(temp.store, done, { kind: 'turn_end', at: T0 }), "observer_state = 'done'")
+  const mixed = seedSession(temp.store, 'claude-code', 'mixed', T0)
+  seedEvent(temp.store, mixed, { kind: 'user_prompt', at: T0 + 40 })
+  set(seedEvent(temp.store, mixed, { kind: 'turn_end', at: T0 + 30 }), "observer_state = 'failed', observer_attempts = 1, observer_retry_at = NULL")
   const stats = queueStats(temp.store.db, T0 + 100)
   expect(stats.map(({ sessionId, retryable, hasBoundary }) => ({ sessionId, retryable, hasBoundary }))).toEqual([
     { sessionId: due, retryable: 1, hasBoundary: false },
     { sessionId: pending, retryable: 2, hasBoundary: true },
+    { sessionId: mixed, retryable: 2, hasBoundary: true },
   ])
 })
 
