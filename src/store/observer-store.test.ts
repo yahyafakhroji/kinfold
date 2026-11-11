@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { type TempStore, T0, openTempStore, seedEvent, seedSession, stateCounts } from '../observer/test-support'
 import { openTestDatabase } from '../sqlite/test-support'
 import { openStore, schemaVersionOf } from './db'
-import { endIdleSessions, markProcessing, recoverInterrupted, startRun, upsertSummary } from './observer-store'
+import { MAX_OBSERVER_ATTEMPTS, QUEUE_STATS_SQL, endIdleSessions, markProcessing, queueStats, recoverInterrupted, startRun, upsertSummary } from './observer-store'
 import { LATEST_SCHEMA_VERSION, MIGRATIONS } from './schema'
 
 let root: string
@@ -78,6 +78,38 @@ test('an idle session with no ended_at gets ended_at at its last event; ended or
   expect(endIdleSessions(temp.store.db, T0 + 500)).toEqual([idle])
   const endedAt = (id: number) => (temp.store.db.query(`SELECT ended_at FROM sessions WHERE id = ${id}`).get() as { ended_at: number | null }).ended_at
   expect([endedAt(idle), endedAt(recent), endedAt(ended)]).toEqual([T0, null, T0 - 1])
+})
+
+test('queue stats count pending and due failed events per session, oldest first, and skip the rest', () => {
+  const pending = seedSession(temp.store, 'claude-code', 'pending', T0)
+  const due = seedSession(temp.store, 'claude-code', 'due', T0)
+  const waiting = seedSession(temp.store, 'claude-code', 'waiting', T0)
+  const exhausted = seedSession(temp.store, 'claude-code', 'exhausted', T0)
+  const done = seedSession(temp.store, 'claude-code', 'done', T0)
+  seedEvent(temp.store, pending, { kind: 'user_prompt', at: T0 + 20 })
+  seedEvent(temp.store, pending, { kind: 'turn_end', at: T0 + 21 })
+  const set = (id: string, sql: string) => temp.store.db.run(`UPDATE events SET ${sql} WHERE event_id = '${id}'`)
+  set(seedEvent(temp.store, due, { kind: 'user_prompt', at: T0 + 10 }), `observer_state = 'failed', observer_attempts = 1, observer_retry_at = ${T0 + 50}`)
+  set(seedEvent(temp.store, waiting, { kind: 'user_prompt', at: T0 }), `observer_state = 'failed', observer_attempts = 1, observer_retry_at = ${T0 + 500}`)
+  set(seedEvent(temp.store, exhausted, { kind: 'user_prompt', at: T0 }), `observer_state = 'failed', observer_attempts = ${MAX_OBSERVER_ATTEMPTS}, observer_retry_at = ${T0}`)
+  set(seedEvent(temp.store, done, { kind: 'turn_end', at: T0 }), "observer_state = 'done'")
+  const mixed = seedSession(temp.store, 'claude-code', 'mixed', T0)
+  seedEvent(temp.store, mixed, { kind: 'user_prompt', at: T0 + 40 })
+  set(seedEvent(temp.store, mixed, { kind: 'turn_end', at: T0 + 30 }), "observer_state = 'failed', observer_attempts = 1, observer_retry_at = NULL")
+  const stats = queueStats(temp.store.db, T0 + 100)
+  expect(stats.map(({ sessionId, retryable, hasBoundary }) => ({ sessionId, retryable, hasBoundary }))).toEqual([
+    { sessionId: due, retryable: 1, hasBoundary: false },
+    { sessionId: pending, retryable: 2, hasBoundary: true },
+    { sessionId: mixed, retryable: 2, hasBoundary: true },
+  ])
+})
+
+test('queue stats read pending and failed events through their partial indexes, never every event of every session', () => {
+  const plan = (temp.store.db.query(`EXPLAIN QUERY PLAN ${QUEUE_STATS_SQL}`).all({ now: T0, maxAttempts: MAX_OBSERVER_ATTEMPTS }) as { detail: string }[])
+    .map((row) => row.detail)
+  expect(plan.some((step) => step.includes('events_pending'))).toBe(true)
+  expect(plan.some((step) => step.includes('events_failed'))).toBe(true)
+  expect(plan.some((step) => step.includes('events_by_session'))).toBe(false)
 })
 
 const summaryRow = (sessionId: number) => ({ sessionId, promptNumber: 2, request: 'fix the parser', learned: 'quotes dropped', completed: 'patched', nextSteps: 'add a test', occurredAt: 10, updatedAt: 10 })

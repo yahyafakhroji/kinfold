@@ -66,8 +66,10 @@ export interface SummaryRow {
   updatedAt: number
 }
 
-const RETRYABLE = `(e.observer_state = 'pending'
-  OR (e.observer_state = 'failed' AND e.observer_attempts < $maxAttempts AND coalesce(e.observer_retry_at, 0) <= $now))`
+const failedAndDue = (alias: string): string =>
+  `${alias}observer_state = 'failed' AND ${alias}observer_attempts < $maxAttempts AND coalesce(${alias}observer_retry_at, 0) <= $now`
+
+const RETRYABLE = `(e.observer_state = 'pending' OR (${failedAndDue('e.')}))`
 
 export function getObserverSession(db: Database, sessionId: number): ObserverSession | null {
   return db.query<ObserverSession, { sessionId: number }>(
@@ -86,15 +88,26 @@ export function retryableEvents(db: Database, sessionId: number, now: number, li
   ).all({ sessionId, now, limit, maxAttempts: MAX_OBSERVER_ATTEMPTS })
 }
 
-export function queueStats(db: Database, now: number): QueueStats[] {
-  return db.query<Omit<QueueStats, 'hasBoundary'> & { hasBoundary: number }, Record<string, number>>(
-    `SELECT s.id AS sessionId, count(*) AS retryable,
+/**
+ * The same rows as filtering events by RETRYABLE, found through the two
+ * partial indexes. With the OR in one WHERE, SQLite walks every event of every
+ * session, and the observer columns sit after the payload, so each row costs
+ * its overflow pages: on a large encrypted store that held the daemon's only
+ * thread for seconds on every observer tick.
+ */
+export const QUEUE_STATS_SQL = `SELECT s.id AS sessionId, count(*) AS retryable,
             max(e.kind IN ('turn_end', 'session_end')) AS hasBoundary,
             s.last_event_at AS lastEventAt, s.ended_at AS endedAt
-     FROM events e JOIN sessions s ON s.id = e.session_id
-     WHERE ${RETRYABLE}
-     GROUP BY s.id ORDER BY min(e.occurred_at)`,
-  ).all({ now, maxAttempts: MAX_OBSERVER_ATTEMPTS }).map((row) => ({ ...row, hasBoundary: row.hasBoundary === 1 }))
+     FROM (SELECT rowid AS id FROM events WHERE observer_state = 'pending'
+           UNION ALL
+           SELECT rowid AS id FROM events WHERE ${failedAndDue('')}) r
+     JOIN events e ON e.rowid = r.id
+     JOIN sessions s ON s.id = e.session_id
+     GROUP BY s.id ORDER BY min(e.occurred_at)`
+
+export function queueStats(db: Database, now: number): QueueStats[] {
+  return db.query<Omit<QueueStats, 'hasBoundary'> & { hasBoundary: number }, Record<string, number>>(QUEUE_STATS_SQL)
+    .all({ now, maxAttempts: MAX_OBSERVER_ATTEMPTS }).map((row) => ({ ...row, hasBoundary: row.hasBoundary === 1 }))
 }
 
 function setStates(db: Database, eventIds: readonly string[], sql: string, params: Record<string, number> = {}): void {
