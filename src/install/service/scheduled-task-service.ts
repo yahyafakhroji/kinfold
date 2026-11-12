@@ -16,6 +16,7 @@ import type { CommandResult, InstallEnv } from '../env'
 import { HEALTH_WAIT_MS } from '../plan'
 import { windowsJoin, windowsSystemTool } from '../windows-system-path'
 import type { ServiceControl, ServiceStep } from './control'
+import { SERVICE_PATH_FILE, servicePathContent, servicePathFor } from './service-path'
 
 export const TASK_NAME = 'KinfoldDaemon'
 /** In <LOCALAPPDATA>\Kinfold: outside the data folder, so WSL can find it without knowing that folder. */
@@ -382,6 +383,13 @@ export class ScheduledTaskService implements ServiceControl {
     const entry = mode.kind === 'program' ? { program: mode.binPath } : { program: mode.bunPath, script: join(mode.projectRoot, CHECKOUT_CLI) }
     const logFile = windowsJoin(this.env.dataDir, 'logs', 'daemon.log')
     return taskXml({ user, ...entry, dataDir: this.env.dataDir, port, logFile })
+  }
+
+  sidecar(): { path: string; content: string } {
+    const mode = this.env.mode
+    const program = mode.kind === 'program' ? mode.binPath : mode.bunPath
+    // join, as readServicePath spells it, so the daemon reads the file install wrote on every OS the tests run on.
+    return { path: join(this.env.dataDir, SERVICE_PATH_FILE), content: servicePathContent(servicePathFor({ bunPath: program, pathEnv: this.env.pathEnv })) }
   }
 
   describe(step: ServiceStep): string {

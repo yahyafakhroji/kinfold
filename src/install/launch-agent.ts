@@ -29,13 +29,13 @@ const str = (value: string): string => `<string>${escapeXml(value)}</string>`
  * `node` follows `codex` because npm's codex is `#!/usr/bin/env node`; it is
  * added only when codex is found. The order here is the PATH order.
  */
-const DAEMON_TOOLS = ['claude', 'git', 'codex', 'opencode'] as const
+export const DAEMON_TOOLS = ['claude', 'git', 'codex', 'opencode'] as const
 const NEEDS_NODE: ReadonlySet<string> = new Set(['codex'])
 const SYSTEM_DIRS = ['/usr/bin', '/bin', '/usr/sbin', '/sbin'] as const
 
 export type Which = (command: string, path: string) => string | null
 
-const bunWhich: Which = (command, path) => Bun.which(command, { PATH: path })
+export const bunWhich: Which = (command, path) => Bun.which(command, { PATH: path })
 
 /**
  * The launcher's directory, the directories holding the daemon's tools on the

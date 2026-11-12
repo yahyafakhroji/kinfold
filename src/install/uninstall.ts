@@ -49,7 +49,9 @@ async function serviceActions(env: InstallEnv): Promise<Action[]> {
   const unload: Action[] = present ? [{ kind: 'service', step: 'stop', description: service.describe('stop') }] : []
   const path = service.configPath()
   const remove: Action[] = path !== null && existsSync(path) ? [{ kind: 'remove', path, summary: `the ${service.label}` }] : []
-  return [...unload, ...remove]
+  const sidecar = service.sidecar?.()?.path ?? null
+  const removeSidecar: Action[] = sidecar !== null && existsSync(sidecar) ? [{ kind: 'remove', path: sidecar, summary: `the ${service.label}'s PATH file` }] : []
+  return [...unload, ...remove, ...removeSidecar]
 }
 
 /** The program and its libraries are the install's own files; the rest of the data folder is the user's. */

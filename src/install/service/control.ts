@@ -40,6 +40,12 @@ export interface ServiceControl {
   configContent(port: number): string | null
   /** How install writes that file; absent means UTF-8. */
   readonly configEncoding?: TextEncoding
+  /**
+   * A second file the daemon reads at start, written and removed with the
+   * config; a change to it restarts the daemon like a config change. Only the
+   * scheduled task has one, its PATH, since task XML carries no environment.
+   */
+  sidecar?(): { path: string; content: string } | null
   /** The dry-run line for a step: the launchctl argv on macOS. */
   describe(step: ServiceStep): string
   /** Why install cannot set the service up here, for the manual-start line; null when it can. */

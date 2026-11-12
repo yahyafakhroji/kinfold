@@ -80,7 +80,7 @@ describe('windows smoke platform', () => {
 
   test('setup runs every Windows live test with its flag', () => {
     const script = readFileSync(RUNNER_SCRIPT, 'utf8')
-    for (const flag of ['KINFOLD_TEST_CREDENTIAL_MANAGER=1', 'KINFOLD_TEST_WINDOWS_DISK=1', 'KINFOLD_TEST_WINDOWS_ACL=1', 'KINFOLD_TEST_WINDOWS_TASK=1']) {
+    for (const flag of ['KINFOLD_TEST_CREDENTIAL_MANAGER=1', 'KINFOLD_TEST_WINDOWS_DISK=1', 'KINFOLD_TEST_WINDOWS_ACL=1', 'KINFOLD_TEST_WINDOWS_TASK=1', 'KINFOLD_TEST_WINDOWS_SHIM=1']) {
       expect(script).toContain(flag)
     }
     for (const file of [
@@ -88,6 +88,7 @@ describe('windows smoke platform', () => {
       './src/install/disk/bitlocker.live.test.ts',
       './src/install/access/windows-acl.live.test.ts',
       './src/install/service/scheduled-task-service.live.test.ts',
+      './src/observer/runners/windows-shim.live.test.ts',
     ]) {
       expect(script).toContain(file)
       expect(existsSync(join(import.meta.dir, '..', '..', file))).toBe(true)

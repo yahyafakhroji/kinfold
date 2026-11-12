@@ -11,6 +11,7 @@ import type { CommandRequest, CommandResult, InstallEnv } from '../env'
 import { readTextOrNull } from '../files'
 import { EXIT_OK, install, serviceActions } from '../install'
 import { uninstall } from '../uninstall'
+import { SERVICE_PATH_FILE, readServicePath } from './service-path'
 import { HEALTH_WAIT_MS, applyAction } from '../plan'
 import { status } from '../status'
 import { BUN, type FakeWorld, YES, createWorld } from '../test-support'
@@ -418,6 +419,32 @@ test('install writes the task file as UTF-16LE with a BOM, and the service reads
   expect(service.configuredDataDir()).toBe(w.dataDir)
   expect(service.configuredPort()).toBe(40000)
   expect(serviceActions(w.env, service, situation, false, false, 40000).some((action) => action.kind === 'write')).toBe(true)
+})
+
+test('install writes service-path.json with the task, a changed PATH restarts the daemon, and uninstall removes it', async () => {
+  const w = windowsWorld()
+  const service = new ScheduledTaskService(w.env)
+  const sidecarPath = join(w.dataDir, SERVICE_PATH_FILE)
+  const down = { health: { up: false, reason: 'down' } as const, loaded: false, pid: null, port: 37811, legacyLoaded: false, foreign: false }
+  const first = serviceActions(w.env, service, down, false, false, 37811)
+  const writes = first.filter((action) => action.kind === 'write')
+  expect(writes.map((action) => action.kind === 'write' && action.path)).toContain(sidecarPath)
+  for (const action of first.filter((action) => action.kind === 'mkdir' || action.kind === 'write')) await applyAction(w.env, action)
+  expect(readServicePath(w.dataDir)).toBe(JSON.parse(service.sidecar().content).path)
+
+  // The same PATH again: nothing to write, and a loaded, answering daemon keeps running.
+  const up = { ...down, health: { up: true, version: '0.1.0', schemaVersion: 11, hmacMode: null } as const, loaded: true }
+  expect(serviceActions(w.env, service, up, false, false, 37811).map((action) => action.kind)).toEqual(['wait-health'])
+
+  // A PATH that changed since the last install is written and restarts the daemon, which reads it only at start.
+  writeFileSync(sidecarPath, `${JSON.stringify({ path: 'C:\\old' })}\n`)
+  const changed = serviceActions(w.env, service, up, false, false, 37811)
+  expect(changed.some((action) => action.kind === 'write' && action.path === sidecarPath)).toBe(true)
+  expect(changed.filter((action) => action.kind === 'service').map((action) => action.kind === 'service' && action.step)).toEqual(['stop', 'start'])
+
+  const runner = schtasksRunner({}, READY)
+  expect(await uninstall({ ...w.env, fetch: healthFetch(null), run: runner.run }, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
+  expect(readTextOrNull(sidecarPath)).toBeNull()
 })
 
 test('the install plan writes the task file and starts the task', async () => {

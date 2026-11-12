@@ -202,7 +202,11 @@ export function serviceActions(env: InstallEnv, service: ServiceControl | null, 
   }
   const path = service.configPath()
   const content = service.configContent(port)
-  const change = path === null || content === null ? null : describeTextChange(readTextOrNull(path), content)
+  const configChange = path === null || content === null ? null : describeTextChange(readTextOrNull(path), content)
+  const sidecar = service.sidecar?.() ?? null
+  const sidecarChange = sidecar === null ? null : describeTextChange(readTextOrNull(sidecar.path), sidecar.content)
+  // The daemon reads the sidecar only at start, so a changed one restarts it like a changed config.
+  const change = configChange ?? sidecarChange
   const file = path?.endsWith('.plist') === true ? 'plist' : 'config'
   if (change === null && situation.loaded && !restart) {
     if (situation.health.up) {
@@ -212,9 +216,12 @@ export function serviceActions(env: InstallEnv, service: ServiceControl | null, 
     env.out(`${service.label}: loaded with an unchanged ${file} but the daemon is not answering; restarting it`)
     return [serviceStep(service, 'stop'), serviceStep(service, 'start'), { kind: 'wait-health' }]
   }
-  const write: Action[] = path === null || content === null || change === null ? [] : [
-    ...mkdirIfMissing(dirname(path), DIR_MODE),
-    { kind: 'write', path, content, mode: FILE_MODE, summary: change, ...(service.configEncoding !== undefined ? { encoding: service.configEncoding } : {}) },
+  const write: Action[] = [
+    ...(path === null || content === null || configChange === null ? [] : [
+      ...mkdirIfMissing(dirname(path), DIR_MODE),
+      { kind: 'write', path, content, mode: FILE_MODE, summary: configChange, ...(service.configEncoding !== undefined ? { encoding: service.configEncoding } : {}) } as const,
+    ]),
+    ...(sidecar === null || sidecarChange === null ? [] : [{ kind: 'write', path: sidecar.path, content: sidecar.content, mode: FILE_MODE, summary: sidecarChange } as const]),
   ]
   const wait: Action[] = situation.foreign && takeover ? [{ kind: 'wait-takeover', pid: situation.pid, port: situation.port }] : []
   let load: Action[] = []

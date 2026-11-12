@@ -25,6 +25,7 @@ import {
   type RunnerUsage,
   toObserverError,
 } from '../types'
+import { withCmdShims } from './windows-shim'
 import { DEFAULT_CLI_TIMEOUT_MS, type SpawnFn, type SpawnRequest, type SpawnResult, ensureObserverDir, spawnProcess } from './claude-cli'
 
 export type Semver = readonly [number, number, number]
@@ -146,6 +147,8 @@ async function spawnStarted(spawn: SpawnFn, request: SpawnRequest, label: string
   try {
     return await spawn(request)
   } catch (error: unknown) {
+    // A refusal from the spawn itself (an unresolvable .cmd) already says what is wrong.
+    if (error instanceof ObserverError) throw error
     const code = errorCode(error, 'spawn failed')
     throw new ObserverError(code === 'ENOENT' ? 'cli_missing' : 'internal', `${label} could not start (${code})`)
   }
@@ -238,7 +241,8 @@ async function inRunDir<T>(
 }
 
 export function createCliObserverRunner(adapter: CliAdapter, options: CliRunnerOptions): CliObserverRunner {
-  const rawSpawn = options.spawn ?? spawnProcess
+  // An npm .cmd shim runs through its target, never cmd.exe, so no argument passes through cmd's parser.
+  const rawSpawn = withCmdShims(options.spawn ?? spawnProcess)
   // Every spawn, the adapter's own included, gets the observer flags last.
   const spawn: SpawnFn = (request) => rawSpawn({ ...request, env: withObserverFlags(request.env) })
   const which = options.which ?? ((command: string, path: string) => Bun.which(command, { PATH: path }))
