@@ -17,6 +17,8 @@ import { closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, open
 import { dirname } from 'node:path'
 import { parsePort, startDaemon } from './daemon'
 import { SHUTDOWN_SIGNALS, parseDaemonArgs } from './daemon-args'
+import { applyServicePath } from '../install/service/service-path'
+import { currentPlatform } from '../platform/platform'
 import { logLine } from './log-line'
 import { parseIdleMs, parseMaxWaitMs } from './observer-scheduler'
 
@@ -138,6 +140,8 @@ export async function runDaemon(argv: readonly string[]): Promise<void> {
     }
     for (const line of deprecationLines(process.env)) sink(logLine(line))
     const dataDir = resolveDataDir()
+    // Before anything spawns an observer: the scheduled task gave this process the registry PATH only.
+    applyServicePath(dataDir, process.env, currentPlatform().os)
     const { credentials, dbKeys } = daemonSecrets(dataDir, processKeyStoreDeps(dataDir))
     const runnerDeps: RunnerDeps = { dataDir, credentials }
     daemon = startDaemon({
