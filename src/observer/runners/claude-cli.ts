@@ -10,6 +10,7 @@ import { isRecord } from '../../contract/event'
 import { DATA_DIR_MODE } from '../../store/data-dir'
 import { LEGACY_OBSERVER_ENV_FLAG, OBSERVER_ENV_FLAG } from '../env'
 import { ObserverError, type ObserverPrompt, type ObserverRunner, type RunnerResult } from '../types'
+import { withCmdShims } from './windows-shim'
 
 export interface SpawnRequest {
   cmd: readonly string[]
@@ -126,7 +127,8 @@ export function parseCliResult(stdout: string, configuredModel: string): RunnerR
 }
 
 export function createClaudeCliRunner(options: ClaudeCliOptions): ObserverRunner {
-  const spawn = options.spawn ?? spawnProcess
+  // An npm claude.cmd runs through its node script, never cmd.exe, so the system prompt is never parsed by a shell.
+  const spawn = withCmdShims(options.spawn ?? spawnProcess)
   const which = options.which ?? ((command: string, path: string) => Bun.which(command, { PATH: path }))
   const env = observerEnv(options.parentEnv ?? process.env)
 
@@ -144,6 +146,7 @@ export function createClaudeCliRunner(options: ClaudeCliOptions): ObserverRunner
     try {
       result = await spawn(request)
     } catch (error: unknown) {
+      if (error instanceof ObserverError) throw error
       const code = isRecord(error) && typeof error.code === 'string' ? error.code : 'spawn failed'
       throw new ObserverError(code === 'ENOENT' ? 'cli_missing' : 'internal', `claude could not start (${code})`)
     }
