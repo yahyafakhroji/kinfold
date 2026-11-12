@@ -18,8 +18,9 @@ const VEC0 = readEnv(process.env, 'TEST_VEC0')
 
 let opened: VectorQueries[] = []
 const roots: string[] = []
-afterEach(() => {
-  for (const queries of opened) queries.close()
+afterEach(async () => {
+  // A worker still holding memory.db keeps Windows from deleting the folder, so each close is awaited first.
+  await Promise.all(opened.map((queries) => queries.close()))
   opened = []
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
@@ -132,7 +133,7 @@ test('a worker that stops fails its query and every later one with a reason', as
 test('after a worker stops, searches move to the daemon connection and the move is logged once', async () => {
   const lines: string[] = []
   const inlineHits: VectorHit[] = [{ id: 1, distance: 0.5 }]
-  const inline: VectorQueries = { nearest: async () => inlineHits, distances: async () => [], exclusive: runNow, close: () => {} }
+  const inline: VectorQueries = { nearest: async () => inlineHits, distances: async () => [], exclusive: runNow, close: async () => {} }
   const queries = workerOrInline(startFake('crash'), inline, (line) => lines.push(line))
   opened.push(queries)
   expect(await queries.nearest(NEAREST)).toEqual(inlineHits)
@@ -142,7 +143,7 @@ test('after a worker stops, searches move to the daemon connection and the move 
 
 test('a worker that cannot start leaves searches on the daemon connection', async () => {
   const lines: string[] = []
-  const inline: VectorQueries = { nearest: async () => [{ id: 2, distance: 0.1 }], distances: async () => [], exclusive: runNow, close: () => {} }
+  const inline: VectorQueries = { nearest: async () => [{ id: 2, distance: 0.1 }], distances: async () => [], exclusive: runNow, close: async () => {} }
   const queries = workerOrInline(startFake('fail-start'), inline, (line) => lines.push(line))
   expect(await queries.nearest(NEAREST)).toEqual([{ id: 2, distance: 0.1 }])
   expect(lines).toEqual(['vectors search worker off (cannot open the store); searching on the daemon connection'])

@@ -45,7 +45,8 @@ export interface VectorQueries {
    * seconds.
    */
   exclusive: Exclusive
-  close(): void
+  /** Settles once the worker has closed its connection and ended; the same promise on every call. */
+  close(): Promise<void>
 }
 
 /** The same reads on a connection the caller owns, on the caller's thread. */
@@ -54,7 +55,7 @@ export function inlineVectorQueries(db: Database): VectorQueries {
     nearest: async (query) => nearestObservations(db, query),
     distances: async (query) => distancesFor(db, query),
     exclusive: runNow,
-    close: () => {},
+    close: async () => {},
   }
 }
 
@@ -90,7 +91,7 @@ export function workerOrInline(starting: Promise<VectorWorkerStart>, inline: Vec
     // Every read in flight when the worker stopped falls back; only the first one logs and closes it.
     if (current !== inline) {
       log(`vectors ${error.message}; searching on the daemon connection`)
-      current?.close()
+      void current?.close()
       current = inline
     }
     return inline
@@ -103,15 +104,14 @@ export function workerOrInline(starting: Promise<VectorWorkerStart>, inline: Vec
       return run(onStopped(error))
     }
   }
-  let closed = false
+  let closing: Promise<void> | null = null
   return {
     nearest: (query, giveUpMs) => read((queries) => queries.nearest(query, giveUpMs)),
     distances: (query, giveUpMs) => read((queries) => queries.distances(query, giveUpMs)),
     exclusive: async (fn) => (current ?? (await ready)).exclusive(fn),
     close: () => {
-      if (closed) return
-      closed = true
-      void ready.then((queries) => queries.close())
+      closing ??= ready.then((queries) => queries.close())
+      return closing
     },
   }
 }
@@ -139,6 +139,7 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
   let started: ((reply: WorkerReply) => void) | null = null
   let closed: (() => void) | null = null
   let closing = false
+  let closeDone: Promise<void> | null = null
   // Reads posted to the worker and not yet answered by it, including ones the caller stopped waiting for.
   let inWorker = 0
   let idleWaiters: (() => void)[] = []
@@ -265,21 +266,26 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
       distances: (query, giveUpMs) => ask({ op: 'distances', query }, giveUpMs),
       exclusive,
       close: () => {
-        if (closing) return
+        if (closeDone !== null) return closeDone
         closing = true
-        if (stopped !== null) {
-          worker.terminate()
-          return
-        }
-        stop('the search worker was closed')
-        // The worker closes its connection first; terminate alone would leave the file handle open.
-        const timer = setTimeout(() => closed?.(), CLOSE_WAIT_MS)
-        closed = () => {
-          clearTimeout(timer)
-          closed = null
-          worker.terminate()
-        }
-        worker.postMessage({ kind: 'close' })
+        closeDone = new Promise<void>((resolve) => {
+          if (stopped !== null) {
+            worker.terminate()
+            resolve()
+            return
+          }
+          stop('the search worker was closed')
+          // The worker closes its connection first: terminate alone leaves the file open, and Windows cannot delete it.
+          const timer = setTimeout(() => closed?.(), CLOSE_WAIT_MS)
+          closed = () => {
+            clearTimeout(timer)
+            closed = null
+            worker.terminate()
+            resolve()
+          }
+          worker.postMessage({ kind: 'close' })
+        })
+        return closeDone
       },
     },
   }

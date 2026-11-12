@@ -390,7 +390,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     await vectors.indexer?.whenIdle()
     removeOwnInfoFile(infoPath)
     reads.close()
-    vectors.queries.close()
+    // Before the store closes: a retention tick queued behind the worker would otherwise run on a closed db.
+    await vectors.queries.close()
     store.db.close()
   }
   return { port: server.port, dataDir, scheduler, observer, hmacKeys, vectors: vectors.indexer, stop }
