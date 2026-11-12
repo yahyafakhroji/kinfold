@@ -22,6 +22,13 @@ export interface StoredVector {
   id: number
   contentHash: string
   vector: Float32Array
+  /**
+   * The text the vector was embedded from (embeddingText). When set, the row
+   * is written only if the observation still reads this way: a redaction
+   * keeps content_hash, so the hash alone would let a vector of the leaked
+   * text, embedded while the redaction landed, back in.
+   */
+  text?: string
 }
 
 /** The embedder a row must come from to count: same model, same length. */
@@ -113,7 +120,13 @@ export function upsertVectors(db: Database, model: string, vectors: readonly Sto
      ON CONFLICT (observation_id) DO UPDATE SET model = excluded.model, dims = excluded.dims,
        embedding = excluded.embedding, created_at = excluded.created_at`,
   )
-  return db.transaction(() => vectors.reduce((written, { id, contentHash, vector }) => {
+  const current = db.query<{ title: string; narrative: string; facts: string }, { id: number }>('SELECT title, narrative, facts FROM observations WHERE id = $id')
+  return db.transaction(() => vectors.reduce((written, { id, contentHash, vector, text }) => {
+    if (text !== undefined) {
+      const row = current.get({ id })
+      // Changed since it was read (redacted): skipped, so the row stays in the backlog and is embedded again.
+      if (row === null || embeddingText(row) !== text) return written
+    }
     const result = statement.run({ id, contentHash, model, dims: vector.length, embedding: encodeVector(vector), now })
     return written + result.changes
   }, 0))()

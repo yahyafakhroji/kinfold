@@ -106,6 +106,24 @@ test('resolve redact on an observation drops its vector, and the indexer re-embe
   expect(again!.text).not.toContain(FRAGMENT)
 })
 
+test('a vector embedded from the old text while a redaction lands is not written back', () => {
+  const leaky = seedObservation(temp.store, { sessionId: session, projectKey: 'org/repo', host: 'claude-code', title: `Racing ${FRAGMENT} leak`, at: T0 })
+  const space = { model: 'm', dims: 4 }
+  // The indexer reads the leaked text, then waits on the embedder ...
+  const [inFlight] = embeddingInputs(temp.store.db, space, 10)
+  // ... while the finding is redacted.
+  scanBatch(temp.store.db, options)
+  const [finding] = listFindings(temp.store.db, { action: 'pending', limit: 10 })
+  expect(resolveFinding(temp.store.db, finding!.id, 'redact', options).ok).toBe(true)
+  const written = upsertVectors(temp.store.db, 'm', [{ id: leaky, contentHash: inFlight!.contentHash, text: inFlight!.text, vector: Float32Array.from([1, 0, 0, 0]) }], T0)
+  expect(written).toBe(0)
+  expect(all(`SELECT observation_id FROM observation_vectors WHERE observation_id = ${leaky}`)).toEqual([])
+  // The row stays in the backlog, with the redacted text.
+  const [next] = embeddingInputs(temp.store.db, space, 10)
+  expect(next!.id).toBe(leaky)
+  expect(next!.text).not.toContain(FRAGMENT)
+})
+
 test('resolve redact on an observation updates FTS; resolve purge deletes the row through the purge path', () => {
   const kept = seedObservation(temp.store, { sessionId: session, projectKey: 'org/repo', host: 'claude-code', title: `Leaky ${FRAGMENT} qxredactword`, at: T0 })
   const purged = seedObservation(temp.store, { sessionId: session, projectKey: 'org/repo', host: 'claude-code', title: `Also ${FRAGMENT} qxpurgeword`, at: T0 + 1 })
