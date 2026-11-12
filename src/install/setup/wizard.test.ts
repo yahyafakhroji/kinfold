@@ -302,6 +302,15 @@ test('a daemon.json pid that is no longer running does not claim the port', asyn
   expect(await defaultPortWith(2_147_483_646)).toBe(37812)
 })
 
+test('a running daemon recorded on another port does not claim the taken one', async () => {
+  const { w } = setup([])
+  w.env.portFree = async (port) => port !== 37811
+  mkdirSync(w.dataDir, { recursive: true })
+  writeFileSync(join(w.dataDir, DAEMON_INFO_FILE), JSON.stringify({ pid: process.pid, port: 37900 }))
+  const answers = await runWizard(w.env, null, await readSetupState(w.env), flagsOf({ hosts: [], noEncrypt: true, yes: true }), { ...NO_CHOICE, yes: true })
+  expect(answers.port).toBe(37812)
+})
+
 test('our own daemon on the saved port keeps it', async () => {
   const { w } = setup([ENTER, ENTER, ENTER, ENTER], { keychainRefs: [DB_KEY_REF] })
   w.keychainValues.set(DB_KEY_REF, newDbKey())

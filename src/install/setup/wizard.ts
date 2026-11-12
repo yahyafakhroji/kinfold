@@ -89,6 +89,8 @@ async function bindFree(port: number): Promise<boolean> {
  * where the system names the port's listener, that same pid. A daemon busy
  * with a long query misses the /health timeout but is still ours, and
  * moving a re-run to another port would rewrite the service for nothing.
+ * Only macOS has lsof at that path; Linux and Windows rely on the pid alone,
+ * and a wrong claim ends with install's failed /health wait, port unchanged.
  */
 async function ownDaemonHolds(env: InstallEnv, port: number): Promise<boolean> {
   const info = readDaemonInfo(env.dataDir)
