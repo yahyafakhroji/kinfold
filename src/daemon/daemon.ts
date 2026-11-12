@@ -20,12 +20,12 @@
 
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { envName } from '../env-names'
+import { envName, readEnv } from '../env-names'
 import { type DbKeyStore, dbKeyStoreFor, rememberedDbKeys } from '../sqlite/keys'
 import { plaintextBesideKey } from '../sqlite/open'
 import type { Database } from '../sqlite/types'
 import { DAEMON_INFO_FILE, SPOOL_DIR, TOKEN_FILE, ensureDataDir, readOrCreateSecret, writePrivateFile } from '../store/data-dir'
-import { openStore } from '../store/db'
+import { type Store, openStore } from '../store/db'
 import { DAEMON_GIT_TIMEOUT_MS, createProjectKeyResolver, gitRunnerWithTimeout } from '../store/project-key'
 import { listRecentSessions } from '../store/reads'
 import { rebuildProjectPacks } from '../context/packs'
@@ -66,6 +66,7 @@ import type { Embedder } from '../vectors/embedder'
 import { type Support, loadVec0 } from '../vectors/extension'
 import { DEFAULT_INDEX_TICK_MS, type VectorIndexer, createVectorIndexer } from '../vectors/indexer'
 import { type SemanticAnswer, type SemanticRequest, createSemanticSearch } from '../vectors/search'
+import { type VectorQueries, inlineVectorQueries, startVectorWorker, workerOrInline } from '../vectors/vector-worker'
 
 export const DEFAULT_PORT = 37_811
 export const FALLBACK_DRAIN_MS = 2_000
@@ -106,19 +107,33 @@ interface Vectors {
   support: Support
   search: (request: SemanticRequest) => Promise<SemanticAnswer>
   timer: Timer | null
+  /** Closed on stop: ends the search worker when there is one. */
+  queries: VectorQueries
 }
 
 const VECTORS_OFF: Support = { ok: false, reason: 'semantic search is not configured in this daemon' }
 
-/** Loads sqlite-vec, starts the indexer when there is an embedder, and builds the search. Indexing works without the extension. */
-function startVectors(db: Database, dataDir: string, options: DaemonVectorOptions | undefined, log: (line: string) => void): Vectors {
+/**
+ * Loads sqlite-vec, starts the indexer when there is an embedder, and builds the
+ * search. Indexing works without the extension. The nearest-vector scan runs in
+ * a worker on its own read-only connection, so a slow search never holds the
+ * thread that answers /health and hooks.
+ */
+function startVectors(store: Store, dataDir: string, dbKeys: DbKeyStore, options: DaemonVectorOptions | undefined, log: (line: string) => void): Vectors {
+  const db = store.db
   const support = options === undefined ? VECTORS_OFF : loadVec0(db, dataDir)
   const embedder = options?.embedder ?? null
   log(`vectors search=${support.ok ? `on (${support.detail})` : `off (${support.reason})`} embedder=${embedder === null ? 'none' : embedder.model}`)
   const indexer = embedder === null ? null : createVectorIndexer({ db, embedder, log })
   const timer = indexer === null ? null : setInterval(() => indexer.tick(), options?.tickMs ?? DEFAULT_INDEX_TICK_MS)
   indexer?.tick()
-  return { indexer, support, search: createSemanticSearch({ db, embedder, support }), timer }
+  const inline = inlineVectorQueries(db)
+  const queries = support.ok && embedder !== null
+    ? workerOrInline(startVectorWorker({
+      dbPath: store.path, dataDir, key: dbKeys.read(), libraryOverride: readEnv(process.env, 'SQLITE3MC_LIB') ?? null, cacheKib: DAEMON_CACHE_KIB,
+    }), inline, log)
+    : inline
+  return { indexer, support, search: createSemanticSearch({ db, embedder, support, queries }), timer, queries }
 }
 
 export interface DaemonObserverOptions {
@@ -300,7 +315,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   warnIfPlaintextBesideKey(store.path, log, dbKeys)
   const token = readOrCreateSecret(join(dataDir, TOKEN_FILE))
   const hmacKeys = createHmacKeys({ dataDir, keychain: options.keychain ?? NO_CREDENTIALS, now: options.hmac?.now ?? Date.now, log })
-  const vectors = startVectors(store.db, dataDir, options.vectors, log)
+  const vectors = startVectors(store, dataDir, dbKeys, options.vectors, log)
   const projectKeyFor = createProjectKeyResolver(gitRunnerWithTimeout(DAEMON_GIT_TIMEOUT_MS))
   const reads = daemonReads(dataDir, dbKeys, projectKeyFor, vectors)
   const drainOptions = (): DrainOptions => ({ spoolDir: join(dataDir, SPOOL_DIR), ...hmacKeys.marker(), projectKeyFor })
@@ -374,6 +389,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     await vectors.indexer?.whenIdle()
     removeOwnInfoFile(infoPath)
     reads.close()
+    vectors.queries.close()
     store.db.close()
   }
   return { port: server.port, dataDir, scheduler, observer, hmacKeys, vectors: vectors.indexer, stop }
