@@ -29,6 +29,8 @@ function cacheFor(open: Database, space: VectorSpace): SpaceCache {
   const key = keyOf(space)
   let cache = caches.get(key)
   if (cache === undefined) {
+    // One space at a time: the embedder's model is fixed for a daemon's life, and an old one is never searched again.
+    caches.clear()
     cache = loadSpaceCache(open, space)
     caches.set(key, cache)
   }
@@ -74,14 +76,21 @@ function answer(message: WorkerRequest): WorkerReply {
   }
 }
 
-/** Cache upkeep never fails a search: on an error the cache is dropped and the next search loads it again. */
-function upkeep(work: (open: Database) => void): void {
-  if (db === null) return
+/**
+ * Cache upkeep never fails a search: on an error the cache is dropped and the
+ * next search loads it again. It always answers `upkept`, because the daemon
+ * counts upkeep as a read of the store until then.
+ */
+function upkeep(work: (open: Database) => number | void): void {
+  const reply: WorkerReply & { kind: 'upkept' } = { kind: 'upkept' }
   try {
-    work(db)
-  } catch {
+    const rows = db === null ? undefined : work(db)
+    if (typeof rows === 'number') reply.rows = rows
+  } catch (error: unknown) {
     caches.clear()
+    reply.error = error instanceof Error ? error.name : 'error'
   }
+  postMessage(reply)
 }
 
 self.onmessage = (event: MessageEvent<WorkerStart | WorkerRequest | WorkerClose | WorkerChanged | WorkerInvalidate>) => {
@@ -108,7 +117,7 @@ self.onmessage = (event: MessageEvent<WorkerStart | WorkerRequest | WorkerClose 
       postMessage(reply)
       if (reply.kind === 'started' && reply.ok && message.prewarm !== null) {
         const space = message.prewarm
-        upkeep((open) => void cacheFor(open, space))
+        upkeep((open) => cacheFor(open, space).count)
       }
       return
     }

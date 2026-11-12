@@ -23,13 +23,13 @@ export interface WorkerStart {
   prewarm: VectorSpace | null
 }
 
-/** The indexer wrote these rows: the worker re-reads them into its vector cache. No reply. */
+/** The indexer wrote these rows: the worker re-reads them into its vector cache. Answered with `upkept`. */
 export interface WorkerChanged {
   kind: 'changed'
   ids: number[]
 }
 
-/** Rows may be gone (retention, purge, resolve): the worker drops its vector cache and reloads it. No reply. */
+/** Rows may be gone (retention, purge, resolve): the worker prunes its vector cache from the index. Answered with `upkept`. */
 export interface WorkerInvalidate {
   kind: 'invalidate'
 }
@@ -50,3 +50,10 @@ export type WorkerReply =
   | { kind: 'expired'; id: number }
   | { kind: 'failed'; id: number; reason: string }
   | { kind: 'closed' }
+  /**
+   * Cache upkeep (prewarm, changed, invalidate) is done. The client counts
+   * upkeep as work in the worker: it reads the store too, so an exclusive pass
+   * must wait for it. error: the class of a failure that dropped the cache;
+   * rows: the cache's size after a prewarm.
+   */
+  | { kind: 'upkept'; error?: string; rows?: number }

@@ -109,6 +109,30 @@ test('exclusive work waits for the read in the worker, and new reads wait for th
   expect(order).toEqual(['read', 'work', 'later read'])
 })
 
+test('exclusive work waits for the cache prewarm, which reads the store like a search', async () => {
+  const started = await startVectorWorker({
+    dbPath: 'prewarm', dataDir: '/nowhere', key: null, libraryOverride: null, cacheKib: null, prewarm: { model: 'm', dims: 2 }, workerUrl: FAKE,
+  })
+  if (!started.ok) throw new Error(started.reason)
+  opened.push(started.queries)
+  const at = performance.now()
+  const ranAfter = await started.queries.exclusive(() => performance.now() - at)
+  expect(ranAfter).toBeGreaterThan(200)
+})
+
+test('a cache refresh asked during exclusive work waits until the work is done', async () => {
+  const queries = await fake('ok')
+  const order: string[] = []
+  const work = queries.exclusive(() => {
+    queries.changed([1, 2])
+    order.push('work')
+  })
+  await work
+  // The refresh was held, then posted; the next exclusive pass waits for its answer.
+  await queries.exclusive(() => order.push('next work'))
+  expect(order).toEqual(['work', 'next work'])
+})
+
 test('with no read in flight, exclusive work runs at once', async () => {
   const queries = await fake('ok')
   let ran = false

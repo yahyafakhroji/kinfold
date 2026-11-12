@@ -129,7 +129,7 @@ function startVectors(store: Store, dataDir: string, dbKeys: DbKeyStore, options
   const queries = support.ok && embedder !== null
     ? workerOrInline(startVectorWorker({
       dbPath: store.path, dataDir, key: dbKeys.read(), libraryOverride: readEnv(process.env, 'SQLITE3MC_LIB') ?? null, cacheKib: DAEMON_CACHE_KIB,
-      prewarm: { model: embedder.model, dims: embedder.dims },
+      prewarm: { model: embedder.model, dims: embedder.dims }, log,
     }), inline, log)
     : inline
   const indexer = embedder === null ? null : createVectorIndexer({ db, embedder, log, onWritten: (ids) => queries.changed(ids) })

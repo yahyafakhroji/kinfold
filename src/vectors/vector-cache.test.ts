@@ -7,7 +7,7 @@ import { PROJECT, T0, type TempStore, openTempStore, seedSession } from '../obse
 import { NO_FILTERS, nearestObservations, upsertVectors } from '../store/vector-store'
 import { upsertProject } from '../store/writes'
 import { loadVec0, vec0Path } from './extension'
-import { SPACE_IDS_SQL, type SpaceCache, cachedNearest, candidateIds, loadSpaceCache, pruneCache, refreshCacheRows } from './vector-cache'
+import { LOAD_PAGE_ROWS, SPACE_IDS_SQL, type SpaceCache, cachedNearest, candidateIds, loadSpaceCache, pruneCache, refreshCacheRows } from './vector-cache'
 
 const VEC0 = readEnv(process.env, 'TEST_VEC0')
 const DIMS = 8
@@ -48,9 +48,23 @@ test('the cache holds one model and length, with each row as a 16-bit vector and
   const ids = seedVectors(9)
   seedVectors(3, 'other')
   const cache = loadSpaceCache(temp.store.db, { model: 'm', dims: DIMS })
-  expect(cache.rows.map((row) => row.id).sort((a, b) => a - b)).toEqual([...ids].sort((a, b) => a - b))
-  expect(cache.rows[0]!.vector).toBeInstanceOf(Float16Array)
-  expect(new Set(cache.rows.map((row) => row.project))).toEqual(new Set(['b', PROJECT]))
+  expect([...cache.ids].sort((a, b) => a - b)).toEqual([...ids].sort((a, b) => a - b))
+  expect(cache.data).toBeInstanceOf(Float16Array)
+  expect(cache.data.length).toBe(9 * DIMS)
+  expect(new Set(cache.projects)).toEqual(new Set(['b', PROJECT]))
+})
+
+test('a load past one page keeps every row and its vector', () => {
+  const dims = 16
+  const ids = seedVectors(LOAD_PAGE_ROWS + 500, 'm', dims)
+  const cache = loadSpaceCache(temp.store.db, { model: 'm', dims })
+  expect(cache.count).toBe(ids.length)
+  for (const [n, id] of ids.entries()) {
+    if (n % 97 !== 0) continue
+    const at = cache.index.get(id)!
+    expect(cache.ids[at]).toBe(id)
+    expect(Math.abs(cache.data[at * dims]! - vectorFor(n + 1, dims)[0]!)).toBeLessThan(0.01)
+  }
 })
 
 test('candidates are the nearest by cosine distance, within the project, at most n', () => {
@@ -68,7 +82,7 @@ test('candidates are the nearest by cosine distance, within the project, at most
 
 test('a zero-length stored vector never ranks', () => {
   const [id] = seedVectors(1)
-  const cache: SpaceCache = { model: 'm', dims: 2, rows: [{ id: id!, project: PROJECT, vector: new Float16Array(2), norm: 0 }], index: new Map([[id!, 0]]) }
+  const cache: SpaceCache = { model: 'm', dims: 2, count: 1, ids: [id!], projects: [PROJECT], norms: [0], data: new Float16Array(2), index: new Map([[id!, 0]]) }
   expect(candidateIds(cache, Float32Array.from([1, 0]), null, 5)).toEqual([])
 })
 
@@ -81,10 +95,11 @@ test('refreshing rows picks up a new or re-embedded vector and drops a deleted o
   const added = seedObservation(temp.store, { sessionId: session, projectKey: PROJECT, host: 'claude-code', title: 'late', at: T0 + 50 })
   upsertVectors(temp.store.db, 'm', [{ id: added, contentHash: hash(added), vector: vectorFor(42) }], T0 + 10)
   refreshCacheRows(temp.store.db, cache, [ids[0]!, ids[1]!, added])
-  expect(cache.rows.map((row) => row.id).sort((a, b) => a - b)).toEqual([ids[0]!, ids[2]!, ids[3]!, ids[4]!, added].sort((a, b) => a - b))
-  const first = cache.rows[cache.index.get(ids[0]!)!]!
-  expect(Math.abs(first.vector[0]! - vectorFor(99)[0]!)).toBeLessThan(0.01)
-  for (const [id, at] of cache.index) expect(cache.rows[at]!.id).toBe(id)
+  expect([...cache.ids].sort((a, b) => a - b)).toEqual([ids[0]!, ids[2]!, ids[3]!, ids[4]!, added].sort((a, b) => a - b))
+  expect(cache.count).toBe(5)
+  const first = cache.index.get(ids[0]!)!
+  expect(Math.abs(cache.data[first * DIMS]! - vectorFor(99)[0]!)).toBeLessThan(0.01)
+  for (const [id, at] of cache.index) expect(cache.ids[at]).toBe(id)
 })
 
 test('pruning drops rows gone from the store and reads only the covering index', () => {
@@ -92,8 +107,8 @@ test('pruning drops rows gone from the store and reads only the covering index',
   const cache = loadSpaceCache(temp.store.db, { model: 'm', dims: DIMS })
   for (const id of ids.slice(0, 2)) temp.store.db.run(`DELETE FROM observations WHERE id = ${id}`)
   pruneCache(temp.store.db, cache)
-  expect(cache.rows.map((row) => row.id).sort((a, b) => a - b)).toEqual(ids.slice(2).sort((a, b) => a - b))
-  for (const [id, at] of cache.index) expect(cache.rows[at]!.id).toBe(id)
+  expect([...cache.ids].sort((a, b) => a - b)).toEqual(ids.slice(2).sort((a, b) => a - b))
+  for (const [id, at] of cache.index) expect(cache.ids[at]).toBe(id)
   const plan = (temp.store.db.query(`EXPLAIN QUERY PLAN ${SPACE_IDS_SQL}`).all({ model: 'm', dims: DIMS }) as { detail: string }[]).map((row) => row.detail)
   expect(plan).toEqual([expect.stringContaining('COVERING INDEX observation_vectors_by_space')])
 })
@@ -114,4 +129,19 @@ test.skipIf(VEC0 === undefined || VEC0 === '')('cached search answers exactly as
   check()
   for (const id of ids.slice(0, 40)) temp.store.db.run(`DELETE FROM observations WHERE id = ${id}`)
   check()
+})
+
+test.skipIf(VEC0 === undefined || VEC0 === '')('among thousands of rows, a few candidates still find the same top hits as the SQL scan', () => {
+  mkdirSync(dirname(vec0Path(temp.dataDir)), { recursive: true })
+  copyFileSync(VEC0!, vec0Path(temp.dataDir))
+  expect(loadVec0(temp.store.db, temp.dataDir).ok).toBe(true)
+  const dims = 64
+  seedVectors(3_000, 'm', dims)
+  const cache = loadSpaceCache(temp.store.db, { model: 'm', dims })
+  for (const n of [5, 211, 1_499, 2_999]) {
+    for (const k of [1, 5]) {
+      const query = { model: 'm', vector: vectorFor(n + 0.5, dims), project: null, k, filters: NO_FILTERS }
+      expect(cachedNearest(temp.store.db, cache, query)).toEqual(nearestObservations(temp.store.db, query))
+    }
+  }
 })

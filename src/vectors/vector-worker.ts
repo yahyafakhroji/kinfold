@@ -125,6 +125,8 @@ export function workerOrInline(starting: Promise<VectorWorkerStart>, inline: Vec
 
 export interface VectorWorkerOptions extends Omit<WorkerStart, 'kind'> {
   limitMs?: number
+  /** Cache events: its size after a prewarm, and a failure that dropped it. Counts only. */
+  log?: (line: string) => void
   /** The worker script; tests pass their own. */
   workerUrl?: string
 }
@@ -182,6 +184,13 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
       started?.(reply)
       return
     }
+    if (reply.kind === 'upkept') {
+      if (reply.error !== undefined) options.log?.(`vectors cache dropped (${reply.error}); the next search loads it again`)
+      if (reply.rows !== undefined) options.log?.(`vectors cache loaded rows=${reply.rows}`)
+      inWorker = Math.max(0, inWorker - 1)
+      wakeIdle()
+      return
+    }
     if (reply.kind === 'closed') {
       closed?.()
       return
@@ -215,6 +224,8 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
       kind: 'start', dbPath: options.dbPath, dataDir: options.dataDir, key: options.key, libraryOverride: options.libraryOverride, cacheKib: options.cacheKib,
       prewarm: options.prewarm,
     }
+    // The prewarm that follows a good start reads the store; an exclusive pass must wait for it like a read.
+    if (options.prewarm !== null) inWorker += 1
     worker.postMessage(start)
   })
   if (reply.kind !== 'started' || !reply.ok) {
@@ -256,7 +267,10 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
         return fn() as Awaited<ReturnType<typeof fn>>
       } finally {
         // The work may have deleted rows: the worker prunes its vector cache before any held read runs.
-        if (stopped === null) worker.postMessage({ kind: 'invalidate' } satisfies WorkerInvalidate)
+        if (stopped === null) {
+          inWorker += 1
+          worker.postMessage({ kind: 'invalidate' } satisfies WorkerInvalidate)
+        }
         exclusives -= 1
         if (exclusives === 0) {
           gated = false
@@ -276,7 +290,16 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
       distances: (query, giveUpMs) => ask({ op: 'distances', query }, giveUpMs),
       exclusive,
       changed: (ids) => {
-        if (stopped === null && ids.length > 0) worker.postMessage({ kind: 'changed', ids: [...ids] } satisfies WorkerChanged)
+        if (ids.length === 0) return
+        const copy = [...ids]
+        // A refresh reads vector pages: counted like a read, and held while an exclusive pass waits or runs.
+        const post = (): void => {
+          if (stopped !== null) return
+          inWorker += 1
+          worker.postMessage({ kind: 'changed', ids: copy } satisfies WorkerChanged)
+        }
+        if (gated) held.push(post)
+        else post()
       },
       close: () => {
         if (closeDone !== null) return closeDone
