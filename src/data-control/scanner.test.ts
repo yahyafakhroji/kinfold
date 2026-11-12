@@ -3,6 +3,7 @@ import { seedObservation } from '../context/test-support'
 import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../observer/test-support'
 import { RULES_VERSION } from '../redaction/rules'
 import { listFindings } from '../store/findings-store'
+import { embeddingInputs, upsertVectors } from '../store/vector-store'
 import { insertPrompt } from '../store/writes'
 import { resolveFinding } from './resolve'
 import { describeScan, scanBatch, scanUntil } from './scanner'
@@ -87,6 +88,22 @@ test('resolve redact rewrites the field in place with the current rules and sett
   expect([row.r, row.s]).toEqual([RULES_VERSION, RULES_VERSION])
   expect(resolveFinding(temp.store.db, finding!.id, 'redact', options)).toEqual({ ok: false, status: 409, error: 'finding is already redacted' })
   expect(resolveFinding(temp.store.db, 9_999, 'purge', options)).toEqual({ ok: false, status: 404, error: 'no such finding' })
+})
+
+test('resolve redact on an observation drops its vector, and the indexer re-embeds the redacted text', () => {
+  const leaky = seedObservation(temp.store, { sessionId: session, projectKey: 'org/repo', host: 'claude-code', title: `Vector ${FRAGMENT} leak`, at: T0 })
+  const space = { model: 'm', dims: 4 }
+  const [input] = embeddingInputs(temp.store.db, space, 10)
+  expect(input!.text).toContain(FRAGMENT)
+  upsertVectors(temp.store.db, 'm', [{ id: leaky, contentHash: input!.contentHash, vector: Float32Array.from([1, 0, 0, 0]) }], T0)
+  scanBatch(temp.store.db, options)
+  const [finding] = listFindings(temp.store.db, { action: 'pending', limit: 10 })
+  expect(resolveFinding(temp.store.db, finding!.id, 'redact', options).ok).toBe(true)
+  // The vector was embedded from the leaked text; it goes with the rewrite, so search can no longer match on it.
+  expect(all(`SELECT observation_id FROM observation_vectors WHERE observation_id = ${leaky}`)).toEqual([])
+  const [again] = embeddingInputs(temp.store.db, space, 10)
+  expect(again!.id).toBe(leaky)
+  expect(again!.text).not.toContain(FRAGMENT)
 })
 
 test('resolve redact on an observation updates FTS; resolve purge deletes the row through the purge path', () => {

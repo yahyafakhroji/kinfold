@@ -138,6 +138,15 @@ export interface NearestQuery {
   filters?: NearestFilters
 }
 
+/**
+ * Deletes an observation's vector, for a rewrite of its text (redaction): the
+ * vector was embedded from the old text and could still match on it. The
+ * indexer then embeds the new text under the same content hash.
+ */
+export function dropVector(db: Database, observationId: number): void {
+  db.query('DELETE FROM observation_vectors WHERE observation_id = $id').run({ id: observationId })
+}
+
 /** At most this many ids get a distance outside the top k; the prompt path asks for its keyword candidates. */
 export const MAX_DISTANCE_IDS = 50
 
