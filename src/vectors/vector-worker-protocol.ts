@@ -1,6 +1,6 @@
 // Messages between the daemon and its vector search worker (search-worker.ts).
 
-import type { NearestQuery, VectorHit } from '../store/vector-store'
+import type { NearestQuery, VectorHit, VectorSpace } from '../store/vector-store'
 
 export interface DistancesQuery {
   model: string
@@ -19,6 +19,19 @@ export interface WorkerStart {
   libraryOverride: string | null
   /** Page cache for the worker's connection, in KiB; null leaves SQLite's default. */
   cacheKib: number | null
+  /** The space the daemon embeds in: its vectors load into memory right after the start. Null: on first search. */
+  prewarm: VectorSpace | null
+}
+
+/** The indexer wrote these rows: the worker re-reads them into its vector cache. Answered with `upkept`. */
+export interface WorkerChanged {
+  kind: 'changed'
+  ids: number[]
+}
+
+/** Rows may be gone (retention, purge, resolve): the worker prunes its vector cache from the index. Answered with `upkept`. */
+export interface WorkerInvalidate {
+  kind: 'invalidate'
 }
 
 /** Closes the worker's connection; the worker answers `closed` and the daemon then ends it. */
@@ -37,3 +50,10 @@ export type WorkerReply =
   | { kind: 'expired'; id: number }
   | { kind: 'failed'; id: number; reason: string }
   | { kind: 'closed' }
+  /**
+   * Cache upkeep (prewarm, changed, invalidate) is done. The client counts
+   * upkeep as work in the worker: it reads the store too, so an exclusive pass
+   * must wait for it. error: the class of a failure that dropped the cache;
+   * rows: the cache's size after a prewarm.
+   */
+  | { kind: 'upkept'; error?: string; rows?: number }
