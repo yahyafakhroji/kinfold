@@ -30,4 +30,4 @@ WSL is a preview in this release. Agents inside a WSL distro use the memory of t
 {{SHA256SUMS}}
 ```
 
-Setup, the security model and the comparison with other memory tools are in the [README](https://github.com/yahyafakhroji/kinfold#readme).
+Setup, the security model and how to build from source are in the [README](https://github.com/yahyafakhroji/kinfold#readme).

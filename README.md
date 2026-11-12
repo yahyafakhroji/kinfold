@@ -1,6 +1,6 @@
 # Kinfold
 
-Kinfold gives Claude Code, OpenCode, Codex and Cursor one memory. It records what each agent did, condenses it into short observations, and hands the relevant ones to the next session in whichever agent you open. The memory is a SQLite file on your machine, encrypted at rest, and Kinfold ships as a single program with no runtime to install.
+Kinfold gives Claude Code, OpenCode, Codex and Cursor one memory. It records what each agent did, condenses it into short observations, and hands the relevant ones to the next session in whichever agent you open. The memory is a SQLite file on your machine, encrypted at rest. Kinfold ships as a single program with no runtime to install, and it's open source under Apache-2.0.
 
 ![Kinfold's setup wizard in a terminal: version, a dry-run install that walks each step, then status](assets/demo.gif)
 
@@ -86,43 +86,6 @@ Ranking runs in a worker thread over a 16-bit copy of the vectors, so searches d
 
 What leaves your machine: session text goes to the observer model you chose, and observation text goes to OpenRouter for embeddings if you gave Kinfold an OpenRouter key.
 
-## How it compares
-
-Checked against each project's official pages on 2026-11-12. "Not documented" means those pages don't say, not that the feature is missing.
-
-| | Kinfold | claude-mem | mem0 / OpenMemory | basic-memory |
-| --- | --- | --- | --- | --- |
-| Local, no account | Storage, yes: a daemon on 127.0.0.1. The observer uses the model account you pick | Partly; cloud sync is opt-in and the installer offers a hosted observer trial [1] | Partly. Self-hostable, but the defaults call OpenAI, and a hosted platform exists; OpenMemory is local per its launch post and still needs an OpenAI key [2][3][4] | Yes, local-first plain text; Cloud is optional [5] |
-| Encrypted at rest by the tool | Yes by default, sqlite3mc | Not documented [1][8] | Not documented [2] | Not documented [5] |
-| Secret redaction before storage | Yes, automatic, with HMAC markers | Content in `<private>` tags is kept out; an optional regex detector exists [1][8] | Not documented [2][3] | Not documented [5] |
-| Coding agents | Claude Code, OpenCode, Codex, Cursor | 15+, some search-only [1][8] | Yes, through MCP and skills [2][4] | Yes, through MCP [5] |
-| Automatic capture | Hooks and plugins, plus an observer | Hooks [1] | The library needs explicit `add()` calls [2] | A Claude Code plugin with briefings and checkpoints [5][9] |
-| Search | Full-text plus semantic | FTS5 plus optional Chroma [1][8] | Semantic, BM25 and entity [2] | Full-text plus vector [5] |
-| Install and runtime | One compiled program, through npx, curl or PowerShell | npx or the plugin marketplace; Node 20.19+ or 22.12+, and it installs Bun and uv if missing [1] | pip or npm; self-hosting uses Docker, and OpenMemory needs Docker plus an OpenAI key [2][3][4] | `uv tool install`; Python 3.12+ [5] |
-| Platforms | macOS, Linux, Windows; WSL as a preview | Windows notes exist; others aren't listed [1] | Not documented [2][3] | Not documented [5] |
-| Storage | A SQLite file, encrypted by default | SQLite plus Chroma [1] | Qdrant plus SQLite, or Postgres with pgvector [3] | Markdown files plus a SQLite index [5] |
-| License | Apache-2.0 | Apache-2.0 [1] | Apache-2.0 [2] | AGPL-3.0 [5] |
-
-Claude Code's built-in memory keeps Markdown files per project on one machine, for Claude Code only [6]. Letta Code is its own agent harness, with Letta Cloud as the default backend [7]. Neither serves other agents, so they're left out of the table.
-
-The others are stronger in several places:
-- **Hosting and sync:** mem0, basic-memory and Letta offer hosted services, and claude-mem has opt-in sync. Kinfold has no cloud.
-- **Teams:** basic-memory Cloud and mem0's per-user keys share memory across people. Committed `CLAUDE.md` files do the same through git.
-- **Graphs and UI:** basic-memory has a knowledge graph view, and mem0 links entities. claude-mem has a web viewer, and mem0 and OpenMemory have dashboards.
-- **Plain files:** basic-memory and Claude Code keep memory as Markdown you can edit. Kinfold's encrypted store can't be edited by hand.
-- **Breadth and setup:** claude-mem lists more agents, mem0 and basic-memory work through MCP, and Claude Code's built-in memory needs no setup.
-
-Sources:
-1. https://github.com/thedotmack/claude-mem
-2. https://github.com/mem0ai/mem0
-3. https://docs.mem0.ai/open-source/overview
-4. https://mem0.ai/blog/introducing-openmemory-mcp
-5. https://github.com/basicmachines-co/basic-memory
-6. https://code.claude.com/docs/en/memory
-7. https://github.com/letta-ai/letta-code
-8. https://docs.claude-mem.ai/
-9. basic-memory README, "Claude Code plugin" section
-
 ## WSL (preview)
 
 Run `kinfold install` inside a WSL distro after Kinfold is installed and running on Windows. Install finds the Windows install through WSL interop and wires the distro's agents to the same memory: hooks write into the Windows data folder through `/mnt/c`, and the MCP server reads through the Windows daemon. The distro keeps its own copy of the program in `~/.kinfold-wsl`. `kinfold status` there shows the link, and `kinfold uninstall` there removes only the distro's wiring; uninstall the Windows side from Windows.
@@ -156,18 +119,35 @@ kinfold uninstall
 
 Uninstall removes the hooks, MCP entries, plugin, service and program. Your memory stays in `~/.kinfold` until you delete it, and the stored credentials and HMAC keys stay unless you pass `--remove-credentials` or `--remove-hmac-keys`.
 
-## Development
+## Build from source
 
-Kinfold is written in TypeScript and built with [Bun](https://bun.sh):
+Kinfold is open source, so you can run it from a checkout, change it, and build your own program. You need git, [Bun](https://bun.sh) 1.4.4 (the version in `.bun-version`) and a C compiler (`xcode-select --install` on macOS, `build-essential` on Debian or Ubuntu), because Kinfold builds its encryption library from pinned source.
 
 ```sh
+git clone https://github.com/yahyafakhroji/kinfold.git
+cd kinfold
 bun install
-bun test
-bunx tsc --noEmit
-bun src/cli/kinfold.ts install --dry-run
+bun tools/build-sqlite3mc.ts   # builds the pinned sqlite3mc into .cache
+bun tools/fetch-vec0.ts        # downloads the pinned sqlite-vec build for semantic search
 ```
 
-`bun tools/build-release.ts <target> <version>` builds a release program. It needs a C compiler, because it builds the encryption library from pinned source.
+Run the tests and the type check:
+
+```sh
+bun test
+bun run typecheck
+```
+
+Run any command from source with `bun src/cli/kinfold.ts`, for example `bun src/cli/kinfold.ts install --dry-run`. A source run reports version `0.0.0-dev` and skips the release checksum check. It wires your real agents and service the same way a release does, so try changes with `--dry-run` first, or give the run a throwaway home: `HOME=$(mktemp -d) bun src/cli/kinfold.ts install --dry-run`.
+
+To build a single program for this machine, pick its target (`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64` or `windows-x64`) and a version:
+
+```sh
+bun tools/build-release.ts darwin-arm64 0.1.0-local.1
+./dist/kinfold-darwin-arm64 --version
+```
+
+The build embeds the sqlite3mc and sqlite-vec files from `.cache`, so build on the platform you target. `.github/workflows/release-build.yml` shows the same steps CI runs for each target.
 
 ## License
 
