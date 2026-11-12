@@ -103,11 +103,15 @@ export function packNpm(distDir: string, version: string, root = join(import.met
           version,
           description: description(target),
           license: 'Apache-2.0',
+          // npm provenance checks that the repository names the repo that built the package.
+          repository: template.repository,
           os: [target.os],
           cpu: [target.cpu],
           // The Linux programs are built for glibc; npm 9.6.5 and later skips them on musl.
           ...(target.os === 'linux' ? { libc: ['glibc'] } : {}),
           files: [target.file],
+          // A scoped package is private by default; these must install for anyone.
+          publishConfig: { access: 'public' },
         },
         null,
         2,
