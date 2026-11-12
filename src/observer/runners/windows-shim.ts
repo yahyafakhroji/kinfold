@@ -15,6 +15,8 @@ const IS_CMD = /\.(cmd|bat)$/i
 // The last line of a cmd-shim: "%_prog%" (node) then the script, or the program alone, then %*.
 const NODE_TARGET = /"%_prog%"\s+"%dp0%\\([^"]+)"\s+%\*/
 const DIRECT_TARGET = /"%dp0%\\([^"]+)"\s+%\*/
+// Windows runs a .bat or .cmd image through cmd.exe, so a direct target must be a program.
+const IS_EXE = /\.exe$/i
 
 /** A path under the shim's folder, or null when the shim's relative path leaves it. */
 function inside(folder: string, windowsRelative: string): string | null {
@@ -53,7 +55,7 @@ export function resolveCmdShim(
   const direct = DIRECT_TARGET.exec(text)
   if (direct === null) return null
   const program = inside(folder, direct[1]!)
-  return program === null || !exists(program) ? null : { argv0: [program] }
+  return program === null || !IS_EXE.test(program) || !exists(program) ? null : { argv0: [program] }
 }
 
 /** A spawn that runs a .cmd or .bat first argument through its npm shim's target, and passes everything else through unchanged. */

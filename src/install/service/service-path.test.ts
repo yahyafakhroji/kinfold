@@ -35,6 +35,19 @@ test('servicePathFor drops entries that are not absolute Windows paths', () => {
   expect(servicePathFor({ bunPath: PROGRAM, pathEnv: '' }, relative)).toBe('C:\\Users\\me\\.kinfold\\bin')
 })
 
+test("servicePathFor records fnm's per-shell folders by their real location, which outlives the shell", () => {
+  const shell = 'C:\\Users\\me\\AppData\\Local\\fnm_multishells\\4120_1731400000000'
+  const real = 'C:\\Users\\me\\AppData\\Roaming\\fnm\\node-versions\\v22.11.0\\installation'
+  const fnm = (command: string) => (command === 'claude' ? `${shell}\\claude.cmd` : command === 'node' ? `${shell}\\node.exe` : null)
+  const realpath = (path: string) => path.replace(shell, real)
+  expect(servicePathFor({ bunPath: PROGRAM, pathEnv: 'ignored' }, fnm, realpath)).toBe(['C:\\Users\\me\\.kinfold\\bin', real].join(';'))
+  // A path that cannot be resolved is kept as found.
+  const failing = () => {
+    throw new Error('ENOENT')
+  }
+  expect(servicePathFor({ bunPath: PROGRAM, pathEnv: 'ignored' }, fnm, failing)).toBe(['C:\\Users\\me\\.kinfold\\bin', shell].join(';'))
+})
+
 test('the recorded PATH round-trips through service-path.json', () => {
   writeServicePath(dataDir, 'C:\\a;C:\\b')
   expect(readServicePath(dataDir)).toBe('C:\\a;C:\\b')

@@ -6,7 +6,7 @@
 // in front of its own PATH at start. macOS and Linux carry the same folders in
 // the plist and the unit instead.
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { join, win32 } from 'node:path'
 import { writeFileAtomic } from '../../fs/atomic'
 import type { OsName } from '../../platform/platform'
@@ -18,17 +18,30 @@ const FILE_MODE = 0o600
 /**
  * The program's folder, then the folder of each daemon tool the installer's
  * PATH finds, in tool order, once each. A tool found as an npm `.cmd` shim
- * runs on node, so node's folder follows it.
+ * runs on node, so node's folder follows it. Each folder is recorded by its
+ * real location: fnm puts node and its global bins on a per-shell junction
+ * that it deletes later, so the found path would not exist at the next logon.
  */
-export function servicePathFor(env: { bunPath: string; pathEnv: string }, which: Which = bunWhich): string {
+export function servicePathFor(
+  env: { bunPath: string; pathEnv: string },
+  which: Which = bunWhich,
+  realpath: (path: string) => string = realpathSync,
+): string {
+  const folderOf = (path: string): string => {
+    try {
+      return win32.dirname(realpath(path))
+    } catch {
+      return win32.dirname(path)
+    }
+  }
   const folders = [win32.dirname(env.bunPath)]
   for (const tool of DAEMON_TOOLS) {
     const found = which(tool, env.pathEnv)
     if (found === null) continue
-    folders.push(win32.dirname(found))
+    folders.push(folderOf(found))
     if (/\.(cmd|bat)$/i.test(found)) {
       const node = which('node', env.pathEnv)
-      if (node !== null) folders.push(win32.dirname(node))
+      if (node !== null) folders.push(folderOf(node))
     }
   }
   return [...new Set(folders.filter((folder) => folder !== '' && win32.isAbsolute(folder)))].join(';')

@@ -58,6 +58,14 @@ test('a .cmd that is not an npm shim, a missing target, or no node resolves to n
   expect(resolveCmdShim(join(npmDir, 'claude.cmd'), undefined, undefined, () => null)).toBeNull()
 })
 
+test('a shim whose direct target is a .bat or .cmd resolves to null, since Windows would run it through cmd.exe', () => {
+  for (const target of ['node_modules\\p\\evil.bat', 'node_modules\\p\\evil.CMD', 'node_modules\\p\\cli.js']) {
+    place(target)
+    const shim = EXE_SHIM.replace('node_modules\\opencode-ai\\bin\\opencode.exe', target)
+    expect(resolveCmdShim(place('opencode.cmd', shim), undefined, undefined, whichNode)).toBeNull()
+  }
+})
+
 test('a shim whose target leaves its folder resolves to null', () => {
   const escaping = JS_SHIM.replace('node_modules\\@anthropic-ai\\claude-code\\cli.js', '..\\elsewhere\\cli.js')
   place('..\\elsewhere\\cli.js')
