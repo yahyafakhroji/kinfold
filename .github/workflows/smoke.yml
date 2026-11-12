@@ -1,7 +1,11 @@
 name: smoke
 
-# Called by release-build after the checksums job, so the same run's artifact
-# is the program and SHA256SUMS under test.
+# Called after the checksums job, so the same run's artifact is the program
+# under test: by release-build for a manual or draft-PR build, and by release.yml
+# once its GitHub prerelease exists. A release candidate checks itself against
+# the local SHA256SUMS named below; a final version ignores that and checks
+# itself against its own GitHub Release, which is why release.yml smokes after
+# the prerelease is made.
 on:
   workflow_call:
 

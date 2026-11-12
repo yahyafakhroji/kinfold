@@ -143,12 +143,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "v$VERSION" --prerelease=false --latest --repo "$GITHUB_REPOSITORY"
 
-  # The tag stays. "Re-run all jobs" makes the prerelease again; rerunning only
-  # the failed jobs would smoke a Release that no longer exists.
+  # The tag stays. After a discard, "Re-run all jobs" makes the prerelease
+  # again; rerunning only the failed jobs would smoke a Release that is gone.
+  # After a promote, the Release stays, so a failed npm publish is finished
+  # with "Re-run failed jobs" instead.
   discard:
     name: discard the prerelease
     needs: [check, github-release, smoke]
-    if: failure() && needs.github-release.result == 'success'
+    if: (failure() || cancelled()) && needs.github-release.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

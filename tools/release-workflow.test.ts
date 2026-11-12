@@ -50,7 +50,8 @@ describe('release workflow', () => {
     expect(promote).toContain('gh release edit "v$VERSION" --prerelease=false --latest')
     expect(job(text, 'npm-publish')).toContain('needs: [check, build, promote]')
     const discard = job(text, 'discard')
-    expect(discard).toContain("if: failure() && needs.github-release.result == 'success'")
+    // A cancelled smoke must not leave an untested prerelease behind either.
+    expect(discard).toContain("if: (failure() || cancelled()) && needs.github-release.result == 'success'")
     expect(discard).toContain('gh release delete "v$VERSION" --yes')
     expect(discard).not.toContain('--cleanup-tag')
   })
