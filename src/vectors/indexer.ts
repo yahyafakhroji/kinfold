@@ -79,7 +79,7 @@ export function createVectorIndexer(options: IndexerOptions): VectorIndexer {
     if (inputs.length === 0) return 0
     const vectors = await embedder.embed(inputs.map((input) => input.text), abort.signal)
     if (stopped) return 0
-    const written = upsertVectors(db, embedder.model, inputs.map((input, index) => ({ id: input.id, contentHash: input.contentHash, vector: vectors[index]! })), now())
+    const written = upsertVectors(db, embedder.model, inputs.map((input, index) => ({ id: input.id, contentHash: input.contentHash, text: input.text, vector: vectors[index]! })), now())
     // A row skipped as purged is re-read too; the cache drops what the store no longer has.
     if (written > 0) options.onWritten?.(inputs.map((input) => input.id))
     return written

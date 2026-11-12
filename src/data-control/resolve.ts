@@ -13,6 +13,7 @@ import type { Database } from '../sqlite/types'
 import { type Finding, getFinding, resolveRowFindings } from '../store/findings-store'
 import { type PurgeTarget, optimizeFts } from '../store/purge-store'
 import { SCAN_TABLES, type ScanTable, readScanRow, rewriteRow, writeEventRedactions } from '../store/scan-store'
+import { dropVector } from '../store/vector-store'
 import { redactRow } from './detect'
 import { type PurgeReport, ensureSecureDelete, purge, scrub } from './purge'
 
@@ -53,7 +54,11 @@ function redactInPlace(db: Database, table: ScanTable, rowId: string, deps: Reso
     rewriteRow(db, table, rowId, result.values, RULES_VERSION)
     if (result.eventNotes !== null) writeEventRedactions(db, rowId, JSON.stringify(result.eventNotes))
     resolveRowFindings(db, table, [rowId], 'redacted', deps.now())
-    if (table === 'observations') optimizeFts(db)
+    if (table === 'observations') {
+      // Its vector came from the old text; dropping it here lets the scrub below wipe it with the text.
+      dropVector(db, Number(rowId))
+      optimizeFts(db)
+    }
     const project = packProject(db, table, rowId)
     if (project !== null) rebuildProjectPacks(db, project, deps.now())
     return true
