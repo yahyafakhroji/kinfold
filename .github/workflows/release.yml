@@ -1,9 +1,13 @@
 name: release
 
-# Pushing a v<version> tag on main builds every program once, smoke-tests it on
-# each OS, publishes those same bytes as a GitHub Release, then publishes them
-# to npm through trusted publishing. The npm trusted-publisher configs name this
-# file, so renaming it breaks npm publishing.
+# Pushing a v<version> tag on main builds every program once and publishes those
+# bytes as a GitHub prerelease. The smoke then installs them on each OS against
+# that real Release, because a final build checks itself against its own
+# Release's SHA256SUMS and accepts no other list. Only then is the Release
+# promoted to latest and the same bytes published to npm through trusted
+# publishing. A failed smoke deletes the prerelease and publishes nothing.
+# The npm trusted-publisher configs name this file, so renaming it breaks npm
+# publishing.
 on:
   push:
     tags:
@@ -63,6 +67,7 @@ jobs:
     uses: ./.github/workflows/release-build.yml
     with:
       version: ${{ needs.check.outputs.version }}
+      skip_smoke: true
 
   github-release:
     name: GitHub Release
@@ -73,7 +78,6 @@ jobs:
       contents: write
     env:
       VERSION: ${{ needs.check.outputs.version }}
-      PRERELEASE: ${{ needs.check.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
 
@@ -110,14 +114,58 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          flags=()
-          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
-          gh release create "v$VERSION" dist/* --verify-tag --title "Kinfold $VERSION" \
-            --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md" "${flags[@]}"
+          # A prerelease until the smoke passes, so /releases/latest never
+          # points at programs no install has run yet.
+          gh release create "v$VERSION" dist/* --verify-tag --prerelease --title "Kinfold $VERSION" \
+            --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md"
+
+  smoke:
+    name: smoke
+    needs: [check, github-release]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/smoke.yml
+
+  promote:
+    name: promote the Release
+    needs: [check, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      # A release candidate stays a prerelease; a final version becomes latest.
+      - name: Mark the Release as latest
+        if: needs.check.outputs.prerelease != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "v$VERSION" --prerelease=false --latest --repo "$GITHUB_REPOSITORY"
+
+  # The tag stays. After a discard, "Re-run all jobs" makes the prerelease
+  # again; rerunning only the failed jobs would smoke a Release that is gone.
+  # After a promote, the Release stays, so a failed npm publish is finished
+  # with "Re-run failed jobs" instead.
+  discard:
+    name: discard the prerelease
+    needs: [check, github-release, smoke]
+    if: (failure() || cancelled()) && needs.github-release.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - name: Delete the prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete "v$VERSION" --yes --repo "$GITHUB_REPOSITORY"
 
   npm-publish:
     name: npm publish
-    needs: [check, build, github-release]
+    needs: [check, build, promote]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
