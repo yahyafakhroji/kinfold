@@ -36,7 +36,7 @@ jobs:
             target: windows-x64
             smoke: windows
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Check for this OS's smoke steps
         id: gate
