@@ -21,6 +21,11 @@ export interface WorkerStart {
   cacheKib: number | null
 }
 
+/** Closes the worker's connection; the worker answers `closed` and the daemon then ends it. */
+export interface WorkerClose {
+  kind: 'close'
+}
+
 export type WorkerRequest =
   | { kind: 'request'; id: number; deadlineAt: number; op: 'nearest'; query: NearestQuery }
   | { kind: 'request'; id: number; deadlineAt: number; op: 'distances'; query: DistancesQuery }
@@ -31,3 +36,4 @@ export type WorkerReply =
   | { kind: 'hits'; id: number; hits: VectorHit[] }
   | { kind: 'expired'; id: number }
   | { kind: 'failed'; id: number; reason: string }
+  | { kind: 'closed' }

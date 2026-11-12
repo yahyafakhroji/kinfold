@@ -31,6 +31,12 @@ export interface SemanticRequest {
   filters: NearestFilters
   /** Rows to measure as well, after the top k: the prompt path's keyword candidates. */
   alsoIds?: readonly number[]
+  /**
+   * When the caller stops waiting, from the request's start. Set by callers
+   * that abort at their deadline (the MCP routes); unset, a read may run late,
+   * as the prompt path wants for its late answers.
+   */
+  giveUpMs?: number
 }
 
 export type SemanticAnswer =
@@ -138,11 +144,12 @@ export function createSemanticSearch(deps: SemanticSearchDeps): (request: Semant
     if (!embedded.ok) return embedded.answer
     const embeddedAt = now()
     try {
-      const nearest = await queries.nearest({ model: embedder.model, vector: embedded.vector, project: request.project, k: request.k, filters: request.filters })
+      const left = (): number | undefined => (request.giveUpMs === undefined ? undefined : request.giveUpMs - (now() - startedAt))
+      const nearest = await queries.nearest({ model: embedder.model, vector: embedded.vector, project: request.project, k: request.k, filters: request.filters }, left())
       if (nearest === null) return { status: 'timeout', ms: Math.round(now() - startedAt) }
       const found = new Set(nearest.map((hit) => hit.id))
       const ids = request.alsoIds?.filter((id) => !found.has(id)) ?? []
-      const extra = ids.length === 0 ? [] : await queries.distances({ model: embedder.model, vector: embedded.vector, project: request.project, ids })
+      const extra = ids.length === 0 ? [] : await queries.distances({ model: embedder.model, vector: embedded.vector, project: request.project, ids }, left())
       if (extra === null) return { status: 'timeout', ms: Math.round(now() - startedAt) }
       return { status: 'ok', hits: [...nearest, ...extra], embedMs: Math.round(embeddedAt - startedAt), searchMs: Math.round(now() - embeddedAt), cached: embedded.cached }
     } catch (error: unknown) {

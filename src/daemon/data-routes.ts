@@ -15,6 +15,7 @@ import type { Database } from '../sqlite/types'
 import { type DataSettings, type DataSettingsChange, readDataSettings, writeDataSettings } from '../store/data-settings-store'
 import { type Finding, type FindingQuery, listFindings, pendingByRule } from '../store/findings-store'
 import type { MarkerKey } from '../redaction/redact'
+import { type Exclusive, runNow } from '../vectors/vector-worker'
 
 /** An on-demand scan works this long, then answers with what is left; the tick carries on. */
 export const SCAN_REQUEST_BUDGET_MS = 2_000
@@ -92,7 +93,7 @@ type ReadBody = () => Promise<Parsed<unknown>>
 const METHOD_NOT_ALLOWED: RouteAnswer = { status: 405, body: { error: 'method not allowed' } }
 const RESOLVE_PATH = /^\/data\/findings\/(\d{1,15})\/resolve$/
 
-async function withBody<T>(readBody: ReadBody, parse: (body: unknown) => Parsed<T>, answer: (value: T) => RouteAnswer): Promise<RouteAnswer> {
+async function withBody<T>(readBody: ReadBody, parse: (body: unknown) => Parsed<T>, answer: (value: T) => RouteAnswer | Promise<RouteAnswer>): Promise<RouteAnswer> {
   const body = await readBody()
   const parsed = body.ok ? parse(body.value) : body
   return parsed.ok ? answer(parsed.value) : { status: 400, body: { error: parsed.error } }
@@ -103,20 +104,24 @@ function resolveAnswer(outcome: ResolveOutcome): RouteAnswer {
   return { status: 200, body: { resolved: outcome.finding, purge: outcome.purge } }
 }
 
-async function retentionRoute(method: string, readBody: ReadBody, handlers: DataHandlers): Promise<RouteAnswer> {
+async function retentionRoute(method: string, readBody: ReadBody, handlers: DataHandlers, exclusive: Exclusive): Promise<RouteAnswer> {
   if (method === 'GET') return { status: 200, body: handlers.retention() }
   if (method !== 'PUT') return METHOD_NOT_ALLOWED
-  return withBody(readBody, parseRetentionRequest, ({ change, preview }) => ({
+  return withBody(readBody, parseRetentionRequest, async ({ change, preview }) => ({
     status: 200,
-    body: preview ? { preview: handlers.previewRetention(change) } : handlers.putRetention(change),
+    body: preview ? { preview: handlers.previewRetention(change) } : await exclusive(() => handlers.putRetention(change)),
   }))
 }
 
-/** Null when the path is not a /data route, so the caller answers 404. */
-export async function dataRoute(method: string, url: URL, readBody: ReadBody, handlers: DataHandlers): Promise<RouteAnswer | null> {
+/**
+ * Null when the path is not a /data route, so the caller answers 404.
+ * Retention, purge and resolve end with a TRUNCATE checkpoint, so they run
+ * through `exclusive`: never beside the vector worker's open read snapshot.
+ */
+export async function dataRoute(method: string, url: URL, readBody: ReadBody, handlers: DataHandlers, exclusive: Exclusive = runNow): Promise<RouteAnswer | null> {
   const path = url.pathname
   if (path === '/data/size') return method === 'GET' ? { status: 200, body: handlers.size() } : METHOD_NOT_ALLOWED
-  if (path === '/data/retention') return retentionRoute(method, readBody, handlers)
+  if (path === '/data/retention') return retentionRoute(method, readBody, handlers, exclusive)
   if (path === '/data/scan') return method === 'POST' ? { status: 200, body: handlers.scan() } : METHOD_NOT_ALLOWED
   if (path === '/data/findings') {
     if (method !== 'GET') return METHOD_NOT_ALLOWED
@@ -125,10 +130,10 @@ export async function dataRoute(method: string, url: URL, readBody: ReadBody, ha
   }
   if (path === '/data/purge') {
     if (method !== 'POST') return METHOD_NOT_ALLOWED
-    return withBody(readBody, parsePurgeBody, (request) => ({ status: 200, body: handlers.purge(request) }))
+    return withBody(readBody, parsePurgeBody, async (request) => ({ status: 200, body: await exclusive(() => handlers.purge(request)) }))
   }
   const resolve = RESOLVE_PATH.exec(path)
   if (resolve === null) return null
   if (method !== 'POST') return METHOD_NOT_ALLOWED
-  return withBody(readBody, parseResolveBody, (action) => resolveAnswer(handlers.resolve(Number(resolve[1]), action)))
+  return withBody(readBody, parseResolveBody, async (action) => resolveAnswer(await exclusive(() => handlers.resolve(Number(resolve[1]), action))))
 }

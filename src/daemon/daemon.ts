@@ -269,7 +269,7 @@ interface DaemonReads {
  */
 function daemonReads(dataDir: string, keys: DbKeyStore, projectKeyFor: ReadRouteDeps['projectKeyFor'], vectors: Vectors): DaemonReads {
   let reader: MemoryReader | null = null
-  const semantic: SemanticClient = (query) => vectors.search({ ...query, deadlineMs: MCP_SEMANTIC_TIMEOUT_MS })
+  const semantic: SemanticClient = (query) => vectors.search({ ...query, deadlineMs: MCP_SEMANTIC_TIMEOUT_MS, giveUpMs: MCP_SEMANTIC_TIMEOUT_MS })
   return {
     deps: {
       reader: () => {
@@ -345,6 +345,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     // Read at request time: `observing` starts after the server, and no request is served before then.
     observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? []),
     data: dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log }),
+    exclusive: vectors.queries.exclusive,
     memory: memoryHandlers(store.db, log),
     updateBanner: () => {
       const notice = pendingNotice(readUpdateState(dataDir), readInstallRecord(dataDir), options.version ?? VERSION, (options.updateCheck?.envVars ?? (() => process.env))())
@@ -365,7 +366,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const rotation = setInterval(hmacKeys.tick, options.hmac?.rotationTickMs ?? ROTATION_TICK_MS)
   const observing = options.observer !== undefined ? startObserver(store.db, options.observer, hmacKeys, () => vectors.indexer?.tick(), log) : null
   observer = observing?.observer ?? null
-  const dataTicks = startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, ...options.dataControl })
+  const dataTicks = startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, exclusive: vectors.queries.exclusive, ...options.dataControl })
   const updateChecks = startUpdateChecks({
     dataDir,
     version: options.version ?? VERSION,

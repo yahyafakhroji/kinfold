@@ -12,18 +12,21 @@ import { openStoreFile } from '../sqlite/open'
 import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
 import { distancesFor, nearestObservations } from '../store/vector-store'
 import { loadVec0 } from './extension'
-import type { WorkerReply, WorkerRequest, WorkerStart } from './vector-worker-protocol'
+import type { WorkerClose, WorkerReply, WorkerRequest, WorkerStart } from './vector-worker-protocol'
 
 declare const self: Worker
+
+const OPEN_BUSY_TIMEOUT_MS = 5_000
 
 let db: Database | null = null
 
 function start(message: WorkerStart): WorkerReply {
   try {
     const key = message.key
-    const keys = { name: 'daemon key', read: () => key, exists: () => key !== null }
+    const keys = { name: "daemon's key store", read: () => key, exists: () => key !== null }
     const env = message.libraryOverride === null ? {} : { [SQLITE3MC_LIB_ENV]: message.libraryOverride }
-    db = openStoreFile(message.dbPath, { readonly: true, keys, env })
+    // The daemon writes and checkpoints beside this reader; a WAL recovery at open must wait, not fail the start.
+    db = openStoreFile(message.dbPath, { readonly: true, keys, env, busyTimeoutMs: OPEN_BUSY_TIMEOUT_MS })
     // Vector pages stay decrypted here between searches, as the daemon's own connection keeps its pages.
     if (message.cacheKib !== null) db.run(`PRAGMA cache_size = -${Math.trunc(message.cacheKib)}`)
     const support = loadVec0(db, message.dataDir)
@@ -52,7 +55,13 @@ function answer(message: WorkerRequest): WorkerReply {
   }
 }
 
-self.onmessage = (event: MessageEvent<WorkerStart | WorkerRequest>) => {
+self.onmessage = (event: MessageEvent<WorkerStart | WorkerRequest | WorkerClose>) => {
   const message = event.data
+  if (message.kind === 'close') {
+    db?.close()
+    db = null
+    postMessage({ kind: 'closed' } satisfies WorkerReply)
+    return
+  }
   postMessage(message.kind === 'start' ? start(message) : answer(message))
 }
