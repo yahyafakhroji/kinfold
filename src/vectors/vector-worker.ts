@@ -24,7 +24,10 @@ export const CLOSE_WAIT_MS = 2_000
  */
 export const COMPILED_WORKER_PATH = './vectors/search-worker.ts'
 
-/** Runs fn once no vector read holds a snapshot of the store, holding new reads until it returns. */
+/**
+ * Runs fn once no vector read holds a snapshot of the store, holding new reads
+ * until it returns. fn must be synchronous: the gate reopens when it returns.
+ */
 export type Exclusive = <T>(fn: () => T) => Promise<T>
 
 /** For callers with no worker: fn runs at once, before the promise is returned. */
@@ -83,13 +86,14 @@ export function workerOrInline(starting: Promise<VectorWorkerStart>, inline: Vec
       return queries
     })
   const onStopped = (error: unknown): VectorQueries => {
-    if (current !== inline && error instanceof Error && error.message.startsWith(STOPPED_PREFIX)) {
+    if (!(error instanceof Error) || !error.message.startsWith(STOPPED_PREFIX)) throw error
+    // Every read in flight when the worker stopped falls back; only the first one logs and closes it.
+    if (current !== inline) {
       log(`vectors ${error.message}; searching on the daemon connection`)
       current?.close()
       current = inline
-      return inline
     }
-    throw error
+    return inline
   }
   const read = async (run: (queries: VectorQueries) => Promise<VectorHit[] | null>): Promise<VectorHit[] | null> => {
     const queries = current ?? (await ready)
@@ -181,11 +185,16 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
     else entry?.reject(new Error(reply.reason))
     wakeIdle()
   }
-  worker.onerror = (event: ErrorEvent) => {
-    stop(`${STOPPED_PREFIX} (${event.message.slice(0, 120)})`)
+  const ended = (why: string): void => {
+    stop(`${STOPPED_PREFIX} (${why})`)
     started?.({ kind: 'started', ok: false, reason: 'the search worker stopped while starting' })
     closed?.()
   }
+  worker.onerror = (event: ErrorEvent) => ended(event.message.slice(0, 120))
+  // An exit with no error event would otherwise leave reads counted in the worker and exclusive waiting forever.
+  worker.addEventListener('close', () => {
+    if (!closing) ended('it exited')
+  })
 
   const reply = await new Promise<WorkerReply>((resolve) => {
     const timer = setTimeout(() => resolve({ kind: 'started', ok: false, reason: `the search worker did not start within ${limitMs} ms` }), limitMs)
@@ -206,7 +215,9 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
 
   const ask = (request: Omit<WorkerRequest, 'kind' | 'id' | 'deadlineAt'>, giveUpMs: number | undefined): Promise<VectorHit[] | null> => {
     if (stopped !== null) return Promise.reject(new Error(stopped))
-    const budget = Math.max(0, Math.min(limitMs, giveUpMs ?? limitMs))
+    const budget = Math.min(limitMs, giveUpMs ?? limitMs)
+    // The caller has already given up: nothing to scan for.
+    if (budget <= 0) return Promise.resolve(null)
     const deadlineAt = Date.now() + budget
     const id = nextId
     nextId += 1

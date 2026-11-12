@@ -62,8 +62,26 @@ test('the main thread keeps running while the worker scans, and a reply after th
     clearInterval(timer)
   }
   expect(ticks).toBeGreaterThan(10)
-  // The late reply for the first read changed nothing: the next read is answered on its own.
-  expect(await fake('ok').then((fresh) => fresh.nearest(NEAREST))).toEqual([{ id: 7, distance: 0.25 }])
+  // The late reply settled nothing twice, and it marked the worker idle: exclusive work runs.
+  expect(await queries.exclusive(() => 'ran')).toBe('ran')
+})
+
+test('a read with no time left answers null without reaching the worker', async () => {
+  const queries = await fake('busy')
+  const startedAt = performance.now()
+  expect(await queries.nearest(NEAREST, 0)).toBeNull()
+  expect(performance.now() - startedAt).toBeLessThan(50)
+  expect(await queries.exclusive(() => 'idle')).toBe('idle')
+})
+
+test('exclusive work that throws still lets held reads through', async () => {
+  const queries = await fake('ok')
+  const failing = queries.exclusive(() => {
+    throw new Error('purge failed')
+  })
+  const held = queries.nearest(NEAREST)
+  await expect(failing).rejects.toThrow('purge failed')
+  expect(await held).toEqual([{ id: 7, distance: 0.25 }])
 })
 
 test('a read whose caller gives up answers null then, and the worker drops it unread', async () => {
