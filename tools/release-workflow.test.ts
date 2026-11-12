@@ -60,6 +60,10 @@ describe('release workflow', () => {
     expect(github).toContain('scripts/install.ps1')
     expect(github).toContain('gh release create "v$VERSION"')
     expect(github).toContain('--verify-tag')
+    expect(github).toContain('bun tools/release-notes.ts dist "$VERSION"')
+    expect(github).toContain('--notes-file "$RUNNER_TEMP/RELEASE_NOTES.md"')
+    // The notes are moved out before dist/* is uploaded, so they never become an asset.
+    expect(github.indexOf('mv dist/RELEASE_NOTES.md')).toBeLessThan(github.indexOf('gh release create'))
     expect(job(text, 'npm-publish')).toContain('needs: [check, build, github-release]')
   })
 

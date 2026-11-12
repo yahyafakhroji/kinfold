@@ -86,6 +86,21 @@ jobs:
         shell: bash
         run: cd dist && sha256sum --check SHA256SUMS
 
+      - name: Install the pinned Bun
+        shell: bash
+        env:
+          # Anonymous API calls share a rate limit per runner address and answer 403.
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/install-bun.sh
+
+      # The notes leave dist/ so that only programs, SHA256SUMS and the install
+      # scripts are uploaded as release assets.
+      - name: Write the release notes
+        shell: bash
+        run: |
+          bun tools/release-notes.ts dist "$VERSION"
+          mv dist/RELEASE_NOTES.md "$RUNNER_TEMP/RELEASE_NOTES.md"
+
       - name: Add the install scripts
         shell: bash
         run: cp scripts/install.sh scripts/install.ps1 dist/
@@ -98,7 +113,7 @@ jobs:
           flags=()
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
           gh release create "v$VERSION" dist/* --verify-tag --title "Kinfold $VERSION" \
-            --notes "Kinfold $VERSION. Each program is listed in SHA256SUMS." "${flags[@]}"
+            --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md" "${flags[@]}"
 
   npm-publish:
     name: npm publish
