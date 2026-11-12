@@ -20,7 +20,7 @@ On Windows, in PowerShell:
 $env:KINFOLD_VERSION = '{{VERSION}}'; irm https://github.com/yahyafakhroji/kinfold/releases/download/v{{VERSION}}/install.ps1 | iex
 ```
 
-Each installer checks the program against the SHA256SUMS below before it runs it. The npm packages carry the same programs, with npm provenance that links them to this release's build.
+The curl and PowerShell installers check the program against the SHA256SUMS below before they run it. A program installed through npm checks its own bytes against the same list before `install` changes anything. The npm packages carry the same programs, with npm provenance that links them to this release's build.
 
 WSL is a preview in this release. Agents inside a WSL distro use the memory of the Windows install, and WSL needs mirrored networking for that.
 

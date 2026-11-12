@@ -137,8 +137,10 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
+      # A pinned major, because this job holds the OIDC token and a new major
+      # could change how publish authenticates.
       - name: Update npm
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       - name: Install the pinned Bun
         shell: bash

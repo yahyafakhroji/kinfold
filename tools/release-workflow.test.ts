@@ -76,6 +76,12 @@ describe('release workflow', () => {
     expect([...npm.matchAll(/npm publish --provenance --access public/g)].length).toBeGreaterThan(0)
   })
 
+  test('release.yml pins the npm major that runs with the OIDC token', () => {
+    const npm = job(release(), 'npm-publish')
+    expect(npm).toMatch(/npm install -g npm@\d+\s/)
+    expect(npm).not.toContain('npm@latest')
+  })
+
   test('release.yml never names an npm token', () => {
     const text = release()
     expect(text).not.toMatch(/NODE_AUTH_TOKEN|NPM_TOKEN|_authToken|\.npmrc/)

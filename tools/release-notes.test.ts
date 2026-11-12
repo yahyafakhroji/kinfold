@@ -28,6 +28,10 @@ test('release notes name the version in every install command and carry SHA256SU
   expect(notes).toContain('preview')
   expect(notes).toContain('https://github.com/yahyafakhroji/kinfold#readme')
   expect(notes).not.toContain('{{')
+  // npm installs the program without a hash check; the program checks itself before install changes anything.
+  expect(notes).toContain('The curl and PowerShell installers check the program against the SHA256SUMS below before they run it.')
+  expect(notes).toContain('checks its own bytes against the same list before `install` changes anything')
+  expect(notes).not.toContain('Each installer checks')
 })
 
 test('release notes refuse a version or checksums the installers would not accept', () => {
