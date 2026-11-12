@@ -307,7 +307,8 @@ test('a running daemon recorded on another port does not claim the taken one', a
   w.env.portFree = async (port) => port !== 37811
   mkdirSync(w.dataDir, { recursive: true })
   writeFileSync(join(w.dataDir, DAEMON_INFO_FILE), JSON.stringify({ pid: process.pid, port: 37900 }))
-  const answers = await runWizard(w.env, null, await readSetupState(w.env), flagsOf({ hosts: [], noEncrypt: true, yes: true }), { ...NO_CHOICE, yes: true })
+  const state = rerun(await readSetupState(w.env), { port: 37811 })
+  const answers = await runWizard(w.env, null, state, flagsOf({ hosts: [], noEncrypt: true, yes: true }), { ...NO_CHOICE, yes: true })
   expect(answers.port).toBe(37812)
 })
 
