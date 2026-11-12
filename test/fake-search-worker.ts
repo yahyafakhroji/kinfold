@@ -5,14 +5,14 @@
 // does), 'crash' (throws on a request), anything else answers at once. A hit's
 // id is the nearest query's k, or the first id of a distances query.
 
-import type { WorkerClose, WorkerReply, WorkerRequest, WorkerStart } from '../src/vectors/vector-worker-protocol'
+import type { WorkerChanged, WorkerClose, WorkerInvalidate, WorkerReply, WorkerRequest, WorkerStart } from '../src/vectors/vector-worker-protocol'
 
 declare const self: Worker
 
 const BUSY_MS = 300
 let mode = 'ok'
 
-self.onmessage = (event: MessageEvent<WorkerStart | WorkerRequest | WorkerClose>) => {
+self.onmessage = (event: MessageEvent<WorkerStart | WorkerRequest | WorkerClose | WorkerChanged | WorkerInvalidate>) => {
   const message = event.data
   if (message.kind === 'start') {
     mode = message.dbPath
@@ -24,6 +24,8 @@ self.onmessage = (event: MessageEvent<WorkerStart | WorkerRequest | WorkerClose>
     postMessage({ kind: 'closed' } satisfies WorkerReply)
     return
   }
+  // Cache upkeep has no reply, as in the real worker.
+  if (message.kind === 'changed' || message.kind === 'invalidate') return
   if (mode === 'slow') return
   if (mode === 'crash') throw new Error('worker blew up')
   if (mode === 'busy') {

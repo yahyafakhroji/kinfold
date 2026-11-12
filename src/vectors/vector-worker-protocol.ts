@@ -1,6 +1,6 @@
 // Messages between the daemon and its vector search worker (search-worker.ts).
 
-import type { NearestQuery, VectorHit } from '../store/vector-store'
+import type { NearestQuery, VectorHit, VectorSpace } from '../store/vector-store'
 
 export interface DistancesQuery {
   model: string
@@ -19,6 +19,19 @@ export interface WorkerStart {
   libraryOverride: string | null
   /** Page cache for the worker's connection, in KiB; null leaves SQLite's default. */
   cacheKib: number | null
+  /** The space the daemon embeds in: its vectors load into memory right after the start. Null: on first search. */
+  prewarm: VectorSpace | null
+}
+
+/** The indexer wrote these rows: the worker re-reads them into its vector cache. No reply. */
+export interface WorkerChanged {
+  kind: 'changed'
+  ids: number[]
+}
+
+/** Rows may be gone (retention, purge, resolve): the worker drops its vector cache and reloads it. No reply. */
+export interface WorkerInvalidate {
+  kind: 'invalidate'
 }
 
 /** Closes the worker's connection; the worker answers `closed` and the daemon then ends it. */

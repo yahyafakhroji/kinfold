@@ -124,15 +124,17 @@ function startVectors(store: Store, dataDir: string, dbKeys: DbKeyStore, options
   const support = options === undefined ? VECTORS_OFF : loadVec0(db, dataDir)
   const embedder = options?.embedder ?? null
   log(`vectors search=${support.ok ? `on (${support.detail})` : `off (${support.reason})`} embedder=${embedder === null ? 'none' : embedder.model}`)
-  const indexer = embedder === null ? null : createVectorIndexer({ db, embedder, log })
-  const timer = indexer === null ? null : setInterval(() => indexer.tick(), options?.tickMs ?? DEFAULT_INDEX_TICK_MS)
-  indexer?.tick()
   const inline = inlineVectorQueries(db)
+  // The worker loads the embedder's vectors into memory at start, so the first search after a restart is quick too.
   const queries = support.ok && embedder !== null
     ? workerOrInline(startVectorWorker({
       dbPath: store.path, dataDir, key: dbKeys.read(), libraryOverride: readEnv(process.env, 'SQLITE3MC_LIB') ?? null, cacheKib: DAEMON_CACHE_KIB,
+      prewarm: { model: embedder.model, dims: embedder.dims },
     }), inline, log)
     : inline
+  const indexer = embedder === null ? null : createVectorIndexer({ db, embedder, log, onWritten: (ids) => queries.changed(ids) })
+  const timer = indexer === null ? null : setInterval(() => indexer.tick(), options?.tickMs ?? DEFAULT_INDEX_TICK_MS)
+  indexer?.tick()
   return { indexer, support, search: createSemanticSearch({ db, embedder, support, queries }), timer, queries }
 }
 

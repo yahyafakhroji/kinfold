@@ -47,6 +47,8 @@ export interface IndexerOptions {
   maxBatchesPerTick?: number
   now?: () => number
   log: (line: string) => void
+  /** After each batch, the ids it embedded: the search worker re-reads them into its vector cache. */
+  onWritten?: (ids: readonly number[]) => void
 }
 
 export function backoffMs(failures: number): number {
@@ -77,7 +79,10 @@ export function createVectorIndexer(options: IndexerOptions): VectorIndexer {
     if (inputs.length === 0) return 0
     const vectors = await embedder.embed(inputs.map((input) => input.text), abort.signal)
     if (stopped) return 0
-    return upsertVectors(db, embedder.model, inputs.map((input, index) => ({ id: input.id, contentHash: input.contentHash, vector: vectors[index]! })), now())
+    const written = upsertVectors(db, embedder.model, inputs.map((input, index) => ({ id: input.id, contentHash: input.contentHash, vector: vectors[index]! })), now())
+    // A row skipped as purged is re-read too; the cache drops what the store no longer has.
+    if (written > 0) options.onWritten?.(inputs.map((input) => input.id))
+    return written
   }
 
   const pass = async (): Promise<void> => {

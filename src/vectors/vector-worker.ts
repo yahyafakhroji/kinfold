@@ -9,7 +9,7 @@
 import { isCompiledProgram } from '../runtime/program'
 import type { Database } from '../sqlite/types'
 import { type NearestQuery, type VectorHit, distancesFor, nearestObservations } from '../store/vector-store'
-import type { DistancesQuery, WorkerReply, WorkerRequest, WorkerStart } from './vector-worker-protocol'
+import type { DistancesQuery, WorkerChanged, WorkerInvalidate, WorkerReply, WorkerRequest, WorkerStart } from './vector-worker-protocol'
 
 /** How long one vector read may take before the caller gets null. Cold reads of a large store take seconds. */
 export const SEARCH_LIMIT_MS = 30_000
@@ -45,6 +45,8 @@ export interface VectorQueries {
    * seconds.
    */
   exclusive: Exclusive
+  /** The indexer wrote these rows; the worker re-reads them into its vector cache. */
+  changed(ids: readonly number[]): void
   /** Settles once the worker has closed its connection and ended; the same promise on every call. */
   close(): Promise<void>
 }
@@ -55,6 +57,7 @@ export function inlineVectorQueries(db: Database): VectorQueries {
     nearest: async (query) => nearestObservations(db, query),
     distances: async (query) => distancesFor(db, query),
     exclusive: runNow,
+    changed: () => {},
     close: async () => {},
   }
 }
@@ -109,6 +112,10 @@ export function workerOrInline(starting: Promise<VectorWorkerStart>, inline: Vec
     nearest: (query, giveUpMs) => read((queries) => queries.nearest(query, giveUpMs)),
     distances: (query, giveUpMs) => read((queries) => queries.distances(query, giveUpMs)),
     exclusive: async (fn) => (current ?? (await ready)).exclusive(fn),
+    changed: (ids) => {
+      if (current !== null) current.changed(ids)
+      else void ready.then((queries) => queries.changed(ids))
+    },
     close: () => {
       closing ??= ready.then((queries) => queries.close())
       return closing
@@ -206,6 +213,7 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
     }
     const start: WorkerStart = {
       kind: 'start', dbPath: options.dbPath, dataDir: options.dataDir, key: options.key, libraryOverride: options.libraryOverride, cacheKib: options.cacheKib,
+      prewarm: options.prewarm,
     }
     worker.postMessage(start)
   })
@@ -247,6 +255,8 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
         if (inWorker > 0) await new Promise<void>((resolve) => idleWaiters.push(resolve))
         return fn() as Awaited<ReturnType<typeof fn>>
       } finally {
+        // The work may have deleted rows: the worker prunes its vector cache before any held read runs.
+        if (stopped === null) worker.postMessage({ kind: 'invalidate' } satisfies WorkerInvalidate)
         exclusives -= 1
         if (exclusives === 0) {
           gated = false
@@ -265,6 +275,9 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
       nearest: (query, giveUpMs) => ask({ op: 'nearest', query }, giveUpMs),
       distances: (query, giveUpMs) => ask({ op: 'distances', query }, giveUpMs),
       exclusive,
+      changed: (ids) => {
+        if (stopped === null && ids.length > 0) worker.postMessage({ kind: 'changed', ids: [...ids] } satisfies WorkerChanged)
+      },
       close: () => {
         if (closeDone !== null) return closeDone
         closing = true
