@@ -1,5 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { DAEMON_INFO_FILE } from '../../store/data-dir'
 import type { CliObserverRunner } from '../../observer/runners/cli-core'
 import { ObserverError } from '../../observer/types'
 import { DB_KEY_REF } from '../../secrets/credentials'
@@ -272,6 +274,42 @@ test('a taken port suggests the next free one', async () => {
   const answers = await runWizard(w.env, ask(w), state, flagsOf({ hosts: [], noEncrypt: true }), NO_CHOICE)
   expect(answers.port).toBe(37812)
   expect(term.output()).toContain('Port 37811 is in use')
+})
+
+const holderIs = (pid: string) => (argv: readonly string[]) =>
+  argv[0] === '/usr/sbin/lsof' ? { exitCode: 0, stdout: `${pid}\n` } : undefined
+
+async function defaultPortWith(daemonPid: number, commandOverride?: (argv: readonly string[]) => { exitCode: number; stdout: string } | undefined): Promise<number> {
+  const { w } = setup([], { commandOverride })
+  w.env.portFree = async (port) => port !== 37811
+  mkdirSync(w.dataDir, { recursive: true })
+  writeFileSync(join(w.dataDir, DAEMON_INFO_FILE), JSON.stringify({ pid: daemonPid, port: 37811 }))
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, null, state, flagsOf({ hosts: [], noEncrypt: true, yes: true }), { ...NO_CHOICE, yes: true })
+  return answers.port
+}
+
+test('our own daemon too busy to answer /health keeps its port under --yes', async () => {
+  expect(await defaultPortWith(process.pid, holderIs(String(process.pid)))).toBe(37811)
+  expect(await defaultPortWith(process.pid)).toBe(37811)
+})
+
+test('another process on the port moves the default even when daemon.json names that port', async () => {
+  expect(await defaultPortWith(process.pid, holderIs('999999'))).toBe(37812)
+})
+
+test('a daemon.json pid that is no longer running does not claim the port', async () => {
+  expect(await defaultPortWith(2_147_483_646)).toBe(37812)
+})
+
+test('a running daemon recorded on another port does not claim the taken one', async () => {
+  const { w } = setup([])
+  w.env.portFree = async (port) => port !== 37811
+  mkdirSync(w.dataDir, { recursive: true })
+  writeFileSync(join(w.dataDir, DAEMON_INFO_FILE), JSON.stringify({ pid: process.pid, port: 37900 }))
+  const state = rerun(await readSetupState(w.env), { port: 37811 })
+  const answers = await runWizard(w.env, null, state, flagsOf({ hosts: [], noEncrypt: true, yes: true }), { ...NO_CHOICE, yes: true })
+  expect(answers.port).toBe(37812)
 })
 
 test('our own daemon on the saved port keeps it', async () => {

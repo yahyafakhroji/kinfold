@@ -197,7 +197,8 @@ export function readJournal(path: string): Journal | null {
   return null
 }
 
-function alive(pid: number): boolean {
+/** Whether a process with this id exists; one owned by another user (EPERM) counts as running. */
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
     return true
@@ -259,7 +260,7 @@ async function converting(ctx: Context, op: Op, from: string | null, to: string 
 function requireNoRun(ctx: Context): void {
   if (!existsSync(maintenancePath(ctx.path))) return
   const journal = readJournal(ctx.path)
-  if (journal !== null && alive(journal.pid) && journal.pid !== process.pid) throw new Refusal(`a kinfold ${journal.op} is running (pid ${journal.pid}); wait for it`)
+  if (journal !== null && isProcessAlive(journal.pid) && journal.pid !== process.pid) throw new Refusal(`a kinfold ${journal.op} is running (pid ${journal.pid}); wait for it`)
   throw new Refusal(`a kinfold ${journal?.op ?? 'encrypt, decrypt or rekey'} was cut short; run kinfold key resume first`)
 }
 
@@ -414,7 +415,7 @@ async function resume(ctx: Context): Promise<void> {
     return
   }
   const journal = readJournal(ctx.path)
-  if (journal !== null && alive(journal.pid) && journal.pid !== process.pid) throw new Refusal(`a kinfold ${journal.op} is still running (pid ${journal.pid}); wait for it`)
+  if (journal !== null && isProcessAlive(journal.pid) && journal.pid !== process.pid) throw new Refusal(`a kinfold ${journal.op} is still running (pid ${journal.pid}); wait for it`)
   if (journal === null) {
     throw new Refusal(`${marker} does not say which run it belongs to; if memory.db opens (kinfold status), remove ${marker}${existsSync(backup) ? ` and keep ${backup} until you have checked it` : ''}`)
   }

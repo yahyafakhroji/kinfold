@@ -9,9 +9,9 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { OBSERVER_PROVIDERS, type ObserverProvider } from '../../observer/types'
 import { encodeRecoveryCode } from '../../sqlite/recovery'
 import { newDbKey } from '../../sqlite/keys'
-import { checkHealth } from '../daemon-client'
+import { checkHealth, readDaemonInfo } from '../daemon-client'
 import { STALE_DB_KEY, staleDbKey, storedDbKey } from '../db-encryption'
-import { encryptKeyExists } from '../encrypt'
+import { encryptKeyExists, isProcessAlive } from '../encrypt'
 import { type InstallHost, detectHosts, selectedHosts } from '../detect'
 import type { InstallEnv } from '../env'
 import { keyStoreOf } from '../key-store-choice'
@@ -84,10 +84,26 @@ async function bindFree(port: number): Promise<boolean> {
   }
 }
 
+/**
+ * Held by the daemon daemon.json names: that port, a pid still running, and,
+ * where the system names the port's listener, that same pid. A daemon busy
+ * with a long query misses the /health timeout but is still ours, and
+ * moving a re-run to another port would rewrite the service for nothing.
+ * Only macOS has lsof at that path; Linux and Windows rely on the pid alone,
+ * and a wrong claim ends with install's failed /health wait, port unchanged.
+ */
+async function ownDaemonHolds(env: InstallEnv, port: number): Promise<boolean> {
+  const info = readDaemonInfo(env.dataDir)
+  if (info.port !== port || info.pid === null || !isProcessAlive(info.pid)) return false
+  const holder = await portHolder(env, port)
+  return holder === null || holder === String(info.pid)
+}
+
 /** Free to bind, or already held by our own daemon, which an install restarts anyway. */
 async function portAvailable(env: InstallEnv, port: number): Promise<boolean> {
   if (await (env.portFree ?? bindFree)(port)) return true
-  return (await checkHealth(env, port)).up
+  if ((await checkHealth(env, port)).up) return true
+  return ownDaemonHolds(env, port)
 }
 
 export async function freePortFrom(env: InstallEnv, start: number): Promise<number> {
