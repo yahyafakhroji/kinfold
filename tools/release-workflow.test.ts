@@ -32,8 +32,34 @@ describe('release workflow', () => {
     expect(text).toMatch(/^permissions: \{\}\s*$/m)
     expect([...text.matchAll(/id-token: write/g)]).toHaveLength(1)
     expect(job(text, 'npm-publish')).toContain('id-token: write')
-    expect(job(text, 'github-release')).toContain('contents: write')
-    expect([...text.matchAll(/contents: write/g)]).toHaveLength(1)
+    // Only the jobs that create, promote or discard the Release may write to the repo.
+    for (const name of ['github-release', 'promote', 'discard']) expect(job(text, name)).toContain('contents: write')
+    expect([...text.matchAll(/contents: write/g)]).toHaveLength(3)
+  })
+
+  test('release.yml smoke-tests the real prerelease before it is promoted and published', () => {
+    const text = release()
+    // A final build checks itself against its own GitHub Release, so the Release must exist before the smoke.
+    expect(job(text, 'build')).toContain('skip_smoke: true')
+    expect(job(text, 'github-release')).toContain('--prerelease')
+    const smoke = job(text, 'smoke')
+    expect(smoke).toContain('uses: ./.github/workflows/smoke.yml')
+    expect(smoke).toContain('needs: [check, github-release]')
+    const promote = job(text, 'promote')
+    expect(promote).toContain('needs: [check, smoke]')
+    expect(promote).toContain('gh release edit "v$VERSION" --prerelease=false --latest')
+    expect(job(text, 'npm-publish')).toContain('needs: [check, build, promote]')
+    const discard = job(text, 'discard')
+    expect(discard).toContain("if: failure() && needs.github-release.result == 'success'")
+    expect(discard).toContain('gh release delete "v$VERSION" --yes')
+    expect(discard).not.toContain('--cleanup-tag')
+  })
+
+  test('release-build.yml smoke-tests unless its caller runs the smoke itself', () => {
+    const called = readFileSync(join(WORKFLOWS, 'release-build.yml'), 'utf8')
+    expect(called).toMatch(/^ {6}skip_smoke:\n/m)
+    const smokeJob = called.slice(called.indexOf('\n  smoke:'))
+    expect(smokeJob).toContain('if: ${{ !inputs.skip_smoke }}')
   })
 
   test('release.yml checks the tag is a release version on main', () => {
@@ -64,7 +90,7 @@ describe('release workflow', () => {
     expect(github).toContain('--notes-file "$RUNNER_TEMP/RELEASE_NOTES.md"')
     // The notes are moved out before dist/* is uploaded, so they never become an asset.
     expect(github.indexOf('mv dist/RELEASE_NOTES.md')).toBeLessThan(github.indexOf('gh release create'))
-    expect(job(text, 'npm-publish')).toContain('needs: [check, build, github-release]')
+    expect(job(text, 'npm-publish')).toContain('needs: [check, build, promote]')
   })
 
   test('release.yml publishes the five cli packages before the launcher', () => {

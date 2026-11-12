@@ -9,6 +9,13 @@ on:
         description: Version stamped into each program
         required: true
         type: string
+      # release.yml runs the smoke itself, after its prerelease exists: a final
+      # build checks itself against its own GitHub Release's SHA256SUMS.
+      skip_smoke:
+        description: Leave the smoke to the caller
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       version:
@@ -156,4 +163,5 @@ jobs:
   smoke:
     name: smoke
     needs: checksums
+    if: ${{ !inputs.skip_smoke }}
     uses: ./.github/workflows/smoke.yml
