@@ -4,10 +4,15 @@
 # with, named by two variables, so this file holds no local paths:
 #   KINFOLD_DEMO_BIN=/path/to/kinfold-darwin-arm64
 #   KINFOLD_DEMO_SUMS=/path/to/SHA256SUMS
+# The program honours a local SHA256SUMS only for an -rc build; a final build
+# fetches the sums of its own GitHub Release, so KINFOLD_DEMO_SUMS is unused.
 #
 # Everything runs under a throwaway HOME in the per-user temp folder, and the
-# install is a dry run, so nothing is written, no service is touched and no key
-# store is read. Stub `claude` and `opencode` commands stand in for the agents.
+# install is a dry run, so nothing is written. The dry run still reads state
+# that is per user rather than per HOME: whether the LaunchAgent is loaded,
+# whether a daemon answers on the port, and whether Keychain entries exist
+# (never their values). Stub `claude` and `opencode` commands stand in for the
+# agents.
 
 Output assets/demo.gif
 
@@ -25,7 +30,7 @@ Type `export HOME="$(mktemp -d "$(getconf DARWIN_USER_TEMP_DIR)kinfold-demo.XXXX
 Enter
 Type `cp "$KINFOLD_DEMO_BIN" bin/kinfold && printf '#!/bin/sh\necho 2.1.0\n' > bin/claude && printf '#!/bin/sh\necho 2.1.4\n' > bin/opencode && chmod +x bin/claude bin/opencode`
 Enter
-Type `export PATH="$HOME/bin:/usr/bin:/bin" KINFOLD_DB_KEYSTORE=none KINFOLD_NO_UPDATE_CHECK=1 KINFOLD_RELEASE_SUMS_URL="file://$KINFOLD_DEMO_SUMS" PS1='$ '`
+Type `export PATH="$HOME/bin:/usr/bin:/bin" KINFOLD_NO_UPDATE_CHECK=1 KINFOLD_RELEASE_SUMS_URL="file://$KINFOLD_DEMO_SUMS" PS1='$ '`
 Enter
 Type "clear"
 Enter
