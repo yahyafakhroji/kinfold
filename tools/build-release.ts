@@ -14,6 +14,8 @@ import { DEVELOPMENT_VERSION } from '../src/install/self-install'
 export interface ReleasePaths {
   root: string
   entry: string
+  /** Worker scripts the program starts with new Worker(); a compile must name each as an entry or the program cannot find it. */
+  workers: string[]
   generator: string
   generated: string
   versionFile: string
@@ -67,6 +69,7 @@ export function releasePaths(root: string): ReleasePaths {
   return {
     root,
     entry: join(root, 'src', 'cli', 'kinfold.ts'),
+    workers: [join(root, 'src', 'vectors', 'search-worker.ts')],
     generator: join(root, 'tools', 'gen-embedded.ts'),
     generated: join(root, 'src', 'runtime', 'embedded.generated.ts'),
     versionFile: join(root, 'src', 'version.ts'),
@@ -165,7 +168,7 @@ const nativeToolchain: BuildToolchain = {
   },
   compile(paths, bunTarget, output) {
     const result = Bun.spawnSync(
-      [process.execPath, 'build', '--compile', `--target=${bunTarget}`, paths.entry, '--outfile', output],
+      [process.execPath, 'build', '--compile', `--target=${bunTarget}`, paths.entry, ...paths.workers, '--outfile', output],
       { cwd: paths.root, stdout: 'inherit', stderr: 'inherit' },
     )
     return result.exitCode ?? 1

@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { FRAGMENT, markV1 } from '../data-control/test-support'
 import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../observer/test-support'
+import type { Exclusive } from '../vectors/vector-worker'
 import { type RunningDaemon, startDaemon } from './daemon'
+import { type DataHandlers, dataRoute } from './data-routes'
 
 let temp: TempStore
 let daemon: RunningDaemon
@@ -84,6 +86,29 @@ test('size and retention answer with their shapes; a bad PUT is 400 and names th
   expect(await bad.text()).not.toContain('SECRET-VALUE')
   expect((await call('POST', '/data/size')).status).toBe(405)
   expect((await call('GET', '/data/findings?limit=0')).status).toBe(400)
+})
+
+test('retention writes, purge and resolve run through exclusive; reads and previews do not', async () => {
+  const seen: string[] = []
+  const handlers = {
+    size: () => { seen.push('size'); return {} },
+    previewRetention: () => { seen.push('preview'); return {} },
+    putRetention: () => { seen.push('put'); return {} },
+    purge: () => { seen.push('purge'); return {} },
+    resolve: () => { seen.push('resolve'); return { ok: true, finding: {}, purge: null } },
+  } as unknown as DataHandlers
+  const exclusive: Exclusive = async (fn) => {
+    seen.push('exclusive')
+    return fn()
+  }
+  const body = (value: unknown) => async () => ({ ok: true as const, value })
+  const at = (path: string) => new URL(`http://127.0.0.1${path}`)
+  await dataRoute('GET', at('/data/size'), body(null), handlers, exclusive)
+  await dataRoute('PUT', at('/data/retention'), body({ retention: { events: 30 }, preview: true }), handlers, exclusive)
+  await dataRoute('PUT', at('/data/retention'), body({ retention: { events: 30 } }), handlers, exclusive)
+  await dataRoute('POST', at('/data/purge'), body({ before: new Date(T0).toISOString() }), handlers, exclusive)
+  await dataRoute('POST', at('/data/findings/1/resolve'), body({ action: 'redact' }), handlers, exclusive)
+  expect(seen).toEqual(['size', 'preview', 'exclusive', 'put', 'exclusive', 'purge', 'exclusive', 'resolve'])
 })
 
 test('purge validates its selector and supports a dry run', async () => {

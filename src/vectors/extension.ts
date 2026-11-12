@@ -2,7 +2,8 @@
 // through sqlite3mc (src/sqlite/), which allows extension loading, so
 // the Homebrew SQLite swap vector search once needed on macOS is gone. The
 // pinned vec0 member from the data dir is hashed against the release and
-// loaded into the daemon's connection only. Every failure is a reason string,
+// loaded into the daemon's connection and its search worker's, never into a
+// hook or the MCP server. Every failure is a reason string,
 // never a throw: search falls back to FTS without it.
 
 import { createHash } from 'node:crypto'

@@ -9,6 +9,7 @@ import { applyRetention, describeRetention } from '../data-control/retention'
 import { DEFAULT_SCAN_BATCH, describeScan, scanBatch } from '../data-control/scanner'
 import type { MarkerKey } from '../redaction/redact'
 import type { Database } from '../sqlite/types'
+import { type Exclusive, runNow } from '../vectors/vector-worker'
 
 export const DEFAULT_SCAN_TICK_MS = 10_000
 export const DEFAULT_RETENTION_TICK_MS = 10 * 60_000
@@ -21,6 +22,8 @@ export interface DataTickOptions {
   scanTickMs?: number
   retentionTickMs?: number
   scanBatchSize?: number
+  /** Retention ends with a TRUNCATE checkpoint, so it runs clear of the vector worker's read snapshot; default at once. */
+  exclusive?: Exclusive
 }
 
 export interface DataTicks {
@@ -51,13 +54,16 @@ export function startDataTicks(options: DataTickOptions): DataTicks {
       return false
     }
   }
+  const exclusive = options.exclusive ?? runNow
   const retentionTick = (): void => {
-    try {
-      const line = describeRetention(applyRetention(db, now()))
-      if (line !== null) log(line)
-    } catch (error: unknown) {
-      log(`data retention failed: ${errorMessage(error)}`)
-    }
+    void exclusive(() => {
+      try {
+        const line = describeRetention(applyRetention(db, now()))
+        if (line !== null) log(line)
+      } catch (error: unknown) {
+        log(`data retention failed: ${errorMessage(error)}`)
+      }
+    })
   }
   const timers = [
     setInterval(scanTick, options.scanTickMs ?? DEFAULT_SCAN_TICK_MS),

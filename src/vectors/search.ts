@@ -10,9 +10,10 @@
 import type { Parsed } from '../context/types'
 import { isRecord } from '../contract/event'
 import type { Database } from '../sqlite/types'
-import { NO_FILTERS, type NearestFilters, type VectorHit, distancesFor, nearestObservations } from '../store/vector-store'
+import { NO_FILTERS, type NearestFilters, type VectorHit } from '../store/vector-store'
 import { EmbedError, type Embedder } from './embedder'
 import type { Support } from './extension'
+import { type VectorQueries, inlineVectorQueries } from './vector-worker'
 
 export const MAX_QUERY_CHARS = 2_000
 export const MAX_K = 100
@@ -30,6 +31,12 @@ export interface SemanticRequest {
   filters: NearestFilters
   /** Rows to measure as well, after the top k: the prompt path's keyword candidates. */
   alsoIds?: readonly number[]
+  /**
+   * When the caller stops waiting, from the request's start. Set by callers
+   * that abort at their deadline (the MCP routes); unset, a read may run late,
+   * as the prompt path wants for its late answers.
+   */
+  giveUpMs?: number
 }
 
 export type SemanticAnswer =
@@ -43,6 +50,8 @@ export interface SemanticSearchDeps {
   embedder: Embedder | null
   /** Whether sqlite-vec loaded into db, and why not. */
   support: Support
+  /** Where the vector reads run; default db on the caller's thread. The daemon passes its search worker. */
+  queries?: VectorQueries
   now?: () => number
 }
 
@@ -125,6 +134,7 @@ async function queryVector(embedder: Embedder, cache: QueryCache, request: Seman
 export function createSemanticSearch(deps: SemanticSearchDeps): (request: SemanticRequest) => Promise<SemanticAnswer> {
   const now = deps.now ?? (() => performance.now())
   const cache = createQueryCache(QUERY_CACHE_SIZE)
+  const queries = deps.queries ?? inlineVectorQueries(deps.db)
   return async (request) => {
     if (!deps.support.ok) return { status: 'unavailable', reason: deps.support.reason }
     const embedder = deps.embedder
@@ -133,10 +143,17 @@ export function createSemanticSearch(deps: SemanticSearchDeps): (request: Semant
     const embedded = await queryVector(embedder, cache, request, () => now() - startedAt)
     if (!embedded.ok) return embedded.answer
     const embeddedAt = now()
-    const nearest = nearestObservations(deps.db, { model: embedder.model, vector: embedded.vector, project: request.project, k: request.k, filters: request.filters })
-    const found = new Set(nearest.map((hit) => hit.id))
-    const extra = request.alsoIds === undefined ? [] : distancesFor(deps.db, { model: embedder.model, vector: embedded.vector, project: request.project, ids: request.alsoIds.filter((id) => !found.has(id)) })
-    const hits = [...nearest, ...extra]
-    return { status: 'ok', hits, embedMs: Math.round(embeddedAt - startedAt), searchMs: Math.round(now() - embeddedAt), cached: embedded.cached }
+    try {
+      const left = (): number | undefined => (request.giveUpMs === undefined ? undefined : request.giveUpMs - (now() - startedAt))
+      const nearest = await queries.nearest({ model: embedder.model, vector: embedded.vector, project: request.project, k: request.k, filters: request.filters }, left())
+      if (nearest === null) return { status: 'timeout', ms: Math.round(now() - startedAt) }
+      const found = new Set(nearest.map((hit) => hit.id))
+      const ids = request.alsoIds?.filter((id) => !found.has(id)) ?? []
+      const extra = ids.length === 0 ? [] : await queries.distances({ model: embedder.model, vector: embedded.vector, project: request.project, ids }, left())
+      if (extra === null) return { status: 'timeout', ms: Math.round(now() - startedAt) }
+      return { status: 'ok', hits: [...nearest, ...extra], embedMs: Math.round(embeddedAt - startedAt), searchMs: Math.round(now() - embeddedAt), cached: embedded.cached }
+    } catch (error: unknown) {
+      return { status: 'unavailable', reason: error instanceof Error ? error.message : 'the vector search failed' }
+    }
   }
 }

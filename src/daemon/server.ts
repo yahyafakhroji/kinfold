@@ -24,6 +24,7 @@ import type { ObserverModelsRoute } from './observer-models-route'
 import type { ObserverTestRoute } from './observer-test'
 import { type ObserverSettingsHandlers, parseRecheck, parseSettingsPut } from './settings-route'
 import { type SemanticAnswer, type SemanticRequest, parseSemanticRequest } from '../vectors/search'
+import type { Exclusive } from '../vectors/vector-worker'
 
 export interface ServerDeps {
   /** 0 picks a free port. */
@@ -49,6 +50,8 @@ export interface ServerDeps {
   observerSettings: ObserverSettingsHandlers
   /** /data/size, /data/retention, /data/scan, /data/findings, /data/findings/:id/resolve, /data/purge. */
   data: DataHandlers
+  /** Runs retention, purge and resolve clear of the vector worker's read snapshot; default at once. */
+  exclusive?: Exclusive
   /** GET /memory/observations, /memory/observations/:id, /memory/facets (the dashboard's memory browser). */
   memory: MemoryHandlers
   /** GET /update: the banner the dashboard shows; absent or null means none. Reads only, never marks a notice shown. */
@@ -139,7 +142,10 @@ async function semanticRoute(request: Request, deps: ServerDeps): Promise<Respon
   const parsed = body.ok ? parseSemanticRequest(body.value) : body
   if (!parsed.ok) return json(400, { error: parsed.error })
   const search = deps.semanticSearch
-  const answer: SemanticAnswer = search === undefined ? { status: 'unavailable', reason: 'semantic search is not configured in this daemon' } : await search(parsed.value)
+  // The MCP client aborts at its deadline; a read still queued then is skipped rather than scanned for no one.
+  const answer: SemanticAnswer = search === undefined
+    ? { status: 'unavailable', reason: 'semantic search is not configured in this daemon' }
+    : await search({ ...parsed.value, giveUpMs: parsed.value.deadlineMs })
   const detail = answer.status === 'ok' ? ` hits=${answer.hits.length} embed_ms=${answer.embedMs} search_ms=${answer.searchMs} cached=${answer.cached}` : ''
   deps.log(`semantic search status=${answer.status}${detail}`)
   return json(200, answer)
@@ -173,7 +179,7 @@ async function route(request: Request, url: URL, deps: ServerDeps): Promise<Resp
 /** The routes the dashboard reads and writes besides /observer/settings: data control, memory, metrics, model test. */
 async function panelRoute(request: Request, url: URL, deps: ServerDeps): Promise<RouteAnswer | null> {
   const path = url.pathname
-  if (path.startsWith('/data/')) return dataRoute(request.method, url, () => readJson(request), deps.data)
+  if (path.startsWith('/data/')) return dataRoute(request.method, url, () => readJson(request), deps.data, deps.exclusive)
   if (path.startsWith('/memory/')) return memoryRoute(request.method, url, deps.memory)
   if (path === '/observer/models') return deps.observerModels(request.method, url)
   if (path === '/observer/test') return deps.observerTest(request.method, () => readJson(request))
