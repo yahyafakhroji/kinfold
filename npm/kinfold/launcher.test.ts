@@ -302,6 +302,19 @@ describe('pack-npm', () => {
     }
   })
 
+  test("pack-npm gives every platform package the launcher's repository and public access", () => {
+    const { dir } = distWithPrograms()
+    packNpm(dir, '1.4.0')
+    const template = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8')) as Record<string, unknown>
+    expect(template.repository).toEqual({ type: 'git', url: 'git+https://github.com/yahyafakhroji/kinfold.git' })
+    for (const target of NPM_TARGETS) {
+      const manifest = JSON.parse(readFileSync(join(dir, 'npm', target.dir, 'package.json'), 'utf8')) as Record<string, unknown>
+      // npm provenance refuses a package whose repository does not name the repo that built it.
+      expect(manifest.repository).toEqual(template.repository)
+      expect(manifest.publishConfig).toEqual({ access: 'public' })
+    }
+  })
+
   test('refuses a version and a dist before it writes packages', () => {
     const { dir } = distWithPrograms()
 

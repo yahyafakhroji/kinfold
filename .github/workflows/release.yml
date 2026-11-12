@@ -1,0 +1,191 @@
+name: release
+
+# Pushing a v<version> tag on main builds every program once, smoke-tests it on
+# each OS, publishes those same bytes as a GitHub Release, then publishes them
+# to npm through trusted publishing. The npm trusted-publisher configs name this
+# file, so renaming it breaks npm publishing.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: check the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Read the version from the tag
+        id: version
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "$TAG is not v<major>.<minor>.<patch>[-<prerelease>]"
+            exit 1
+          fi
+          version="${TAG#v}"
+          if [ "$version" = "0.0.0-dev" ]; then
+            echo "0.0.0-dev is the development version, which skips the checksum check"
+            exit 1
+          fi
+          prerelease=false
+          if [[ "$version" == *-* ]]; then prerelease=true; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      # A tag on a branch that never merged would publish code main never had.
+      - name: Confirm the tagged commit is on main
+        shell: bash
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+  build:
+    name: build
+    needs: check
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-build.yml
+    with:
+      version: ${{ needs.check.outputs.version }}
+
+  github-release:
+    name: GitHub Release
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      PRERELEASE: ${{ needs.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: kinfold-programs
+          path: dist
+
+      - name: Check the programs against SHA256SUMS
+        shell: bash
+        run: cd dist && sha256sum --check SHA256SUMS
+
+      - name: Install the pinned Bun
+        shell: bash
+        env:
+          # Anonymous API calls share a rate limit per runner address and answer 403.
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/install-bun.sh
+
+      # The notes leave dist/ so that only programs, SHA256SUMS and the install
+      # scripts are uploaded as release assets.
+      - name: Write the release notes
+        shell: bash
+        run: |
+          bun tools/release-notes.ts dist "$VERSION"
+          mv dist/RELEASE_NOTES.md "$RUNNER_TEMP/RELEASE_NOTES.md"
+
+      - name: Add the install scripts
+        shell: bash
+        run: cp scripts/install.sh scripts/install.ps1 dist/
+
+      - name: Create the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "v$VERSION" dist/* --verify-tag --title "Kinfold $VERSION" \
+            --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md" "${flags[@]}"
+
+  npm-publish:
+    name: npm publish
+    needs: [check, build, github-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      PRERELEASE: ${{ needs.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Trusted publishing needs npm 11.5.1 or later. registry-url points npm at
+      # the registry; with no token set, npm exchanges this job's OIDC token.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      # A pinned major, because this job holds the OIDC token and a new major
+      # could change how publish authenticates.
+      - name: Update npm
+        run: npm install -g npm@11
+
+      - name: Install the pinned Bun
+        shell: bash
+        env:
+          # Anonymous API calls share a rate limit per runner address and answer 403.
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/install-bun.sh
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: kinfold-programs
+          path: dist
+
+      - name: Check the programs against SHA256SUMS
+        shell: bash
+        run: cd dist && sha256sum --check SHA256SUMS
+
+      - name: Pack the npm packages
+        shell: bash
+        run: bun tools/pack-npm.ts dist "$VERSION"
+
+      # The platform packages go first, so the launcher never names a package
+      # that is not there yet. A version already on npm is skipped, which lets a
+      # rerun finish a publish that stopped partway.
+      - name: Publish
+        shell: bash
+        run: |
+          tag=latest
+          if [ "$PRERELEASE" = "true" ]; then tag=next; fi
+          publish() {
+            name=$(node -p "require('./$1/package.json').name")
+            if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+              echo "$name@$VERSION is already on npm"
+              return
+            fi
+            (cd "$1" && npm publish --provenance --access public --tag "$tag")
+          }
+          publish dist/npm/cli-darwin-arm64
+          sleep 3
+          publish dist/npm/cli-darwin-x64
+          sleep 3
+          publish dist/npm/cli-linux-x64
+          sleep 3
+          publish dist/npm/cli-linux-arm64
+          sleep 3
+          publish dist/npm/cli-windows-x64
+          sleep 3
+          publish dist/npm/kinfold

@@ -1,6 +1,14 @@
 name: release-build
 
 on:
+  # The tag-triggered release.yml builds through this workflow, so a release
+  # ships the programs this exact pipeline built and smoke-tested.
+  workflow_call:
+    inputs:
+      version:
+        description: Version stamped into each program
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -24,7 +32,7 @@ env:
 jobs:
   build:
     name: build (${{ matrix.target }})
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft
+    if: inputs.version != '' || github.event.pull_request.draft
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
