@@ -17,6 +17,14 @@
 // With vector options it loads sqlite-vec into its connection, embeds
 // observations in the background (after each observer write and on a tick)
 // and answers POST /search/semantic for the MCP server's hybrid search.
+//
+// The process has two layers. The shell is the HTTP server, the dashboard
+// sessions, the token and the HMAC keys: it lives as long as the process. The
+// core is everything that holds memory.db: the writer, the reader, the vector
+// worker, the drain, the observer and the data ticks. A restore stops the
+// core, swaps the store, and starts a new core on it, so the port, the
+// sessions and the page a person is watching all survive
+// (backup-routes.ts). While there is no core, store routes answer 503.
 
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -57,7 +65,11 @@ import { type UpdateCheckDeps, startUpdateChecks } from '../update/check'
 import { availableMessage, pendingNotice } from '../update/notice'
 import { readUpdateState } from '../update/state'
 import { readInstallRecord } from '../install/setup/record'
-import { startServer } from './server'
+import { MAX_UPLOAD_BYTES, type ServerDeps, startServer } from './server'
+import { type BackupRoutes, backupRoutes, uploadLimitFor } from './backup-routes'
+import { snapshotInWorker, snapshotInto } from '../backup/snapshot'
+import type { KeyStore } from '../secrets/key-store'
+import { keyStoresOffForTests, processKeyStoreDeps, resolveKeyStore } from '../secrets/key-store-record'
 import type { ReadRouteDeps } from './read-routes'
 import { type MemoryReader, openMemoryReader } from '../mcp/reader'
 import { MCP_SEMANTIC_TIMEOUT_MS, type SemanticClient } from '../mcp/semantic-client'
@@ -94,6 +106,20 @@ export interface DaemonOptions {
   vectors?: DaemonVectorOptions
   /** The daily update check's fetch, clock and environment, for tests. It never runs for a 0.0.0-dev version. */
   updateCheck?: Partial<Pick<UpdateCheckDeps, 'fetch' | 'now' | 'envVars'>>
+  /** Where a restored store's key is written; null: none. Default: the store key-store.json names, read when a restore needs it. */
+  keyStore?: KeyStore | null
+  /** Test seams for the backup and restore routes. */
+  backup?: DaemonBackupOptions
+}
+
+export interface DaemonBackupOptions {
+  /** The most a restore upload may be; default the hard ceiling, lowered to what the disk can hold. */
+  uploadLimit?: () => number
+  /** The wait between tries while another process holds memory.db. */
+  sleep?: (ms: number) => Promise<void>
+  lockAttempts?: number
+  /** The store could not be opened again after a restore; default logs and ends the process, so the service starts a fresh one. */
+  onFatal?: (reason: string) => void
 }
 
 export interface DaemonVectorOptions {
@@ -165,12 +191,36 @@ export interface DaemonInfo {
 export interface RunningDaemon {
   port: number
   dataDir: string
-  scheduler: DrainScheduler
-  observer: ObserverScheduler | null
+  /** The drain, observer and indexer of the store that is open now; a restore replaces all three. */
+  readonly scheduler: DrainScheduler
+  readonly observer: ObserverScheduler | null
   hmacKeys: HmacKeyState
   /** Null without an embedder. */
-  vectors: VectorIndexer | null
+  readonly vectors: VectorIndexer | null
   stop: () => Promise<void>
+}
+
+/** The routes that read or write memory.db; a restore swaps them for the new store's. */
+type CoreRoutes = Pick<ServerDeps, 'schemaVersion' | 'vectorSearch' | 'semanticSearch' | 'onNudge' | 'listSessions' | 'context' | 'retryFailed' | 'observerSettings' | 'data' | 'exclusive' | 'memory' | 'metrics' | 'mcpRead' | 'reads'>
+
+/** Everything that holds memory.db open. */
+interface Core {
+  routes: CoreRoutes
+  scheduler: DrainScheduler
+  observer: ObserverScheduler | null
+  indexer: VectorIndexer | null
+  /** Writes the store's snapshot to a new file and resolves with its schema version. */
+  snapshot: (dest: string) => Promise<number>
+  /** Settles once every connection to memory.db is closed. */
+  stop: () => Promise<void>
+}
+
+const RESTORING = 'Kinfold is restoring a backup; try again in a moment'
+/** Long enough for the answer that reports the failure to leave. */
+const FATAL_EXIT_MS = 250
+
+function defaultKeyStore(dataDir: string): KeyStore | null {
+  return keyStoresOffForTests(process.env) ? null : resolveKeyStore(dataDir, processKeyStoreDeps(dataDir))
 }
 
 export function parsePort(value: string | undefined): number {
@@ -309,92 +359,170 @@ function warnIfPlaintextBesideKey(path: string, log: (line: string) => void, key
 export function startDaemon(options: DaemonOptions): RunningDaemon {
   const dataDir = ensureDataDir(options.dataDir)
   const log = options.log ?? ((line: string) => process.stderr.write(logLine(line)))
-  // One key lookup for the writer and the /read/ reader alike.
-  const dbKeys = rememberedDbKeys(options.dbKeys ?? dbKeyStoreFor(dataDir))
-  const store = openStore(dataDir, { keys: dbKeys })
-  // Decrypted pages stay here between requests; with SQLite's 2 MB default every prompt decrypted its pages again.
-  store.db.run(`PRAGMA cache_size = -${DAEMON_CACHE_KIB}`)
-  warnIfPlaintextBesideKey(store.path, log, dbKeys)
+  const version = options.version ?? VERSION
+  const envVars = options.updateCheck?.envVars ?? (() => process.env)
   const token = readOrCreateSecret(join(dataDir, TOKEN_FILE))
   const hmacKeys = createHmacKeys({ dataDir, keychain: options.keychain ?? NO_CREDENTIALS, now: options.hmac?.now ?? Date.now, log })
-  const vectors = startVectors(store, dataDir, dbKeys, options.vectors, log)
   const projectKeyFor = createProjectKeyResolver(gitRunnerWithTimeout(DAEMON_GIT_TIMEOUT_MS))
-  const reads = daemonReads(dataDir, dbKeys, projectKeyFor, vectors)
-  const drainOptions = (): DrainOptions => ({ spoolDir: join(dataDir, SPOOL_DIR), ...hmacKeys.marker(), projectKeyFor })
 
-  let observer: ObserverScheduler | null = null
-  const drain = (): void => {
-    const result = drainSpool(store.db, drainOptions())
-    const line = describeDrain(result)
-    if (line !== null) log(line)
-    if (result.inserted > 0) observer?.tick()
+  function startCore(): Core {
+    // One key lookup for the writer and the /read/ reader alike; a new core asks again, since a restore changes the key.
+    const dbKeys = rememberedDbKeys(options.dbKeys ?? dbKeyStoreFor(dataDir))
+    const store = openStore(dataDir, { keys: dbKeys })
+    // Decrypted pages stay here between requests; with SQLite's 2 MB default every prompt decrypted its pages again.
+    store.db.run(`PRAGMA cache_size = -${DAEMON_CACHE_KIB}`)
+    warnIfPlaintextBesideKey(store.path, log, dbKeys)
+    const vectors = startVectors(store, dataDir, dbKeys, options.vectors, log)
+    const reads = daemonReads(dataDir, dbKeys, projectKeyFor, vectors)
+    const drainOptions = (): DrainOptions => ({ spoolDir: join(dataDir, SPOOL_DIR), ...hmacKeys.marker(), projectKeyFor })
+
+    let observer: ObserverScheduler | null = null
+    const drain = (): void => {
+      const result = drainSpool(store.db, drainOptions())
+      const line = describeDrain(result)
+      if (line !== null) log(line)
+      if (result.inserted > 0) observer?.tick()
+    }
+    const scheduler = createDrainScheduler(drain, (error) => log(`drain failed: ${errorMessage(error)}`), options.debounceMs)
+    drain()
+    const interval = setInterval(() => scheduler.request(), options.fallbackDrainMs ?? FALLBACK_DRAIN_MS)
+    const observing = options.observer !== undefined ? startObserver(store.db, options.observer, hmacKeys, () => vectors.indexer?.tick(), log) : null
+    observer = observing?.observer ?? null
+    const dataTicks = startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, exclusive: vectors.queries.exclusive, ...options.dataControl })
+
+    const routes: CoreRoutes = {
+      schemaVersion: store.schemaVersion,
+      vectorSearch: vectors.support.ok ? 'on' : 'off',
+      semanticSearch: vectors.search,
+      onNudge: () => scheduler.request(),
+      listSessions: (projectKey) => listRecentSessions(store.db, projectKey),
+      context: contextHandler({ db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, updates: { dataDir, version, envVars } }),
+      retryFailed: (target) => retryFailed(store.db, target, observer, log),
+      observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? []),
+      data: dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log }),
+      exclusive: vectors.queries.exclusive,
+      memory: memoryHandlers(store.db, log),
+      metrics: (window) => metricsRoute(store.db, window),
+      mcpRead: mcpReadHandler(store.db, log),
+      reads: reads.deps,
+    }
+    // Off the thread that answers hooks; on this connection if the worker cannot start.
+    const snapshot = (dest: string): Promise<number> =>
+      snapshotInWorker({ dbPath: store.path, key: dbKeys.read(), dest, libraryOverride: readEnv(process.env, 'SQLITE3MC_LIB') ?? null }).catch((error: unknown) => {
+        log(`backup snapshot worker off (${error instanceof Error ? error.message : 'it failed'}); copying on the daemon connection`)
+        return snapshotInto(store.db, dest)
+      })
+    const stop = async (): Promise<void> => {
+      clearInterval(interval)
+      dataTicks.stop()
+      if (observing !== null) stopObserver(observing)
+      if (vectors.timer !== null) clearInterval(vectors.timer)
+      vectors.indexer?.stop()
+      scheduler.stop()
+      await vectors.indexer?.whenIdle()
+      reads.close()
+      // Before the store closes: a retention tick queued behind the worker would otherwise run on a closed db.
+      await vectors.queries.close()
+      store.db.close()
+    }
+    return { routes, scheduler, observer, indexer: vectors.indexer, snapshot, stop }
   }
-  const scheduler = createDrainScheduler(drain, (error) => log(`drain failed: ${errorMessage(error)}`), options.debounceMs)
-  drain()
 
-  const server = startServer({
+  let core = startCore()
+  // True from the moment a restore starts closing the store until a new core has it open.
+  let down = false
+  const onFatal = options.backup?.onFatal ?? ((reason: string): void => {
+    log(`fatal: ${reason}; stopping so the service starts a fresh daemon`)
+    setTimeout(() => process.exit(1), FATAL_EXIT_MS)
+  })
+
+  /** Closes the store, runs `between`, and opens the store again. A store that will not reopen is fatal: this process has nothing left to serve. */
+  const restart = async (between: () => Promise<void>): Promise<void> => {
+    down = true
+    await core.stop()
+    let failure: unknown = null
+    try {
+      await between()
+    } catch (error: unknown) {
+      failure = error
+    }
+    try {
+      core = startCore()
+      Object.assign(deps, core.routes)
+      down = false
+    } catch (error: unknown) {
+      onFatal(`memory.db could not be opened again (${error instanceof Error ? error.name : 'error'})`)
+      throw failure ?? error
+    }
+    if (failure !== null) throw failure
+  }
+
+  const backup: BackupRoutes = backupRoutes({
+    dataDir,
+    version,
+    now: Date.now,
+    log,
+    snapshot: (dest) => core.snapshot(dest),
+    keyStore: () => (options.keyStore !== undefined ? options.keyStore : defaultKeyStore(dataDir)),
+    restart,
+    sleep: options.backup?.sleep ?? ((ms) => Bun.sleep(ms)),
+    uploadLimit: options.backup?.uploadLimit ?? (() => uploadLimitFor(dataDir, MAX_UPLOAD_BYTES)),
+    ...(options.backup?.lockAttempts !== undefined ? { lockAttempts: options.backup.lockAttempts } : {}),
+  })
+
+  const deps: ServerDeps = {
     port: options.port,
     token,
-    version: options.version ?? VERSION,
-    schemaVersion: store.schemaVersion,
+    version,
     hmacMode: () => hmacKeys.mode(),
-    vectorSearch: vectors.support.ok ? 'on' : 'off',
-    semanticSearch: vectors.search,
-    onNudge: () => scheduler.request(),
-    listSessions: (projectKey) => listRecentSessions(store.db, projectKey),
-    context: contextHandler({ db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, updates: { dataDir, version: options.version ?? VERSION, envVars: options.updateCheck?.envVars ?? (() => process.env) } }),
-    retryFailed: (target) => retryFailed(store.db, target, observer, log),
-    // Read at request time: `observing` starts after the server, and no request is served before then.
-    observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? []),
-    data: dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log }),
-    exclusive: vectors.queries.exclusive,
-    memory: memoryHandlers(store.db, log),
     updateBanner: () => {
-      const notice = pendingNotice(readUpdateState(dataDir), readInstallRecord(dataDir), options.version ?? VERSION, (options.updateCheck?.envVars ?? (() => process.env))())
+      const notice = pendingNotice(readUpdateState(dataDir), readInstallRecord(dataDir), version, envVars())
       return notice === null ? null : { version: notice.version, message: availableMessage(notice) }
     },
-    metrics: (window) => metricsRoute(store.db, window),
-    mcpRead: mcpReadHandler(store.db, log),
     observerModels: observerModelsRoute(options.observer?.cliRunnerFor ?? null, log, Date.now),
     observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log)),
     auth: createDashboardAuth(),
-    reads: reads.deps,
+    backup,
+    unavailable: () => (down ? RESTORING : null),
     log,
-  })
+    ...core.routes,
+  }
+  const server = startServer(deps)
   const infoPath = join(dataDir, DAEMON_INFO_FILE)
   const info: DaemonInfo = { pid: process.pid, port: server.port }
   writePrivateFile(infoPath, JSON.stringify(info), false)
-  const interval = setInterval(() => scheduler.request(), options.fallbackDrainMs ?? FALLBACK_DRAIN_MS)
   const rotation = setInterval(hmacKeys.tick, options.hmac?.rotationTickMs ?? ROTATION_TICK_MS)
-  const observing = options.observer !== undefined ? startObserver(store.db, options.observer, hmacKeys, () => vectors.indexer?.tick(), log) : null
-  observer = observing?.observer ?? null
-  const dataTicks = startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, exclusive: vectors.queries.exclusive, ...options.dataControl })
   const updateChecks = startUpdateChecks({
     dataDir,
-    version: options.version ?? VERSION,
+    version,
     fetch: options.updateCheck?.fetch ?? ((url, init) => fetch(url, init)),
     now: options.updateCheck?.now ?? Date.now,
-    envVars: options.updateCheck?.envVars ?? (() => process.env),
+    envVars,
     log,
   })
-  log(`listening on 127.0.0.1:${server.port} schema=${store.schemaVersion} observer=${observer !== null ? 'on' : 'off'}`)
+  log(`listening on 127.0.0.1:${server.port} schema=${core.routes.schemaVersion} observer=${core.observer !== null ? 'on' : 'off'}`)
 
   const stop = async (): Promise<void> => {
-    clearInterval(interval)
     clearInterval(rotation)
-    dataTicks.stop()
     updateChecks.stop()
-    if (observing !== null) stopObserver(observing)
-    if (vectors.timer !== null) clearInterval(vectors.timer)
-    vectors.indexer?.stop()
-    scheduler.stop()
     await server.stop()
-    await vectors.indexer?.whenIdle()
+    // A core a restore already closed, and could not replace, has nothing left to stop.
+    if (!down) await core.stop()
     removeOwnInfoFile(infoPath)
-    reads.close()
-    // Before the store closes: a retention tick queued behind the worker would otherwise run on a closed db.
-    await vectors.queries.close()
-    store.db.close()
   }
-  return { port: server.port, dataDir, scheduler, observer, hmacKeys, vectors: vectors.indexer, stop }
+  return {
+    port: server.port,
+    dataDir,
+    get scheduler() {
+      return core.scheduler
+    },
+    get observer() {
+      return core.observer
+    },
+    hmacKeys,
+    get vectors() {
+      return core.indexer
+    },
+    stop,
+  }
 }
