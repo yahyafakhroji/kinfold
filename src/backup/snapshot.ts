@@ -63,7 +63,7 @@ export function snapshotInto(db: Database, dest: string): number {
 
 /** The same copy through a read-only connection of its own, for a process that does not hold the store open. */
 export function snapshotStoreFile(input: SnapshotFileInput): number {
-  if (existsSync(maintenancePath(input.dbPath))) throw new BackupError('busy', 'memory.db is being changed (kinfold encrypt, decrypt, rekey or restore); try again when it finishes')
+  if (existsSync(maintenancePath(input.dbPath))) throw new BackupError('busy', 'memory.db is being changed by a kinfold encrypt, decrypt, rekey or restore; if none is running, run kinfold key resume')
   const options = { readonly: true, busyTimeoutMs: OPEN_BUSY_TIMEOUT_MS }
   const db = input.key === null ? openPlain(input.dbPath, options, input.env) : openEncrypted(input.dbPath, input.key, options, input.env)
   try {

@@ -199,7 +199,7 @@ export async function dbStatusLines(env: InstallEnv): Promise<string[]> {
     lines.push(`warning: memory.db is plaintext but ${store.place} holds ${DB_KEY_REF}; the file was replaced by a plaintext copy, or a conversion failed`)
   }
   if (existsSync(maintenancePath(path))) {
-    lines.push(`warning: ${maintenancePath(path)} is there: a kinfold encrypt, decrypt or rekey is running or was cut short; nothing opens memory.db until it goes. If none is running, run kinfold key resume`)
+    lines.push(`warning: ${maintenancePath(path)} is there: a kinfold encrypt, decrypt, rekey or restore is running or was cut short; nothing opens memory.db until it goes. If none is running, run kinfold key resume`)
   }
   if (existsSync(foundBackupPath(path))) {
     lines.push(`warning: ${foundBackupPath(path)} is left from a conversion that was cut short; it is the original store; run kinfold key resume`)
