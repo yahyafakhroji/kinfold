@@ -225,6 +225,7 @@ input, select {
 input:hover, select:hover { border-color: var(--ink-3); }
 input:focus-visible, select:focus-visible { outline-offset: 0; border-color: var(--focus); }
 input[type="checkbox"] { width: 1rem; min-height: 1rem; accent-color: var(--accent); }
+input[type="file"] { padding: var(--space-1) var(--space-2); }
 
 .field { display: grid; gap: var(--space-1); min-width: 0; }
 .field[hidden] { display: none; }
