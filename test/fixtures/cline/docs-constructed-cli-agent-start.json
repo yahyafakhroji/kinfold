@@ -1,0 +1,1 @@
+{ "hookName": "agent_start", "clineVersion": "1.0.0", "timestamp": "2026-01-15T10:30:00Z", "taskId": "conv-123", "sessionContext": { "rootSessionId": "conv-123" }, "workspaceRoots": ["/workspace/project"], "userId": "user", "taskStart": { "taskMetadata": {} } }

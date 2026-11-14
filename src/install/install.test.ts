@@ -424,10 +424,10 @@ test.skipIf(process.platform === 'win32')('hostStatusLines returns exactly the m
   expect(await hostStatusLines(w.env)).toEqual(printed)
   const normalized = (await hostStatusLines(w.env)).map((line) => line.replaceAll(w.home, '<home>').replaceAll(w.root, '<root>'))
   expect(normalized).toEqual([
-    '  claude-code: detected 2.1.310 (Claude Code); wired: yes in <home>/.claude/settings.json',
-    '  opencode: detected 2.1.4; wired: yes in <home>/.config/opencode/plugins/kinfold.js',
-    '  codex: not detected (not found (no codex on PATH, no Codex.app)); wired: no (no hooks.json) in <home>/.codex/hooks.json',
-    '  cursor: not detected (not found (no cursor-agent or cursor on PATH, no Cursor.app)); wired: no (no hooks.json) in <home>/.cursor/hooks.json',
+    '  claude-code: detected 2.1.310 (Claude Code); wired: yes in <home>/.claude/settings.json; captures, context at start and on each prompt, search',
+    '  opencode: detected 2.1.4; wired: yes in <home>/.config/opencode/plugins/kinfold.js; captures, search',
+    `  continue: not detected (no safe signal for an IDE extension; name it with --hosts continue); wired: MCP not written (YAML config); run \`kinfold install --hosts continue --dry-run\` to print the block to add; Continue has no hooks; search needs the MCP block added to ~/.continue/config.yaml by hand; built from the docs, not yet checked against a real run`,
+    `  not found: codex, cursor, gemini-cli, qwen-code, factory-droid, devin, kilo-code, cline, copilot, antigravity, junie, kiro, amp, kimi-code, auggie, goose, crush, zed, warp`,
     'mcp server <root>/checkout/src/mcp/server.ts:',
     '  claude-code: no in <home>/.claude.json',
     '  opencode: yes in <home>/.config/opencode/opencode.json',

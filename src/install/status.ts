@@ -5,21 +5,17 @@
 
 import type { EffectiveSettings } from '../daemon/settings-route'
 import { OPENROUTER_CREDENTIAL_REF, providerTakesKey } from '../observer/settings'
-import { inspectSamHooks } from './claude-hooks'
 import { getObserverSettings } from './daemon-client'
 import { dbStatusLines } from './db-encryption'
 import { detectHosts } from './detect'
+import { isFoldedAbsent } from './detectors'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
 import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
 import { keyStoreStatusLine, noStoreWord, readKeyStore } from './key-store-choice'
-import { entryCommand } from './entry'
-import { readJsonObject, readTextOrNull } from './files'
 import { EXIT_OK, daemonSituation } from './install'
 import { serviceOf } from './service/control'
 import { hmacStatusLines } from './hmac-migration'
-import { hostWiringLine } from './host-wiring'
 import { mcpStatusLines } from './mcp-wiring'
-import { inspectShim } from './opencode-shim'
 import { dataDirAccessFor } from './access/check'
 import { vectorStatusLine } from './vec0-install'
 import { updatesEnabled } from '../update/enabled'
@@ -28,38 +24,49 @@ import { readUpdateState } from '../update/state'
 import { VERSION } from '../version'
 import { readInstallRecord } from './setup/record'
 import { type WslStatus, wslStatus } from '../wsl/entry'
+import type { HookHostSpec } from '../agents/hook-spec'
+import { HOOK_SPECS } from '../agents/hook-specs'
+import { INSTALL_PROFILES, overlapPlan, overlapState } from '../agents/install-profiles'
+import { type AgentId, type AgentProfile, capabilityLine, verificationNote } from '../agents/profile'
 
-function claudeWiring(env: InstallEnv): string {
-  const paths = installPaths(env)
-  try {
-    const file = readJsonObject(paths.claudeSettings)
-    return file.exists ? inspectSamHooks(file.value, entryCommand(env.mode, 'hook', env.dataDir)) : 'no (no settings.json)'
-  } catch (error: unknown) {
-    return `unknown (${errorMessage(error)})`
-  }
+type ProfileTable = Readonly<Record<AgentId, AgentProfile>>
+type SpecTable = Readonly<Record<AgentId, HookHostSpec | null>>
+
+const WIRED_STATES: readonly string[] = ['yes', 'stale', 'partial']
+
+/** The agents wired now, as install would have chosen them. */
+function wiredHosts(env: InstallEnv, profiles: ProfileTable): AgentId[] {
+  return Object.values(profiles).flatMap((profile) => (WIRED_STATES.includes(profile.wiring.state(env)) ? [profile.id] : []))
 }
 
-function opencodeWiring(env: InstallEnv): string {
-  const paths = installPaths(env)
-  const state = inspectShim(readTextOrNull(paths.opencodePlugin), { pluginEntry: paths.pluginEntry, dataDir: env.dataDir })
-  return state === 'foreign' ? 'no (a file by our name exists but is not our shim)' : state === 'stale' ? 'stale path' : state
-}
-
-async function hostLines(env: InstallEnv): Promise<string[]> {
-  const detections = await detectHosts(env, null)
-  const paths = installPaths(env)
-  return detections.map((detection) => {
+async function hostLines(env: InstallEnv, profiles: ProfileTable, specs: SpecTable): Promise<string[]> {
+  const os = platformOf(env).os
+  const detections = await detectHosts(env, null, profiles)
+  const overlap = overlapPlan(wiredHosts(env, profiles), env, profiles, specs)
+  const folded: string[] = []
+  const lines = detections.flatMap((detection) => {
+    const profile = profiles[detection.host]
+    const state = overlapState(env, profile, profiles)
+    if (isFoldedAbsent(detection, state !== 'no')) {
+      folded.push(detection.host)
+      return []
+    }
     const found = detection.selected ? `detected${detection.version !== null ? ` ${detection.version}` : ''}` : `not detected (${detection.note})`
-    const wired = detection.host === 'claude-code'
-      ? `${claudeWiring(env)} in ${paths.claudeSettings}`
-      : detection.host === 'opencode' ? `${opencodeWiring(env)} in ${paths.opencodePlugin}` : hostWiringLine(env, detection.host)
-    return `  ${detection.host}: ${found}; wired: ${wired}`
+    const wired = profile.wiring.line(env)
+    const note = verificationNote(profile.verification)
+    const line = `  ${detection.host}: ${found}; wired: ${wired}; ${capabilityLine(profile, os)}${note === null ? '' : `; ${note}`}`
+    // Steps and notes for an agent that is neither here nor wired would be noise on every status run.
+    const present = detection.selected || WIRED_STATES.includes(state)
+    const overlapNote = overlap.notes[profile.id]
+    const extra = [...(overlapNote !== undefined ? [overlapNote] : []), ...profile.manualSteps(os, env)]
+    return [line, ...(present ? extra.map((step) => `    ${step}`) : [])]
   })
+  return folded.length > 0 ? [...lines, `  not found: ${folded.join(', ')}`] : lines
 }
 
-/** Every host's detection and wiring line, then the MCP lines: what status prints under `hosts:`. */
-export async function hostStatusLines(env: InstallEnv): Promise<string[]> {
-  return [...(await hostLines(env)), ...mcpStatusLines(env)]
+/** Every host's detection, wiring and capability line, then the MCP lines: what status prints under `hosts:`. */
+export async function hostStatusLines(env: InstallEnv, profiles: ProfileTable = INSTALL_PROFILES, specs: SpecTable = HOOK_SPECS): Promise<string[]> {
+  return [...(await hostLines(env, profiles, specs)), ...mcpStatusLines(env)]
 }
 
 async function daemonLines(env: InstallEnv): Promise<string[]> {
@@ -120,7 +127,7 @@ export function updateLine(env: InstallEnv, running: string = VERSION): string {
   return `update: none known (${state.checkedAt === null ? 'never checked' : `last checked ${new Date(state.checkedAt).toISOString()}`})`
 }
 
-export async function status(env: InstallEnv, running: string = VERSION): Promise<number> {
+export async function status(env: InstallEnv, running: string = VERSION, profiles: ProfileTable = INSTALL_PROFILES): Promise<number> {
   let wsl: WslStatus | null = null
   if (platformOf(env).wsl) {
     // The Windows side can fail in ways this host cannot fix; the rest of status still holds.
@@ -136,7 +143,7 @@ export async function status(env: InstallEnv, running: string = VERSION): Promis
   const duplicates = findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings])
   const lines = [
     'hosts:',
-    ...(await hostStatusLines(env)),
+    ...(await hostStatusLines(env, profiles)),
     ...(await daemonLines(env)),
     ...(await databaseLines(env)),
     ...observer.lines,

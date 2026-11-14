@@ -43,11 +43,11 @@ test('bad flags are usage errors that name the problem', () => {
     const parsed = parseArgs(argv)
     return parsed.ok ? 'parsed' : parsed.error
   }
-  expect(error(['install', '--observer', 'zed=claude-cli:haiku'])).toStartWith('--observer takes <host>=<provider>:<model>')
+  expect(error(['install', '--observer', 'nonesuch=claude-cli:haiku'])).toStartWith('--observer takes <host>=<provider>:<model>')
   expect(error(['install', '--observer', 'opencode=gpt:x'])).toContain('needs <provider>:<model> with a known provider')
   expect(error(['install', '--observer', 'opencode=openrouter:'])).toContain('needs <provider>:<model>')
   expect(error(['install', '--observer', 'opencode=claude-cli:a', '--observer', 'opencode=claude-cli:b'])).toBe('--observer given twice for opencode')
-  expect(error(['install', '--hosts', 'zed'])).toStartWith('--hosts takes a comma list')
+  expect(error(['install', '--hosts', 'nonesuch'])).toStartWith('--hosts takes a comma list')
   expect(error(['install', '--observer'])).toBe('--observer needs a value')
   expect(error(['status', '--dry-run'])).toBe('--dry-run does not apply to status')
   expect(error(['uninstall', '--yes'])).toBe('--yes does not apply to uninstall')

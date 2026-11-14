@@ -1,0 +1,1 @@
+{ "hook_event_name": "UserPromptSubmit", "session_id": "session_abc", "session_title": "Fix the login page", "client_type": "kimi_code_cli", "cwd": "/path/to/project", "prompt": "Add a test for the parser" }

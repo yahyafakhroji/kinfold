@@ -1,0 +1,1 @@
+{ "hookName": "PostToolUse", "clineVersion": "3.40.0", "timestamp": "1767225600000", "taskId": "1767225600000", "workspaceRoots": ["/workspace/project"], "userId": "user-1", "postToolUse": { "toolName": "read_file", "parameters": { "path": "src/parser.ts" }, "result": "export function parse() {}", "success": true, "executionTimeMs": 12 } }

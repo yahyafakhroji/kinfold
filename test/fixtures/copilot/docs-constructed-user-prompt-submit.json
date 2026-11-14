@@ -1,0 +1,1 @@
+{ "hook_event_name": "UserPromptSubmit", "session_id": "copilot-session-0001", "timestamp": "2026-11-13T10:00:00.000Z", "cwd": "/Users/me/project", "prompt": "Add a test for the parser" }

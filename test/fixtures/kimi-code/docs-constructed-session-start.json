@@ -1,0 +1,1 @@
+{ "hook_event_name": "SessionStart", "session_id": "session_abc", "session_title": "Fix the login page", "client_type": "kimi_code_cli", "cwd": "/path/to/project", "source": "startup", "model": "kimi-code/k3", "profile": "default" }

@@ -136,3 +136,23 @@ test('the bundled plugin adds no context when the daemon is down', async () => {
     else process.env.KINFOLD_DATA_DIR = previous
   }
 })
+
+test('a file written for kilo-code makes the same bundle report host kilo-code', async () => {
+  const out = await built()
+  const dataDir = join(root!, 'data')
+  const composed = join(root!, 'kilo.js')
+  writeFileSync(composed, pluginFileContent({ kind: 'program', binPath: '/x/bin/kinfold' } satisfies InstallMode, dataDir, readFileSync(out, 'utf8'), 'kilo-code'))
+  const plugin = (await import(`${pathToFileURL(composed).href}?run=${Date.now()}`)).default as { setup: (ctx: unknown) => void }
+  const handlers = new Map<string, (event: unknown) => unknown>()
+  plugin.setup({
+    location: { directory: root },
+    tool: { hook: (name: string, handler: (event: unknown) => unknown) => handlers.set(`tool.${name}`, handler) },
+    session: { hook: (name: string, handler: (event: unknown) => unknown) => handlers.set(`session.${name}`, handler) },
+    event: { subscribe: () => {} },
+  })
+  handlers.get('session.prompt')!({ sessionID: 'ses_kilo', messageID: 'msg_kilo', prompt: { text: 'hello from kilo' }, delivery: 'steer' })
+  await new Promise((resolve) => setImmediate(resolve))
+  const spool = join(dataDir, 'spool')
+  const [file] = readdirSync(spool).filter((name) => name.endsWith('.json'))
+  expect(JSON.parse(readFileSync(join(spool, file!), 'utf8')).host).toBe('kilo-code')
+})

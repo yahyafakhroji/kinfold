@@ -11,6 +11,15 @@ import { createOpenCodePlugin } from './opencode-plugin'
 // read when the plugin asks, not when this file loads. `typeof` on a name that
 // does not exist is safe.
 declare const KINFOLD_DATA_DIR: string | undefined
+// Same rule for the agent: a file written for Kilo Code carries KINFOLD_HOST,
+// so one bundle serves both. OpenCode's file has none and reports opencode.
+declare const KINFOLD_HOST: string | undefined
+
+function hostFromFile(): string | undefined {
+  if (typeof KINFOLD_HOST === 'string') return KINFOLD_HOST
+  const fromShim = (globalThis as Record<string, unknown>).KINFOLD_HOST
+  return typeof fromShim === 'string' && fromShim !== '' ? fromShim : undefined
+}
 
 function dataDirFromHost(): string | undefined {
   if (typeof KINFOLD_DATA_DIR === 'string') return KINFOLD_DATA_DIR
@@ -18,6 +27,6 @@ function dataDirFromHost(): string | undefined {
   return typeof fromShim === 'string' && fromShim !== '' ? fromShim : undefined
 }
 
-const { id, setup } = createOpenCodePlugin({ dataDir: () => dataDirFromHost() ?? resolveDataDir() })
+const { id, setup } = createOpenCodePlugin({ dataDir: () => dataDirFromHost() ?? resolveDataDir(), host: hostFromFile })
 
 export default { id, setup }

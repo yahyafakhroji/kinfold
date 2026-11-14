@@ -1,0 +1,1 @@
+{ "hook_event_name": "Stop", "conversation_id": "conv-xyz789", "workspace_roots": ["/Users/username/project"], "agent_stop_cause": "end_turn" }

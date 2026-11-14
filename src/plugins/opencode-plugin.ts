@@ -49,6 +49,8 @@ export type ContextFetcher = (request: ContextRequest) => Promise<ContextResult 
 
 export interface OpenCodePluginOptions {
   dataDir?: () => string
+  /** The agent this plugin file was written for; OpenCode when absent. */
+  host?: () => string | undefined
   log?: (line: string) => void
   env?: Readonly<Record<string, string | undefined>>
   /** Test seam; the default asks the daemon only, with no read of the store. */
@@ -155,9 +157,11 @@ export function createOpenCodePlugin(options: OpenCodePluginOptions = {}): OpenC
   const setup = (ctx: OpenCodeSetupContext): void => {
     if (isObserverProcess(options.env ?? process.env)) return
     const dataDir = (options.dataDir ?? (() => resolveDataDir()))()
+    const host = options.host?.() ?? OPENCODE_HOST
     // host_version: session.created's data.version per session, else the installer's record, read once per setup.
     const context: OpenCodeContext = {
-      ...defaultAdapterContext(recordedHostVersion(dataDir, OPENCODE_HOST)),
+      ...defaultAdapterContext(recordedHostVersion(dataDir, host)),
+      host,
       directory: ctx.location.directory,
       sessionVersions: new Map(),
     }
@@ -181,7 +185,7 @@ export function createOpenCodePlugin(options: OpenCodePluginOptions = {}): OpenC
 
     const fetcher: ContextFetcher = options.fetchContext
       ?? ((request) => fetchDaemonContext(dataDir, request, { timeoutMs: DAEMON_ONLY_TIMEOUT_MS, log: (line) => log(`kinfold-opencode: ${line}`) }))
-    const injector = createContextInjector({ host: OPENCODE_HOST, cwd: ctx.location.directory, fetch: fetcher, log })
+    const injector = createContextInjector({ host, cwd: ctx.location.directory, fetch: fetcher, log })
 
     ctx.tool.hook('execute.after', guarded((input) => normalizeOpenCodeToolAfter(input, context)))
     const capturePrompt = guarded((input) => normalizeOpenCodePrompt(input, context))

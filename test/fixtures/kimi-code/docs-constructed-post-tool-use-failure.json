@@ -1,0 +1,1 @@
+{"hook_event_name": "PostToolUseFailure", "session_id": "session_abc", "session_title": "Fix the login page", "client_type": "kimi_code_cli", "cwd": "/path/to/project", "tool_name": "Bash", "tool_input": {"command": "bun test"}, "error": "Exit code 1\n1 fail"}

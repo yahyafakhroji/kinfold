@@ -1,0 +1,1 @@
+{ "event": "PostToolUseFailure", "session_id": "20260514_1", "matcher_context": "shell", "tool_call_id": "call_2", "tool_name": "shell", "tool_input": { "command": "false" }, "working_dir": "/Users/you/project" }

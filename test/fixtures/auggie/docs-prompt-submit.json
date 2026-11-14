@@ -1,0 +1,1 @@
+{ "hook_event_name": "PromptSubmit", "conversation_id": "conv-xyz789", "workspace_roots": ["/Users/username/project"], "user_prompt": "Add error handling to the login function" }

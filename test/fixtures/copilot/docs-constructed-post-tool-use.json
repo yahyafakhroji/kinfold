@@ -1,0 +1,1 @@
+{ "hook_event_name": "PostToolUse", "session_id": "copilot-session-0001", "timestamp": "2026-11-13T10:00:00.000Z", "cwd": "/Users/me/project", "tool_name": "bash", "tool_input": { "command": "ls" }, "tool_result": { "result_type": "success", "text_result_for_llm": "README.md" } }

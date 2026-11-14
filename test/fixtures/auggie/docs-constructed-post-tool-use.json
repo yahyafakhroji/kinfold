@@ -1,0 +1,1 @@
+{ "hook_event_name": "PostToolUse", "cwd": "/Users/username/project", "conversation_id": "conv-xyz789", "workspace_roots": ["/Users/username/project"], "tool_name": "bash", "tool_input": { "command": "git status" }, "tool_output": "On branch main\nnothing to commit, working tree clean", "tool_is_error": false, "is_mcp_tool": false }

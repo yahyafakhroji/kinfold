@@ -16,26 +16,25 @@ import type { EmbeddedAssets } from '../runtime/embedded'
 import type { KeyStore, KeyStoreKind, KeyStoreModule } from '../secrets/key-store'
 import { DAEMON_INFO_FILE, DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
 import type { ObserverSettingsInput, ObserverSettingsRow } from '../store/observer-settings-store'
-import { mergeSamHooks } from './claude-hooks'
 import { type Health, checkHealth, getObserverSettings, readDaemonInfo, waitForStart } from './daemon-client'
 import { dataDirAccessFor } from './access/check'
 import { setupDbKeyActions } from './db-encryption'
 import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from './detect'
+import { isFoldedAbsent } from './detectors'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
 import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
 import { entryCommand } from './entry'
 import { type InstallKeyStore, chooseInstallKeyStore, keyStoreOf, keyStoreRecordActions, refusalLines, secretSetAction } from './key-store-choice'
-import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
+import { describeTextChange, readTextOrNull } from './files'
 import { isAgentLoaded, legacyPrintArgv } from './launch-agent'
 import { ChoiceError, type ChoiceOptions, type ObserverChoice } from './observer-choice'
 import { hmacMigrationActions } from './hmac-migration'
-import { hostHookInstallActions, hostVersionActions, opencodeInstallActions } from './host-wiring'
-import { claudeMcpInstallActions, claudeMcpState, opencodeMcpInstallActions } from './mcp-wiring'
+import { hostVersionActions } from './host-wiring'
 import { type ServiceControl, type ServiceStep, managedServiceOf, serviceOf } from './service/control'
 import { type Action, runPlan, stopCommand } from './plan'
 import { askHidden, createPrompts, PromptCancelled } from './prompt/prompts'
 import { type ProgramCheck, checkProgram, programInstallActions } from './self-install'
-import { legacyClaudeMcpRemoval, legacyShimRemoval, migrationFailureNote, renameMigrationActions } from './rename-migration'
+import { migrationFailureNote, renameMigrationActions } from './rename-migration'
 import { applySetup } from './setup/apply'
 import { type SetupState, readSetupState } from './setup/prefill'
 import { installRecordAction, readInstallRecord } from './setup/record'
@@ -44,6 +43,7 @@ import { sqlite3mcInstallActions } from './sqlite3mc-install'
 import { hostUnwireActions } from './uninstall'
 import { vec0InstallActions } from './vec0-install'
 import { envForDataDir } from '../cli/data-dir-env'
+import { builtProfiles, overlapPlan, overlapState, overlapWiring, profileOf } from '../agents/install-profiles'
 import { wslInstall } from '../wsl/entry'
 
 export const EXIT_OK = 0
@@ -142,27 +142,6 @@ function credentialActions(env: InstallEnv, choices: readonly ObserverChoice[]):
   return [...seen].map(([ref, value]): Action => secretSetAction(store, ref, value))
 }
 
-function claudeActions(env: InstallEnv): Action[] {
-  const paths = installPaths(env)
-  const file = readJsonObject(paths.claudeSettings)
-  const merge = mergeSamHooks(file.exists ? file.value : {}, { entry: entryCommand(env.mode, 'hook', env.dataDir) })
-  if (!merge.changed) {
-    env.out(`claude-code: hooks already wired in ${paths.claudeSettings}`)
-    return []
-  }
-  const backup = plannedBackup(paths.claudeSettings, env.now())
-  const parts = [
-    merge.added.length > 0 ? `add Kinfold hooks for ${merge.added.join(', ')}` : '',
-    merge.replaced.length > 0 ? `replace Kinfold hooks for ${merge.replaced.join(', ')}` : '',
-    'every other key and hook kept',
-  ].filter((part) => part !== '')
-  return [
-    ...mkdirIfMissing(paths.claudeDir, DIR_MODE),
-    ...(backup !== null ? [{ kind: 'backup', from: paths.claudeSettings, to: backup } as const] : []),
-    { kind: 'write', path: paths.claudeSettings, content: serializeJson(merge.settings, file.exists ? file.text : null), mode: file.exists ? file.mode : FILE_MODE, summary: parts.join('; ') },
-  ]
-}
-
 function daemonCommandLine(env: InstallEnv): string {
   const entry = entryCommand(env.mode, 'daemon', env.dataDir)
   return [entry.command, ...entry.args].join(' ')
@@ -231,30 +210,53 @@ export function serviceActions(env: InstallEnv, service: ServiceControl | null, 
 }
 
 /**
- * Claude Code and OpenCode wiring. Each entry or shim under the pre-rename
- * name goes only after the kinfold one is written (the old opencode.json key
- * inside that same write), and only for the hosts being installed, so a
- * failed step never leaves an agent without a memory server. Reads host
- * config files only, never the data dir or the Keychain.
+ * Every chosen agent's wiring, in INSTALL_HOSTS order, each from its profile.
+ * An entry or shim under the pre-rename name goes only after the kinfold one
+ * is written, and only for the hosts being installed (the profiles plan that).
+ * Reads host config files only, never the data dir or the Keychain.
  */
 export async function agentWiringActions(env: InstallEnv, hosts: readonly InstallHost[], opencodeAssets?: EmbeddedAssets | null): Promise<Action[]> {
-  const claudeState = hosts.includes('claude-code') ? claudeMcpState(env) : null
-  const claudeLegacy = claudeState === 'yes' || claudeState === 'no' || claudeState === 'stale' ? legacyClaudeMcpRemoval(env) : []
-  const opencode = hosts.includes('opencode') ? [...(await opencodeInstallActions(env, opencodeAssets)), ...opencodeMcpInstallActions(env), ...legacyShimRemoval(env)] : []
-  return [
-    ...(hosts.includes('claude-code') ? [...claudeActions(env), ...claudeMcpInstallActions(env), ...claudeLegacy] : []),
-    ...opencode,
-  ]
+  const chosen = builtProfiles().filter((profile) => hosts.includes(profile.id))
+  // An agent that runs another chosen agent's hooks gets its MCP entry only, and loses hooks of its own from an earlier run.
+  const overlap = overlapPlan(hosts, env)
+  // OpenCode plans first: a plugin file that is not ours stops the install
+  // before any other agent prints a plan line.
+  const planOrder = [...chosen.filter((profile) => profile.id === 'opencode'), ...chosen.filter((profile) => profile.id !== 'opencode')]
+  const planned = new Map<InstallHost, Action[]>()
+  for (const profile of planOrder) {
+    const note = overlap.notes[profile.id]
+    if (note !== undefined) env.out(`${profile.id}: ${note}`)
+    planned.set(profile.id, await overlapWiring(profile, overlap).install(env, { opencodeAssets }))
+  }
+  return chosen.flatMap((profile) => planned.get(profile.id) ?? [])
+}
+
+function stateOf(env: InstallEnv, host: InstallHost): ReturnType<typeof overlapState> {
+  return overlapState(env, profileOf(host))
 }
 
 /** Each host as found, and whether this install wires it: a host found but not chosen is skipped as not chosen. */
 export function reportDetections(env: InstallEnv, detections: readonly HostDetection[], chosen: readonly InstallHost[]): void {
+  const folded: string[] = []
+  const leftOut: string[] = []
   for (const detection of detections) {
+    if (detection.leftOut === true && !chosen.includes(detection.host)) {
+      leftOut.push(detection.host)
+      continue
+    }
+    // An absent agent whose hooks are still in place keeps its line, as in status.
+    const hasWiring = chosen.includes(detection.host) || stateOf(env, detection.host) !== 'no'
+    if (isFoldedAbsent(detection, hasWiring)) {
+      folded.push(detection.host)
+      continue
+    }
     const version = detection.version !== null ? ` ${detection.version}` : ''
     const wired = chosen.includes(detection.host)
     const note = wired || !detection.selected ? detection.note : 'not chosen'
     env.out(`host ${detection.host}${version}: ${wired ? 'install' : 'skip'} (${note})`)
   }
+  if (folded.length > 0) env.out(`not found: ${folded.join(', ')}`)
+  if (leftOut.length > 0) env.out(`left out by --hosts: ${leftOut.join(', ')}`)
 }
 
 export interface Prepared {
@@ -372,8 +374,6 @@ export async function buildPlan(
       ...hostVersionActions(env, detections),
       ...credentialActions(env, choices),
       ...(await agentWiringActions(env, hosts, options.opencodeAssets)),
-      ...(hosts.includes('codex') ? hostHookInstallActions(env, 'codex') : []),
-      ...(hosts.includes('cursor') ? hostHookInstallActions(env, 'cursor') : []),
       ...dropped.flatMap((host) => hostUnwireActions(env, host)),
       ...serviceActions(env, service, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon, answers.port),
       ...(await plannedSettingsActions(env, choices, state, manual && !situation.health.up)),

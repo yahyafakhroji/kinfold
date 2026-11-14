@@ -1,0 +1,1 @@
+{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"/path/to/Foo.kt","content":"…"},"tool_response":{"output":"…","filePath":"/path/to/Foo.kt"},"tool_use_id":"call_…","duration_ms":12}

@@ -1,0 +1,1 @@
+{ "hookName": "TaskCancel", "clineVersion": "3.40.0", "timestamp": "1767225600000", "taskId": "1767225600000", "workspaceRoots": ["/workspace/project"], "userId": "user-1", "taskCancel": { "taskMetadata": { "taskId": "1767225600000", "ulid": "", "completionStatus": "cancelled" } } }

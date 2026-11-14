@@ -6,6 +6,7 @@ import type { Parsed } from '../context/types'
 import { parsePurgeBody, parseRetentionPut } from '../data-control/requests'
 import type { ResolveAction } from '../data-control/resolve'
 import type { DataSettingsChange } from '../store/data-settings-store'
+import { builtProfiles } from '../agents/install-profiles'
 import { INSTALL_HOSTS, type InstallHost } from './detect'
 import { type ObserverFlag, parseProviderModel } from './observer-choice'
 
@@ -218,18 +219,38 @@ export function parseDataArgs(argv: readonly string[]): Parsed<DataArgs> | null 
   return { ok: true, value: { command: command as 'size' | 'scan' } }
 }
 
+/** The agents Kinfold wires today, for flag errors. */
+function supportedList(): string {
+  return builtProfiles().map((profile) => profile.id).join(', ')
+}
+
+function isKnownHost(name: string): name is InstallHost {
+  return (INSTALL_HOSTS as readonly string[]).includes(name)
+}
+
+/** Why a name cannot be wired, or null: every known agent has a profile, so only an unknown name has a problem. */
+function hostProblem(name: string): string | null {
+  return isKnownHost(name) ? null : ''
+}
+
+function withReasons(base: string, reasons: readonly string[]): string {
+  const named = reasons.filter((reason) => reason !== '')
+  return named.length === 0 ? base : `${base}; ${named.join('; ')}`
+}
+
 export function parseHosts(value: string): Parsed<InstallHost[]> {
   const names = value.split(',').map((name) => name.trim()).filter((name) => name !== '')
-  const unknown = names.filter((name) => !INSTALL_HOSTS.includes(name as InstallHost))
-  if (names.length === 0 || unknown.length > 0) return { ok: false, error: `--hosts takes a comma list of ${INSTALL_HOSTS.join(', ')}` }
+  const problems = names.map(hostProblem).filter((problem): problem is string => problem !== null)
+  if (names.length === 0 || problems.length > 0) return { ok: false, error: withReasons(`--hosts takes a comma list of ${supportedList()}`, problems) }
   return { ok: true, value: [...new Set(names as InstallHost[])] }
 }
 
 export function parseObserverFlag(value: string): Parsed<ObserverFlag> {
   const at = value.indexOf('=')
   const host = value.slice(0, at)
-  if (at <= 0 || !INSTALL_HOSTS.includes(host as InstallHost)) {
-    return { ok: false, error: `--observer takes <host>=<provider>:<model>, host one of ${INSTALL_HOSTS.join(', ')}` }
+  const problem = at <= 0 ? '' : hostProblem(host)
+  if (problem !== null) {
+    return { ok: false, error: withReasons(`--observer takes <host>=<provider>:<model>, host one of ${supportedList()}`, [problem]) }
   }
   const parsed = parseProviderModel(value.slice(at + 1))
   if (parsed === null) return { ok: false, error: `--observer ${host}=... needs <provider>:<model> with a known provider and a model` }

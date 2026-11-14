@@ -1,0 +1,1 @@
+{ "hook_event_name": "PreToolUse", "cwd": "/current/working/directory", "session_id": "abc123-def456-789", "tool_name": "mcp_postgres_query", "tool_input": { "sql": "SELECT * FROM orders LIMIT 10;" } }

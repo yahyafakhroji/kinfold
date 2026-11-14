@@ -14,7 +14,6 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { detectHosts, INSTALL_HOSTS, type InstallHost, selectedHosts } from '../install/detect'
 import { type InstallEnv, platformOf } from '../install/env'
-import { hostHookInstallActions } from '../install/host-wiring'
 import { EXIT_FAILED, EXIT_OK, agentWiringActions } from '../install/install'
 import type { InstallOptions } from '../install/install'
 import { type Action, runPlan } from '../install/plan'
@@ -58,7 +57,7 @@ function linkedEnv(env: InstallEnv, dataDir: string): InstallEnv {
   return { ...env, dataDir, unflaggedDataDir: dataDir, mode: { kind: 'program', binPath: programPath(env.homeDir) }, service: null }
 }
 
-/** Hosts with Kinfold entries now; unwiring a host with none plans nothing. */
+/** Hosts with Kinfold entries now; unwiring a host with none (or with no profile yet) plans nothing. */
 function wiredHosts(env: InstallEnv): InstallHost[] {
   return INSTALL_HOSTS.filter((host) => hostUnwireActions(env, host).length > 0)
 }
@@ -77,11 +76,7 @@ function healthRefusal(health: Exclude<WindowsDaemonHealth, { up: true }>, windo
 }
 
 async function hookActions(env: InstallEnv, hosts: readonly InstallHost[], options: InstallOptions): Promise<Action[]> {
-  return [
-    ...(await agentWiringActions(env, hosts, options.opencodeAssets)),
-    ...(hosts.includes('codex') ? hostHookInstallActions(env, 'codex') : []),
-    ...(hosts.includes('cursor') ? hostHookInstallActions(env, 'cursor') : []),
-  ]
+  return agentWiringActions(env, hosts, options.opencodeAssets)
 }
 
 function recordActions(env: InstallEnv, wslHome: string, options: InstallOptions): Action[] {
