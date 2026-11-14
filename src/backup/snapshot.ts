@@ -45,14 +45,16 @@ export interface SnapshotWorkerInput {
   workerUrl?: string
 }
 
-export type SnapshotWorkerReply = { ok: true } | { ok: false; reason: string }
+export type SnapshotWorkerReply = { ok: true; schemaVersion: number } | { ok: false; reason: string }
 
-/** Copies the open store to a new file. `dest` must not exist; a failed copy leaves nothing behind. */
-export function snapshotInto(db: Database, dest: string): void {
+/** Copies the open store to a new file and returns the store's schema version. `dest` must not exist; a failed copy leaves nothing behind. */
+export function snapshotInto(db: Database, dest: string): number {
   if (existsSync(dest)) throw new BackupError('state', 'the snapshot file exists already')
+  const schemaVersion = db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0
   try {
     db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`)
     chmodSync(dest, DATA_FILE_MODE)
+    return schemaVersion
   } catch (error: unknown) {
     rmSync(dest, { force: true })
     throw error
@@ -60,12 +62,12 @@ export function snapshotInto(db: Database, dest: string): void {
 }
 
 /** The same copy through a read-only connection of its own, for a process that does not hold the store open. */
-export function snapshotStoreFile(input: SnapshotFileInput): void {
+export function snapshotStoreFile(input: SnapshotFileInput): number {
   if (existsSync(maintenancePath(input.dbPath))) throw new BackupError('busy', 'memory.db is being changed (kinfold encrypt, decrypt, rekey or restore); try again when it finishes')
   const options = { readonly: true, busyTimeoutMs: OPEN_BUSY_TIMEOUT_MS }
   const db = input.key === null ? openPlain(input.dbPath, options, input.env) : openEncrypted(input.dbPath, input.key, options, input.env)
   try {
-    snapshotInto(db, input.dest)
+    return snapshotInto(db, input.dest)
   } finally {
     db.close()
   }
@@ -80,20 +82,20 @@ export function workerEnv(libraryOverride: string | null): Readonly<Record<strin
   return libraryOverride === null ? {} : { [SQLITE3MC_LIB_ENV]: libraryOverride }
 }
 
-/** Runs snapshotStoreFile in a one-shot worker. Rejects with the worker's fixed reason, which never holds the key. */
-export function snapshotInWorker(input: SnapshotWorkerInput): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
+/** Runs snapshotStoreFile in a one-shot worker and resolves with the schema version. Rejects with the worker's fixed reason, which never holds the key. */
+export function snapshotInWorker(input: SnapshotWorkerInput): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
     const worker = new Worker(input.workerUrl ?? workerUrl())
-    const finish = (error: Error | null): void => {
-      worker.terminate()
-      if (error === null) resolve()
-      else reject(error)
-    }
     worker.onmessage = (event: MessageEvent<SnapshotWorkerReply>) => {
-      finish(event.data.ok ? null : new Error(event.data.reason))
+      worker.terminate()
+      if (event.data.ok) resolve(event.data.schemaVersion)
+      else reject(new Error(event.data.reason))
     }
     // The event's own message can quote a path; the fixed text is enough.
-    worker.onerror = () => finish(new Error('the snapshot worker failed'))
+    worker.onerror = () => {
+      worker.terminate()
+      reject(new Error('the snapshot worker failed'))
+    }
     worker.postMessage({ dbPath: input.dbPath, key: input.key, dest: input.dest, libraryOverride: input.libraryOverride })
   })
 }

@@ -11,8 +11,7 @@ declare const self: Worker
 
 function run(input: SnapshotWorkerInput): SnapshotWorkerReply {
   try {
-    snapshotStoreFile({ dbPath: input.dbPath, key: input.key, dest: input.dest, env: workerEnv(input.libraryOverride) })
-    return { ok: true }
+    return { ok: true, schemaVersion: snapshotStoreFile({ dbPath: input.dbPath, key: input.key, dest: input.dest, env: workerEnv(input.libraryOverride) }) }
   } catch (error: unknown) {
     if (error instanceof BackupError) return { ok: false, reason: error.message }
     return { ok: false, reason: `the snapshot could not be written (${error instanceof Error ? error.name : 'error'})` }
