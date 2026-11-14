@@ -48,7 +48,7 @@ function restoreBlock(deps) {
   let flow = idleRestore()
   let running = false
   const status = h('div', { 'aria-live': 'polite' })
-  const facts = h('div', {})
+  const facts = h('div', { class: 'restore-facts' })
   const file = h('input', { type: 'file', name: 'file', accept: '.kfb' })
   const upload = h('button', { type: 'button', class: 'quiet', 'data-action': 'upload', disabled: true }, 'Read backup')
   const code = h('input', { type: 'password', name: 'code', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', placeholder: 'XXXXX-XXXXX-…' })
@@ -70,6 +70,7 @@ function restoreBlock(deps) {
       if (answer.state === 'done') {
         flow = idleRestore()
         replaceContent(facts)
+        codeField.setAttribute('hidden', '')
         replaceContent(status, notice('The backup is restored.', 'ok'), h('ul', { class: 'plain' }, (answer.lines ?? []).map((line) => h('li', {}, String(line)))))
         return
       }

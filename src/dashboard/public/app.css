@@ -314,6 +314,7 @@ tr:hover td { background: color-mix(in srgb, var(--sunk) 60%, transparent); }
 .plain li { margin: var(--space-1) 0; overflow-wrap: anywhere; }
 ul.plain.mono { list-style: square; }
 .purge { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px dashed var(--rule); }
+.restore-facts:not(:empty) { margin: var(--space-4) 0; }
 
 /* ---- Models ----------------------------------------------------------- */
 

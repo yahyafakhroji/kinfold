@@ -179,6 +179,9 @@ test('Restore sends the upload and the code in one body, clears the field, and s
   const shown = textOf(page)
   expect(shown).toContain('restored the backup made 2026-11-14')
   expect(shown).toContain(HOSTILE)
+  // Done: the code field goes away with the upload it belonged to.
+  expect(named(page, 'code-field').getAttribute('hidden')).not.toBeNull()
+  expect(shown).not.toContain('5.0 MB')
   // The code is in no text node, no attribute and no request but the one.
   expect(shown).not.toContain(CODE)
   for (const element of elements(page)) for (const value of element.attributes.values()) expect(value).not.toContain(CODE)
