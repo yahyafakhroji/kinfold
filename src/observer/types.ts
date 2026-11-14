@@ -86,7 +86,13 @@ export interface ObserverRunner {
 export const OBSERVER_PROVIDERS = ['claude-cli', 'openrouter', 'codex-cli', 'opencode-cli'] as const
 export type ObserverProvider = (typeof OBSERVER_PROVIDERS)[number]
 
-/** Providers that borrow the user's own CLI login instead of a Keychain key. */
+/**
+ * Providers that borrow the user's own CLI login instead of a Keychain key.
+ * A CLI joins this list only when its docs confirm a headless mode, a way to
+ * turn every tool off, and reuse of the existing login. The agents checked
+ * and left out, with the doc line for each, are in
+ * runners/CLI-LOGIN-CANDIDATES.md.
+ */
 export const CLI_LOGIN_PROVIDERS = ['codex-cli', 'opencode-cli'] as const
 export type CliLoginProvider = (typeof CLI_LOGIN_PROVIDERS)[number]
 
