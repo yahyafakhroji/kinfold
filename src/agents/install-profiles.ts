@@ -7,7 +7,7 @@ import type { HookHostSpec } from './hook-spec'
 import { DEVIN_HOOK_ENV, HOOK_SPECS } from './hook-specs'
 import type { WiringState } from '../install/claude-hooks'
 import type { InstallEnv } from '../install/env'
-import type { AgentId, AgentProfile, AgentWiring } from './profile'
+import type { AgentId, AgentProfile, AgentWiring, ProfileTable } from './profile'
 import { AMP_PROFILE } from './profiles/amp'
 import { AUGGIE_PROFILE } from './profiles/auggie'
 import { ANTIGRAVITY_PROFILE } from './profiles/antigravity'
@@ -31,7 +31,7 @@ import { CONTINUE_PROFILE } from './profiles/continue'
 import { WARP_PROFILE } from './profiles/warp'
 import { ZED_PROFILE } from './profiles/zed'
 
-export const INSTALL_PROFILES: Readonly<Record<AgentId, AgentProfile>> = {
+export const INSTALL_PROFILES: ProfileTable = {
   'claude-code': CLAUDE_CODE_PROFILE,
   opencode: OPENCODE_PROFILE,
   codex: CODEX_PROFILE,
@@ -80,7 +80,7 @@ export interface OverlapPlan {
 export function overlapPlan(
   selected: readonly AgentId[],
   env?: InstallEnv,
-  profiles: Readonly<Record<AgentId, AgentProfile>> = INSTALL_PROFILES,
+  profiles: ProfileTable = INSTALL_PROFILES,
   specs: Readonly<Record<AgentId, HookHostSpec | null>> = HOOK_SPECS,
 ): OverlapPlan {
   const skip: AgentId[] = []
@@ -118,15 +118,25 @@ export function overlapWiring(profile: AgentProfile, plan: OverlapPlan): AgentWi
 
 const WIRED: readonly (WiringState | 'unknown')[] = ['yes', 'stale', 'partial']
 
+/** Kinfold's wiring for the agent is in place, current or not. */
+export function isWired(state: WiringState | 'unknown'): boolean {
+  return WIRED.includes(state)
+}
+
+/** Anything but a clean 'no': a config that can't be read may still hold our entries. */
+export function hasWiring(state: WiringState | 'unknown'): boolean {
+  return state !== 'no'
+}
+
 /**
  * An agent's wiring state, counting one wired without hooks of its own: with
  * the agent whose hooks it runs wired, its MCP entry decides. Hooks of its own
  * still in place are reported as they are.
  */
-export function overlapState(env: InstallEnv, profile: AgentProfile, profiles: Readonly<Record<AgentId, AgentProfile>> = INSTALL_PROFILES): WiringState | 'unknown' {
+export function overlapState(env: InstallEnv, profile: AgentProfile, profiles: ProfileTable = INSTALL_PROFILES): WiringState | 'unknown' {
   const own = profile.wiring.state(env)
   const from = profile.alsoFiresFrom === undefined ? null : profiles[profile.alsoFiresFrom]
   if (own !== 'no' || from === null || profile.wiring.withoutHooks === undefined) return own
   if (profile.firesFrom?.(env).fires === false) return own
-  return WIRED.includes(from.wiring.state(env)) ? profile.wiring.withoutHooks().state(env) : own
+  return isWired(from.wiring.state(env)) ? profile.wiring.withoutHooks().state(env) : own
 }

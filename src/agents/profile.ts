@@ -63,6 +63,9 @@ export interface AgentProfile {
   firesFrom?(env: InstallEnv): { fires: boolean; note: string }
 }
 
+/** Every agent's profile by id; tests pass one with an agent the real table lacks. */
+export type ProfileTable = Readonly<Record<AgentId, AgentProfile>>
+
 /** The short limit of every agent whose hooks stay off on Windows until its shell is checked. */
 export const SHORT_WINDOWS_HOOKS_UNCHECKED = 'Hooks stay off on Windows until the hook command is checked against the shell the agent runs them in.'
 export const SHORT_NO_HOOKS = 'The agent has no hooks.'

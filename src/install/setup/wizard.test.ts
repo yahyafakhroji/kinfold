@@ -23,7 +23,7 @@ import type { TerminalIO } from '../prompt/terminal'
 import { type FakeWorld, createWorld, profilesWithDocsAgent, snapshotTree, startWorldDaemon } from '../test-support'
 import { LOCKED_FOLDER_NOTE, type SetupState, readSetupState } from './prefill'
 import { installRecordAction } from './record'
-import { DRY_RUN_NO_CODE, NO_TTY_ENCRYPTION_CHANGE, STALE_DB_KEY, type SetupFlags, freePortFrom, runWizard } from './wizard'
+import { DRY_RUN_NO_CODE, NO_AGENTS_NOTE, NO_TTY_ENCRYPTION_CHANGE, STALE_DB_KEY, type SetupFlags, freePortFrom, runWizard } from './wizard'
 import { posixOnly } from '../../../test/platform-guards'
 
 let world: FakeWorld | null = null
@@ -454,6 +454,24 @@ test('--yes installs detected live agents and leaves detected docs agents out un
   expect(named.hosts).toEqual(['claude-code', 'gemini-cli'])
 })
 
+const ABSENT_BESIDE_CLAUDE = 'OpenCode, Codex, Cursor, Gemini CLI, Qwen Code, Factory Droid, Devin, Kilo Code, Cline, GitHub Copilot, Antigravity, Junie, Kiro, Amp, Kimi Code, Auggie, Goose, Crush, Zed, Warp'
+const CONTINUE_HINT = 'Continue: no safe signal for an IDE extension; name it with --hosts continue'
+
+test('with no agent to list, the left-off lines are still said before the note that none will be wired', async () => {
+  const { w, term } = setup(Array(6).fill(ENTER))
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)
+  expect(answers.hosts).toEqual([])
+  const lines = term.output().split(/\r?\n/).map((line) => line.trim())
+  const notFound = lines.findIndex((line) => line.endsWith(`not found: Claude Code, ${ABSENT_BESIDE_CLAUDE}`))
+  const hint = lines.findIndex((line) => line.endsWith(CONTINUE_HINT))
+  const none = lines.findIndex((line) => line.endsWith(NO_AGENTS_NOTE))
+  expect(notFound).toBeGreaterThan(-1)
+  expect(hint).toBeGreaterThan(notFound)
+  expect(none).toBeGreaterThan(hint)
+  expect(term.output()).not.toContain('Which agents should share memory?')
+})
+
 test('agents neither detected nor wired are named on one not-found line, not offered as choices', async () => {
   const { w, term } = setup(Array(7).fill(ENTER), { claudeVersion: '2.0.0' })
   const state = await readSetupState(w.env)
@@ -462,8 +480,8 @@ test('agents neither detected nor wired are named on one not-found line, not off
   const lines = term.output().split(/\r?\n/)
   const notFound = lines.filter((line) => line.includes('not found: '))
   expect(notFound).toHaveLength(1)
-  expect(notFound[0]).toContain('not found: OpenCode, Codex, Cursor, Gemini CLI,')
-  expect(notFound[0]).not.toContain('Continue')
+  // The whole line, after the cursor escape the terminal writes before it.
+  expect(notFound[0]?.slice(notFound[0].indexOf('not found: ')).trimEnd()).toBe(`not found: ${ABSENT_BESIDE_CLAUDE}`)
   expect(lines.filter((line) => line.includes('Continue: no safe signal for an IDE extension; name it with --hosts continue'))).toHaveLength(1)
   // The one choice is Claude Code; no other agent is drawn as a row.
   expect(term.output()).not.toContain('no claude on PATH')

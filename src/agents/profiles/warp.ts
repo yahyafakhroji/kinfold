@@ -6,6 +6,13 @@
 //     ~/.claude.json and Codex's ~/.codex/config.toml too, and starts servers
 //     from other agents' global files only with "Auto-spawn servers from
 //     third-party agents" on)
+//   docs.warp.dev/getting-started/readme/installation-and-setup, checked
+//     2026-11-14 (the Linux packages are named warp-terminal: "find Warp in
+//     your desktop manager or run `warp-terminal` on your terminal")
+// The docs name the Linux command but not its flags; `--version` is in the
+// command-line parser of Warp's public source (github.com/warpdotdev/warp,
+// crates/warp_cli), and a probe that gets no answer only leaves Warp
+// undetected.
 // Warp has no hooks. With the Claude Code MCP entry in place Warp already
 // reads it, so a second entry would only list the server twice and none is
 // written. Codex counts too in principle, but Kinfold writes no MCP entry into
@@ -41,7 +48,7 @@ export const WARP_PROFILE: AgentProfile = {
   capabilities: () => CAPABILITIES,
   limit: () => 'Warp has no hooks',
   shortLimit: () => SHORT_NO_HOOKS,
-  detection: { binaries: ['warp'], bundles: ['Warp.app'] },
+  detection: { binaries: ['warp', 'warp-terminal'], bundles: ['Warp.app'] },
   wiring: {
     install: async (env) => {
       if (!usesClaudeEntry(env)) return jsonAgentFileInstallActions(env, HOST, WARP_MCP_FILE)

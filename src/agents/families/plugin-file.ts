@@ -1,10 +1,13 @@
-// The OpenCode wiring: one file in ~/.config/opencode/plugins/. A checkout
-// install writes a shim that sets the data folder and loads the checkout's
-// plugin; a program install writes the plugin bundle
+// The plugin-file wiring of OpenCode and of the agents that load OpenCode-style
+// plugins from a folder of their own (Kilo Code, ~/.config/kilo/plugin/; Amp
+// through a template): one file in ~/.config/opencode/plugins/ or the agent's
+// folder. A checkout install writes a shim that sets the data folder and
+// loads the checkout's plugin; a program install writes the plugin bundle
 // it carries, so no path points into a checkout or a cache. OpenCode 2.x loads
 // every file in that directory by itself (claude-mem's installer relies on the
 // same rule, and 2.x warns about file paths listed in opencode.json), so
-// opencode.json and opencode.jsonc stay untouched.
+// opencode.json and opencode.jsonc stay untouched. Kilo's docs give its
+// folder the same rule, and its shim names Kilo, not OpenCode.
 
 // Shims written now carry SHIM_MARKER on their first line; a pre-rename
 // install wrote LEGACY_SHIM_MARKER there. A program-mode file carries the same
@@ -43,7 +46,7 @@ export const OPENCODE_HOST_ID: AgentId = 'opencode'
 export const HOST_CONSTANT = 'KINFOLD_HOST'
 
 // The form written before the shim carried a data folder: a bare re-export.
-const REEXPORT_PATTERN = /export\s*\{\s*default\s*\}\s*from\s*"([^"]*\/src\/plugins\/opencode\.ts)"/
+const REEXPORT_PATTERN = /export\s*\{\s*default\s*\}\s*from\s*("(?:[^"\\]|\\.)*")/
 // The current form loads the plugin with a dynamic import.
 const IMPORT_PATTERN = /await\s+import\(\s*("(?:[^"\\]|\\.)*")\s*\)/
 const PLUGIN_SUFFIX = '/src/plugins/opencode.ts'
@@ -56,10 +59,12 @@ export type ShimState = 'yes' | 'no' | 'stale' | 'foreign'
  * the assignment. The plugin's default export must be { id, setup } and
  * nothing else, so the shim passes it through unchanged.
  */
-export function shimContent(pluginEntry: string, dataDir: string, host: AgentId = OPENCODE_HOST_ID): string {
+export function shimContent(pluginEntry: string, dataDir: string, host: AgentId = OPENCODE_HOST_ID, label?: string): string {
+  // The comment names the agent whose folder the file sits in; OpenCode's line is pinned byte for byte.
+  const loader = host === OPENCODE_HOST_ID ? 'OpenCode 2.x' : (label ?? host)
   return [
     `// ${SHIM_MARKER}: written by \`kinfold install\`, removed by \`kinfold uninstall\`.`,
-    '// OpenCode 2.x loads every plugin in this folder; the plugin itself lives in',
+    `// ${loader} loads every plugin in this folder; the plugin itself lives in`,
     '// the checkout below, and reads its data folder from the line under this.',
     `globalThis.${DATA_DIR_CONSTANT} = ${JSON.stringify(dataDir)};`,
     ...(host === OPENCODE_HOST_ID ? [] : [`globalThis.${HOST_CONSTANT} = ${JSON.stringify(host)};`]),
@@ -77,8 +82,8 @@ export const DATA_DIR_CONSTANT = 'KINFOLD_DATA_DIR'
  * own bundle under a data-folder constant. JSON.stringify keeps a folder with
  * quotes, backslashes or spaces one valid string.
  */
-export function pluginFileContent(mode: InstallMode, dataDir: string, bundle: string, host: AgentId = OPENCODE_HOST_ID): string {
-  if (mode.kind === 'checkout') return shimContent(join(mode.projectRoot, 'src', 'plugins', 'opencode.ts'), dataDir, host)
+export function pluginFileContent(mode: InstallMode, dataDir: string, bundle: string, host: AgentId = OPENCODE_HOST_ID, label?: string): string {
+  if (mode.kind === 'checkout') return shimContent(join(mode.projectRoot, 'src', 'plugins', 'opencode.ts'), dataDir, host, label)
   return [
     `// ${SHIM_MARKER}: written by \`kinfold install\`, removed by \`kinfold uninstall\`.`,
     `const ${DATA_DIR_CONSTANT} = ${JSON.stringify(dataDir)};`,
@@ -89,16 +94,23 @@ export function pluginFileContent(mode: InstallMode, dataDir: string, bundle: st
 
 /** The plugin entry a Kinfold shim loads, in the current or the older form, or null when the text is not one. */
 export function shimTarget(text: string): string | null {
-  const loaded = IMPORT_PATTERN.exec(text)?.[1]
-  if (loaded !== undefined) {
-    try {
-      const path: unknown = JSON.parse(loaded)
-      if (typeof path === 'string' && path.endsWith(PLUGIN_SUFFIX)) return path
-    } catch {
-      return null
-    }
+  return pluginPathIn(IMPORT_PATTERN.exec(text)?.[1]) ?? pluginPathIn(REEXPORT_PATTERN.exec(text)?.[1])
+}
+
+/**
+ * The path a quoted JS string holds, when it is a checkout's plugin entry.
+ * A Windows checkout writes it with backslashes, so the suffix is matched on
+ * either separator; without that a Windows shim read as marker-only and was
+ * never found stale.
+ */
+function pluginPathIn(literal: string | undefined): string | null {
+  if (literal === undefined) return null
+  try {
+    const path: unknown = JSON.parse(literal)
+    return typeof path === 'string' && path.replaceAll('\\', '/').endsWith(PLUGIN_SUFFIX) ? path : null
+  } catch {
+    return null
   }
-  return REEXPORT_PATTERN.exec(text)?.[1] ?? null
 }
 
 function hasOurMarker(text: string): boolean {
@@ -111,12 +123,12 @@ function hasOurMarker(text: string): boolean {
  * plugin import; it is never overwritten or removed. A program-mode file has no
  * import of the checkout, so its first-line marker is what proves it is ours.
  */
-export function inspectShim(text: string | null, expected: { pluginEntry: string; dataDir: string; host?: AgentId }): ShimState {
+export function inspectShim(text: string | null, expected: { pluginEntry: string; dataDir: string; host?: AgentId; label?: string }): ShimState {
   if (text === null) return 'no'
   const target = shimTarget(text)
   // Anything but the exact current form is stale: another checkout, another
   // data folder, or the older re-export that carries no folder.
-  if (target !== null) return text === shimContent(expected.pluginEntry, expected.dataDir, expected.host) ? 'yes' : 'stale'
+  if (target !== null) return text === shimContent(expected.pluginEntry, expected.dataDir, expected.host, expected.label) ? 'yes' : 'stale'
   return hasOurMarker(text) ? 'yes' : 'foreign'
 }
 
@@ -132,8 +144,8 @@ export function isOwnShim(text: string | null): boolean {
   return hasOurMarker(text)
 }
 
-function shimExpectation(env: InstallEnv, spec: PluginFileSpec): { pluginEntry: string; dataDir: string; host: AgentId } {
-  return { pluginEntry: installPaths(env).pluginEntry, dataDir: env.dataDir, host: spec.host }
+function shimExpectation(env: InstallEnv, spec: PluginFileSpec): { pluginEntry: string; dataDir: string; host: AgentId; label?: string } {
+  return { pluginEntry: installPaths(env).pluginEntry, dataDir: env.dataDir, host: spec.host, ...(spec.label !== undefined ? { label: spec.label } : {}) }
 }
 
 const fileOf = (env: InstallEnv, spec: PluginFileSpec): string => join(spec.dir(env), spec.fileName)
@@ -188,7 +200,7 @@ export async function pluginFileActions(env: InstallEnv, spec: PluginFileSpec, a
   if (state === 'foreign') throw new Error(`${path} exists and is not a Kinfold plugin file; move it away first`)
   const bundle = env.mode.kind === 'program' ? (assets === null ? null : await assets.opencodePlugin()) : ''
   if (bundle === null) throw new Error(`this build carries no ${label} plugin; reinstall from a release build`)
-  const content = pluginFileContent(env.mode, env.dataDir, bundle, spec.host)
+  const content = pluginFileContent(env.mode, env.dataDir, bundle, spec.host, spec.label)
   if (state === 'yes' && before === content) {
     env.out(`${spec.host}: plugin already in ${path}`)
     return []

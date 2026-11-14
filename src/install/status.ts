@@ -26,17 +26,14 @@ import { readInstallRecord } from './setup/record'
 import { type WslStatus, wslStatus } from '../wsl/entry'
 import type { HookHostSpec } from '../agents/hook-spec'
 import { HOOK_SPECS } from '../agents/hook-specs'
-import { INSTALL_PROFILES, overlapPlan, overlapState } from '../agents/install-profiles'
-import { type AgentId, type AgentProfile, capabilityLine, verificationNote } from '../agents/profile'
+import { INSTALL_PROFILES, hasWiring, isWired, overlapPlan, overlapState } from '../agents/install-profiles'
+import { type AgentId, type ProfileTable, capabilityLine, verificationNote } from '../agents/profile'
 
-type ProfileTable = Readonly<Record<AgentId, AgentProfile>>
 type SpecTable = Readonly<Record<AgentId, HookHostSpec | null>>
-
-const WIRED_STATES: readonly string[] = ['yes', 'stale', 'partial']
 
 /** The agents wired now, as install would have chosen them. */
 function wiredHosts(env: InstallEnv, profiles: ProfileTable): AgentId[] {
-  return Object.values(profiles).flatMap((profile) => (WIRED_STATES.includes(profile.wiring.state(env)) ? [profile.id] : []))
+  return Object.values(profiles).flatMap((profile) => (isWired(profile.wiring.state(env)) ? [profile.id] : []))
 }
 
 async function hostLines(env: InstallEnv, profiles: ProfileTable, specs: SpecTable): Promise<string[]> {
@@ -47,7 +44,7 @@ async function hostLines(env: InstallEnv, profiles: ProfileTable, specs: SpecTab
   const lines = detections.flatMap((detection) => {
     const profile = profiles[detection.host]
     const state = overlapState(env, profile, profiles)
-    if (isFoldedAbsent(detection, state !== 'no')) {
+    if (isFoldedAbsent(detection, hasWiring(state))) {
       folded.push(detection.host)
       return []
     }
@@ -56,7 +53,7 @@ async function hostLines(env: InstallEnv, profiles: ProfileTable, specs: SpecTab
     const note = verificationNote(profile.verification)
     const line = `  ${detection.host}: ${found}; wired: ${wired}; ${capabilityLine(profile, os)}${note === null ? '' : `; ${note}`}`
     // Steps and notes for an agent that is neither here nor wired would be noise on every status run.
-    const present = detection.selected || WIRED_STATES.includes(state)
+    const present = detection.selected || isWired(state)
     const overlapNote = overlap.notes[profile.id]
     const extra = [...(overlapNote !== undefined ? [overlapNote] : []), ...profile.manualSteps(os, env)]
     return [line, ...(present ? extra.map((step) => `    ${step}`) : [])]

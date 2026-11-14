@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { KNOWN_HOSTS } from '../../contract/event'
 import { detectFromSpec } from '../../install/detect'
 import { MCP_SERVER_NAME, claudeMcpEntry } from '../../install/mcp-config'
+import { createWorld } from '../../install/test-support'
 import { mcpPaths, mcpTarget } from '../../install/mcp-wiring'
 import { MCP_HOST_ENV } from '../../mcp/read-reporter'
 import type { OsName } from '../../platform/platform'
@@ -115,6 +116,17 @@ test('continue: writes nothing, prints the exact YAML block, and detection finds
   if (typeof c.detection !== 'function') return
   expect(await c.detection(w.env, false)).toMatchObject({ host: 'continue', selected: false })
   expect(await c.detection(w.env, true)).toMatchObject({ host: 'continue', selected: true })
+})
+
+test('warp: a Linux install, whose command is warp-terminal, is detected', async () => {
+  const detection = profile('warp').detection
+  if (typeof detection === 'function') throw new Error('warp is detected from a spec')
+  const w = createWorld({ platform: 'linux', versionResults: { 'warp-terminal': { exitCode: 0, stdout: 'v0.2026.04.27.15.32.stable_02\n' } } })
+  try {
+    expect(await detectFromSpec(w.env, 'warp', detection, false)).toMatchObject({ host: 'warp', selected: true, version: 'v0.2026.04.27.15.32.stable_02', note: 'warp-terminal --version answered' })
+  } finally {
+    await w.cleanup()
+  }
 })
 
 test('warp: writes nothing when Claude Code is wired and status says which entry it uses', async () => {

@@ -5,7 +5,11 @@
 // (bare, quoted or dotted), single-line strings, decimal numbers, booleans and
 // arrays of those, with comments. Anything else (inline tables, multi-line
 // strings, dates, hex numbers) makes readTomlConfig return null, so the file
-// is refused rather than half understood.
+// is refused rather than half understood. So does a document TOML itself
+// rejects for defining one name twice: a table header repeated, a table and
+// an array of tables under one name, or a header and a key (plain or dotted)
+// claiming the same table. Kimi would not load such a file, and the blocks
+// here would give one table's keys to two owners.
 //
 // The document is kept as its own lines, split into blocks at each header, so
 // every byte outside Kinfold's tables stays as the user wrote it. Our tables
@@ -54,11 +58,85 @@ interface ParsedHeader {
   values: Record<string, TomlValue>
 }
 
-/** The statements of `text`, or null at the first thing outside the subset. */
+type Claim = 'value' | 'table' | 'array' | 'implied' | 'dotted'
+/** Key parts as written; a number is the element of the array of tables before it. */
+type ClaimPath = readonly (string | number)[]
+
+interface Claims {
+  /** Records a [table] or [[array]] header; the path its keys live under, or null when the name is taken. */
+  header(parts: readonly string[], isArray: boolean): ClaimPath | null
+  /** Records a key of the block at `base`; false when it or a table on its way is taken. */
+  key(base: ClaimPath, parts: readonly string[], block: number): boolean
+}
+
+/**
+ * Who defined each table and key so far. A header may fill in a table that
+ * earlier headers only implied ([a.b] then [a]) and may add a sub-table to
+ * one a dotted key made; a dotted key may extend only tables made by dotted
+ * keys of its own block. Everything else under a taken name is a conflict.
+ */
+function newClaims(): Claims {
+  const kinds = new Map<string, Claim>()
+  const dottedBy = new Map<string, number>()
+  const elements = new Map<string, number>()
+  const id = (path: ClaimPath): string => JSON.stringify(path)
+  /** The path with every array of tables on it narrowed to its latest element, the one a header below it means. */
+  const scoped = (parts: readonly string[]): (string | number)[] => {
+    const out: (string | number)[] = []
+    for (const part of parts) {
+      out.push(part)
+      const count = kinds.get(id(out)) === 'array' ? elements.get(id(out)) : undefined
+      if (count !== undefined) out.push(count - 1)
+    }
+    return out
+  }
+  return {
+    header: (parts, isArray) => {
+      const parent = scoped(parts.slice(0, -1))
+      for (let end = 1; end <= parent.length; end += 1) {
+        if (typeof parent[end - 1] === 'number') continue
+        const prefix = id(parent.slice(0, end))
+        if (kinds.get(prefix) === 'value') return null
+        if (!kinds.has(prefix)) kinds.set(prefix, 'implied')
+      }
+      const path = [...parent, parts[parts.length - 1] ?? '']
+      const existing = kinds.get(id(path))
+      if (existing !== undefined && existing !== (isArray ? 'array' : 'implied')) return null
+      if (!isArray) {
+        kinds.set(id(path), 'table')
+        return path
+      }
+      const count = (elements.get(id(path)) ?? 0) + 1
+      kinds.set(id(path), 'array')
+      elements.set(id(path), count)
+      return [...path, count - 1]
+    },
+    key: (base, parts, block) => {
+      for (let end = 1; end < parts.length; end += 1) {
+        const prefix = id([...base, ...parts.slice(0, end)])
+        const existing = kinds.get(prefix)
+        if (existing === undefined) {
+          kinds.set(prefix, 'dotted')
+          dottedBy.set(prefix, block)
+        } else if (existing !== 'dotted' || dottedBy.get(prefix) !== block) return false
+      }
+      const full = id([...base, ...parts])
+      if (kinds.has(full)) return false
+      kinds.set(full, 'value')
+      return true
+    },
+  }
+}
+
+const dottedName = (parts: readonly string[]): string => parts.map((part) => (BARE_KEY.test(part) ? part : JSON.stringify(part))).join('.')
+
+/** The statements of `text`, or null at the first thing outside the subset or the first name defined twice. */
 function parseStatements(text: string): ParsedHeader[] | null {
   let pos = 0
   let line = 0
   const blocks: ParsedHeader[] = [{ kind: 'root', name: '', startLine: 0, values: {} }]
+  const claims = newClaims()
+  let base: ClaimPath = []
   const peek = (ahead = 0): string | undefined => text[pos + ahead]
   const skipWs = (): void => {
     while (peek() === ' ' || peek() === '\t') pos += 1
@@ -131,15 +209,15 @@ function parseStatements(text: string): ParsedHeader[] | null {
     while (/[A-Za-z0-9_-]/.test(peek() ?? '')) pos += 1
     return pos === start ? undefined : text.slice(start, pos)
   }
-  const keyPath = (): string | undefined => {
+  const keyPath = (): string[] | undefined => {
     const parts: string[] = []
     for (;;) {
       skipWs()
       const part = keyPart()
       if (part === undefined) return undefined
-      parts.push(BARE_KEY.test(part) ? part : JSON.stringify(part))
+      parts.push(part)
       skipWs()
-      if (peek() !== '.') return parts.join('.')
+      if (peek() !== '.') return parts
       pos += 1
     }
   }
@@ -199,7 +277,10 @@ function parseStatements(text: string): ParsedHeader[] | null {
       pos += close.length
       const startLine = line
       if (!endOfStatement()) return null
-      blocks.push({ kind: isArray ? 'array' : 'table', name, startLine, values: {} })
+      const claimed = claims.header(name, isArray)
+      if (claimed === null) return null
+      base = claimed
+      blocks.push({ kind: isArray ? 'array' : 'table', name: dottedName(name), startLine, values: {} })
       continue
     }
     const key = keyPath()
@@ -208,8 +289,8 @@ function parseStatements(text: string): ParsedHeader[] | null {
     skipWs()
     const parsed = value()
     const block = blocks[blocks.length - 1]
-    if (parsed === undefined || block === undefined || Object.hasOwn(block.values, key)) return null
-    block.values[key] = parsed
+    if (parsed === undefined || block === undefined || !claims.key(base, key, blocks.length - 1)) return null
+    block.values[dottedName(key)] = parsed
     if (!endOfStatement()) return null
   }
   return blocks

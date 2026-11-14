@@ -15,8 +15,13 @@ import type { AdapterContext } from './context'
 
 export const GOOSE_HOST = 'goose'
 
-/** The events install registers, in hooks.json order. */
-export const GOOSE_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd'] as const
+/**
+ * The events install registers, in hooks.json order: the two documented with
+ * working_dir. The others would spawn the hook on every prompt and turn end
+ * and record nothing. GOOSE_KINDS still maps them, so a hooks.json written
+ * before, or a Goose that does send a folder, is read rather than dropped.
+ */
+export const GOOSE_EVENTS = ['PostToolUse', 'PostToolUseFailure'] as const
 
 const GOOSE_KINDS: Readonly<Record<string, EventKind>> = {
   SessionStart: 'session_start',

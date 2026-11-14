@@ -20,10 +20,10 @@
 // safely, so with one present we write no kilo.json and leave the MCP entry
 // to the user). No recorded Kilo payloads exist yet, so verification stays 'docs'.
 
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { type InstallEnv, errorMessage } from '../../install/env'
 import { openCodeMcpEntry } from '../../install/mcp-config'
-import { existsSync } from 'node:fs'
 import { MCP_HOST_ENV } from '../../mcp/read-reporter'
 import { PLUGIN_FILE_NAME } from '../../names'
 import { type PluginFileSpec, pluginFileActions, pluginFileLine, pluginFileState, pluginFileUninstallActions } from '../families/plugin-file'

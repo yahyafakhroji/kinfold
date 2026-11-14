@@ -43,7 +43,7 @@ import { sqlite3mcInstallActions } from './sqlite3mc-install'
 import { hostUnwireActions } from './uninstall'
 import { vec0InstallActions } from './vec0-install'
 import { envForDataDir } from '../cli/data-dir-env'
-import { builtProfiles, overlapPlan, overlapState, overlapWiring, profileOf } from '../agents/install-profiles'
+import { builtProfiles, hasWiring, overlapPlan, overlapState, overlapWiring, profileOf } from '../agents/install-profiles'
 import { wslInstall } from '../wsl/entry'
 
 export const EXIT_OK = 0
@@ -245,8 +245,8 @@ export function reportDetections(env: InstallEnv, detections: readonly HostDetec
       continue
     }
     // An absent agent whose hooks are still in place keeps its line, as in status.
-    const hasWiring = chosen.includes(detection.host) || stateOf(env, detection.host) !== 'no'
-    if (isFoldedAbsent(detection, hasWiring)) {
+    const kept = chosen.includes(detection.host) || hasWiring(stateOf(env, detection.host))
+    if (isFoldedAbsent(detection, kept)) {
       folded.push(detection.host)
       continue
     }

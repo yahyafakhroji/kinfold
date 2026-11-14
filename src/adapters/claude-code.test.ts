@@ -100,6 +100,39 @@ describe('normalizeClaudeCode on bad input', () => {
   })
 })
 
+// The shared Claude-style parser reads a little more than Claude Code's recorded payloads show.
+describe('normalizeClaudeCode on shapes the shared parser also accepts', () => {
+  const { tool_response: _response, ...bashWithoutResponse } = fixture('post-tool-use.bash')
+
+  test('a tool event with an error and no result is a failed call', () => {
+    const { tool } = normalizeClaudeCode({ ...bashWithoutResponse, error: 'Exit code 2\nboom' }, context) ?? {}
+    expect(tool).toMatchObject({ name: 'Bash', output: 'Exit code 2\nboom', isError: true, exitCode: 2 })
+  })
+
+  test('an error beside a tool_response does not make the call a failure', () => {
+    const { tool } = normalizeClaudeCode({ ...fixture('post-tool-use.bash'), error: 'ignored' }, context) ?? {}
+    expect(tool?.isError).toBeUndefined()
+    expect(tool?.exitCode).toBe(0)
+  })
+
+  test('tool_result is read when tool_response is missing', () => {
+    const { tool } = normalizeClaudeCode({ ...bashWithoutResponse, tool_result: { stdout: 'from tool_result', stderr: '' } }, context) ?? {}
+    expect(tool).toMatchObject({ name: 'Bash', output: 'from tool_result', exitCode: 0 })
+  })
+
+  test('an absolute project_path stands in for a missing cwd, and a relative one does not', () => {
+    const { cwd, ...withoutCwd } = fixture('session-start')
+    expect(normalizeClaudeCode({ ...withoutCwd, project_path: cwd }, context)).toMatchObject({ kind: 'session_start', cwd })
+    expect(() => normalizeClaudeCode({ ...withoutCwd, project_path: 'relative' }, context)).toThrow('absolute cwd')
+  })
+
+  test('an event Kinfold does not capture is null even without a session or folder', () => {
+    expect(normalizeClaudeCode({ hook_event_name: 'Notification' }, context)).toBeNull()
+    expect(normalizeClaudeCode({}, context)).toBeNull()
+    expect(() => normalizeClaudeCode({ hook_event_name: 'SessionStart' }, context)).toThrow('session_id')
+  })
+})
+
 describe('flattenToolResponse', () => {
   test('joins stderr after stdout, keeps unknown shapes as JSON, and maps nothing to empty', () => {
     expect(flattenToolResponse({ stdout: 'ok', stderr: 'warn' })).toBe('ok\n[stderr]\nwarn')

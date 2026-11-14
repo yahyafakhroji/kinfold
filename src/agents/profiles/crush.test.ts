@@ -103,6 +103,8 @@ test('crush: the hook and MCP lines print the commands install would write, in c
     const mcp = entryCommand(env.mode, 'mcp', env.dataDir)
     expect(step).toContain(`mcp add kinfold --command ${inDoubleQuotes(mcp.command)} ${mcp.args.map((arg) => `--args ${inDoubleQuotes(arg)}`).join(' ')} --env ${MCP_HOST_ENV} crush`)
     expect(step).toContain(join(crushConfigDir(env), 'crushrc'))
+    // Crush's docs don't say how crushrc reads flags, so the step asks for a check.
+    expect(step).toContain('check that Crush accepts this line')
     expect(step).not.toContain("'kinfold hook")
   }
 })

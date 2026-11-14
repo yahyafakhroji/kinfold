@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MCP_SERVER_NAME } from '../../install/mcp-config'
 import { mcpTarget, opencodeMcpInstallActions } from '../../install/mcp-wiring'
@@ -101,6 +101,26 @@ test('uninstall removes only the plugin file and mcp.kinfold, keeping other entr
   }
   expect(existsSync(plugin)).toBe(false)
   expect(JSON.parse(readFileSync(cfg, 'utf8'))).toEqual({ theme: 'dark', mcp: { other: { type: 'local', command: ['npx', 'x'] } } })
+})
+
+test('uninstall beside a kilo.jsonc creates nothing and leaves kilo.jsonc as it was', async () => {
+  const w = world()
+  const dir = join(w.env.homeDir, '.config/kilo')
+  const jsonc = join(dir, 'kilo.jsonc')
+  const mine = '{ // mine\n  "mcp": { "other": { "type": "local", "command": ["npx", "x"] } },\n}\n'
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(jsonc, mine)
+  apply(await KILO_CODE_PROFILE.wiring.install(w.env))
+  const actions = KILO_CODE_PROFILE.wiring.uninstall(w.env)
+  // Only the plugin file install wrote goes; no step writes, creates or backs up anything.
+  expect(actions.map((a) => a.kind)).toEqual(['remove'])
+  expect(actions.flatMap((a) => (a.kind === 'remove' ? [a.path] : []))).toEqual([join(dir, 'plugin/kinfold.js')])
+  for (const a of actions) if (a.kind === 'remove') rmSync(a.path)
+  expect(readFileSync(jsonc, 'utf8')).toBe(mine)
+  expect(existsSync(join(dir, 'kilo.json'))).toBe(false)
+  // With no plugin file left either, a second uninstall plans nothing at all.
+  expect(KILO_CODE_PROFILE.wiring.uninstall(w.env)).toEqual([])
+  expect(readdirSync(dir).sort()).toEqual(['kilo.jsonc', 'plugin'])
 })
 
 test('a kinfold.js in Kilo\'s plugin folder that is not ours skips Kilo\'s plugin with the reason, and the rest still installs', async () => {

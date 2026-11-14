@@ -198,6 +198,17 @@ test('status shows the capability line, the docs note and each manual step for a
   expect(w.out[at + 1]).toBe('    gemini-cli: enable hooks in settings')
 })
 
+test('a real agent that is detected but not wired shows its manual step under its line, and an absent one shows none', async () => {
+  const w = make({ versionResults: { crush: { exitCode: 0, stdout: 'crush version v0.11.0\n' } } })
+  expect(await status(w.env)).toBe(EXIT_OK)
+  const at = w.out.findIndex((line) => line.startsWith('  crush: detected crush version v0.11.0; wired: MCP no in '))
+  expect(at).toBeGreaterThan(-1)
+  expect(w.out[at + 1]).toStartWith('    crush: Kinfold never edits crushrc. To record Crush sessions, add these lines to ')
+  expect(w.out[at + 1]).toContain('hook add PostToolUse --name kinfold --command ')
+  // Cline is neither here nor wired, so its steps stay out of status.
+  expect(w.out.some((line) => line.startsWith('    cline:'))).toBe(false)
+})
+
 test('a machine with only Claude Code shows one not-found line in status and in install, and Continue keeps its own', async () => {
   const w = make({ opencodeVersion: null })
   expect(await status(w.env)).toBe(EXIT_OK)

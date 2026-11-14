@@ -74,7 +74,8 @@ function crushrcSteps(env: InstallEnv): string {
   return [
     `crush: Kinfold never edits crushrc. To record Crush sessions, add these lines to ${crushrcPath(env)}:`,
     ...CRUSH_EVENTS.map((event) => `  hook add ${event} --name kinfold --command ${hook} --timeout ${AGENT_HOOK_TIMEOUT_S}`),
-    'If you keep your config in crushrc rather than crush.json, add the MCP server there too:',
+    // The flags are the documented `mcp add` ones; how crushrc splits and quotes them is not documented.
+    'If you keep your config in crushrc rather than crush.json, add the MCP server there too (check that Crush accepts this line; its docs don\'t say how crushrc reads the flags):',
     `  mcp add kinfold --command ${bashWord(mcp.command)} ${mcp.args.map((arg) => `--args ${bashWord(arg)}`).join(' ')} --env ${MCP_HOST_ENV} ${HOST}`,
   ].join('\n')
 }

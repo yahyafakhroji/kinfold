@@ -118,6 +118,15 @@ function cwdOf(payload: Payload): string | undefined {
 /**
  * The strict mapping: throws AdapterInputError on a payload it cannot map, so
  * the hook logs why nothing was captured; null for events not in the table.
+ *
+ * One parser serves the whole family, so Claude Code is read a little more
+ * widely than its own recorded payloads need, on purpose: a tool event with
+ * an `error` and no result is a failed call; tool_result is read when
+ * tool_response is missing; an absolute project_path stands in for a missing
+ * cwd; and an event outside the table is null before session_id and cwd are
+ * looked at, so an uncaptured event never logs an error. None of these shapes
+ * occurs in a recorded Claude Code payload, so its captures are unchanged,
+ * and a per-agent switch for each would be a second code path to keep right.
  */
 export function parseClaudeStyle(eventMap: ClaudeStyleEventMap, host: AgentId, payload: unknown, context: AdapterContext, options: ClaudeStyleOptions = {}): NormalizedEvent | null {
   if (!isRecord(payload)) throw new AdapterInputError('hook payload must be a JSON object')
