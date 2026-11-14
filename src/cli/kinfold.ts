@@ -2,7 +2,8 @@
 // `hook`, `mcp`, `daemon` and `observe` start the programs that hosts wire up,
 // while `install|uninstall|status`, the data-control commands
 // `size|retention|scan|findings|purge` (src/data-control/cli.ts), `dashboard`
-// (src/dashboard/cli.ts) and the `key` family stay in this process.
+// (src/dashboard/cli.ts), `backup|restore` (src/install/backup-cli.ts) and the
+// `key` family stay in this process.
 //
 // Only the store location is read here at startup. Each command's modules are
 // imported when that command runs, so a hook pays for the hook alone and never
@@ -123,7 +124,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
   }
   const base = env ?? (await systemEnv(args, global.value.dataDir))
   const effective = global.value.dataDir === null ? base : envForDataDir(base, global.value.dataDir)
-  const { parseArgs, parseDashboardArgs, parseDataArgs, parseKeyArgs } = await import('../install/args')
+  const { parseArgs, parseBackupArgs, parseDashboardArgs, parseDataArgs, parseKeyArgs } = await import('../install/args')
   const dashboard = parseDashboardArgs(args)
   if (dashboard !== null) {
     if (!dashboard.ok) {
@@ -141,6 +142,15 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     }
     const { runKeyCommand } = await import('../install/encrypt')
     return runKeyCommand(effective, key.value.command)
+  }
+  const backup = parseBackupArgs(args)
+  if (backup !== null) {
+    if (!backup.ok) {
+      effective.out(backup.error)
+      return EXIT_USAGE
+    }
+    const { runBackupCommand } = await import('../install/backup-cli')
+    return runBackupCommand(effective, backup.value)
   }
   const data = parseDataArgs(args)
   if (data !== null) {

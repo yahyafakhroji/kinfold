@@ -1,3 +1,4 @@
+import { writeBackupRecord } from '../backup/record'
 import { afterEach, expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -180,6 +181,19 @@ test('status shows the notice', async () => {
   writeUpdateState(w.dataDir, { lastAttemptAt: 1, latestVersion: '0.1.0', checkedAt: 1_800_000_000_000, notified: {} })
   await status(w.env, '0.1.0')
   expect(w.out).toContain('update: none known (last checked 2027-01-15T08:00:00.000Z)')
+})
+
+test('status says when the last backup was made, and nothing when there is none', async () => {
+  const w = make({ withLibrary: false })
+  mkdirSync(w.dataDir, { recursive: true })
+  await status(w.env, '0.1.0')
+  expect(w.out.some((line) => line.startsWith('backup:'))).toBe(false)
+  w.out.length = 0
+  writeBackupRecord(w.dataDir, 1_800_000_000_000)
+  await status(w.env, '0.1.0')
+  expect(w.out).toContain('backup: last made 2027-01-15T08:00:00.000Z')
+  // An old backup is stated, never nagged about.
+  expect(w.out.filter((line) => line.includes('backup')).join('\n')).not.toMatch(/warning|old|overdue/i)
 })
 
 test('status names the service', async () => {

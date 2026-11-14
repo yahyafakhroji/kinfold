@@ -5,6 +5,12 @@
 // data-directory token, or for the routes the dashboard calls, its session
 // cookie (src/dashboard/access.ts decides which route takes which). Every
 // answer carries the dashboard's CSP and no-store headers.
+//
+// Bun's own body cap is server-wide, and the restore upload needs it high, so
+// the 16 KB limit of every other route is kept here: a declared length past it
+// is refused unread, and a body is read by counting, never whole. Both come
+// after the Host and credential checks, so a request without credentials
+// cannot make the daemon read anything.
 
 import { timingSafeEqual } from 'node:crypto'
 import { type ContextRequest, type ContextResult, type Parsed, parseContextRequest } from '../context/types'
@@ -15,6 +21,7 @@ import { dashboardRoute } from '../dashboard/routes'
 import type { RetryTarget } from '../store/observer-reset'
 import type { McpRead } from '../store/mcp-read-store'
 import type { SessionSummary } from '../store/reads'
+import type { BackupRoutes } from './backup-routes'
 import { type DataHandlers, type RouteAnswer, dataRoute } from './data-routes'
 import { parseMcpRead } from './mcp-read-route'
 import { type ReadRouteDeps, readRoute } from './read-routes'
@@ -68,6 +75,10 @@ export interface ServerDeps {
   auth: DashboardAuth
   /** The /read/ routes (token only); absent, every /read/ path is 404. */
   reads?: ReadRouteDeps
+  /** GET /backup, POST /restore/upload, POST /restore, GET /restore/status; absent, each is 404. */
+  backup?: BackupRoutes
+  /** Why the store cannot be reached right now (a restore is replacing it), or null. Routes that read or write it answer 503 meanwhile. */
+  unavailable?: () => string | null
   /** Receives counts, ids and error messages only, never payloads. */
   log: (line: string) => void
 }
@@ -99,11 +110,45 @@ export function hasToken(header: string | null, token: string): boolean {
 
 /** Bodies are a few hundred bytes; anything far larger is not a client of ours. */
 export const MAX_BODY_BYTES = 16_384
+/** The most the restore upload may ever take, and so the server-wide cap; the route lowers it to what the disk can hold. */
+export const MAX_UPLOAD_BYTES = 8 * 1024 ** 3
+const UPLOAD_PATH = '/restore/upload'
+const BACKUP_PATHS: ReadonlySet<string> = new Set(['/backup', '/restore', UPLOAD_PATH, '/restore/status'])
+
+function declaredLength(request: Request): number {
+  const length = Number(request.headers.get('content-length') ?? '0')
+  return Number.isFinite(length) ? length : 0
+}
+
+/** The body, read a chunk at a time and dropped the moment it passes `limit` (null then): a sender cannot make the daemon hold more than the cap. */
+async function readCapped(request: Request, limit: number): Promise<Uint8Array | null> {
+  if (request.body === null) return new Uint8Array(0)
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > limit) {
+      await reader.cancel().catch(() => {})
+      return null
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
+}
 
 async function readJson(request: Request): Promise<Parsed<unknown>> {
   // Counted in bytes before decoding: a body of multi-byte characters is several times its length in characters.
-  const bytes = await request.arrayBuffer()
-  if (bytes.byteLength > MAX_BODY_BYTES) return { ok: false, error: 'body too large' }
+  const bytes = declaredLength(request) > MAX_BODY_BYTES ? null : await readCapped(request, MAX_BODY_BYTES)
+  if (bytes === null) return { ok: false, error: 'body too large' }
   try {
     return { ok: true, value: JSON.parse(new TextDecoder().decode(bytes)) }
   } catch {
@@ -189,6 +234,23 @@ async function panelRoute(request: Request, url: URL, deps: ServerDeps): Promise
   return null
 }
 
+/** Backup and restore: the one place a body may be larger than 16 KB, and the routes that still answer while the store is being replaced. */
+async function backupRoute(request: Request, path: string, deps: ServerDeps): Promise<Response> {
+  const routes = deps.backup
+  if (routes === undefined) return json(404, { error: 'not found' })
+  const wrongMethod = json(405, { error: 'method not allowed' })
+  if (path === '/backup') return request.method === 'GET' ? routes.download() : wrongMethod
+  const answered = (answer: RouteAnswer): Response => json(answer.status, answer.body)
+  if (path === '/restore/status') return request.method === 'GET' ? answered(routes.status()) : wrongMethod
+  if (request.method !== 'POST') return wrongMethod
+  return answered(path === UPLOAD_PATH ? await routes.upload(request) : await routes.start(() => readJson(request)))
+}
+
+async function storeRoute(request: Request, url: URL, deps: ServerDeps): Promise<Response> {
+  const down = deps.unavailable?.() ?? null
+  return down === null ? route(request, url, deps) : json(503, { error: down })
+}
+
 const DASHBOARD_PAGES = new Set(['/dashboard', '/dashboard/'])
 
 /** A signed-out browser opening the app page goes to the login page, which explains `kinfold dashboard`. */
@@ -227,11 +289,14 @@ async function answer(request: Request, port: number, deps: ServerDeps): Promise
   const access = accessFor(url.pathname)
   const checked = checkAccess(request, access, { port, hasToken: (header) => hasToken(header, deps.token), auth: deps.auth })
   if (!checked.ok) return refused(request, url.pathname, access, checked, deps)
+  // Every route but the upload keeps the 16 KB limit Bun's cap used to give it, body-reading or not.
+  if (url.pathname !== UPLOAD_PATH && declaredLength(request) > MAX_BODY_BYTES) return json(413, { error: 'body too large' })
   const startedAt = performance.now()
   const dashboard = url.pathname === '/dashboard' || url.pathname.startsWith('/dashboard/')
     ? await dashboardRoute(request, url.pathname, { port, auth: deps.auth, readBody: () => readJson(request), log: deps.log })
     : undefined
-  const response = dashboard === undefined ? await route(request, url, deps) : (dashboard ?? json(404, { error: 'not found' }))
+  const other = (): Promise<Response> => (BACKUP_PATHS.has(url.pathname) ? backupRoute(request, url.pathname, deps) : storeRoute(request, url, deps))
+  const response = dashboard === undefined ? await other() : (dashboard ?? json(404, { error: 'not found' }))
   // Route, status and time only: no query string, body or cookie.
   if (checked.via === 'cookie') deps.log(`dashboard ${request.method} ${url.pathname} status=${response.status} ms=${Math.round(performance.now() - startedAt)}`)
   return response
@@ -245,8 +310,8 @@ export function startServer(deps: ServerDeps): RunningServer {
   const server = Bun.serve({
     hostname: LOOPBACK_HOST,
     port: deps.port,
-    // Bun's own cap is 128 MB, which any local process could make the daemon hold; past this one it answers 413 unread.
-    maxRequestBodySize: MAX_BODY_BYTES,
+    // Server-wide, so it is the upload's ceiling; every other route is held to MAX_BODY_BYTES in answer() and readJson.
+    maxRequestBodySize: MAX_UPLOAD_BYTES,
     fetch: (request, self) => handleRequest(request, self.port ?? deps.port, deps),
     error: (error) => {
       // The name only: a SQLite message can echo query fragments, and prompt terms are query fragments.

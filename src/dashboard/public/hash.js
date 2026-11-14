@@ -3,7 +3,7 @@
 // carries a credential: the login code lives in /dashboard/login's fragment
 // only until login.js replaces the URL.
 
-export const PAGES = ['models', 'memory', 'data', 'metrics']
+export const PAGES = ['models', 'memory', 'data', 'metrics', 'backup']
 export const DEFAULT_PAGE = 'memory'
 
 /** @typedef {{ page: string, params: Record<string, string> }} HashState */
