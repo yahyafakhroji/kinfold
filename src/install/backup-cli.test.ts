@@ -15,7 +15,7 @@ import { runBackupCommand } from './backup-cli'
 import { runKeyCommand } from './encrypt'
 import type { InstallEnv } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
-import { type FakeWorld, type RecordingKeyStore, createWorld, recordingKeyStore } from './test-support'
+import { type FakeWorld, type RecordingKeyStore, createWorld, recordingKeyStore, startWorldDaemon } from './test-support'
 
 const worlds: FakeWorld[] = []
 afterEach(async () => {
@@ -245,4 +245,77 @@ test('backup and restore each take exactly one file', () => {
   for (const argv of [['backup'], ['restore'], ['backup', 'a', 'b'], ['restore', '--force'], ['backup', '']]) {
     expect(parseBackupArgs(argv)).toMatchObject({ ok: false })
   }
+})
+
+/** Starts the machine's daemon on its own key store, and records every URL the command asks for. */
+function withDaemon(m: Machine): { urls: string[]; bodies: string[] } {
+  m.w.env.keyStore = m.keyStore
+  m.w.launchd.daemon = startWorldDaemon(m.w, m.w.dataDir)
+  const urls: string[] = []
+  const bodies: string[] = []
+  const inner = m.env.fetch
+  m.env.fetch = (url, init) => {
+    urls.push(url)
+    if (typeof init.body === 'string') bodies.push(init.body)
+    return inner(url, init)
+  }
+  return { urls, bodies }
+}
+
+test('with the daemon running, backup comes from GET /backup and restore goes through its routes', async () => {
+  const old = machine({ titles: ['first', 'second'] })
+  const oldCalls = withDaemon(old)
+  const file = await backupOf(old)
+  expect(oldCalls.urls.some((url) => url.endsWith('/backup'))).toBe(true)
+  expect(readArchive(file).manifest.encrypted).toBe(true)
+  expect(existsSync(`${file}.partial`)).toBe(false)
+  expect(old.w.out.join('\n')).toContain(file)
+
+  const code = encodeRecoveryCode(old.key!)
+  const fresh = machine({ titles: ['mine'], code })
+  const calls = withDaemon(fresh)
+  expect(await runBackupCommand(fresh.env, { command: 'restore', file })).toBe(EXIT_OK)
+  const paths = calls.urls.map((url) => new URL(url).pathname)
+  expect(paths).toContain('/restore/upload')
+  expect(paths).toContain('/restore')
+  expect(paths).toContain('/restore/status')
+  expect(titles(fresh)).toEqual(['first', 'second'])
+  expect(fresh.keyStore.values.get(DB_KEY_REF)).toBe(old.key!)
+  expect(fresh.keyStore.values.get(DB_KEY_REPLACED_REF)).toBe(fresh.key!)
+  const text = fresh.w.out.join('\n')
+  expect(text).toContain('restored the backup')
+  expect(text).toContain('switch back')
+  expect(text).not.toContain('the daemon is not running')
+  // The code went in one request body and nowhere else: no URL, no output.
+  expect(calls.bodies.filter((body) => body.includes(code))).toHaveLength(1)
+  for (const url of calls.urls) {
+    expect(url).not.toContain(code)
+    expect(url).not.toContain(code.replace(/-/g, ''))
+    expect(new URL(url).search).toBe('')
+  }
+  expect(text).not.toContain(code)
+  // The daemon still serves, on the restored store.
+  expect((await fresh.env.fetch(calls.urls[0]!.replace(/\/[^/]*$/, '/health'), {})).status).toBe(200)
+})
+
+test('with the daemon running, a wrong code fails the command and the store stays', async () => {
+  const old = machine({ titles: ['first'] })
+  const file = await backupOf(old)
+  const wrong = encodeRecoveryCode(newDbKey())
+  const fresh = machine({ titles: ['mine'], code: wrong })
+  withDaemon(fresh)
+  expect(await runBackupCommand(fresh.env, { command: 'restore', file })).toBe(EXIT_FAILED)
+  expect(fresh.w.out.join('\n')).toContain('does not open this backup')
+  expect(fresh.w.out.join('\n')).not.toContain(wrong)
+  expect(titles(fresh)).toEqual(['mine'])
+  expect(fresh.keyStore.values.get(DB_KEY_REF)).toBe(fresh.key!)
+})
+
+test('with the daemon running, backup still refuses to replace a file', async () => {
+  const m = machine({ titles: ['one'] })
+  withDaemon(m)
+  const file = join(m.w.root, 'taken.kfb')
+  writeFileSync(file, 'mine')
+  expect(await runBackupCommand(m.env, { command: 'backup', file })).toBe(EXIT_FAILED)
+  expect(readFileSync(file, 'utf8')).toBe('mine')
 })

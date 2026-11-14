@@ -142,11 +142,12 @@ export function fakeSecurity(kinfold: FakeKeychain, legacy: FakeKeychain, calls:
 export function startWorldDaemon(world: FakeWorld, dataDir: string): RunningDaemon {
   // The daemon's reads go through the same fake as the installer's writes, or through the injected store.
   const injected = world.env.keyStore
-  const keychain = credentialProviderOf(injected ?? createKeychainStore((invocation) => world.env.security(invocation)))
+  const store = injected ?? createKeychainStore((invocation) => world.env.security(invocation))
+  const keychain = credentialProviderOf(store)
   const dbKeys = injected === undefined || injected === null
     ? credentialDbKeyStore('keychain', keychain, () => world.keychain.has(DB_KEY_REF) || world.legacyKeychain.has(DB_KEY_REF))
     : credentialDbKeyStore(injected.label, keychain, () => injected.exists(DB_KEY_REF))
-  const daemon = startDaemon({ dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, keychain, dbKeys })
+  const daemon = startDaemon({ dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, keychain, dbKeys, keyStore: store })
   world.allowedPorts.add(daemon.port)
   return daemon
 }
