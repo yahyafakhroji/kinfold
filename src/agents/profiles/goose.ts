@@ -122,6 +122,7 @@ export const GOOSE_PROFILE: AgentProfile = {
   verification: 'docs',
   capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),
   limit: (os) => (onWindows(os) ? WINDOWS_LIMIT : LIMIT),
+  shortLimit: (os) => (os === 'windows' ? 'Nothing is wired on Windows; search needs the MCP server added to config.yaml by hand.' : 'Records tool calls only; search needs the MCP server added to config.yaml by hand.'),
   detection: detectGoose,
   wiring: {
     install: async (env) => (windowsEnv(env) ? [] : gooseFileActions(env)),

@@ -30,7 +30,7 @@ import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentFileInstallActions, 
 import { hookTarget, shellCommand } from '../families/json-hooks'
 import { mcpEntryState } from '../families/mcp-entry'
 import { type OwnedFileSpec, ownedFileActions, ownedFileState, ownedFileUninstallActions } from '../families/owned-file'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: false, prompt: false }, search: true, observer: false }
 const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false }
@@ -98,6 +98,7 @@ export const KIRO_PROFILE: AgentProfile = {
   verification: 'docs',
   capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),
   limit: (os) => (onWindows(os) ? WINDOWS_LIMIT : LIMIT),
+  shortLimit: (os) => (os === 'windows' ? SHORT_WINDOWS_HOOKS_UNCHECKED : 'Needs Kiro CLI V3; tool output is recorded only if the agent sends it.'),
   detection: { binaries: ['kiro-cli'], bundles: ['Kiro.app'] },
   wiring: {
     install: async (env) => [...(windowsEnv(env) ? [] : kiroHooksFileActions(env)), ...jsonAgentFileInstallActions(env, HOST, KIRO_MCP_FILE)],

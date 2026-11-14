@@ -18,7 +18,7 @@ import type { InstallEnv } from '../../install/env'
 import { claudeMcpState } from '../../install/mcp-wiring'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpEntryText, mcpServersFile } from '../families/json-agent'
 import { mcpEntryState } from '../families/mcp-entry'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, SHORT_NO_HOOKS } from '../profile'
 
 const HOST = 'warp'
 
@@ -40,6 +40,7 @@ export const WARP_PROFILE: AgentProfile = {
   verification: 'docs',
   capabilities: () => CAPABILITIES,
   limit: () => 'Warp has no hooks',
+  shortLimit: () => SHORT_NO_HOOKS,
   detection: { binaries: ['warp'], bundles: ['Warp.app'] },
   wiring: {
     install: async (env) => {

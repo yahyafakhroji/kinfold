@@ -1,6 +1,6 @@
 # Kinfold
 
-Kinfold gives 22 coding agents one memory. Claude Code, OpenCode, Codex and Cursor are checked against real runs; the rest are built from their docs. What each agent can do depends on its hooks, and `kinfold status` shows it per agent. It records what each agent did, condenses it into short observations, and hands the relevant ones to the next session in whichever agent you open. The memory is a SQLite file on your machine, encrypted at rest. Kinfold ships as a single program with no runtime to install, and it's open source under Apache-2.0.
+Kinfold gives 22 coding agents one memory. The [Supported agents](#supported-agents) table lists them and shows which were checked against a real run. What each agent can do depends on its hooks, and `kinfold status` shows it per agent. It records what each agent did, condenses it into short observations, and hands the relevant ones to the next session in whichever agent you open. The memory is a SQLite file on your machine, encrypted at rest. Kinfold ships as a single program with no runtime to install, and it's open source under Apache-2.0.
 
 ![Kinfold's setup wizard in a terminal: version, a dry-run install that walks each step, then status](assets/demo.gif)
 
@@ -46,6 +46,56 @@ Kinfold needs at least one supported coding agent. `kinfold status` lists them a
 - **Dashboard.** `kinfold dashboard` opens a local page with sessions, observations, stats and the observer settings.
 - **Data control.** `kinfold retention` sets how long each kind of data is kept, `kinfold purge` removes a session, project or agent, and `kinfold scan` checks the store for secrets that slipped through.
 - **Updates.** `kinfold update` fetches the latest release and checks it against `SHA256SUMS` before it replaces the program.
+
+## Supported agents
+
+What Kinfold wires for each agent on macOS and Linux. **Observer** is `yes` when the agent's own login can run the observer model. **Checked** is `live` when the profile was tested against a real run of the agent, and `docs` when it was built from the agent's docs. **Windows** compares Windows with the other two.
+
+<!-- agents:start -->
+| Agent | Captures | Context | Search | Observer | Checked | Windows |
+| --- | --- | --- | --- | --- | --- | --- |
+| Claude Code | yes | start, prompt | yes | yes | live | same |
+| OpenCode | yes | no | yes | yes | live | same |
+| Codex | yes | start, prompt | yes | yes | live | same |
+| Cursor | yes | start | yes | no | live | same |
+| Gemini CLI | yes | start, prompt | yes | no | docs | search only <sup>1</sup> |
+| Qwen Code | yes | start, prompt | yes | no | docs | search only <sup>1</sup> |
+| Factory Droid | yes | start, prompt | yes | no | docs | search only <sup>1</sup> |
+| Devin <sup>2</sup> | yes | start, prompt | yes | no | docs | search only <sup>1</sup> |
+| Kilo Code <sup>3</sup> | yes | no | yes | no | docs | same <sup>4</sup> |
+| Cline <sup>5</sup> | yes | prompt | yes | no | docs | search only <sup>6</sup> |
+| GitHub Copilot | yes | start | yes | no | docs | search only <sup>1</sup> |
+| Antigravity <sup>7</sup> | yes | start | yes | no | docs | search only <sup>1</sup> |
+| Junie <sup>8</sup> | yes | prompt | yes | no | docs | search only <sup>1</sup> |
+| Kiro <sup>9</sup> | yes | no | yes | no | docs | search only <sup>1</sup> |
+| Amp <sup>10</sup> | yes | start, prompt | yes | no | docs | same |
+| Kimi Code <sup>11</sup> | yes | prompt | yes | no | docs | search only <sup>1</sup> |
+| Auggie <sup>12</sup> | yes | no | yes | no | docs | same |
+| Goose <sup>13</sup> | tool results | no | no | no | docs | none <sup>14</sup> |
+| Crush <sup>15</sup> | no | no | yes | no | docs | same |
+| Zed <sup>16</sup> | no | no | yes | no | docs | same <sup>17</sup> |
+| Continue <sup>18</sup> | no | no | no | no | docs | same |
+| Warp <sup>16</sup> | no | no | yes | no | docs | same |
+
+1. Hooks stay off on Windows until the hook command is checked against the shell the agent runs them in.
+2. Runs Claude Code's hooks when Claude Code is wired; not yet checked on a live run.
+3. The config folder can't be moved with an environment variable.
+4. The Windows config folder is unconfirmed, and no environment variable moves it.
+5. Context on each prompt reaches the VS Code extension only, not the Cline CLI.
+6. The agent's hooks don't run on Windows.
+7. Tool calls are recorded without their output; later prompts in a conversation may be missed.
+8. Events without a session id are not recorded; the docs show one only on session start and prompts.
+9. Needs Kiro CLI V3; tool output is recorded only if the agent sends it.
+10. Run `amp plugins list` to check that the plugin loaded.
+11. Session-start output is dropped, so context arrives with each prompt.
+12. Hook output never reaches the agent, and the assistant's reply is not recorded.
+13. Records tool calls only; search needs the MCP server added to config.yaml by hand.
+14. Nothing is wired on Windows; search needs the MCP server added to config.yaml by hand.
+15. Hooks live in crushrc, which Kinfold can't edit safely; add the `hook add` lines by hand to record tool calls.
+16. The agent has no hooks.
+17. The agent has no hooks; add the MCP entry by hand, no Windows settings path is documented.
+18. The agent has no hooks; search needs the MCP block added to ~/.continue/config.yaml by hand.
+<!-- agents:end -->
 
 ## Choosing the observer model
 

@@ -77,6 +77,7 @@ export const AMP_PROFILE: AgentProfile = {
   verification: 'docs',
   capabilities: () => CAPABILITIES,
   limit: () => LIMIT,
+  shortLimit: () => 'Run `amp plugins list` to check that the plugin loaded.',
   detection: { binaries: ['amp'] },
   wiring: {
     install: async (env, options) => {

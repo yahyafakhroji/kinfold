@@ -35,7 +35,7 @@ import { type InstallEnv, errorMessage, platformOf } from '../../install/env'
 import type { OsName } from '../../platform/platform'
 import { readPlainJsonObject } from '../families/plain-json'
 import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentWiring, mcpServersFile } from '../families/json-agent'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: true }, search: true, observer: false }
 const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false }
@@ -106,6 +106,7 @@ export const DEVIN_PROFILE: AgentProfile = {
   verification: 'docs',
   capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),
   limit: (os) => (onWindows(os) ? WINDOWS_LIMIT : LIMIT),
+  shortLimit: (os) => (os === 'windows' ? SHORT_WINDOWS_HOOKS_UNCHECKED : "Runs Claude Code's hooks when Claude Code is wired; not yet checked on a live run."),
   detection: { binaries: ['devin'] },
   wiring: jsonAgentWiring('devin', DEVIN_FILES),
   manualSteps: () => [],
