@@ -29,7 +29,7 @@ import type { OsName } from '../../platform/platform'
 import { type AgentHome, type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpServersFile } from '../families/json-agent'
 import { mcpEntryState } from '../families/mcp-entry'
 import { tomlHooksActions, tomlHooksState, tomlHooksUninstallActions } from '../families/toml-file'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: false, prompt: true }, search: true, observer: false }
 const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false }
@@ -107,6 +107,7 @@ export const KIMI_CODE_PROFILE: AgentProfile = {
   verification: 'docs',
   capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),
   limit: (os) => (onWindows(os) ? WINDOWS_LIMIT : LIMIT),
+  shortLimit: (os) => (os === 'windows' ? SHORT_WINDOWS_HOOKS_UNCHECKED : 'Session-start output is dropped, so context arrives with each prompt.'),
   detection: { binaries: ['kimi'] },
   wiring: {
     install: async (env) => install(env),

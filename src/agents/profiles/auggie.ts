@@ -54,6 +54,7 @@ export const AUGGIE_PROFILE: AgentProfile = {
   verification: 'docs',
   capabilities: () => CAPABILITIES,
   limit: () => LIMIT,
+  shortLimit: () => "Hook output never reaches the agent, and the assistant's reply is not recorded.",
   detection: { binaries: ['auggie'] },
   wiring: jsonAgentWiring(HOST, [AUGGIE_FILE]),
   manualSteps: (_os, env) => [

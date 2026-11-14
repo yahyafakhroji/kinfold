@@ -27,7 +27,7 @@ import { resolveAgentHome } from '../../install/codex-home'
 import { type InstallEnv, platformOf } from '../../install/env'
 import type { OsName } from '../../platform/platform'
 import { AGENT_HOOK_TIMEOUT_S, type AgentHome, type JsonAgentFile, jsonAgentWiring, mcpServersFile } from '../families/json-agent'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: false }, search: true, observer: false }
 const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false }
@@ -75,6 +75,7 @@ export const COPILOT_PROFILE: AgentProfile = {
   verification: 'docs',
   capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),
   limit: (os) => (onWindows(os) ? WINDOWS_LIMIT : null),
+  shortLimit: (os) => (os === 'windows' ? SHORT_WINDOWS_HOOKS_UNCHECKED : null),
   detection: { binaries: ['copilot'] },
   wiring: jsonAgentWiring('copilot', COPILOT_FILES, COPILOT_HOME),
   manualSteps: () => [],

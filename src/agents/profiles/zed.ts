@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { type InstallEnv, platformOf } from '../../install/env'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpEntryText, stdioMcpEntry } from '../families/json-agent'
 import { mcpEntryState } from '../families/mcp-entry'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, SHORT_NO_HOOKS } from '../profile'
 
 const HOST = 'zed'
 
@@ -41,6 +41,7 @@ export const ZED_PROFILE: AgentProfile = {
   verification: 'docs',
   capabilities: () => CAPABILITIES,
   limit: (os) => (os === 'windows' ? `Zed has no hooks; ${NO_WINDOWS_PATH}` : 'Zed has no hooks'),
+  shortLimit: (os) => (os === 'windows' ? 'The agent has no hooks; add the MCP entry by hand, no Windows settings path is documented.' : SHORT_NO_HOOKS),
   detection: { binaries: ['zed'], bundles: ['Zed.app'] },
   wiring: {
     install: async (env) => {

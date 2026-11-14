@@ -49,6 +49,7 @@ export const CONTINUE_PROFILE: AgentProfile = {
   verification: 'docs',
   capabilities: () => CAPABILITIES,
   limit: () => 'Continue has no hooks; search needs the MCP block added to ~/.continue/config.yaml by hand',
+  shortLimit: () => 'The agent has no hooks; search needs the MCP block added to ~/.continue/config.yaml by hand.',
   detection: async (_env, forced) =>
     forced
       ? { host: HOST, selected: true, version: null, note: 'wired because --hosts names it' }

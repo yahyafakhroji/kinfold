@@ -86,6 +86,7 @@ export const CRUSH_PROFILE: AgentProfile = {
   verification: 'docs',
   capabilities: () => CAPABILITIES,
   limit: () => LIMIT,
+  shortLimit: () => "Hooks live in crushrc, which Kinfold can't edit safely; add the `hook add` lines by hand to record tool calls.",
   detection: { binaries: ['crush'] },
   wiring: {
     install: async (env) => {

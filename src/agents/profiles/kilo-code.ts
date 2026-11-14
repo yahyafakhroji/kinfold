@@ -57,6 +57,7 @@ export const KILO_CODE_PROFILE: AgentProfile = {
     os === 'windows'
       ? 'Windows config folder unverified (the Kilo docs say it may differ); no config-folder variable honoured'
       : 'no config-folder variable honoured',
+  shortLimit: (os) => (os === 'windows' ? 'The Windows config folder is unconfirmed, and no environment variable moves it.' : "The config folder can't be moved with an environment variable."),
   detection: { binaries: ['kilo'] },
   wiring: {
     install: async (env, options) => {

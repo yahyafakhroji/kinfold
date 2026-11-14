@@ -102,6 +102,7 @@ export const CLINE_PROFILE: AgentProfile = {
   verification: 'docs',
   capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),
   limit: (os) => (onWindows(os) ? WINDOWS_LIMIT : LIMIT),
+  shortLimit: (os) => (os === 'windows' ? "The agent's hooks don't run on Windows." : 'Context on each prompt reaches the VS Code extension only, not the Cline CLI.'),
   detection: { binaries: ['cline'] },
   wiring: {
     install: async (env) => [...(windowsEnv(env) ? [] : clineHookFileActions(env)), ...jsonAgentFileInstallActions(env, HOST, CLINE_MCP_FILE)],

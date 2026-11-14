@@ -51,6 +51,8 @@ export interface AgentProfile {
   capabilities(os: OsName): Capabilities
   /** Why the agent does less than a full integration on this OS, or null. */
   limit(os: OsName): string | null
+  /** The limit in one short sentence that names no agent, for the README table's notes; null where limit is null. A profile with a limit on any OS has one. */
+  shortLimit?(os: OsName): string | null
   detection: DetectionSpec | ((env: InstallEnv, forced: boolean) => Promise<HostDetection>)
   wiring: AgentWiring
   /** Steps the user takes by hand; any command in them is the one install would write on this env. */
@@ -61,6 +63,10 @@ export interface AgentProfile {
   firesFrom?(env: InstallEnv): { fires: boolean; note: string }
 }
 
+/** The short limit of every agent whose hooks stay off on Windows until its shell is checked. */
+export const SHORT_WINDOWS_HOOKS_UNCHECKED = 'Hooks stay off on Windows until the hook command is checked against the shell the agent runs them in.'
+export const SHORT_NO_HOOKS = 'The agent has no hooks.'
+
 function contextPart(context: Capabilities['context']): string | null {
   if (context.sessionStart && context.prompt) return 'context at start and on each prompt'
   if (context.sessionStart) return 'context at start'
@@ -68,15 +74,19 @@ function contextPart(context: Capabilities['context']): string | null {
   return null
 }
 
-export function capabilityLine(profile: AgentProfile, os: OsName): string {
-  const caps = profile.capabilities(os)
+/** What the capabilities come to, without the limit: "captures, context at start, search", or '' for none. */
+export function capabilitySummary(caps: Capabilities): string {
   const parts: string[] = []
   if (caps.capture === 'full') parts.push('captures')
   if (caps.capture === 'partial') parts.push('captures tool results only')
   const context = contextPart(caps.context)
   if (context) parts.push(context)
   if (caps.search) parts.push(parts.length === 0 ? 'search only' : 'search')
-  const line = parts.join(', ')
+  return parts.join(', ')
+}
+
+export function capabilityLine(profile: AgentProfile, os: OsName): string {
+  const line = capabilitySummary(profile.capabilities(os))
   const limit = profile.limit(os)
   // With nothing to list, the limit is the whole story.
   if (line === '') return limit ?? 'nothing wired'
