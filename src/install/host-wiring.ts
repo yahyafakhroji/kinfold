@@ -17,10 +17,10 @@ import { type EmbeddedAssets, embeddedAssets } from '../runtime/embedded'
 import { DATA_FILE_MODE } from '../store/data-dir'
 import type { HostDetection } from './detect'
 import { type InstallEnv, codexHomeProblem, errorMessage, installPaths } from './env'
-import { entryCommand } from './entry'
 import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import type { WiringState } from './claude-hooks'
 import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, type CommandHookHost, type CommandHookSpec, inspectHostHooks, mergeHostHooks, removeHostHooks } from './host-hooks'
+import { hookTarget } from '../agents/families/json-hooks'
 import type { Action } from './plan'
 import { type PluginFileSpec, pluginFileActions, pluginFileLine, pluginFileState, pluginFileUninstallActions } from '../agents/families/plugin-file'
 import { PLUGIN_FILE_NAME } from '../names'
@@ -60,7 +60,7 @@ export function hostHookInstallActions(env: InstallEnv, host: CommandHookHost): 
   const { dir, file: path } = hostFiles(env, host)
   if (host === 'codex' && env.codexHomeEnv !== undefined && env.codexHomeEnv !== '') env.out(`codex: CODEX_HOME is set; using ${path}`)
   const file = readJsonObject(path)
-  const merge = mergeHostHooks(HOST_HOOK_SPECS[host], file.exists ? file.value : {}, { entry: entryCommand(env.mode, 'hook', env.dataDir, host) })
+  const merge = mergeHostHooks(HOST_HOOK_SPECS[host], file.exists ? file.value : {}, hookTarget(env, host))
   if (!merge.changed) {
     env.out(`${host}: hooks already wired in ${path}`)
     return []
@@ -92,6 +92,12 @@ export function hostHookUninstallActions(env: InstallEnv, host: CommandHookHost)
   ]
 }
 
+/** The state of a host's hooks against what an install would write on this env, the Windows form included. */
+function inspectHooks(env: InstallEnv, host: CommandHookHost, settings: Readonly<Record<string, unknown>>): WiringState {
+  const target = hookTarget(env, host)
+  return inspectHostHooks(HOST_HOOK_SPECS[host], settings, target.entry, target.windows)
+}
+
 /** Codex's entries under CODEX_HOME and, when that is elsewhere, under ~/.codex too. */
 export function codexHookUninstallActions(env: InstallEnv): Action[] {
   const here = hostHookUninstallActions(env, 'codex')
@@ -105,7 +111,7 @@ export function hostWiringState(env: InstallEnv, host: CommandHookHost): WiringS
   if (host === 'codex' && codexHomeProblem(env) !== null) return 'unknown'
   try {
     const file = readJsonObject(hostFiles(env, host).file)
-    return file.exists ? inspectHostHooks(HOST_HOOK_SPECS[host], file.value, entryCommand(env.mode, 'hook', env.dataDir, host)) : 'no'
+    return file.exists ? inspectHooks(env, host, file.value) : 'no'
   } catch {
     return 'unknown'
   }
@@ -118,7 +124,7 @@ export function hostWiringLine(env: InstallEnv, host: CommandHookHost): string {
   if (problem !== null) return `unknown (${problem}) in ${path}`
   try {
     const file = readJsonObject(path)
-    return `${file.exists ? inspectHostHooks(HOST_HOOK_SPECS[host], file.value, entryCommand(env.mode, 'hook', env.dataDir, host)) : 'no (no hooks.json)'} in ${path}`
+    return `${file.exists ? inspectHooks(env, host, file.value) : 'no (no hooks.json)'} in ${path}`
   } catch (error: unknown) {
     return `unknown (${errorMessage(error)}) in ${path}`
   }

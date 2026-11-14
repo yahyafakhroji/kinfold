@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { inspectSamHooks, mergeSamHooks } from './claude-hooks'
-import { entryCommand, entryIdentity, entryRole, installedProgramPath, isCompiledProgram, isOurEntry } from './entry'
+import { entryCommand, entryIdentity, entryPath, entryRole, installedProgramPath, isCompiledProgram, isOurEntry, parseEntry, sameEntry } from './entry'
+import { cmdCommand, powershellCommand } from '../agents/families/hook-shell'
 import { serializeJson } from './files'
 import { samCommand, samCommandScript } from './host-hooks'
 import { DEFAULT_PORT } from '../daemon/daemon'
@@ -107,5 +108,33 @@ describe('a data folder with spaces', () => {
     const written = samCommand({ entry: entryCommand(mode, 'hook', DATA_DIR, 'codex') })
     expect(written).toBe(`'${PROGRAM}' --data-dir '${DATA_DIR}' hook --host codex`)
     expect(samCommandScript({ command: written }, 'codex')).toBe(PROGRAM)
+  })
+})
+
+describe('a command string written for a Windows shell', () => {
+  const WIN_PROGRAM = "C:\\Users\\O'Brien & Co\\100%\\My Memory\\bin\\kinfold.exe"
+  const WIN_DATA = "C:\\Users\\O'Brien & Co\\100%\\My Memory"
+  const expected = entryCommand({ kind: 'program', binPath: WIN_PROGRAM }, 'hook', WIN_DATA, 'junie')
+  const checkout = entryCommand({ kind: 'checkout', bunPath: 'C:\\Program Files\\bun\\bun.exe', projectRoot: 'C:\\src\\kin fold' }, 'hook', WIN_DATA, 'junie')
+
+  test('the PowerShell and cmd forms are ours and run what the entry runs', () => {
+    for (const entry of [expected, checkout]) {
+      for (const text of [powershellCommand(entry), cmdCommand(entry)]) {
+        expect(isOurEntry(text, [])).toBe(true)
+        expect(entryRole(text, [])).toBe('hook')
+        expect(sameEntry(text, [], entry)).toBe(true)
+      }
+    }
+    expect(entryPath(cmdCommand(expected), [])).toBe(WIN_PROGRAM)
+    expect(sameEntry(powershellCommand(expected), [], { ...expected, args: ['--data-dir', 'C:\\elsewhere', 'hook', '--host', 'junie'] })).toBe(false)
+  })
+
+  test('each form is read by its own shell rules only', () => {
+    // POSIX rules would read the cmd form as a program named @C:\...\kinfold.exe.
+    expect(parseEntry(cmdCommand(expected), [])?.command).toBe(WIN_PROGRAM)
+    expect(parseEntry(powershellCommand(expected), [])?.command).toBe(WIN_PROGRAM)
+    expect(isOurEntry(`& '${WIN_PROGRAM.replaceAll("'", "''")}' hook; Remove-Item x`, [])).toBe(false)
+    expect(isOurEntry('@"C:\\k\\bin\\kinfold.exe" hook & del x', [])).toBe(false)
+    expect(isOurEntry('@echo off', [])).toBe(false)
   })
 })

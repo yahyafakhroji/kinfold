@@ -8,7 +8,9 @@ import { MCP_SERVER_NAME } from '../../install/mcp-config'
 import type { Action } from '../../install/plan'
 import { type FakeWorld, createWorld } from '../../install/test-support'
 import { MCP_HOST_ENV } from '../../mcp/read-reporter'
+import { powershellCommand } from '../families/hook-shell'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions } from '../families/json-agent'
+import { hookTarget } from '../families/json-hooks'
 import { assertWriterContract, fileWriter } from '../families/writer-contract.test-support'
 import { hookSpecFor } from '../hook-specs'
 import { profileOf } from '../install-profiles'
@@ -123,16 +125,16 @@ describe('gemini-cli', () => {
     expect(profile('gemini-cli').wiring.state(missing.env)).toBe('unknown')
   })
 
-  test('gemini-cli: on Windows, no hooks are planned and the capability line says why', async () => {
+  test('gemini-cli: on Windows, the hooks are written for PowerShell, which Gemini CLI runs them through', async () => {
     const gemini = profile('gemini-cli')
-    expect(gemini.capabilities('windows')).toEqual({ capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false })
-    expect(capabilityLine(gemini, 'windows')).toStartWith('search only (no hooks on Windows')
+    expect(gemini.capabilities('windows')).toEqual(gemini.capabilities('macos'))
+    expect(gemini.limit('windows')).toBeNull()
     const w = world('win32')
     const actions = await gemini.wiring.install(w.env)
     const write = actions.find((action) => action.kind === 'write')
     expect(writesOf(actions)).toEqual([join(w.env.homeDir, '.gemini', 'settings.json')])
     const json = JSON.parse(write?.kind === 'write' ? write.content : '{}')
-    expect(json.hooks).toBeUndefined()
+    expect(json.hooks.SessionEnd).toEqual([{ hooks: [{ type: 'command', command: powershellCommand(hookTarget(w.env, 'gemini-cli').entry), timeout: 10_000 }] }])
     expect(json.mcpServers[MCP_SERVER_NAME]).toBeDefined()
   })
 })

@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import { readHostVersions, recordedHostVersion } from '../adapters/host-version'
 import type { EmbeddedAssets } from '../runtime/embedded'
 import { installPaths } from './env'
-import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, samItem } from './host-hooks'
-import { CODEX_TRUST_NOTE, opencodeInstallActions } from './host-wiring'
+import { cmdCommand, powershellCommand } from '../agents/families/hook-shell'
+import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, mergeHostHooks, samItem } from './host-hooks'
+import { CODEX_TRUST_NOTE, hostHookInstallActions, hostHookUninstallActions, hostWiringLine, hostWiringState, opencodeInstallActions } from './host-wiring'
 import { EXIT_OK, install } from './install'
 import { inspectShim, pluginFileContent, shimContent } from './opencode-shim'
 import { runPlan } from './plan'
@@ -207,4 +208,35 @@ test('program mode refuses to write a plugin when the build carries none, and le
   writeFileSync(paths.opencodePlugin, before)
   await expect(opencodeInstallActions(w.env, null)).rejects.toThrow('this build carries no OpenCode plugin')
   expect(readFileSync(paths.opencodePlugin, 'utf8')).toBe(before)
+})
+
+test('on Windows, Codex gets the cmd form and Cursor the PowerShell form, and an older POSIX string is replaced', () => {
+  const w = createWorld({ platform: 'win32' })
+  world = w
+  const paths = installPaths(w.env)
+  const expected = {
+    codex: cmdCommand(entryCommand(w.env.mode, 'hook', w.env.dataDir, 'codex')),
+    cursor: powershellCommand(entryCommand(w.env.mode, 'hook', w.env.dataDir, 'cursor')),
+  }
+  const files = { codex: paths.codexHooks, cursor: paths.cursorHooks } as const
+  const specs = { codex: CODEX_HOOK_SPEC, cursor: CURSOR_HOOK_SPEC } as const
+  for (const host of ['codex', 'cursor'] as const) {
+    // What an install before this form wrote: the POSIX string.
+    const old = mergeHostHooks(specs[host], {}, { entry: entryCommand(w.env.mode, 'hook', w.env.dataDir, host) }).settings
+    mkdirSync(join(files[host], '..'), { recursive: true })
+    writeFileSync(files[host], `${JSON.stringify(old, null, 2)}\n`)
+    expect(hostWiringState(w.env, host)).toBe('stale')
+    const actions = hostHookInstallActions(w.env, host)
+    const write = actions.find((action) => action.kind === 'write')
+    expect(write?.kind === 'write' ? write.summary : '').toStartWith('replace Kinfold hooks for ')
+    const json = JSON.parse(write?.kind === 'write' ? write.content : '{}')
+    const stop = host === 'codex' ? json.hooks.Stop[0].hooks[0] : json.hooks.stop[0]
+    expect(stop.command).toBe(expected[host])
+    expect(json.hooks[host === 'codex' ? 'Stop' : 'stop']).toHaveLength(1)
+    writeFileSync(files[host], write?.kind === 'write' ? write.content : '')
+    expect(hostWiringState(w.env, host)).toBe('yes')
+    expect(hostWiringLine(w.env, host)).toStartWith('yes in ')
+    expect(hostHookInstallActions(w.env, host)).toEqual([])
+    expect(hostHookUninstallActions(w.env, host).some((action) => action.kind === 'write')).toBe(true)
+  }
 })
