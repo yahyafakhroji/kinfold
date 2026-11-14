@@ -15,18 +15,15 @@ import { fileState, openStoreFile } from '../../sqlite/open'
 import { DB_FILE } from '../../store/data-dir'
 import { listSafety } from '../../store/observer-safety-store'
 import { type ObserverSettingsInput, listObserverSettings } from '../../store/observer-settings-store'
-import { type WiringState, inspectSamHooks } from '../claude-hooks'
+import type { WiringState } from '../claude-hooks'
 import { getObserverSettings, readDaemonInfo } from '../daemon-client'
 import { INSTALL_HOSTS, type InstallHost } from '../detect'
-import { type InstallEnv, installPaths } from '../env'
-import { entryCommand } from '../entry'
-import { readJsonObject, readTextOrNull } from '../files'
-import { hostWiringState } from '../host-wiring'
+import type { InstallEnv } from '../env'
 import { keyStoreOf } from '../key-store-choice'
 import { ChoiceError, type ObserverFlag } from '../observer-choice'
-import { inspectShim } from '../opencode-shim'
 import { serviceOf } from '../service/control'
 import { type InstallChannel, currentChannel, readInstallRecord } from './record'
+import { overlapState, profileOf } from '../../agents/install-profiles'
 
 export interface SetupState {
   /** install.json exists, or the service config names a data folder. */
@@ -56,28 +53,13 @@ export const UNREADABLE_OBSERVERS =
 
 export const LOCKED_FOLDER_NOTE = 'Chosen at first install. To use another folder, uninstall and reinstall.'
 
-const WIRED_STATES: readonly (WiringState | 'foreign' | 'unknown')[] = ['yes', 'stale', 'partial']
+const WIRED_STATES: readonly (WiringState | 'unknown')[] = ['yes', 'stale', 'partial']
 
-function claudeState(env: InstallEnv): WiringState | 'unknown' {
-  try {
-    const file = readJsonObject(installPaths(env).claudeSettings)
-    return file.exists ? inspectSamHooks(file.value, entryCommand(env.mode, 'hook', env.dataDir)) : 'no'
-  } catch {
-    return 'unknown'
-  }
+function hostState(env: InstallEnv, host: InstallHost): WiringState | 'unknown' {
+  return overlapState(env, profileOf(host))
 }
 
-function opencodeState(env: InstallEnv): WiringState | 'foreign' {
-  const paths = installPaths(env)
-  return inspectShim(readTextOrNull(paths.opencodePlugin), { pluginEntry: paths.pluginEntry, dataDir: env.dataDir })
-}
-
-function hostState(env: InstallEnv, host: InstallHost): WiringState | 'foreign' | 'unknown' {
-  if (host === 'claude-code') return claudeState(env)
-  if (host === 'opencode') return opencodeState(env)
-  return hostWiringState(env, host)
-}
-
+/** A host Kinfold wires today; a saved row for any other host is not offered back. */
 function isInstallHost(host: string): host is InstallHost {
   return (INSTALL_HOSTS as readonly string[]).includes(host)
 }

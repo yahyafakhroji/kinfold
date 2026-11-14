@@ -21,8 +21,9 @@ import { entryCommand } from './entry'
 import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import type { WiringState } from './claude-hooks'
 import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, type CommandHookHost, type CommandHookSpec, inspectHostHooks, mergeHostHooks, removeHostHooks } from './host-hooks'
-import { inspectShim, pluginFileContent } from './opencode-shim'
 import type { Action } from './plan'
+import { type PluginFileSpec, pluginFileActions, pluginFileLine, pluginFileState, pluginFileUninstallActions } from '../agents/families/plugin-file'
+import { PLUGIN_FILE_NAME } from '../names'
 
 const DIR_MODE = 0o755
 const FILE_MODE = 0o644
@@ -37,30 +38,18 @@ function hostFiles(env: InstallEnv, host: CommandHookHost): { dir: string; file:
   return host === 'codex' ? { dir: paths.codexDir, file: paths.codexHooks } : { dir: paths.cursorDir, file: paths.cursorHooks }
 }
 
-/**
- * The OpenCode plugin file. A checkout writes the shim that re-exports its
- * plugin; a program writes the bundle it carries under the data folder, so
- * OpenCode loads a file that needs neither the checkout nor SQLite. Both carry
- * our marker; a file without it is never touched.
- */
-export async function opencodeInstallActions(env: InstallEnv, assets: EmbeddedAssets | null = embeddedAssets()): Promise<Action[]> {
-  const paths = installPaths(env)
-  const before = readTextOrNull(paths.opencodePlugin)
-  const state = inspectShim(before, { pluginEntry: paths.pluginEntry, dataDir: env.dataDir })
-  if (state === 'foreign') throw new Error(`${paths.opencodePlugin} exists and is not a Kinfold plugin file; move it away first`)
-  const bundle = env.mode.kind === 'program' ? (assets === null ? null : await assets.opencodePlugin()) : ''
-  if (bundle === null) throw new Error('this build carries no OpenCode plugin; reinstall from a release build')
-  const content = pluginFileContent(env.mode, env.dataDir, bundle)
-  if (state === 'yes' && before === content) {
-    env.out(`opencode: plugin already in ${paths.opencodePlugin}`)
-    return []
-  }
-  const summary = `${describeTextChange(before, content) ?? 'unchanged'}${state === 'stale' ? ', replacing a stale plugin path' : ''}`
-  return [
-    ...(existsSync(paths.opencodePluginsDir) ? [] : [{ kind: 'mkdir', path: paths.opencodePluginsDir, mode: DIR_MODE } as const]),
-    { kind: 'write', path: paths.opencodePlugin, content, mode: FILE_MODE, summary },
-  ]
-}
+/** OpenCode's plugin file: the generic plugin-file writer with OpenCode's folder. */
+export const OPENCODE_PLUGIN_SPEC: PluginFileSpec = { dir: (env) => installPaths(env).opencodePluginsDir, fileName: PLUGIN_FILE_NAME, host: 'opencode', label: 'OpenCode' }
+
+export const opencodeInstallActions = (env: InstallEnv, assets: EmbeddedAssets | null = embeddedAssets()): Promise<Action[]> => pluginFileActions(env, OPENCODE_PLUGIN_SPEC, assets)
+
+export const opencodeUninstallActions = (env: InstallEnv): Action[] => pluginFileUninstallActions(env, OPENCODE_PLUGIN_SPEC)
+
+/** The plugin file's state, read-only; a file that is not ours reads as 'foreign'. */
+export const opencodeWiringState = (env: InstallEnv): WiringState | 'foreign' => pluginFileState(env, OPENCODE_PLUGIN_SPEC)
+
+/** For status: the plugin file's state with its path. */
+export const opencodeWiringLine = (env: InstallEnv): string => pluginFileLine(env, OPENCODE_PLUGIN_SPEC)
 
 export function hostHookInstallActions(env: InstallEnv, host: CommandHookHost): Action[] {
   const problem = host === 'codex' ? codexHomeProblem(env) : null

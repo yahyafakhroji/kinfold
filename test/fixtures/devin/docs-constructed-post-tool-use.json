@@ -1,0 +1,1 @@
+{ "hook_event_name": "PostToolUse", "session_id": "devin-session-0001", "cwd": "/Users/me/project", "prompt_id": "devin-prompt-0001", "tool_name": "exec", "tool_input": { "command": "false" }, "tool_response": { "success": false, "output": "", "error": "exit status 1" } }

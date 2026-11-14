@@ -85,6 +85,18 @@ export interface InstallEnv {
   cliRunnerFor: (settings: ObserverSettings) => CliObserverRunner
   /** The CODEX_HOME the installer runs with; unset or empty means ~/.codex (codex-home.ts). */
   codexHomeEnv?: string
+  /** COPILOT_HOME as the installer sees it; unset or empty means ~/.copilot (agents/profiles/copilot.ts). */
+  copilotHomeEnv?: string
+  /** JUNIE_HOME as the installer sees it; unset or empty means ~/.junie (agents/profiles/junie.ts). */
+  junieHomeEnv?: string
+  /** GEMINI_CLI_HOME as the installer sees it; unset or empty means the home folder, which holds .gemini (agents/profiles/gemini-cli.ts). */
+  geminiCliHomeEnv?: string
+  /** KIMI_CODE_HOME as the installer sees it; unset or empty means ~/.kimi-code (agents/profiles/kimi-code.ts). */
+  kimiCodeHomeEnv?: string
+  /** XDG_CONFIG_HOME as the installer sees it; Amp loads system plugins from $XDG_CONFIG_HOME/amp/plugins when it is set (agents/profiles/amp.ts). */
+  xdgConfigHomeEnv?: string
+  /** CLINE_MCP_SETTINGS_PATH as the installer sees it; unset or empty means the Cline CLI's default file (agents/profiles/cline.ts). */
+  clineMcpSettingsPathEnv?: string
   /** process.arch; picks the pinned sqlite-vec build. Default: this process's. */
   arch?: string
   /** Test seam for the sqlite3mc compile (about 10 s); default src/sqlite/build.ts. */

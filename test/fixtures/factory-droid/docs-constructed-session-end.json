@@ -1,0 +1,1 @@
+{ "session_id": "abc123", "transcript_path": "/Users/.../.factory/projects/.../session.jsonl", "cwd": "/Users/me/project", "permission_mode": "off", "hook_event_name": "SessionEnd", "reason": "prompt_input_exit", "session_duration_ms": 60000, "message_count": 4 }

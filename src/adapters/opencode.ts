@@ -16,6 +16,8 @@ export interface OpenCodeContext extends AdapterContext {
    * instance; it wins over the installer's record in `hostVersion`.
    */
   sessionVersions?: Map<string, string>
+  /** The agent that loaded the plugin when it is not OpenCode itself (Kilo Code runs the same plugin). */
+  host?: string
 }
 
 const PATH_KEYS: ReadonlySet<string> = new Set(['path', 'filePath'])
@@ -34,7 +36,7 @@ function baseEvent(sessionId: string, context: OpenCodeContext, occurredAt: numb
   return {
     schemaVersion: SCHEMA_VERSION,
     eventId: context.newId(),
-    host: OPENCODE_HOST,
+    host: context.host ?? OPENCODE_HOST,
     hostSessionId: sessionId,
     occurredAt,
     cwd,

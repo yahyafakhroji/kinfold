@@ -54,10 +54,10 @@ test('hosts not detected: install, status and uninstall never touch ~/.codex or 
   expect(await status(w.env)).toBe(EXIT_OK)
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
   expect({ codex: snapshotTree(paths.codexDir), cursor: snapshotTree(paths.cursorDir) }).toEqual(before)
-  expect(w.out).toContain('host codex: skip (not found (no codex on PATH, no Codex.app))')
-  expect(w.out).toContain('host cursor: skip (not found (no cursor-agent or cursor on PATH, no Cursor.app))')
+  // Absent agents fold into one line per command, never a line each.
+  expect(w.out.filter((line) => line.startsWith('not found: codex, cursor,'))).toHaveLength(2)
+  expect(w.out.filter((line) => line.startsWith('  not found: codex, cursor,'))).toHaveLength(1)
   expect(w.out.some((line) => line.includes(paths.codexHooks) && line.includes('write'))).toBe(false)
-  expect(w.out).toContain(`  codex: not detected (not found (no codex on PATH, no Codex.app)); wired: no in ${paths.codexHooks}`)
 })
 
 test('detected Codex (CLI) and Cursor (app): wired with backups, foreign entries kept, idempotent, removed cleanly', async () => {
@@ -87,8 +87,8 @@ test('detected Codex (CLI) and Cursor (app): wired with backups, foreign entries
 
   w.out.length = 0
   expect(await status(w.env)).toBe(EXIT_OK)
-  expect(w.out).toContain(`  codex: detected codex-cli 0.120.0; wired: yes in ${paths.codexHooks}`)
-  expect(w.out).toContain(`  cursor: detected 2.4.21; wired: yes in ${paths.cursorHooks}`)
+  expect(w.out).toContain(`  codex: detected codex-cli 0.120.0; wired: yes in ${paths.codexHooks}; captures, context at start and on each prompt, search`)
+  expect(w.out).toContain(`  cursor: detected 2.4.21; wired: yes in ${paths.cursorHooks}; captures, context at start, search`)
 
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
   expect(JSON.parse(readFileSync(paths.codexHooks, 'utf8'))).toEqual(CODEX_FILE)

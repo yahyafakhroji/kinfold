@@ -2,8 +2,8 @@
 daemon: not running; LaunchAgent not loaded
 host claude-code 2.1.310 (Claude Code): install (claude --version answered)
 host opencode 2.1.4: install (opencode --version answered 2.x or later)
-host codex: skip (not found (no codex on PATH, no Codex.app))
-host cursor: skip (not found (no cursor-agent or cursor on PATH, no Cursor.app))
+host continue: skip (no safe signal for an IDE extension; name it with --hosts continue)
+not found: codex, cursor, gemini-cli, qwen-code, factory-droid, devin, kilo-code, cline, copilot, antigravity, junie, kiro, amp, kimi-code, auggie, goose, crush, zed, warp
 observer claude-code: claude-cli/haiku (default); no key needed; check not run (dry run)
 observer opencode: openrouter/openrouter/auto (default); keychain entry openrouter present; check not run (dry run)
 database library: sqlite3mc 2.6.1 already in <root>/home/.kinfold/lib
@@ -36,8 +36,8 @@ plan (dry run, nothing is changed): 22 actions
 daemon: answers on port <port>; LaunchAgent loaded
 host claude-code 2.1.310 (Claude Code): install (claude --version answered)
 host opencode 2.1.4: install (opencode --version answered 2.x or later)
-host codex: skip (not found (no codex on PATH, no Codex.app))
-host cursor: skip (not found (no cursor-agent or cursor on PATH, no Cursor.app))
+host continue: skip (no safe signal for an IDE extension; name it with --hosts continue)
+not found: codex, cursor, gemini-cli, qwen-code, factory-droid, devin, kilo-code, cline, copilot, antigravity, junie, kiro, amp, kimi-code, auggie, goose, crush, zed, warp
 observer claude-code: claude-cli/haiku (saved); no key needed; check not run (dry run)
 observer opencode: openrouter/openrouter/auto (saved); keychain entry openrouter present; check not run (dry run)
 hmac keys: master in keychain, no hmac.key; nothing to migrate

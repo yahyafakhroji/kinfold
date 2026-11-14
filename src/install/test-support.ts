@@ -7,6 +7,8 @@
 // its HMAC master from those values, never from a real Keychain.
 // Tests only; nothing in the installer imports it.
 
+import { INSTALL_PROFILES } from '../agents/install-profiles'
+import type { AgentId, AgentProfile } from '../agents/profile'
 import type { TerminalIO } from './prompt/terminal'
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -408,4 +410,20 @@ export function countingService(inner: ServiceControl, reason?: string): Countin
     describe: (step) => inner.describe(step),
     unavailableReason: () => (reason !== undefined ? reason : inner.unavailableReason()),
   }
+}
+
+/** The real profile table plus a detected, docs-level Gemini CLI, which has no profile of its own yet. */
+export function profilesWithDocsAgent(detected = true): Readonly<Record<AgentId, AgentProfile>> {
+  const docs: AgentProfile = {
+    id: 'gemini-cli',
+    name: 'Gemini CLI',
+    family: 'gemini-style',
+    verification: 'docs',
+    capabilities: () => ({ capture: 'full', context: { sessionStart: true, prompt: false }, search: true, observer: false }),
+    limit: () => null,
+    detection: async () => ({ host: 'gemini-cli', selected: detected, version: null, note: detected ? 'gemini answered --version' : 'not found' }),
+    wiring: { install: async () => [], uninstall: () => [], state: () => 'no', line: () => 'no' },
+    manualSteps: () => ['gemini-cli: enable hooks in settings'],
+  }
+  return { ...INSTALL_PROFILES, 'gemini-cli': docs }
 }

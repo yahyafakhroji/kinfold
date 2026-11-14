@@ -1,0 +1,1 @@
+{ "event": "tool.result", "thread": { "id": "T-7f3a9c2e-1b4d-4e8a-9c3f-2a1b5d6e7f80" }, "cwd": "/workspace/project", "toolUseID": "toolu_01", "tool": "Read", "input": { "path": "/workspace/project/src/parser.ts" }, "status": "done", "output": "export function parse() {}" }

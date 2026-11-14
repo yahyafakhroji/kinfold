@@ -1,0 +1,1 @@
+{ "session_id": "qwen-session-0001", "transcript_path": "/Users/me/.qwen/tmp/qwen-session-0001.jsonl", "cwd": "/Users/me/project", "timestamp": "2026-11-13T10:00:00.000Z", "permission_mode": "default", "hook_event_name": "SessionStart", "source": "startup", "model": "qwen3-coder-plus" }

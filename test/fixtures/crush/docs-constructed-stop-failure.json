@@ -1,0 +1,1 @@
+{ "event": "StopFailure", "hook_event_name": "StopFailure", "session_id": "313909e", "cwd": "/home/user/project", "error": "Rate limit reached" }

@@ -51,7 +51,8 @@ posixOnly('POSIX paths')('install wires $CODEX_HOME/hooks.json, leaves ~/.codex 
   expect(w.out).toContain(`codex: CODEX_HOME is set; using ${hooks}`)
   w.out.length = 0
   await status(w.env)
-  expect(w.out).toContain(`  codex: detected codex-cli 0.120.0; wired: yes in ${hooks}`)
+  expect(w.out).toContain(`  codex: detected codex-cli 0.120.0; wired: yes in ${hooks}; captures, context at start and on each prompt, search`)
+  expect(w.out).toContain('    codex: open Codex and run /hooks to review and trust the Kinfold hooks; Codex skips untrusted hooks')
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
   expect(samEvents(hooks)).toEqual([])
 })

@@ -16,7 +16,32 @@ const OPENROUTER_AUTO: BuiltIn = { provider: 'openrouter', model: 'openrouter/au
 
 // Codex and Cursor default to OpenRouter like OpenCode: neither ships a CLI
 // the observer could borrow a login from. Confirmed by the user: no saved row means Auto.
-const BUILT_IN: Readonly<Record<string, BuiltIn>> = { 'claude-code': CLAUDE_HAIKU, opencode: OPENROUTER_AUTO, codex: OPENROUTER_AUTO, cursor: OPENROUTER_AUTO }
+// Every other known agent defaults to OpenRouter too: the observer has no
+// provider that borrows their logins. An id outside this table keeps Haiku.
+const BUILT_IN: Readonly<Record<string, BuiltIn>> = {
+  'claude-code': CLAUDE_HAIKU,
+  opencode: OPENROUTER_AUTO,
+  codex: OPENROUTER_AUTO,
+  cursor: OPENROUTER_AUTO,
+  'gemini-cli': OPENROUTER_AUTO,
+  'qwen-code': OPENROUTER_AUTO,
+  'factory-droid': OPENROUTER_AUTO,
+  devin: OPENROUTER_AUTO,
+  'kilo-code': OPENROUTER_AUTO,
+  cline: OPENROUTER_AUTO,
+  copilot: OPENROUTER_AUTO,
+  antigravity: OPENROUTER_AUTO,
+  junie: OPENROUTER_AUTO,
+  kiro: OPENROUTER_AUTO,
+  amp: OPENROUTER_AUTO,
+  'kimi-code': OPENROUTER_AUTO,
+  auggie: OPENROUTER_AUTO,
+  goose: OPENROUTER_AUTO,
+  crush: OPENROUTER_AUTO,
+  zed: OPENROUTER_AUTO,
+  continue: OPENROUTER_AUTO,
+  warp: OPENROUTER_AUTO,
+}
 
 interface SettingsRow {
   provider: string

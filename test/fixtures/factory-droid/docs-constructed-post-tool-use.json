@@ -1,0 +1,1 @@
+{ "session_id": "abc123", "transcript_path": "/Users/.../.factory/projects/.../session.jsonl", "cwd": "/Users/me/project", "permission_mode": "off", "hook_event_name": "PostToolUse", "tool_name": "Create", "tool_input": { "file_path": "/Users/me/project/file.txt", "content": "file content" }, "tool_response": "File created" }

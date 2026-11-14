@@ -20,7 +20,7 @@ import { fakeTerminal } from '../prompt/fake-terminal'
 import { type Key, decodeKeys } from '../prompt/keys'
 import { PromptCancelled, createPrompts } from '../prompt/prompts'
 import type { TerminalIO } from '../prompt/terminal'
-import { type FakeWorld, createWorld, snapshotTree, startWorldDaemon } from '../test-support'
+import { type FakeWorld, createWorld, profilesWithDocsAgent, snapshotTree, startWorldDaemon } from '../test-support'
 import { LOCKED_FOLDER_NOTE, type SetupState, readSetupState } from './prefill'
 import { installRecordAction } from './record'
 import { DRY_RUN_NO_CODE, NO_TTY_ENCRYPTION_CHANGE, STALE_DB_KEY, type SetupFlags, freePortFrom, runWizard } from './wizard'
@@ -420,4 +420,52 @@ test('a dry run shows no recovery code, and says a real run would show one at th
   expect(converted.encryption).toEqual({ kind: 'encrypt-existing', key: null })
   expect(plain.term.output()).not.toMatch(CODE_PATTERN)
   expect(plain.term.output()).toContain(DRY_RUN_NO_CODE)
+})
+
+const DOCS_NOTE = 'built from the docs, not yet checked against a real run'
+
+test('a detected docs-level agent is listed but starts unticked', async () => {
+  const { w, term } = setup(Array(7).fill(ENTER), { claudeVersion: '2.0.0' })
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE, undefined, profilesWithDocsAgent())
+  expect(answers.hosts).toEqual(['claude-code'])
+  expect(term.output()).toContain(`Gemini CLI`)
+  expect(term.output()).toContain(`gemini answered --version · captures, context at start, search · ${DOCS_NOTE}`)
+})
+
+test('a detected live agent starts ticked', async () => {
+  const { w, term } = setup(Array(7).fill(ENTER), { claudeVersion: '2.0.0' })
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE, undefined, profilesWithDocsAgent(false))
+  expect(answers.hosts).toEqual(['claude-code'])
+  expect(term.output()).toContain('Claude Code')
+  expect(term.output()).toContain('captures, context at start and on each prompt, search')
+  expect(term.output()).not.toContain(DOCS_NOTE)
+})
+
+test('--yes installs detected live agents and leaves detected docs agents out unless --hosts names them', async () => {
+  const { w } = setup([], { interactive: false, terminal: null, claudeVersion: '2.0.0', keychainRefs: ['openrouter'] })
+  const state = await readSetupState(w.env)
+  const profiles = profilesWithDocsAgent()
+  const choice = { ...NO_CHOICE, yes: true }
+  const byDefault = await runWizard(w.env, null, state, flagsOf({ yes: true }), choice, undefined, profiles)
+  expect(byDefault.hosts).toEqual(['claude-code'])
+  const named = await runWizard(w.env, null, state, flagsOf({ yes: true, hosts: ['claude-code', 'gemini-cli'] }), choice, undefined, profiles)
+  expect(named.hosts).toEqual(['claude-code', 'gemini-cli'])
+})
+
+test('agents neither detected nor wired are named on one not-found line, not offered as choices', async () => {
+  const { w, term } = setup(Array(7).fill(ENTER), { claudeVersion: '2.0.0' })
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)
+  expect(answers.hosts).toEqual(['claude-code'])
+  const lines = term.output().split(/\r?\n/)
+  const notFound = lines.filter((line) => line.includes('not found: '))
+  expect(notFound).toHaveLength(1)
+  expect(notFound[0]).toContain('not found: OpenCode, Codex, Cursor, Gemini CLI,')
+  expect(notFound[0]).not.toContain('Continue')
+  expect(lines.filter((line) => line.includes('Continue: no safe signal for an IDE extension; name it with --hosts continue'))).toHaveLength(1)
+  // The one choice is Claude Code; no other agent is drawn as a row.
+  expect(term.output()).not.toContain('no claude on PATH')
+  expect(term.output().split('Gemini CLI').length - 1).toBe(1)
 })

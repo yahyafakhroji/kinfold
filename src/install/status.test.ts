@@ -5,12 +5,14 @@ import { mergeSamHooks, samHookGroup } from './claude-hooks'
 import { entryCommand, entryIdentity, installedProgramPath } from './entry'
 import { installPaths } from './env'
 import { CODEX_HOOK_SPEC, mergeHostHooks } from './host-hooks'
-import { EXIT_OK, install } from './install'
+import { detectHosts } from './detect'
+import { EXIT_OK, install, reportDetections } from './install'
+import { claudeMcpEntry } from './mcp-config'
 import { mcpPaths, mcpTarget } from './mcp-wiring'
 import { VERSION } from '../version'
 import { status } from './status'
 import { writeUpdateState } from '../update/state'
-import { BUN, type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
+import { BUN, type FakeWorld, YES, createWorld, profilesWithDocsAgent, snapshotTree } from './test-support'
 import { posixOnly } from '../../test/platform-guards'
 
 let world: FakeWorld | null = null
@@ -32,10 +34,10 @@ test('before install: hosts detected but not wired, daemon down, nothing created
   const paths = installPaths(w.env)
   expect(w.out).toEqual([
     'hosts:',
-    `  claude-code: detected 2.1.310 (Claude Code); wired: no (no settings.json) in ${paths.claudeSettings}`,
-    `  opencode: detected 2.1.4; wired: no in ${paths.opencodePlugin}`,
-    `  codex: not detected (not found (no codex on PATH, no Codex.app)); wired: no (no hooks.json) in ${paths.codexHooks}`,
-    `  cursor: not detected (not found (no cursor-agent or cursor on PATH, no Cursor.app)); wired: no (no hooks.json) in ${paths.cursorHooks}`,
+    `  claude-code: detected 2.1.310 (Claude Code); wired: no (no settings.json) in ${paths.claudeSettings}; captures, context at start and on each prompt, search`,
+    `  opencode: detected 2.1.4; wired: no in ${paths.opencodePlugin}; captures, search`,
+    `  continue: not detected (no safe signal for an IDE extension; name it with --hosts continue); wired: MCP not written (YAML config); run \`kinfold install --hosts continue --dry-run\` to print the block to add; Continue has no hooks; search needs the MCP block added to ~/.continue/config.yaml by hand; built from the docs, not yet checked against a real run`,
+    `  not found: codex, cursor, gemini-cli, qwen-code, factory-droid, devin, kilo-code, cline, copilot, antigravity, junie, kiro, amp, kimi-code, auggie, goose, crush, zed, warp`,
     `mcp server ${entryIdentity(w.env.mode, 'mcp', w.env.dataDir)}:`,
     `  claude-code: no in ${mcpPaths(w.env).claudeUserConfig}`,
     `  opencode: no in ${mcpPaths(w.env).opencodeConfig}`,
@@ -186,4 +188,84 @@ test('status names the service', async () => {
   w.out.length = 0
   expect(await status(w.env)).toBe(EXIT_OK)
   expect(w.out).toContain('service (LaunchAgent): config present; running: yes')
+})
+
+test('status shows the capability line, the docs note and each manual step for an agent', async () => {
+  const w = make({ withLibrary: false })
+  expect(await status(w.env, undefined, profilesWithDocsAgent())).toBe(EXIT_OK)
+  const at = w.out.findIndex((line) => line.startsWith('  gemini-cli:'))
+  expect(w.out[at]).toBe('  gemini-cli: detected; wired: no; captures, context at start, search; built from the docs, not yet checked against a real run')
+  expect(w.out[at + 1]).toBe('    gemini-cli: enable hooks in settings')
+})
+
+test('a machine with only Claude Code shows one not-found line in status and in install, and Continue keeps its own', async () => {
+  const w = make({ opencodeVersion: null })
+  expect(await status(w.env)).toBe(EXIT_OK)
+  const notFound = w.out.filter((line) => /^ {2}not found: /.test(line))
+  expect(notFound).toHaveLength(1)
+  expect(notFound[0]).toContain('codex, cursor')
+  expect(notFound[0]).not.toContain('continue')
+  expect(w.out.filter((line) => line.includes('not detected ('))).toHaveLength(1)
+  expect(w.out.some((line) => line.startsWith('  continue: not detected (no safe signal'))).toBe(true)
+  expect(w.out.some((line) => line.startsWith('  claude-code: detected'))).toBe(true)
+
+  w.out.length = 0
+  expect(await install(w.env, { ...YES, dryRun: true })).toBe(EXIT_OK)
+  const hostLines = w.out.filter((line) => line.startsWith('host ') || line.startsWith('not found: '))
+  expect(hostLines.filter((line) => line.startsWith('not found: '))).toHaveLength(1)
+  expect(hostLines.filter((line) => line.includes('skip (not found'))).toHaveLength(0)
+  expect(hostLines.some((line) => line.startsWith('host continue'))).toBe(true)
+})
+
+test('naming Continue with --hosts prints its YAML block at plan time, dry run included', async () => {
+  const w = make()
+  expect(await install(w.env, { ...YES, dryRun: true, hosts: ['continue'] })).toBe(EXIT_OK)
+  const text = w.out.join('\n')
+  expect(text).toContain('mcpServers:')
+  expect(text).toContain('- name: kinfold')
+  expect(text).toContain('config.yaml')
+  expect(text).not.toContain('shown by `kinfold status`')
+})
+
+test("status tells how to get Continue's block, and Warp says what its shared entry needs", async () => {
+  const w = make()
+  expect(await status(w.env)).toBe(EXIT_OK)
+  expect(w.out.find((line) => line.startsWith('  continue:'))).toContain('kinfold install --hosts continue --dry-run')
+  mkdirSync(join(w.root, 'Applications', 'Warp.app', 'Contents'), { recursive: true })
+  writeFileSync(mcpPaths(w.env).claudeUserConfig, JSON.stringify({ mcpServers: { kinfold: JSON.parse(JSON.stringify(claudeMcpEntry(mcpTarget(w.env)))) } }))
+  w.out.length = 0
+  expect(await status(w.env)).toBe(EXIT_OK)
+  expect(w.out.find((line) => line.startsWith('  warp:'))).toContain("uses the Claude Code entry (needs 'Auto-spawn servers from third-party agents' on in Warp)")
+})
+
+test('--hosts claude-code lists the other agents as left out on one line', async () => {
+  const w = make()
+  expect(await install(w.env, { ...YES, dryRun: true, hosts: ['claude-code'] })).toBe(EXIT_OK)
+  const lines = w.out.filter((line) => line.startsWith('left out by --hosts:'))
+  expect(lines).toHaveLength(1)
+  expect(lines[0]).toStartWith('left out by --hosts: opencode, codex, cursor,')
+  expect(lines[0]).not.toContain('claude-code')
+  expect(w.out.filter((line) => line.includes('left out by --hosts)'))).toHaveLength(0)
+  expect(w.out.some((line) => line.startsWith('host claude-code'))).toBe(true)
+})
+
+test('status keeps an agent with an unusable home override on its own line, outside the not-found line', async () => {
+  const w = make()
+  w.env = { ...w.env, copilotHomeEnv: join(w.root, 'nowhere') }
+  expect(await status(w.env)).toBe(EXIT_OK)
+  const own = w.out.find((line) => line.startsWith('  copilot: not detected'))
+  expect(own).toContain('unknown (')
+  expect(w.out.find((line) => line.startsWith('  not found: '))).not.toContain('copilot')
+})
+
+test('a wired agent whose binary is gone keeps its own line in install, and is not folded', async () => {
+  let gone = false
+  const w = make({ codexVersion: 'codex-cli 0.120.0', commandOverride: (argv) => (gone && argv[0] === 'codex' ? { exitCode: 127, stdout: '' } : undefined) })
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  gone = true
+  w.out.length = 0
+  // Not chosen, but its hooks are still in place: the stale wiring must show.
+  reportDetections(w.env, await detectHosts(w.env, null), [])
+  expect(w.out.some((line) => line.startsWith('host codex') && line.includes('not found'))).toBe(true)
+  expect(w.out.find((line) => line.startsWith('not found: '))).not.toContain('codex')
 })

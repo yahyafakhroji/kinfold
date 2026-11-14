@@ -12,8 +12,10 @@ import { newDbKey } from '../../sqlite/keys'
 import { checkHealth, readDaemonInfo } from '../daemon-client'
 import { STALE_DB_KEY, staleDbKey, storedDbKey } from '../db-encryption'
 import { encryptKeyExists, isProcessAlive } from '../encrypt'
-import { type InstallHost, detectHosts, selectedHosts } from '../detect'
-import type { InstallEnv } from '../env'
+import { INSTALL_PROFILES } from '../../agents/install-profiles'
+import { type AgentId, type AgentProfile, capabilityLine, verificationNote } from '../../agents/profile'
+import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from '../detect'
+import { type InstallEnv, platformOf } from '../env'
 import { keyStoreOf } from '../key-store-choice'
 import {
   type Candidate,
@@ -166,29 +168,54 @@ async function folderStep(env: InstallEnv, ask: Prompts | null, state: SetupStat
 
 // ---- agents -----------------------------------------------------------------
 
-async function agentsStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags): Promise<InstallHost[]> {
-  if (flags.hosts !== null) return selectedHosts(await detectHosts(env, flags.hosts))
-  const detections = await detectHosts(env, null)
-  const detected = selectedHosts(detections)
+type ProfileTable = Readonly<Record<AgentId, AgentProfile>>
+
+/** A detected docs-level agent is listed but not ticked: nothing recorded has shown it working. */
+function startsTicked(found: HostDetection, profiles: ProfileTable): boolean {
+  return found.selected && profiles[found.host].verification === 'live'
+}
+
+function agentChoices(env: InstallEnv, detections: readonly HostDetection[], profiles: ProfileTable): Choice<InstallHost>[] {
+  const os = platformOf(env).os
+  return detections.map((found) => {
+    const profile = profiles[found.host]
+    const verification = verificationNote(profile.verification)
+    const parts = [found.note, capabilityLine(profile, os), ...(verification === null ? [] : [verification])]
+    return { value: found.host, label: profile.name, hint: parts.join(' · ') }
+  })
+}
+
+/**
+ * The lines naming the agents left off the list: one `not found:` line for
+ * those simply absent, in KNOWN_HOSTS order, and a line of its own for any
+ * with more to say (Continue's --hosts hint, an unsupported version).
+ */
+function leftOffLines(left: readonly HostDetection[], profiles: ProfileTable): string[] {
+  const name = (found: HostDetection): string => profiles[found.host].name
+  const absent = left.filter((found) => found.absent === true)
+  const told = left.filter((found) => found.absent !== true)
+  return [...(absent.length === 0 ? [] : [`not found: ${absent.map(name).join(', ')}`]), ...told.map((found) => `${name(found)}: ${found.note}`)]
+}
+
+async function agentsStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags, profiles: ProfileTable): Promise<InstallHost[]> {
+  if (flags.hosts !== null) return selectedHosts(await detectHosts(env, flags.hosts, profiles))
+  const detections = await detectHosts(env, null, profiles)
   const wired = new Set(state.wiredHosts)
-  // Not detected and not wired is the only untickable host; a wired one whose agent is gone can still be unticked to drop its wiring.
-  const choices: Choice<InstallHost>[] = detections.map((found) => ({
-    value: found.host,
-    label: found.host,
-    hint: found.note,
-    ...(!found.selected && !wired.has(found.host) ? { disabled: found.note } : {}),
-  }))
+  // A re-run starts from the saved wiring, whatever its level, so it never drops or adds wiring unasked.
+  const defaults = state.installed ? state.wiredHosts : detections.filter((found) => startsTicked(found, profiles) || wired.has(found.host)).map((found) => found.host)
   if (ask === null) {
-    // Under --yes the saved wiring is the default; a host whose agent is gone stays wired until someone unticks it.
-    const hosts = state.installed ? state.wiredHosts : detected
-    if (hosts.length === 0) env.out(NO_AGENTS_NOTE)
-    return hosts
+    // Under --yes a host whose agent is gone stays wired until someone unticks it.
+    if (defaults.length === 0) env.out(NO_AGENTS_NOTE)
+    return defaults
   }
-  if (choices.every((choice) => choice.disabled !== undefined)) {
+  // Not detected and not wired can't be ticked, so it is named, not listed; a wired one whose agent is gone stays listed so it can be unticked.
+  const listed = detections.filter((found) => found.selected || wired.has(found.host))
+  if (listed.length === 0) {
     ask.say(NO_AGENTS_NOTE)
     return []
   }
-  return ask.multiSelect('Which agents should share memory?', choices, state.installed ? state.wiredHosts : detected)
+  for (const line of leftOffLines(detections.filter((found) => !listed.includes(found)), profiles)) ask.say(line)
+  return ask.multiSelect('Which agents should share memory?', agentChoices(env, listed, profiles), defaults)
 }
 
 // ---- observers --------------------------------------------------------------
@@ -365,6 +392,7 @@ export async function runWizard(
   flags: SetupFlags,
   choice: ChoiceOptions,
   retarget?: (dataDir: string) => Promise<FolderTarget>,
+  profiles: ProfileTable = INSTALL_PROFILES,
 ): Promise<SetupAnswers> {
   // --yes never asks, even on a terminal: a child `install --yes` must not stop at a question.
   const ask = flags.yes ? null : prompts
@@ -372,7 +400,7 @@ export async function runWizard(
   if (problem !== null) throw new ChoiceError(problem)
   const dataDir = await folderStep(first, ask, firstState, flags)
   const { env, state } = retarget !== undefined && resolve(dataDir) !== resolve(firstState.dataDir) ? await retarget(dataDir) : { env: first, state: firstState }
-  const hosts = await agentsStep(env, ask, state, flags)
+  const hosts = await agentsStep(env, ask, state, flags, profiles)
   const observers = await observersStep(env, ask, state, flags, choice, hosts)
   const encryption = await encryptionStep(env, ask, state, flags, choice.dryRun)
   const port = await portStep(env, ask, state, flags)

@@ -6,63 +6,31 @@
 // event, it prints exactly one JSON object carrying the project's context pack
 // (daemon first, read-only fallback second, 300 ms for both) in the shape that
 // host reads; a compiled program has no SQLite, so it asks the daemon only and
-// prints nothing while the daemon is down. On a Claude Code user prompt it
-// prints the prompt-time delta (memory written since the session last received
-// it) the same way, as UserPromptSubmit additionalContext. Any failure or an
-// empty answer prints nothing. Errors go to stderr
-// without the payload. Under the observer (KINFOLD_OBSERVER=1) it captures and
+// prints nothing while the daemon is down. On a user prompt it prints the
+// prompt-time delta (memory written since the session last received it) the
+// same way, for every agent whose spec takes it; an agent that drops one of
+// the two gets nothing then. Any failure or an empty answer prints nothing.
+// Errors go to stderr without the payload. Under the observer (KINFOLD_OBSERVER=1) it captures and
 // injects nothing. host_version comes from the payload when the host sends
 // one (Cursor), otherwise from the installer's record (adapters/host-version.ts):
 // one file read and one stat, never a `--version` spawn.
 
-import { CLAUDE_CODE_HOST, normalizeClaudeCode, userPromptContextOutput } from '../adapters/claude-code'
-import { CODEX_HOST, normalizeCodex } from '../adapters/codex'
-import { type AdapterContext, defaultAdapterContext } from '../adapters/context'
-import { CURSOR_HOST, normalizeCursor } from '../adapters/cursor'
+import { CLAUDE_CODE_HOST } from '../adapters/claude-code'
+import { defaultAdapterContext } from '../adapters/context'
 import { recordedHostVersion } from '../adapters/host-version'
+import { HOOK_SPECS, hookSpecFor } from '../agents/hook-specs'
+import type { AgentId } from '../agents/profile'
 import { type ContextClientOptions, fetchContext } from '../context/client'
 import { type ContextChannel, MAX_CONTEXT_PROMPT_CHARS, type UpdateNotice } from '../context/types'
 import type { NormalizedEvent } from '../contract/event'
 import { isObserverProcess } from '../observer/env'
 import { resolveDataDir } from '../store/data-dir'
 import { applyDataDirFlag } from '../store/data-dir-flag'
-import { agentLine, availableMessage } from '../update/notice-text'
 import { recordEvent } from './record'
 
 export type ErrorSink = (line: string) => void
 
-export type HookHost = typeof CLAUDE_CODE_HOST | typeof CODEX_HOST | typeof CURSOR_HOST
-
-interface HookHostSpec {
-  normalize: (payload: unknown, context: AdapterContext) => NormalizedEvent | null
-  /** The stdout line that hands `text` to the host as session context. */
-  sessionContext: (text: string) => string
-  /** The session-start line when an update notice rides along: the user sees it, or the agent is told. */
-  sessionContextWithNotice: (text: string, notice: UpdateNotice) => string
-  /** The stdout line that adds the prompt-time delta to a turn; absent for hosts not wired for it yet (Cursor). Codex documents the same UserPromptSubmit shape as Claude Code. */
-  promptContext?: (text: string) => string
-}
-
-/** Claude Code and Codex share the hookSpecificOutput shape; Cursor's sessionStart reads additional_context. */
-const hookSpecific = (text: string): string => JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } })
-
-/** Claude Code shows `systemMessage` to the user, so the notice never enters the model's context; the pack may be empty. */
-const claudeWithNotice = (text: string, notice: UpdateNotice): string =>
-  JSON.stringify({ systemMessage: availableMessage(notice), ...(text !== '' ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {}) })
-
-/** Hosts with no user channel get one agent line as the last line of Kinfold's block. */
-const withAgentLine = (text: string, notice: UpdateNotice): string => [text.replace(/\n$/, ''), agentLine(notice)].filter((part) => part !== '').join('\n')
-
-export const HOOK_HOSTS: Readonly<Record<HookHost, HookHostSpec>> = {
-  'claude-code': { normalize: normalizeClaudeCode, sessionContext: hookSpecific, sessionContextWithNotice: claudeWithNotice, promptContext: userPromptContextOutput },
-  // Codex documents the same UserPromptSubmit hookSpecificOutput shape as Claude Code.
-  codex: { normalize: normalizeCodex, sessionContext: hookSpecific, sessionContextWithNotice: (text, notice) => hookSpecific(withAgentLine(text, notice)), promptContext: userPromptContextOutput },
-  cursor: {
-    normalize: normalizeCursor,
-    sessionContext: (text) => JSON.stringify({ additional_context: text }),
-    sessionContextWithNotice: (text, notice) => JSON.stringify({ additional_context: withAgentLine(text, notice) }),
-  },
-}
+export type HookHost = AgentId
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -74,14 +42,15 @@ export function hostFromArgs(argv: readonly string[]): HookHost | null {
   const flag = argv[at]
   if (flag === undefined) return CLAUDE_CODE_HOST
   const value = flag.startsWith('--host=') ? flag.slice('--host='.length) : argv[at + 1]
-  return value !== undefined && Object.hasOwn(HOOK_HOSTS, value) ? (value as HookHost) : null
+  if (value === undefined || !Object.hasOwn(HOOK_SPECS, value)) return null
+  return hookSpecFor(value as AgentId) === null ? null : (value as AgentId)
 }
 
 /** Test seams for the session-start injection; the CLI uses the defaults. */
 export type InjectOptions = Pick<ContextClientOptions, 'budgetMs' | 'daemonShareMs' | 'fetch' | 'fallback'>
 
 /** Normalizes and spools one payload; null when it is not a JSON hook payload or not an event we capture. */
-async function capture(input: string, dataDir: string, host: HookHost, stderr: ErrorSink): Promise<NormalizedEvent | null> {
+async function capture(input: string, dataDir: string, host: HookHost, stderr: ErrorSink, env: Readonly<Record<string, string | undefined>>): Promise<NormalizedEvent | null> {
   let payload: unknown
   try {
     payload = JSON.parse(input)
@@ -89,10 +58,15 @@ async function capture(input: string, dataDir: string, host: HookHost, stderr: E
     stderr('kinfold-hook: stdin is not a JSON hook payload; nothing captured')
     return null
   }
+  const spec = hookSpecFor(host)
+  if (spec === null) return null
   let event: NormalizedEvent | null = null
   try {
-    event = HOOK_HOSTS[host].normalize(payload, defaultAdapterContext(recordedHostVersion(dataDir, host)))
-    if (event === null) return null
+    // An agent running this host's hooks gets its own label and version; the context line stays in this host's shape, which that agent reads.
+    const caller = spec.callerOf?.(payload, env) ?? null
+    const normalized = spec.normalize(payload, defaultAdapterContext(recordedHostVersion(dataDir, caller ?? host)))
+    if (normalized === null) return null
+    event = caller === null ? normalized : { ...normalized, host: caller }
     const { nudge } = await recordEvent(event, dataDir)
     if (!nudge.ok) stderr(`kinfold-hook: event ${event.eventId} spooled, nudge skipped: ${nudge.reason}`)
   } catch (error: unknown) {
@@ -103,8 +77,9 @@ async function capture(input: string, dataDir: string, host: HookHost, stderr: E
 
 /** Which context an event asks for, and the line that carries it; null when this event and host get none. */
 function contextFor(event: NormalizedEvent, host: HookHost): { channel: ContextChannel; render: (text: string) => string } | null {
-  const spec = HOOK_HOSTS[host]
-  if (event.kind === 'session_start') return { channel: 'session_start', render: spec.sessionContext }
+  const spec = hookSpecFor(host)
+  if (spec === null) return null
+  if (event.kind === 'session_start') return spec.sessionContextIgnored === true ? null : { channel: 'session_start', render: spec.sessionContext }
   if (event.kind === 'user_prompt' && spec.promptContext !== undefined) return { channel: 'prompt', render: spec.promptContext }
   return null
 }
@@ -122,7 +97,7 @@ async function contextOutput(event: NormalizedEvent, dataDir: string, host: Hook
   const result = fetched.result
   if (result === null) return null
   // The notice rides on session start only; the route never attaches it to a prompt delta.
-  if (wanted.channel === 'session_start' && result.updateNotice !== undefined) return HOOK_HOSTS[host].sessionContextWithNotice(result.text, result.updateNotice)
+  if (wanted.channel === 'session_start' && result.updateNotice !== undefined) return hookSpecFor(host)?.sessionContextWithNotice(result.text, result.updateNotice) ?? null
   return result.text === '' ? null : wanted.render(result.text)
 }
 
@@ -140,7 +115,7 @@ export async function runHook(
   host: HookHost = CLAUDE_CODE_HOST,
 ): Promise<string | null> {
   if (isObserverProcess(env)) return null
-  const event = await capture(input, dataDir, host, stderr)
+  const event = await capture(input, dataDir, host, stderr, env)
   if (event === null) return null
   try {
     return await contextOutput(event, dataDir, host, stderr, inject)

@@ -1,0 +1,1 @@
+{ "hook_event_name": "PostToolUse", "cwd": "/Users/username/project", "conversation_id": "conv-xyz789", "workspace_roots": ["/Users/username/project"], "tool_name": "bash", "tool_input": { "command": "git pushh" }, "tool_output": "", "tool_error": "git: 'pushh' is not a git command.", "tool_is_error": true, "is_mcp_tool": false }

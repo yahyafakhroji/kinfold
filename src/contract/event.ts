@@ -10,7 +10,30 @@ export const EVENT_KINDS = ['session_start', 'user_prompt', 'tool_result', 'turn
 export type EventKind = (typeof EVENT_KINDS)[number]
 
 /** Hosts with an adapter in src/adapters/. Any other lowercase id still validates, so this list only grows. */
-export const KNOWN_HOSTS = ['claude-code', 'opencode', 'codex', 'cursor'] as const
+export const KNOWN_HOSTS = [
+  'claude-code',
+  'opencode',
+  'codex',
+  'cursor',
+  'gemini-cli',
+  'qwen-code',
+  'factory-droid',
+  'devin',
+  'kilo-code',
+  'cline',
+  'copilot',
+  'antigravity',
+  'junie',
+  'kiro',
+  'amp',
+  'kimi-code',
+  'auggie',
+  'goose',
+  'crush',
+  'zed',
+  'continue',
+  'warp',
+] as const
 export type KnownHost = (typeof KNOWN_HOSTS)[number]
 export type HostId = KnownHost | (string & {})
 

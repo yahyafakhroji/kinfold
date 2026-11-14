@@ -1,6 +1,6 @@
 # Kinfold
 
-Kinfold gives Claude Code, OpenCode, Codex and Cursor one memory. It records what each agent did, condenses it into short observations, and hands the relevant ones to the next session in whichever agent you open. The memory is a SQLite file on your machine, encrypted at rest. Kinfold ships as a single program with no runtime to install, and it's open source under Apache-2.0.
+Kinfold gives 22 coding agents one memory. Claude Code, OpenCode, Codex and Cursor are checked against real runs; the rest are built from their docs. What each agent can do depends on its hooks, and `kinfold status` shows it per agent. It records what each agent did, condenses it into short observations, and hands the relevant ones to the next session in whichever agent you open. The memory is a SQLite file on your machine, encrypted at rest. Kinfold ships as a single program with no runtime to install, and it's open source under Apache-2.0.
 
 ![Kinfold's setup wizard in a terminal: version, a dry-run install that walks each step, then status](assets/demo.gif)
 
@@ -35,14 +35,14 @@ Install copies the program to the `bin` folder of the memory folder (`~/.kinfold
 | Windows | x64 |
 | WSL | preview, see below |
 
-Kinfold needs at least one of Claude Code, OpenCode, Codex or Cursor. It never asks for admin or root rights.
+Kinfold needs at least one supported coding agent. `kinfold status` lists them and shows which ones it found on your machine. It never asks for admin or root rights.
 
 ## What it does
 
-- **Capture.** Hooks in Claude Code, Codex and Cursor, and a plugin for OpenCode, record prompts, tool calls and their results. Secrets are redacted before anything is written.
+- **Capture.** Hooks or plugins in each agent that has them record prompts, tool calls and their results. Most agents without hooks can still search Kinfold's memory through MCP. Secrets are redacted before anything is written.
 - **Observations.** A background observer reads finished turns and writes short observations that cite the events they came from: decisions, fixes, gotchas, how things work.
-- **Context.** When a session starts, Kinfold adds a small block of related memory to the agent's context. Claude Code, Codex and OpenCode also get one on each prompt.
-- **Search.** An MCP server gives every agent `search`, `timeline` and `get_observations`. Search is full-text, plus semantic search when you give Kinfold an OpenRouter key for embeddings.
+- **Context.** Where an agent's hooks allow it, Kinfold adds a small block of related memory to the agent's context at session start, on each prompt, or both. `kinfold status` shows which.
+- **Search.** An MCP server gives agents `search`, `timeline` and `get_observations`. Goose and Continue need the server added by hand; Warp may need a setting turned on. Search is full-text, plus semantic search when you give Kinfold an OpenRouter key for embeddings.
 - **Dashboard.** `kinfold dashboard` opens a local page with sessions, observations, stats and the observer settings.
 - **Data control.** `kinfold retention` sets how long each kind of data is kept, `kinfold purge` removes a session, project or agent, and `kinfold scan` checks the store for secrets that slipped through.
 - **Updates.** `kinfold update` fetches the latest release and checks it against `SHA256SUMS` before it replaces the program.

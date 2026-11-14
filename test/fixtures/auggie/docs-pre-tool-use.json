@@ -1,0 +1,1 @@
+{ "hook_event_name": "PreToolUse", "conversation_id": "conv-xyz789", "workspace_roots": ["/Users/username/project"], "tool_name": "bash", "tool_input": { "command": "git status" }, "is_mcp_tool": false }

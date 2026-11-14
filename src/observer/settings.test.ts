@@ -20,7 +20,7 @@ test('built-in defaults: claude-code and unknown hosts get Haiku via the CLI, op
   const db = temp.store.db
   expect(resolveObserverSettings(db, 'claude-code')).toEqual({ provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: true, source: 'built-in' })
   expect(resolveObserverSettings(db, 'opencode')).toEqual({ provider: 'openrouter', model: 'openrouter/auto', credentialRef: 'openrouter', enabled: true, source: 'built-in' })
-  expect(resolveObserverSettings(db, 'zed')).toMatchObject({ provider: 'claude-cli', model: 'haiku', source: 'built-in' })
+  expect(resolveObserverSettings(db, 'not-a-known-agent')).toMatchObject({ provider: 'claude-cli', model: 'haiku', source: 'built-in' })
 })
 
 test('built-in defaults: codex and cursor get OpenRouter Auto like opencode', () => {

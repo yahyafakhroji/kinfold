@@ -1,0 +1,1 @@
+{ "session_id": "abc123", "transcript_path": "/Users/.../.factory/projects/.../session.jsonl", "cwd": "/Users/me/project", "permission_mode": "off", "hook_event_name": "UserPromptSubmit", "prompt": "Add a test for the parser", "has_images": false }

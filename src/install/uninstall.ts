@@ -17,21 +17,17 @@ import { join } from 'node:path'
 import { KEYCHAIN_SERVICE, isSystemCredentialRef } from '../secrets/credentials'
 import type { KeyStore } from '../secrets/key-store'
 import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
-import { removeSamHooks } from './claude-hooks'
 import { getObserverSettings } from './daemon-client'
-import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
-import { plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
+import { type InstallEnv, errorMessage, platformOf } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
 import { INSTALL_HOSTS, type InstallHost } from './detect'
-import { claudeMcpUninstallActions, opencodeMcpUninstallActions } from './mcp-wiring'
 import { hmacRemoval } from './hmac-cleanup'
 import { hmacKeptNotes } from './hmac-migration'
-import { codexHookUninstallActions, hostHookUninstallActions } from './host-wiring'
 import { readKeyStore, secretDeleteAction } from './key-store-choice'
-import { inspectShim } from './opencode-shim'
 import { type Action, runPlan } from './plan'
 import { managedServiceOf } from './service/control'
 import { wslUninstall } from '../wsl/entry'
+import { profileOf } from '../agents/install-profiles'
 
 export interface UninstallOptions {
   dryRun: boolean
@@ -64,38 +60,13 @@ function installedFilesActions(env: InstallEnv): Action[] {
   ]
 }
 
-function claudeActions(env: InstallEnv): Action[] {
-  const path = installPaths(env).claudeSettings
-  const file = readJsonObject(path)
-  if (!file.exists) return []
-  const result = removeSamHooks(file.value)
-  if (result.removed === 0) return []
-  const backup = plannedBackup(path, env.now())
-  return [
-    ...(backup !== null ? [{ kind: 'backup', from: path, to: backup } as const] : []),
-    { kind: 'write', path, content: serializeJson(result.settings, file.text), mode: file.mode, summary: `remove ${result.removed} Kinfold hook entries; every other key and hook kept` },
-  ]
-}
-
-function opencodeActions(env: InstallEnv): Action[] {
-  const paths = installPaths(env)
-  const state = inspectShim(readTextOrNull(paths.opencodePlugin), { pluginEntry: paths.pluginEntry, dataDir: env.dataDir })
-  if (state === 'foreign') env.out(`opencode: ${paths.opencodePlugin} is not a Kinfold plugin file; left alone`)
-  return state === 'yes' || state === 'stale' ? [{ kind: 'remove', path: paths.opencodePlugin, summary: 'the Kinfold OpenCode plugin file' }] : []
-}
-
 /**
  * One host's Kinfold wiring out: its hooks, MCP entry or plugin file, each
  * config backed up beside itself first. Uninstall runs this for every host;
  * install runs it for a host that was wired and is no longer chosen.
  */
 export function hostUnwireActions(env: InstallEnv, host: InstallHost): Action[] {
-  switch (host) {
-    case 'claude-code': return [...claudeActions(env), ...claudeMcpUninstallActions(env)]
-    case 'opencode': return [...opencodeActions(env), ...opencodeMcpUninstallActions(env)]
-    case 'codex': return codexHookUninstallActions(env)
-    case 'cursor': return hostHookUninstallActions(env, 'cursor')
-  }
+  return profileOf(host).wiring.uninstall(env)
 }
 
 /** The default ref plus any ref a stored setting names. A dry run asks the daemon nothing (only /health is allowed). */

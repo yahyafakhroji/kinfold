@@ -1,0 +1,1 @@
+{ "event": "PostToolUse", "session_id": "20260514_1", "matcher_context": "shell", "tool_call_id": "call_1", "tool_name": "shell", "tool_input": { "command": "ls" }, "working_dir": "/Users/you/project" }
