@@ -45,6 +45,7 @@ Kinfold needs at least one supported coding agent. `kinfold status` lists them a
 - **Search.** An MCP server gives agents `search`, `timeline` and `get_observations`. Goose and Continue need the server added by hand; Warp may need a setting turned on. Search is full-text, plus semantic search when you give Kinfold an OpenRouter key for embeddings.
 - **Dashboard.** `kinfold dashboard` opens a local page with sessions, observations, stats and the observer settings.
 - **Data control.** `kinfold retention` sets how long each kind of data is kept, `kinfold purge` removes a session, project or agent, and `kinfold scan` checks the store for secrets that slipped through.
+- **Backup and restore.** `kinfold backup <file>` writes the whole memory to one file while capture keeps running, and `kinfold restore <file>` brings it back on a fresh system. The dashboard's Backup page does both in the browser. See [Backup and restore](#backup-and-restore).
 - **Updates.** `kinfold update` fetches the latest release and checks it against `SHA256SUMS` before it replaces the program.
 
 ## Supported agents
@@ -135,6 +136,33 @@ Ranking runs in a worker thread over a 16-bit copy of the vectors, so searches d
 - **Checked downloads.** The curl and PowerShell installers, `kinfold install` and `kinfold update` refuse a program whose SHA-256 doesn't match the release's `SHA256SUMS`. The npm packages carry the same programs, published from CI with [npm provenance](https://docs.npmjs.com/generating-provenance-statements).
 
 What leaves your machine: session text goes to the observer model you chose, and observation text goes to OpenRouter for embeddings if you gave Kinfold an OpenRouter key.
+
+## Backup and restore
+
+Before you reinstall your operating system or move to another machine, save the memory to a file:
+
+```sh
+kinfold key show-recovery     # write the recovery code down, away from this machine
+kinfold backup ~/kinfold.kfb
+```
+
+The backup is a consistent copy of the store, taken while agents keep working. It stays encrypted with the store's own key, and the file holds no key, recovery code or token. Keep the recovery code somewhere else: restore needs it, and the reinstall wipes the key store that holds the key.
+
+On the new system, install Kinfold, then restore:
+
+```sh
+kinfold install
+kinfold restore ~/kinfold.kfb
+```
+
+Restore asks for the recovery code and checks that it opens the backup before it changes anything. A wrong code, a damaged file or a backup from a newer Kinfold leaves the current memory as it was. An older backup is migrated forward. The daemon keeps running: it closes the store, swaps in the backup and opens it again.
+
+- **The store that was there.** If it held no memory, as on a fresh install, it is removed. If it held memory, it is kept as `memory.db.kinfold-replaced` with its key under `db-key-replaced`, and restore prints how to switch back. Restore replaces the store. It does not merge two memories.
+- **What a backup leaves out.** The OpenRouter key, which you enter again. The key behind redaction markers, so markers written after a restore don't match older markers for the same secret. Nothing old is lost. Records about the machine, such as the install channel and logs, also stay behind.
+- **An unencrypted store** backs up and restores without a code. The file is then readable by anyone who has it.
+- **If a restore is cut short,** `kinfold key resume` finishes it or puts the old store back.
+
+The dashboard's Backup page downloads the same file and restores from one: choose the file, check its date and version, type the recovery code and confirm. Once you have made a backup, `kinfold status` shows when.
 
 ## WSL (preview)
 
