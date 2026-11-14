@@ -12,7 +12,7 @@
 // binary or the app's Info.plist), so host-versions.ts can tell an upgrade.
 
 import { INSTALL_PROFILES } from '../agents/install-profiles'
-import type { AgentId, AgentProfile } from '../agents/profile'
+import type { AgentId, ProfileTable } from '../agents/profile'
 import { KNOWN_HOSTS } from '../contract/event'
 import { type HostDetection, detectFromSpec } from './detectors'
 import type { InstallEnv } from './env'
@@ -35,7 +35,7 @@ export type InstallHost = AgentId
 
 /** `override` is the --hosts list; null means detect. Order is INSTALL_HOSTS. */
 /** `profiles` is the install-profile table; tests pass one with an agent the real table does not have yet. */
-export async function detectHosts(env: InstallEnv, override: readonly InstallHost[] | null, profiles: Readonly<Record<AgentId, AgentProfile>> = INSTALL_PROFILES): Promise<HostDetection[]> {
+export async function detectHosts(env: InstallEnv, override: readonly InstallHost[] | null, profiles: ProfileTable = INSTALL_PROFILES): Promise<HostDetection[]> {
   const excluded = (host: InstallHost): HostDetection => ({ host, selected: false, version: null, note: 'left out by --hosts', leftOut: true })
   const forced = override !== null
   const detections: HostDetection[] = []

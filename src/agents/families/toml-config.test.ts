@@ -48,6 +48,36 @@ test.each([
   expect(readTomlConfig(text)).toBeNull()
 })
 
+test.each([
+  ['a table header given twice', '[a]\nx = 1\n[a]\ny = 2\n'],
+  ['a table header given twice with a quoted name', '[a."b c"]\n[a."b c"]\n'],
+  ['a table and an array of tables under one name', '[a]\n[[a]]\n'],
+  ['an array of tables and a table under one name', '[[a]]\n[a]\n'],
+  ['a header over a key of the root', 'a = 1\n[a]\n'],
+  ['a header below a key of the root', 'a = 1\n[a.b]\n'],
+  ['a header over a table a dotted key made', 'a.b = 1\n[a]\n'],
+  ['a header over a table a dotted key made, inside a table', '[t]\na.b = 1\n[t.a]\n'],
+  ['a dotted key through a value', 'a = 1\na.b = 2\n'],
+  ['a value over a dotted-key table', 'a.b = 1\na = 2\n'],
+  ['a dotted key into a table a header defined', '[a.b]\nx = 1\n[a]\nb.y = 2\n'],
+  ['an array of tables over a table only headers implied', '[a.b]\n[[a]]\n'],
+])('readTomlConfig refuses a document whose tables conflict: %s', (_name, text) => {
+  expect(readTomlConfig(text)).toBeNull()
+})
+
+test('readTomlConfig still reads tables that only look alike', () => {
+  for (const text of [
+    '[a.b]\nx = 1\n[a]\ny = 2\n',
+    '[[hooks]]\nevent = "A"\n[[hooks]]\nevent = "A"\n',
+    '[[a]]\n[a.sub]\nx = 1\n[[a]]\n[a.sub]\nx = 2\n',
+    'a.b = 1\na.c = 2\n[a.d]\nx = 1\n',
+    '[t]\na.b = 1\n[u]\na.b = 1\n',
+    '[mcpServers.one]\ncommand = "x"\n[mcpServers.two]\ncommand = "y"\n',
+  ]) {
+    expect(renderToml(parsed(text))).toBe(text)
+  }
+})
+
 test('readTomlConfig reads the subset, comments and all, and renders it back byte for byte', () => {
   const doc = parsed(KIMI)
   expect(renderToml(doc)).toBe(KIMI)

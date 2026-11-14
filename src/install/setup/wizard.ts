@@ -13,7 +13,7 @@ import { checkHealth, readDaemonInfo } from '../daemon-client'
 import { STALE_DB_KEY, staleDbKey, storedDbKey } from '../db-encryption'
 import { encryptKeyExists, isProcessAlive } from '../encrypt'
 import { INSTALL_PROFILES } from '../../agents/install-profiles'
-import { type AgentId, type AgentProfile, capabilityLine, verificationNote } from '../../agents/profile'
+import { type ProfileTable, capabilityLine, verificationNote } from '../../agents/profile'
 import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from '../detect'
 import { type InstallEnv, platformOf } from '../env'
 import { keyStoreOf } from '../key-store-choice'
@@ -168,8 +168,6 @@ async function folderStep(env: InstallEnv, ask: Prompts | null, state: SetupStat
 
 // ---- agents -----------------------------------------------------------------
 
-type ProfileTable = Readonly<Record<AgentId, AgentProfile>>
-
 /** A detected docs-level agent is listed but not ticked: nothing recorded has shown it working. */
 function startsTicked(found: HostDetection, profiles: ProfileTable): boolean {
   return found.selected && profiles[found.host].verification === 'live'
@@ -210,11 +208,12 @@ async function agentsStep(env: InstallEnv, ask: Prompts | null, state: SetupStat
   }
   // Not detected and not wired can't be ticked, so it is named, not listed; a wired one whose agent is gone stays listed so it can be unticked.
   const listed = detections.filter((found) => found.selected || wired.has(found.host))
+  // Said even with nothing to list: Continue's line is the only place its --hosts hint appears.
+  for (const line of leftOffLines(detections.filter((found) => !listed.includes(found)), profiles)) ask.say(line)
   if (listed.length === 0) {
     ask.say(NO_AGENTS_NOTE)
     return []
   }
-  for (const line of leftOffLines(detections.filter((found) => !listed.includes(found)), profiles)) ask.say(line)
   return ask.multiSelect('Which agents should share memory?', agentChoices(env, listed, profiles), defaults)
 }
 

@@ -31,7 +31,8 @@ test('goose: each fixture normalizes to the right kind with session, cwd and too
   }
   expect(normalizeGoose(fixture('docs-constructed-post-tool-use.json'), context)?.tool).toEqual({ name: 'shell', input: { command: 'ls' }, output: '' })
   expect(normalizeGoose(fixture('docs-constructed-post-tool-use-failure.json'), context)?.tool).toMatchObject({ name: 'shell', input: { command: 'false' }, isError: true })
-  expect(GOOSE_EVENTS).toEqual(['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd'])
+  // Only the events documented with a working folder are registered; the rest would run the hook and record nothing.
+  expect(GOOSE_EVENTS).toEqual(['PostToolUse', 'PostToolUseFailure'])
 })
 
 test('goose: events that do carry a working folder are captured, with the prompt, reply and tool output read when present', () => {

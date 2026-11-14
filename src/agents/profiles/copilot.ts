@@ -16,7 +16,9 @@
 // literal payloads: test/fixtures/copilot/ holds docs-constructed-*.json.
 // COPILOT_HOME moves the Copilot home: the hooks reference puts the user hooks
 // folder at $COPILOT_HOME/hooks/ and the CLI reference keeps the user's files
-// there, so both files follow it. The docs don't say whether the folder must
+// there, so both files follow it. For mcp-config.json that is inferred: the
+// MCP page names only ~/.copilot/mcp-config.json and says nothing of
+// COPILOT_HOME. The docs don't say whether the folder must
 // exist; it is held to Codex's CODEX_HOME rule.
 // On Windows the command is written for PowerShell (hook-shell.ts). The hooks
 // reference, checked 2026-11-14, gives an entry `bash` ("Shell command for

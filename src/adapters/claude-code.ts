@@ -24,7 +24,8 @@ export const CLAUDE_CODE_EVENTS: ClaudeStyleEventMap = {
  * Returns null for hook events Kinfold does not capture (SubagentStop,
  * PreCompact, and the rest); throws AdapterInputError on a payload it cannot
  * map, which the hook logs, since Claude Code's recorded payloads always carry
- * session_id and cwd.
+ * session_id and cwd. The parser is the family's, and accepts a few shapes
+ * Claude Code has not been seen to send (parseClaudeStyle lists them).
  */
 export function normalizeClaudeCode(payload: unknown, context: AdapterContext): NormalizedEvent | null {
   return parseClaudeStyle(CLAUDE_CODE_EVENTS, CLAUDE_CODE_HOST, payload, context, { shellTools: SHELL_TOOLS, flatten: flattenToolResponse, failureFromResult: false })

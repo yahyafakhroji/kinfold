@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { InstallMode } from './entry'
+import { shimTarget } from '../agents/families/plugin-file'
 import { inspectShim, isOwnShim, pluginFileContent, shimContent } from './opencode-shim'
 import { posixOnly } from '../../test/platform-guards'
 
@@ -76,4 +77,22 @@ test('a data folder with quotes and spaces stays one string in the shim', () => 
   const line = shimContent(PLUGIN_ENTRY, dir).split('\n').find((candidate) => candidate.startsWith('globalThis.KINFOLD_DATA_DIR = '))
   expect(new Function(`const globalThis = {}; ${line} return globalThis.KINFOLD_DATA_DIR`)()).toBe(dir)
   expect(inspectShim(shimContent(PLUGIN_ENTRY, dir), { pluginEntry: PLUGIN_ENTRY, dataDir: dir })).toBe('yes')
+})
+
+// A Windows checkout's plugin entry, as installPaths gives it there; every OS runs this, so the Windows branch is covered off Windows too.
+const WIN_ENTRY = 'C:\\Users\\u\\kinfold\\src\\plugins\\opencode.ts'
+const WIN_DATA = 'C:\\Users\\u\\.kinfold'
+
+test('a shim whose plugin path uses backslashes is read as a shim: current, stale by folder, stale by checkout', () => {
+  const current = shimContent(WIN_ENTRY, WIN_DATA)
+  expect(shimTarget(current)).toBe(WIN_ENTRY)
+  expect(isOwnShim(current)).toBe(true)
+  expect(inspectShim(current, { pluginEntry: WIN_ENTRY, dataDir: WIN_DATA })).toBe('yes')
+  expect(inspectShim(current, { pluginEntry: WIN_ENTRY, dataDir: 'D:\\other' })).toBe('stale')
+  expect(inspectShim(shimContent('C:\\old\\src\\plugins\\opencode.ts', WIN_DATA), { pluginEntry: WIN_ENTRY, dataDir: WIN_DATA })).toBe('stale')
+  // The pre-data-folder re-export, with the backslashes a JS string literal carries.
+  const reexport = `// kinfold: written by \`kinfold install\`, removed by \`kinfold uninstall\`.\nexport { default } from ${JSON.stringify(WIN_ENTRY)};\n`
+  expect(inspectShim(reexport, { pluginEntry: WIN_ENTRY, dataDir: WIN_DATA })).toBe('stale')
+  // A path that only resembles the plugin's is still not a shim.
+  expect(shimTarget(`const plugin = await import(${JSON.stringify('C:\\x\\src\\plugins\\other.ts')});`)).toBeNull()
 })

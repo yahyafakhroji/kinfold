@@ -8,7 +8,7 @@
 // Tests only; nothing in the installer imports it.
 
 import { INSTALL_PROFILES } from '../agents/install-profiles'
-import type { AgentId, AgentProfile } from '../agents/profile'
+import type { AgentProfile, ProfileTable } from '../agents/profile'
 import type { TerminalIO } from './prompt/terminal'
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -413,7 +413,7 @@ export function countingService(inner: ServiceControl, reason?: string): Countin
 }
 
 /** The real profile table plus a detected, docs-level Gemini CLI, which has no profile of its own yet. */
-export function profilesWithDocsAgent(detected = true): Readonly<Record<AgentId, AgentProfile>> {
+export function profilesWithDocsAgent(detected = true): ProfileTable {
   const docs: AgentProfile = {
     id: 'gemini-cli',
     name: 'Gemini CLI',

@@ -16,7 +16,7 @@
 //     extensions in ~/.config/goose/config.yaml, YAML only; no command adds
 //     one for good without prompts)
 // The parser is src/adapters/goose.ts. The docs show a working folder on tool
-// events only, so capture is tool results only. Kinfold never edits YAML, so
+// events only, so only those are registered and capture is tool results only. Kinfold never edits YAML, so
 // the MCP server is a manual step. Goose's hook runner calls `sh` on Windows
 // too, which the docs don't cover, so Windows gets nothing until a live run.
 // Detection is the `goose` binary, unless its --version answer is the
@@ -44,7 +44,7 @@ const MANIFEST_DESCRIPTION = 'Records goose sessions in Kinfold; written by `kin
 const CAPABILITIES: Capabilities = { capture: 'partial', context: { sessionStart: false, prompt: false }, search: false, observer: false }
 const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: false, observer: false }
 
-const LIMIT = 'Goose documents a working folder on tool events only and no hook output reaching the model: tool calls are recorded, with their output only if Goose sends it, and no context is injected; search needs the MCP server added to config.yaml by hand'
+const LIMIT = 'Goose documents a working folder on tool events only and no hook output reaching the model, so only the tool events are registered: tool calls are recorded, with their output only if Goose sends it, and no context is injected; search needs the MCP server added to config.yaml by hand'
 const WINDOWS_LIMIT = 'nothing is wired on Windows: Goose runs hooks with sh -c, and its docs don\'t cover Windows; search needs the MCP server added to config.yaml by hand'
 
 const onWindows = (os: OsName): boolean => os === 'windows'

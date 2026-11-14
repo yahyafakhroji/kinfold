@@ -44,12 +44,27 @@ test('goose: the plugin\'s hooks.json and plugin.json meet the writer contract a
   }
   apply(gooseFileActions(w.env))
   const hooks = JSON.parse(readFileSync(gooseHooksPath(w.env), 'utf8')).hooks
-  expect(Object.keys(hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd'])
+  expect(Object.keys(hooks)).toEqual(['PostToolUse', 'PostToolUseFailure'])
   expect(hooks.PostToolUse[0].matcher).toBeUndefined()
   expect(hooks.PostToolUse[0].hooks[0]).toMatchObject({ type: 'command', timeout: 10 })
   expect(hooks.PostToolUse[0].hooks[0].command).toEndWith(' --host goose')
   expect(JSON.parse(readFileSync(goosePluginManifestPath(w.env), 'utf8')).name).toBe('kinfold')
   expect(gooseFileActions(w.env)).toEqual([])
+})
+
+test('goose: a hooks.json from an install that registered every event reads as stale and is rewritten with the tool events only', () => {
+  const w = bench.world()
+  apply(gooseFileActions(w.env))
+  const path = gooseHooksPath(w.env)
+  const current = JSON.parse(readFileSync(path, 'utf8')) as { hooks: Record<string, unknown> }
+  const rule = current.hooks.PostToolUse
+  const older = { hooks: { SessionStart: rule, UserPromptSubmit: rule, PostToolUse: rule, PostToolUseFailure: rule, Stop: rule, SessionEnd: rule } }
+  writeFileSync(path, `${JSON.stringify(older, null, 2)}\n`)
+  expect(profile('goose').wiring.state(w.env)).toBe('stale')
+  expect(writesOf(gooseFileActions(w.env))).toEqual([path])
+  apply(gooseFileActions(w.env))
+  expect(Object.keys(JSON.parse(readFileSync(path, 'utf8')).hooks)).toEqual(['PostToolUse', 'PostToolUseFailure'])
+  expect(profile('goose').wiring.state(w.env)).toBe('yes')
 })
 
 test('goose: a hooks.json by our name that is not ours is left alone', () => {
@@ -77,6 +92,7 @@ test('goose: built from the docs, tool results only, MCP left to the user as YAM
   expect(goose).toMatchObject({ id: 'goose', verification: 'docs' })
   expect(goose.capabilities('macos')).toEqual({ capture: 'partial', context: { sessionStart: false, prompt: false }, search: false, observer: false })
   expect(capabilityLine(goose, 'macos')).toStartWith('captures tool results only (')
+  expect(goose.limit('macos')).toContain('only the tool events are registered')
   const steps = goose.manualSteps('macos', bench.world().env).join(' ')
   expect(steps).toContain('~/.config/goose/config.yaml')
   expect(steps).toContain('extensions:')

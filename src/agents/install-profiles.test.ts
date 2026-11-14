@@ -6,7 +6,7 @@ import { parseHosts, parseObserverFlag } from '../install/args'
 import { detectFromSpec, detectHosts } from '../install/detect'
 import { type FakeWorld, createWorld } from '../install/test-support'
 import { builtInSettings } from '../observer/settings'
-import { INSTALL_PROFILES, profileOf } from './install-profiles'
+import { INSTALL_PROFILES, hasWiring, isWired, profileOf } from './install-profiles'
 import { type AgentId, capabilityLine } from './profile'
 
 let world: FakeWorld | null = null
@@ -101,4 +101,10 @@ describe('profile modules', () => {
       expect(run.stdout.toString().trim()).toBe(String(KNOWN_HOSTS.length))
     }
   })
+})
+
+test('isWired counts wiring that is in place, current or not; hasWiring counts anything but none', () => {
+  expect((['yes', 'stale', 'partial', 'no', 'unknown'] as const).map(isWired)).toEqual([true, true, true, false, false])
+  // A config Kinfold cannot read may still hold its entries, so unknown keeps the agent's line.
+  expect((['yes', 'stale', 'partial', 'no', 'unknown'] as const).map(hasWiring)).toEqual([true, true, true, false, true])
 })

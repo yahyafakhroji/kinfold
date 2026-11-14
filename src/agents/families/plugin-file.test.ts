@@ -24,6 +24,40 @@ test('the plugin file for kilo-code names host kilo-code and the data dir', () =
   expect(shim).toContain('globalThis.KINFOLD_HOST = "kilo-code";')
 })
 
+const writeKiloShim = async (w: ReturnType<typeof createWorld>): Promise<string> => {
+  const path = join(KILO_PLUGIN_SPEC.dir(w.env), KILO_PLUGIN_SPEC.fileName)
+  for (const action of await pluginFileActions(w.env, KILO_PLUGIN_SPEC)) {
+    if (action.kind === 'mkdir') mkdirSync(action.path, { recursive: true })
+    if (action.kind === 'write') writeFileSync(action.path, action.content)
+  }
+  return path
+}
+
+test("Kilo's checkout shim says Kilo Code loads the folder", async () => {
+  const w = createWorld()
+  try {
+    const written = readFileSync(await writeKiloShim(w), 'utf8')
+    expect(written.split('\n')[1]).toBe('// Kilo Code loads every plugin in this folder; the plugin itself lives in')
+    expect(written).not.toContain('OpenCode 2.x')
+    expect(pluginFileState(w.env, KILO_PLUGIN_SPEC)).toBe('yes')
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test("a Kilo shim that still names OpenCode is stale and is rewritten", async () => {
+  const w = createWorld()
+  try {
+    const path = await writeKiloShim(w)
+    const written = readFileSync(path, 'utf8')
+    writeFileSync(path, written.replace('// Kilo Code loads', '// OpenCode 2.x loads'))
+    expect(pluginFileState(w.env, KILO_PLUGIN_SPEC)).toBe('stale')
+    expect((await pluginFileActions(w.env, KILO_PLUGIN_SPEC)).some((action) => action.kind === 'write' && action.content === written)).toBe(true)
+  } finally {
+    await w.cleanup()
+  }
+})
+
 test("OpenCode's plugin file is byte-identical to before", () => {
   expect(shimContent(ENTRY, DATA)).toBe(
     [

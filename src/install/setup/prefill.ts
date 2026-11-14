@@ -23,7 +23,7 @@ import { keyStoreOf } from '../key-store-choice'
 import { ChoiceError, type ObserverFlag } from '../observer-choice'
 import { serviceOf } from '../service/control'
 import { type InstallChannel, currentChannel, readInstallRecord } from './record'
-import { overlapState, profileOf } from '../../agents/install-profiles'
+import { isWired, overlapState, profileOf } from '../../agents/install-profiles'
 
 export interface SetupState {
   /** install.json exists, or the service config names a data folder. */
@@ -52,8 +52,6 @@ export const UNREADABLE_OBSERVERS =
   'cannot read the saved observer settings (the daemon is down and memory.db did not open); start the daemon or pass --observer <host>=<provider>:<model>'
 
 export const LOCKED_FOLDER_NOTE = 'Chosen at first install. To use another folder, uninstall and reinstall.'
-
-const WIRED_STATES: readonly (WiringState | 'unknown')[] = ['yes', 'stale', 'partial']
 
 function hostState(env: InstallEnv, host: InstallHost): WiringState | 'unknown' {
   return overlapState(env, profileOf(host))
@@ -184,7 +182,7 @@ export async function readSetupState(env: InstallEnv, options: SetupStateOptions
   const record = found?.record ?? null
   const installed = found !== null
   const at: InstallEnv = { ...env, dataDir }
-  const wiredHosts = INSTALL_HOSTS.filter((host) => WIRED_STATES.includes(hostState(at, host)))
+  const wiredHosts = INSTALL_HOSTS.filter((host) => isWired(hostState(at, host)))
   // Whatever `installed` says: a store with saved rows and no install.json (a pre-wizard install off macOS) must not read as empty.
   const observers = await savedObservers(at, dataDir)
   return {
