@@ -12,6 +12,7 @@
 // arguments therefore never matches.
 
 import { join } from 'node:path'
+import { cmdWords, powershellWords } from '../agents/families/hook-shell'
 import { osOf } from '../platform/platform'
 
 export { isCompiledProgram } from '../runtime/program'
@@ -92,15 +93,25 @@ export function entryPath(command: string, args: readonly string[]): string | nu
  * The entry a host config holds, read as a command plus its arguments. A
  * command string such as a Codex or Cursor hook is split the way a shell
  * reads it; an absolute path with spaces is used whole, because an argv
- * command never needs the shell.
+ * command never needs the shell. The string's first character says which
+ * shell it was written for (hook-shell.ts): `&` PowerShell, `@` cmd, else
+ * POSIX. Each is read by its own rules only, since POSIX rules would read
+ * the cmd form as a program whose name starts with @.
  */
 export function parseEntry(command: string, args: readonly string[]): ParsedEntry | null {
   const direct = classify(command, args)
   if (direct !== null) return direct
-  const words = shellWords(command)
+  const words = commandWords(command)
   if (words === null || words.length < 2) return null
   const [program, ...rest] = words
   return program === undefined ? null : classify(program, [...rest, ...args])
+}
+
+function commandWords(command: string): string[] | null {
+  const text = command.trimStart()
+  if (text.startsWith('&')) return powershellWords(text)
+  if (text.startsWith('@')) return cmdWords(text)
+  return shellWords(command)
 }
 
 function classify(command: string, args: readonly string[]): ParsedEntry | null {

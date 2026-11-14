@@ -11,6 +11,11 @@
 //            Cursor { Event: [ { command: "<shell>", timeout (s) } ] } (grouped: false)
 //   gemini:  { Event: [ { hooks: [ { type, command: "<shell>", timeout (ms) } ] } ] }
 // Auggie takes the claude shape with its timeout in milliseconds.
+// A command string is POSIX-quoted. On Windows an agent runs it through
+// PowerShell or cmd, where that quoting does not parse, so a spec that names
+// the agent's Windows shell gets the string written for that shell there
+// (hook-shell.ts). A spec that names none keeps the POSIX string; its profile
+// writes no hooks on Windows.
 // Gemini CLI's reference (geminicli.com/docs/hooks/reference, checked
 // 2026-11-13) documents neither `args` nor `async`, and counts the timeout in
 // milliseconds, so the gemini shape writes one shell string and no matcher,
@@ -22,10 +27,11 @@
 // file plans both through one json-file.ts call: one read, one write.
 
 import { isRecord } from '../../contract/event'
-import type { InstallEnv } from '../../install/env'
+import { type InstallEnv, platformOf } from '../../install/env'
 import { type EntryCommand, entryCommand, entryPath, entryRole, parseEntry, sameEntry } from '../../install/entry'
 import type { Action } from '../../install/plan'
 import type { AgentId } from '../profile'
+import { type HookShell, hookCommandText, posixCommand } from './hook-shell'
 import { type JsonEdit, type Settings, plainJsonFileActions, plainJsonFileUninstallActions } from './json-file'
 import { readPlainJsonObject } from './plain-json'
 
@@ -34,6 +40,8 @@ export type HookShape = 'claude' | 'command' | 'gemini'
 export interface HookTarget {
   /** The command an install writes, from entry.ts. */
   entry: EntryCommand
+  /** The install is for Windows, where a command string is written for the spec's windowsShell. Default no. */
+  windows?: boolean
 }
 
 export type { Settings }
@@ -58,6 +66,10 @@ export interface JsonHooksSpec {
   timeoutsS?: Readonly<Record<string, number>>
   /** The claude shape only: the agent counts `timeout` in milliseconds (Auggie). Default seconds. */
   timeoutUnit?: 's' | 'ms'
+  /** The shell the agent runs a command string through on Windows, from its docs; absent when they name none. */
+  windowsShell?: Exclude<HookShell, 'posix'>
+  /** Fields the entry also carries on Windows, such as Qwen Code's `shell`. */
+  windowsEntry?: Readonly<Record<string, unknown>>
   /** Names the file in error messages. */
   label?: string
   /**
@@ -82,24 +94,12 @@ const labelOf = (spec: JsonHooksSpec): string => spec.label ?? 'settings.json'
 /** Where an event's list sits, for messages. */
 const eventPath = (spec: JsonHooksSpec, event: string): string => (spec.hooksKey === null ? event : `${spec.hooksKey}.${event}`)
 
-const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`
+/** One entry as the POSIX shell string a command-string agent reads; flags, the host id and the subcommand stay bare. */
+export const shellCommand = posixCommand
 
-const BARE_WORDS: ReadonlySet<string> = new Set(['hook', 'mcp', 'daemon'])
-
-/** One entry as the shell string a command-string agent reads; flags, the host id and the subcommand stay bare. */
-export function shellCommand(entry: EntryCommand): string {
-  const words = [entry.command, ...entry.args]
-  const parts: string[] = []
-  for (let index = 0; index < words.length; index += 1) {
-    const word = words[index] ?? ''
-    if (word === '--host') {
-      parts.push(word, words[index + 1] ?? '')
-      index += 1
-      continue
-    }
-    parts.push(word.startsWith('--') || BARE_WORDS.has(word) ? word : shellQuote(word))
-  }
-  return parts.join(' ')
+/** The shell a command string is written for on this target. */
+function shellOf(spec: JsonHooksSpec, target: HookTarget): HookShell {
+  return target.windows === true ? (spec.windowsShell ?? 'posix') : 'posix'
 }
 
 const argsOf = (entry: Readonly<Record<string, unknown>>): string[] =>
@@ -128,9 +128,11 @@ function hookEntry(spec: JsonHooksSpec, event: string, target: HookTarget): Reco
     const timeout = spec.timeoutUnit === 'ms' ? timeoutS * MS_PER_S : timeoutS
     return { type: 'command', command: entry.command, args: entry.args, timeout, ...(isAsync ? { async: true } : {}) }
   }
-  if (spec.shape === 'gemini') return { type: 'command', command: shellCommand(entry), timeout: timeoutS * MS_PER_S }
-  if (!isGrouped(spec)) return { command: shellCommand(entry), timeout: timeoutS }
-  return { type: 'command', command: shellCommand(entry), timeout: timeoutS, ...(isAsync ? { async: true } : {}) }
+  const command = hookCommandText(entry, shellOf(spec, target))
+  const extra = target.windows === true ? (spec.windowsEntry ?? {}) : {}
+  if (spec.shape === 'gemini') return { type: 'command', command, timeout: timeoutS * MS_PER_S, ...extra }
+  if (!isGrouped(spec)) return { command, timeout: timeoutS, ...extra }
+  return { type: 'command', command, timeout: timeoutS, ...(isAsync ? { async: true } : {}), ...extra }
 }
 
 /** What we put in an event's list: a group holding our entry, or the entry itself for an ungrouped agent. */
@@ -230,25 +232,28 @@ export function jsonHookScriptsIn(spec: JsonHooksSpec, settings: Settings): stri
   return Object.keys(hooks).flatMap((event) => ownEntries(spec, listOf(spec, hooks, event)).map((entry) => jsonHookScript(spec, entry) ?? ''))
 }
 
-function runsExpected(entry: unknown, expected: EntryCommand): boolean {
-  return isRecord(entry) && typeof entry.command === 'string' && sameEntry(entry.command, argsOf(entry), expected)
+function runsExpected(spec: JsonHooksSpec, entry: unknown, target: HookTarget): boolean {
+  if (!isRecord(entry) || typeof entry.command !== 'string' || !sameEntry(entry.command, argsOf(entry), target.entry)) return false
+  // The right words in another shell's quoting do not run: an older install's POSIX string on Windows.
+  return spec.shape === 'claude' || shellOf(spec, target) === 'posix' || entry.command === hookCommandText(target.entry, shellOf(spec, target))
 }
 
 /**
  * yes: every event runs the expected entry; stale: some entry of ours runs
- * another script, program or data folder; partial: some events missing.
+ * another script, program or data folder, or is written for another shell
+ * than the agent's on Windows; partial: some events missing.
  */
-export function inspectJsonHooks(spec: JsonHooksSpec, settings: Settings, expected: EntryCommand): WiringState {
+export function inspectJsonHooks(spec: JsonHooksSpec, settings: Settings, expected: EntryCommand, windows = false): WiringState {
   const hooks = hooksOf(spec, settings)
   const all = Object.keys(hooks).flatMap((event) => ownEntries(spec, listOf(spec, hooks, event)))
   if (all.length === 0) return 'no'
-  if (all.some((entry) => !runsExpected(entry, expected))) return 'stale'
+  if (all.some((entry) => !runsExpected(spec, entry, { entry: expected, windows }))) return 'stale'
   return spec.events.every((event) => ownEntries(spec, listOf(spec, hooks, event)).length > 0) ? 'yes' : 'partial'
 }
 
 /** The hook command an install writes for `host`; Claude Code's has never carried --host, and no --host still means claude-code. */
 export function hookTarget(env: InstallEnv, host: AgentId): HookTarget {
-  return { entry: entryCommand(env.mode, 'hook', env.dataDir, host === 'claude-code' ? undefined : host) }
+  return { entry: entryCommand(env.mode, 'hook', env.dataDir, host === 'claude-code' ? undefined : host), windows: platformOf(env).os === 'windows' }
 }
 
 /** Our entries merged in; a re-run with them in place changes nothing. */
@@ -284,7 +289,8 @@ export function jsonHooksUninstallActions(env: InstallEnv, path: string, spec: J
 export function jsonHooksState(env: InstallEnv, path: string, spec: JsonHooksSpec, host: AgentId): WiringState | 'unknown' {
   try {
     const file = readPlainJsonObject(path)
-    return file.exists ? inspectJsonHooks(spec, file.value, hookTarget(env, host).entry) : 'no'
+    const target = hookTarget(env, host)
+    return file.exists ? inspectJsonHooks(spec, file.value, target.entry, target.windows) : 'no'
   } catch {
     return 'unknown'
   }

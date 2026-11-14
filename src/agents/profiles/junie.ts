@@ -14,22 +14,19 @@
 //   junie.jetbrains.com/docs/environment-variables.html (JUNIE_HOME overrides
 //     the default ~/.junie; whether it must exist is not said, so it is held
 //     to Codex's CODEX_HOME rule)
-// On Windows Junie runs a hook through `cmd /c`, where the single-quoted
-// command an install writes does not quote; until that is checked against a
-// real run, Windows gets no hooks and search only.
+// On Windows the command is written for cmd (hook-shell.ts): the hooks page,
+// checked 2026-11-14, says of `command`, "Executed via `sh -c` on macOS/Linux
+// and `cmd /c` on Windows."
 
 import { join } from 'node:path'
 import { resolveAgentHome } from '../../install/codex-home'
-import { type InstallEnv, platformOf } from '../../install/env'
-import type { OsName } from '../../platform/platform'
+import type { InstallEnv } from '../../install/env'
 import { AGENT_HOOK_TIMEOUT_S, type AgentHome, type JsonAgentFile, jsonAgentWiring, mcpServersFile } from '../families/json-agent'
-import { type AgentProfile, type Capabilities, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
+import type { AgentProfile, Capabilities } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: false, prompt: true }, search: true, observer: false }
-const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false }
 
 const LIMIT = 'Junie documents a session id only on session start and prompts; events without one are not recorded'
-const WINDOWS_LIMIT = 'no hooks on Windows: Junie runs them through cmd /c, which the hook command is not yet checked against'
 
 export const JUNIE_HOME: AgentHome = {
   variable: 'JUNIE_HOME',
@@ -43,12 +40,9 @@ function junieDir(env: InstallEnv): string {
   return home.ok ? home.dir : join(env.homeDir, '.junie')
 }
 
-const onWindows = (os: OsName): boolean => os === 'windows'
-
 export const JUNIE_FILES: readonly JsonAgentFile[] = [
   {
     path: (env) => join(junieDir(env), 'config.json'),
-    when: (env) => !onWindows(platformOf(env).os),
     hooks: {
       shape: 'command',
       grouped: true,
@@ -57,6 +51,7 @@ export const JUNIE_FILES: readonly JsonAgentFile[] = [
       events: ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop', 'SessionEnd'],
       hooksKey: 'hooks',
       timeoutS: AGENT_HOOK_TIMEOUT_S,
+      windowsShell: 'cmd',
     },
   },
   mcpServersFile((env) => join(junieDir(env), 'mcp', 'mcp.json')),
@@ -67,9 +62,9 @@ export const JUNIE_PROFILE: AgentProfile = {
   name: 'Junie',
   family: 'claude-style',
   verification: 'docs',
-  capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),
-  limit: (os) => (onWindows(os) ? WINDOWS_LIMIT : LIMIT),
-  shortLimit: (os) => (os === 'windows' ? SHORT_WINDOWS_HOOKS_UNCHECKED : 'Events without a session id are not recorded; the docs show one only on session start and prompts.'),
+  capabilities: () => CAPABILITIES,
+  limit: () => LIMIT,
+  shortLimit: () => 'Events without a session id are not recorded; the docs show one only on session start and prompts.',
   detection: { binaries: ['junie'] },
   wiring: jsonAgentWiring('junie', JUNIE_FILES, JUNIE_HOME),
   manualSteps: () => [],

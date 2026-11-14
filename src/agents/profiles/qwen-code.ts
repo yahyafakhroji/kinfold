@@ -11,35 +11,30 @@
 // what an absent matcher does, so the tool events carry "*". Neither page
 // shows a stdin example, so test/fixtures/qwen-code/ holds payloads built from
 // the documented fields (docs-constructed-*.json).
-// Qwen Code is a Gemini CLI fork, and Gemini CLI runs hooks through PowerShell
-// on Windows, where the single-quoted command an install writes would be a
-// string, not a call; until that is checked against a real run, Windows gets
-// no hooks and search only.
+// On Windows Qwen Code picks the hook's shell from its surroundings (Git Bash
+// under MSYS, else ComSpec, so cmd or PowerShell), which no one command string
+// suits. The hooks page, checked 2026-11-14, documents a `shell` field,
+// "bash" | "powershell", and the source runs a hook that names powershell as
+// `powershell -Command <command>`:
+//   github.com/QwenLM/qwen-code/blob/main/packages/core/src/hooks/hookRunner.ts
+//     (getShellConfigForHook)
+// So on Windows the entry names PowerShell as its shell and the command is
+// written for it (hook-shell.ts).
 
 import { join } from 'node:path'
-import { type InstallEnv, platformOf } from '../../install/env'
-import type { OsName } from '../../platform/platform'
+import type { InstallEnv } from '../../install/env'
 import type { McpEntrySpec } from '../families/mcp-entry'
 import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentWiring, stdioMcpEntry } from '../families/json-agent'
-import { type AgentProfile, type Capabilities, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
+import type { AgentProfile, Capabilities } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: true }, search: true, observer: false }
-const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false }
-
-const WINDOWS_LIMIT = 'no hooks on Windows: Qwen Code, a Gemini CLI fork, may run them through PowerShell, which the hook command is not yet checked against'
-
-const onWindows = (os: OsName): boolean => os === 'windows'
-
 const settingsPath = (env: InstallEnv): string => join(env.homeDir, '.qwen', 'settings.json')
 
 const MCP: McpEntrySpec = { path: settingsPath, key: 'mcpServers', entry: stdioMcpEntry() }
 
-// The same file twice: hooks and MCP off Windows, MCP alone on it. Uninstall
-// clears both out of it once, whichever OS installed.
 export const QWEN_CODE_FILES: readonly JsonAgentFile[] = [
   {
     path: settingsPath,
-    when: (env) => !onWindows(platformOf(env).os),
     hooks: {
       shape: 'command',
       grouped: true,
@@ -50,10 +45,11 @@ export const QWEN_CODE_FILES: readonly JsonAgentFile[] = [
       timeoutS: AGENT_HOOK_TIMEOUT_S,
       asyncEvents: ['PostToolUse', 'PostToolUseFailure'],
       matchers: { PostToolUse: '*', PostToolUseFailure: '*' },
+      windowsShell: 'powershell',
+      windowsEntry: { shell: 'powershell' },
     },
     mcp: MCP,
   },
-  { path: settingsPath, when: (env) => onWindows(platformOf(env).os), mcp: MCP },
 ]
 
 export const QWEN_CODE_PROFILE: AgentProfile = {
@@ -61,9 +57,9 @@ export const QWEN_CODE_PROFILE: AgentProfile = {
   name: 'Qwen Code',
   family: 'claude-style',
   verification: 'docs',
-  capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),
-  limit: (os) => (onWindows(os) ? WINDOWS_LIMIT : null),
-  shortLimit: (os) => (os === 'windows' ? SHORT_WINDOWS_HOOKS_UNCHECKED : null),
+  capabilities: () => CAPABILITIES,
+  limit: () => null,
+  shortLimit: () => null,
   detection: { binaries: ['qwen'] },
   wiring: jsonAgentWiring('qwen-code', QWEN_CODE_FILES),
   manualSteps: () => [],

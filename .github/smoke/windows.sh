@@ -5,7 +5,8 @@
 # write, and the smoke's shim folder from the user PATH. setup also runs the
 # live tests against the real Credential Manager, BitLocker, access list and
 # Task Scheduler, which the smoke itself reaches only through install and
-# status.
+# status, and the one that runs each agent's hook command through PowerShell
+# and cmd, which no agent on the runner does.
 #
 # Usage: bash .github/smoke/windows.sh setup|cleanup
 set -eo pipefail
@@ -45,13 +46,14 @@ install_pywinpty() {
 run_live_tests() {
   KINFOLD_SQLITE3MC_LIB=not-opened-by-the-live-tests \
   KINFOLD_TEST_CREDENTIAL_MANAGER=1 KINFOLD_TEST_WINDOWS_DISK=1 KINFOLD_TEST_WINDOWS_ACL=1 \
-  KINFOLD_TEST_WINDOWS_TASK=1 KINFOLD_TEST_WINDOWS_SHIM=1 \
+  KINFOLD_TEST_WINDOWS_TASK=1 KINFOLD_TEST_WINDOWS_SHIM=1 KINFOLD_TEST_WINDOWS_HOOK_SHELL=1 \
     bun test \
       ./src/secrets/stores/credential-manager.live.test.ts \
       ./src/install/disk/bitlocker.live.test.ts \
       ./src/install/access/windows-acl.live.test.ts \
       ./src/install/service/scheduled-task-service.live.test.ts \
-      ./src/observer/runners/windows-shim.live.test.ts
+      ./src/observer/runners/windows-shim.live.test.ts \
+      ./src/agents/windows-hook-command.live.test.ts
 }
 
 remove_task() {

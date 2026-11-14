@@ -7,6 +7,13 @@
 //   Cursor: { version: 1, hooks: { event: [ { command, timeout, matcher? } ] } }
 // Codex has no wildcard matcher documented, so our groups carry none, which
 // matches every tool. Codex caps SessionEnd hooks at 3 s.
+// On Windows the string is written for the shell each host runs it through
+// (agents/families/hook-shell.ts), checked 2026-11-14:
+//   Codex:  %COMSPEC% /C "<command>", from build_command in
+//           github.com/openai/codex/blob/main/codex-rs/hooks/src/engine/command_runner.rs
+//           (the hooks page, learn.chatgpt.com/docs/hooks, names no shell)
+//   Cursor: "On Windows, the desktop app runs hook commands through
+//           PowerShell" (cursor.com/docs/agent/hooks)
 
 import {
   type HookTarget,
@@ -43,6 +50,7 @@ export const CODEX_HOOK_SPEC: CommandHookSpec = {
   timeoutS: HOOK_TIMEOUT_S,
   timeoutsS: { SessionEnd: CODEX_SESSION_END_TIMEOUT_S },
   asyncEvents: ['PostToolUse'],
+  windowsShell: 'cmd',
 }
 
 export const CURSOR_HOOK_SPEC: CommandHookSpec = {
@@ -54,6 +62,7 @@ export const CURSOR_HOOK_SPEC: CommandHookSpec = {
   grouped: false,
   timeoutS: HOOK_TIMEOUT_S,
   version: 1,
+  windowsShell: 'powershell',
 }
 
 export type HostHooksMerge = JsonHooksMerge
@@ -86,6 +95,6 @@ export function removeHostHooks(spec: CommandHookSpec, settings: Settings): { se
  * yes: every event runs the expected entry; stale: some entry of ours runs
  * another script, program or data folder; partial: some events missing.
  */
-export function inspectHostHooks(spec: CommandHookSpec, settings: Settings, expected: EntryCommand): WiringState {
-  return inspectJsonHooks(spec, settings, expected)
+export function inspectHostHooks(spec: CommandHookSpec, settings: Settings, expected: EntryCommand, windows = false): WiringState {
+  return inspectJsonHooks(spec, settings, expected, windows)
 }

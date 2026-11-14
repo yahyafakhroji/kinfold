@@ -18,23 +18,21 @@
 // folder at $COPILOT_HOME/hooks/ and the CLI reference keeps the user's files
 // there, so both files follow it. The docs don't say whether the folder must
 // exist; it is held to Codex's CODEX_HOME rule.
-// The hooks reference says a command runs in PowerShell on Windows, where the
-// single-quoted command an install writes would not parse; until that is
-// checked against a real run, Windows gets no hooks and search only.
+// On Windows the command is written for PowerShell (hook-shell.ts). The hooks
+// reference, checked 2026-11-14, gives an entry `bash` ("Shell command for
+// Unix.") and `powershell` ("Shell command for Windows."), with `command` the
+// "Cross-platform fallback. Copied to both `bash` and `powershell` when those
+// fields are absent". It also has a shell-free `exec` with `args`, "Only
+// supported in Copilot CLI"; VS Code reads the same hooks folder, so the entry
+// stays a `command` every surface runs.
 
 import { join } from 'node:path'
 import { resolveAgentHome } from '../../install/codex-home'
-import { type InstallEnv, platformOf } from '../../install/env'
-import type { OsName } from '../../platform/platform'
+import type { InstallEnv } from '../../install/env'
 import { AGENT_HOOK_TIMEOUT_S, type AgentHome, type JsonAgentFile, jsonAgentWiring, mcpServersFile } from '../families/json-agent'
-import { type AgentProfile, type Capabilities, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
+import type { AgentProfile, Capabilities } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: false }, search: true, observer: false }
-const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false }
-
-const WINDOWS_LIMIT = 'no hooks on Windows: Copilot runs them in PowerShell, which the hook command is not yet checked against'
-
-const onWindows = (os: OsName): boolean => os === 'windows'
 
 export const COPILOT_HOME: AgentHome = {
   variable: 'COPILOT_HOME',
@@ -51,7 +49,6 @@ function copilotDir(env: InstallEnv): string {
 export const COPILOT_FILES: readonly JsonAgentFile[] = [
   {
     path: (env) => join(copilotDir(env), 'hooks', 'kinfold.json'),
-    when: (env) => !onWindows(platformOf(env).os),
     // Kinfold's own file: once our hooks are out, only the version it carries is left.
     removeWhenOnly: ['version'],
     hooks: {
@@ -63,6 +60,7 @@ export const COPILOT_FILES: readonly JsonAgentFile[] = [
       events: ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd'],
       hooksKey: 'hooks',
       timeoutS: AGENT_HOOK_TIMEOUT_S,
+      windowsShell: 'powershell',
     },
   },
   mcpServersFile((env) => join(copilotDir(env), 'mcp-config.json'), { type: 'local', tools: ['*'] }),
@@ -73,9 +71,9 @@ export const COPILOT_PROFILE: AgentProfile = {
   name: 'GitHub Copilot',
   family: 'claude-style',
   verification: 'docs',
-  capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),
-  limit: (os) => (onWindows(os) ? WINDOWS_LIMIT : null),
-  shortLimit: (os) => (os === 'windows' ? SHORT_WINDOWS_HOOKS_UNCHECKED : null),
+  capabilities: () => CAPABILITIES,
+  limit: () => null,
+  shortLimit: () => null,
   detection: { binaries: ['copilot'] },
   wiring: jsonAgentWiring('copilot', COPILOT_FILES, COPILOT_HOME),
   manualSteps: () => [],

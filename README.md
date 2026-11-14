@@ -58,15 +58,15 @@ What Kinfold wires for each agent on macOS and Linux. **Observer** is `yes` when
 | OpenCode | yes | no | yes | yes | live | same |
 | Codex | yes | start, prompt | yes | yes | live | same |
 | Cursor | yes | start | yes | no | live | same |
-| Gemini CLI | yes | start, prompt | yes | no | docs | search only <sup>1</sup> |
-| Qwen Code | yes | start, prompt | yes | no | docs | search only <sup>1</sup> |
+| Gemini CLI | yes | start, prompt | yes | no | docs | same |
+| Qwen Code | yes | start, prompt | yes | no | docs | same |
 | Factory Droid | yes | start, prompt | yes | no | docs | search only <sup>1</sup> |
 | Devin <sup>2</sup> | yes | start, prompt | yes | no | docs | search only <sup>1</sup> |
 | Kilo Code <sup>3</sup> | yes | no | yes | no | docs | same <sup>4</sup> |
 | Cline <sup>5</sup> | yes | prompt | yes | no | docs | search only <sup>6</sup> |
-| GitHub Copilot | yes | start | yes | no | docs | search only <sup>1</sup> |
+| GitHub Copilot | yes | start | yes | no | docs | same |
 | Antigravity <sup>7</sup> | yes | start | yes | no | docs | search only <sup>1</sup> |
-| Junie <sup>8</sup> | yes | prompt | yes | no | docs | search only <sup>1</sup> |
+| Junie <sup>8</sup> | yes | prompt | yes | no | docs | same |
 | Kiro <sup>9</sup> | yes | no | yes | no | docs | search only <sup>1</sup> |
 | Amp <sup>10</sup> | yes | start, prompt | yes | no | docs | same |
 | Kimi Code <sup>11</sup> | yes | prompt | yes | no | docs | search only <sup>1</sup> |

@@ -5,7 +5,8 @@ import { CLAUDE_JSON_HOOKS, mergeSamHooks, removeSamHooks } from '../../install/
 import { entryCommand } from '../../install/entry'
 import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, mergeHostHooks, removeHostHooks } from '../../install/host-hooks'
 import { type FakeWorld, createWorld } from '../../install/test-support'
-import { type JsonHooksSpec, inspectJsonHooks, jsonHooksActions, jsonHooksUninstallActions, mergeJsonHooks, removeJsonHooks } from './json-hooks'
+import { cmdCommand, powershellCommand } from './hook-shell'
+import { type JsonHooksSpec, hookTarget, inspectJsonHooks, jsonHookItem, jsonHooksActions, jsonHooksUninstallActions, mergeJsonHooks, removeJsonHooks, shellCommand } from './json-hooks'
 import { assertWriterContract, fileWriter } from './writer-contract.test-support'
 
 let worlds: FakeWorld[] = []
@@ -132,4 +133,53 @@ test('the claude-code host keeps the command without --host, as today', () => {
   const [write] = jsonHooksActions(w.env, path, CLAUDE_JSON_HOOKS, 'claude-code').filter((action) => action.kind === 'write')
   const text = write?.kind === 'write' ? write.content : ''
   expect(JSON.parse(text).hooks.Stop[0].hooks[0].args).toEqual(entryCommand(w.env.mode, 'hook', w.env.dataDir).args)
+})
+
+const WIN_ENTRY = { command: "C:\\Users\\O'Brien\\.kinfold\\bin\\kinfold.exe", args: ['--data-dir', "C:\\Users\\O'Brien\\.kinfold", 'hook', '--host', 'gemini-cli'] }
+const POWERSHELL: JsonHooksSpec = { ...GEMINI, windowsShell: 'powershell' }
+const CMD_SPEC: JsonHooksSpec = { shape: 'command', grouped: false, events: ['Stop'], hooksKey: 'hooks', timeoutS: 10, host: 'gemini-cli', windowsShell: 'cmd' }
+
+test('on Windows the command is written for the shell the agent runs it through', () => {
+  const onWindows = { entry: WIN_ENTRY, windows: true }
+  expect(jsonHookItem(POWERSHELL, 'SessionStart', onWindows)).toEqual({ hooks: [{ type: 'command', command: powershellCommand(WIN_ENTRY), timeout: 10_000 }] })
+  expect(jsonHookItem(CMD_SPEC, 'Stop', onWindows)).toEqual({ command: cmdCommand(WIN_ENTRY), timeout: 10 })
+  // Off Windows, and for an agent with no documented Windows shell, the POSIX string stays.
+  expect(jsonHookItem(POWERSHELL, 'SessionStart', { entry: WIN_ENTRY })).toEqual({ hooks: [{ type: 'command', command: shellCommand(WIN_ENTRY), timeout: 10_000 }] })
+  expect(jsonHookItem(GEMINI, 'SessionStart', onWindows)).toEqual({ hooks: [{ type: 'command', command: shellCommand(WIN_ENTRY), timeout: 10_000 }] })
+})
+
+test('windowsEntry adds its fields to the entry on Windows only', () => {
+  const spec: JsonHooksSpec = { ...POWERSHELL, windowsEntry: { shell: 'powershell' } }
+  expect(jsonHookItem(spec, 'SessionStart', { entry: WIN_ENTRY, windows: true })).toEqual({
+    hooks: [{ type: 'command', command: powershellCommand(WIN_ENTRY), timeout: 10_000, shell: 'powershell' }],
+  })
+  expect(jsonHookItem(spec, 'SessionStart', { entry: WIN_ENTRY })).toEqual({ hooks: [{ type: 'command', command: shellCommand(WIN_ENTRY), timeout: 10_000 }] })
+})
+
+test('a Windows-form entry is ours: a re-run changes nothing, state reads yes and uninstall takes it out', () => {
+  for (const spec of [POWERSHELL, CMD_SPEC]) {
+    const target = { entry: WIN_ENTRY, windows: true }
+    const merged = mergeJsonHooks(spec, { theme: 'x' }, target)
+    expect(mergeJsonHooks(spec, merged.settings, target).changed).toBe(false)
+    expect(inspectJsonHooks(spec, merged.settings, WIN_ENTRY, true)).toBe('yes')
+    expect(removeJsonHooks(spec, merged.settings)).toEqual({ settings: { theme: 'x' }, removed: spec.events.length })
+  }
+})
+
+test('a POSIX string left by an older install reads stale on Windows and is replaced, not added to', () => {
+  const old = mergeJsonHooks(POWERSHELL, {}, { entry: WIN_ENTRY }).settings
+  expect(inspectJsonHooks(POWERSHELL, old, WIN_ENTRY, true)).toBe('stale')
+  expect(inspectJsonHooks(POWERSHELL, old, WIN_ENTRY)).toBe('yes')
+  const merged = mergeJsonHooks(POWERSHELL, old, { entry: WIN_ENTRY, windows: true })
+  expect(merged.replaced).toEqual([...POWERSHELL.events])
+  expect(merged.added).toEqual([])
+  expect(inspectJsonHooks(POWERSHELL, merged.settings, WIN_ENTRY, true)).toBe('yes')
+})
+
+test('hookTarget says whether the env is Windows', () => {
+  const win = createWorld({ platform: 'win32' })
+  const mac = createWorld()
+  worlds.push(win, mac)
+  expect(hookTarget(win.env, 'copilot').windows).toBe(true)
+  expect(hookTarget(mac.env, 'copilot').windows).toBe(false)
 })

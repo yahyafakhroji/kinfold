@@ -8,7 +8,9 @@ import type { InstallEnv } from '../../install/env'
 import { MCP_SERVER_NAME } from '../../install/mcp-config'
 import { type FakeWorld, createWorld } from '../../install/test-support'
 import { MCP_HOST_ENV } from '../../mcp/read-reporter'
+import { cmdCommand, powershellCommand } from '../families/hook-shell'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions } from '../families/json-agent'
+import { hookTarget } from '../families/json-hooks'
 import { assertWriterContract, fileWriter } from '../families/writer-contract.test-support'
 import { hookSpecFor } from '../hook-specs'
 import { profileOf } from '../install-profiles'
@@ -211,14 +213,18 @@ describe('junie', () => {
 
   test('junie: JUNIE_HOME moves both files, and an unusable one skips Junie with the reason', () => expectHomeOverride('junie', 'junieHomeEnv', 'JUNIE_HOME'))
 
-  test('junie: on Windows, no hooks are planned and the capability line says why', async () => {
+  test('junie: on Windows, the hooks are written for cmd, which Junie runs them through', async () => {
     const junie = profile('junie')
-    expect(junie.capabilities('windows')).toEqual({ capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false })
-    expect(capabilityLine(junie, 'windows')).toStartWith('search only (no hooks on Windows')
+    expect(junie.capabilities('windows')).toEqual(junie.capabilities('macos'))
+    expect(junie.limit('windows')).toBe(junie.limit('macos'))
     const w = createWorld({ platform: 'win32' })
     worlds.push(w)
-    const writes = (await junie.wiring.install(w.env)).flatMap((action) => (action.kind === 'write' ? [action.path] : []))
-    expect(writes).toEqual([join(w.env.homeDir, '.junie', 'mcp', 'mcp.json')])
+    const writes = (await junie.wiring.install(w.env)).flatMap((action) => (action.kind === 'write' ? [action] : []))
+    expect(writes.map((write) => write.path)).toEqual([join(w.env.homeDir, '.junie', 'config.json'), join(w.env.homeDir, '.junie', 'mcp', 'mcp.json')])
+    const json = JSON.parse(writes[0]?.content ?? '{}')
+    expect(json.hooks.Stop[0].hooks[0]).toEqual({ type: 'command', command: cmdCommand(hookTarget(w.env, 'junie').entry), timeout: 10 })
+    applyActions(await junie.wiring.install(w.env))
+    expect(junie.wiring.state(w.env)).toBe('yes')
   })
 })
 
@@ -283,16 +289,46 @@ describe('the five profiles', () => {
 })
 
 describe('on Windows', () => {
-  // The hook command is POSIX single-quoted; none of these agents documents a POSIX shell on Windows.
+  test('copilot: the hooks are written for PowerShell, which Copilot runs them through', async () => {
+    const copilot = profile('copilot')
+    expect(copilot.capabilities('windows')).toEqual(copilot.capabilities('macos'))
+    expect(copilot.limit('windows')).toBeNull()
+    const w = createWorld({ platform: 'win32' })
+    worlds.push(w)
+    const writes = (await copilot.wiring.install(w.env)).flatMap((action) => (action.kind === 'write' ? [action] : []))
+    expect(writes.map((write) => write.path)).toEqual([join(w.env.homeDir, '.copilot', 'hooks', 'kinfold.json'), join(w.env.homeDir, '.copilot', 'mcp-config.json')])
+    const json = JSON.parse(writes[0]?.content ?? '{}')
+    expect(json.hooks.Stop).toEqual([{ command: powershellCommand(hookTarget(w.env, 'copilot').entry), timeout: 10 }])
+    applyActions(await copilot.wiring.install(w.env))
+    expect(copilot.wiring.state(w.env)).toBe('yes')
+  })
+
+  test('qwen-code: the hooks are written for PowerShell and name it as their shell', async () => {
+    const qwen = profile('qwen-code')
+    expect(qwen.capabilities('windows')).toEqual(qwen.capabilities('macos'))
+    expect(qwen.limit('windows')).toBeNull()
+    const w = createWorld({ platform: 'win32' })
+    worlds.push(w)
+    const writes = (await qwen.wiring.install(w.env)).flatMap((action) => (action.kind === 'write' ? [action] : []))
+    expect(writes.map((write) => write.path)).toEqual([join(w.env.homeDir, '.qwen', 'settings.json')])
+    const json = JSON.parse(writes[0]?.content ?? '{}')
+    expect(json.hooks.Stop).toEqual([{ hooks: [{ type: 'command', command: powershellCommand(hookTarget(w.env, 'qwen-code').entry), timeout: 10, shell: 'powershell' }] }])
+    expect(json.mcpServers[MCP_SERVER_NAME].env).toEqual({ [MCP_HOST_ENV]: 'qwen-code' })
+    // Off Windows Qwen Code picks bash itself, so the entry names no shell.
+    const mac = createWorld()
+    worlds.push(mac)
+    const [macWrite] = (await qwen.wiring.install(mac.env)).flatMap((action) => (action.kind === 'write' ? [action] : []))
+    expect(JSON.parse(macWrite?.content ?? '{}').hooks.Stop[0].hooks[0].shell).toBeUndefined()
+  })
+
+  // Neither agent's docs name the shell a hook runs through on Windows, so the POSIX command is not written there.
   const searchOnly: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false }
-  const mcpPaths = (home: string): Record<'copilot' | 'qwen-code' | 'factory-droid' | 'devin', string> => ({
-    copilot: join(home, '.copilot', 'mcp-config.json'),
-    'qwen-code': join(home, '.qwen', 'settings.json'),
+  const mcpPaths = (home: string): Record<'factory-droid' | 'devin', string> => ({
     'factory-droid': join(home, '.factory', 'mcp.json'),
     devin: join(home, 'AppData', 'Roaming', 'devin', 'mcp_config.json'),
   })
 
-  for (const id of ['copilot', 'qwen-code', 'factory-droid', 'devin'] as const) {
+  for (const id of ['factory-droid', 'devin'] as const) {
     test(`${id}: on Windows, no hooks are planned, the MCP entry is, and the capability line says why`, async () => {
       const agent = profile(id)
       expect(agent.capabilities('windows')).toEqual(searchOnly)
