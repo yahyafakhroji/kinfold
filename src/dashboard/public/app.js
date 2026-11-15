@@ -6,13 +6,14 @@
 import { api, errorText } from './api.js'
 import { h, notice, replaceContent } from './dom.js'
 import { formatHash, parseHash } from './hash.js'
+import { renderBackup } from './page-backup.js'
 import { renderData } from './page-data.js'
 import { renderMemory } from './page-memory.js'
 import { renderMetrics } from './page-metrics.js'
 import { renderModels } from './page-models.js'
 import { showUpdateBanner } from './update-banner.js'
 
-const PAGES = { models: renderModels, memory: renderMemory, data: renderData, metrics: renderMetrics }
+const PAGES = { models: renderModels, memory: renderMemory, data: renderData, metrics: renderMetrics, backup: renderBackup }
 let generation = 0
 
 /** @param {import('./hash.js').HashState} state */

@@ -46,7 +46,7 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
 }
 
 export const USAGE = [
-  'usage: kinfold <install|uninstall|status|update|size|retention|scan|findings|purge|dashboard|encrypt|decrypt|rekey|key|hook|mcp|daemon|observe> [--data-dir <path>] [--version] [flags]',
+  'usage: kinfold <install|uninstall|status|update|size|retention|scan|findings|purge|dashboard|backup|restore|encrypt|decrypt|rekey|key|hook|mcp|daemon|observe> [--data-dir <path>] [--version] [flags]',
   '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>]...',
   '             [--skip-check] [--replace-credential] [--credential-stdin] [--takeover]',
   '             [--no-encrypt] [--port <1024-65535>] [--no-update-check]',
@@ -61,11 +61,13 @@ export const USAGE = [
   '  scan',
   '  findings   [--all] [--redact <id> | --purge <id>]',
   '  purge      --session <id> | --project <key> | --host <host> | --observation <id> | --before <iso> [--after <iso>] [--dry-run]',
+  '  backup     <file>   write the memory to one file, still encrypted; capture keeps running',
+  '  restore    <file>   replace the memory with a backup; asks for its recovery code (typed, or on stdin)',
   '  encrypt    convert memory.db to an encrypted file; shows a recovery code to keep',
   '  decrypt    store memory.db in plaintext again and delete its key',
   '  rekey      give memory.db a new key and a new recovery code',
   '  key show-recovery | key recover   show the recovery code, or put the key back from one (on stdin or typed)',
-  '  key resume finish or undo a kinfold encrypt, decrypt or rekey that was cut short',
+  '  key resume finish or undo a kinfold encrypt, decrypt, rekey or restore that was cut short',
   '  hook       [--host codex|cursor]   record one host hook payload from stdin, Claude Code by default',
   '  mcp        answer the MCP stdio protocol on stdin and stdout',
   '  daemon     run the local daemon on loopback',
@@ -177,6 +179,19 @@ function purgeArgs(flags: readonly DataFlag[]): Parsed<DataArgs> {
 // ---- Dashboard: `kinfold dashboard [--print]` -------------------------------------
 // Asks the daemon for a one-time login code and opens (or prints) the login
 // link. Its only flag is --print.
+
+export interface BackupArgs {
+  command: 'backup' | 'restore'
+  file: string
+}
+
+/** Null when argv is not `backup` or `restore`, so every other command parses exactly as before. Each takes one file and no flags. */
+export function parseBackupArgs(argv: readonly string[]): Parsed<BackupArgs> | null {
+  const [command, file, ...rest] = argv
+  if (command !== 'backup' && command !== 'restore') return null
+  if (file === undefined || file === '' || file.startsWith('--') || rest.length > 0) return { ok: false, error: `${command} takes one file\n${USAGE}` }
+  return { ok: true, value: { command, file } }
+}
 
 export type KeyArgs = { command: 'encrypt' | 'decrypt' | 'rekey' | 'show-recovery' | 'recover' | 'resume' }
 

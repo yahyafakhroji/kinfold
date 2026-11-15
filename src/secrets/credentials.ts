@@ -14,13 +14,15 @@ export { KEYCHAIN_SERVICE }
 export const DB_KEY_REF = 'db-key'
 /** The new key while `kinfold rekey` runs; it replaces db-key once the store is checked. */
 export const DB_KEY_NEXT_REF = 'db-key-next'
+/** The key of a store that `kinfold restore` replaced and kept beside the restored one. */
+export const DB_KEY_REPLACED_REF = 'db-key-replaced'
 
 /**
  * Entries Kinfold keeps for itself. An observer setting may never name one: the
  * observer would send the value to its provider as an API key, and
  * `kinfold uninstall --remove-credentials` would delete it with the observer keys.
  */
-export const SYSTEM_CREDENTIAL_REFS: readonly string[] = ['hmac-master', 'hmac-legacy', DB_KEY_REF, DB_KEY_NEXT_REF]
+export const SYSTEM_CREDENTIAL_REFS: readonly string[] = ['hmac-master', 'hmac-legacy', DB_KEY_REF, DB_KEY_NEXT_REF, DB_KEY_REPLACED_REF]
 
 export function isSystemCredentialRef(ref: string): boolean {
   return SYSTEM_CREDENTIAL_REFS.includes(ref)

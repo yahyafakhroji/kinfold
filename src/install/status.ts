@@ -1,8 +1,10 @@
 // `kinfold status`: read-only. Hosts found and wired (yes/no/stale/partial), the
 // LaunchAgent, daemon health, each host's observer and where it came from,
 // the key store and its entries (metadata lookups only, never the value), the HMAC keys (master and legacy entries, sub-key epochs, leftover plain-text keys), data dir modes, and
-// duplicate project wiring. It creates nothing, not even the data dir.
+// the time of the last backup, and duplicate project wiring. It creates nothing,
+// not even the data dir.
 
+import { readBackupRecord } from '../backup/record'
 import type { EffectiveSettings } from '../daemon/settings-route'
 import { OPENROUTER_CREDENTIAL_REF, providerTakesKey } from '../observer/settings'
 import { getObserverSettings } from './daemon-client'
@@ -124,6 +126,12 @@ export function updateLine(env: InstallEnv, running: string = VERSION): string {
   return `update: none known (${state.checkedAt === null ? 'never checked' : `last checked ${new Date(state.checkedAt).toISOString()}`})`
 }
 
+/** When the last backup was made, from backup.json; null when none was. Stated only: an old backup is the person's call. */
+export function backupLine(env: InstallEnv): string | null {
+  const record = readBackupRecord(env.dataDir)
+  return record === null ? null : `backup: last made ${new Date(record.lastBackupAt).toISOString()}`
+}
+
 export async function status(env: InstallEnv, running: string = VERSION, profiles: ProfileTable = INSTALL_PROFILES): Promise<number> {
   let wsl: WslStatus | null = null
   if (platformOf(env).wsl) {
@@ -147,6 +155,7 @@ export async function status(env: InstallEnv, running: string = VERSION, profile
     ...keyStoreLines(env, observer.refs),
     ...hmacStatusLines(env),
     ...(await dataDirAccessFor(env).statusLines(env.dataDir)),
+    ...[backupLine(env)].filter((line) => line !== null),
     updateLine(env, running),
     ...(duplicates.length === 0 ? ['duplicate wiring: none in this directory'] : duplicateWarning(duplicates)),
   ]

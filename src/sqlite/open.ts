@@ -54,7 +54,7 @@ export interface StoreOpenOptions extends PlainOpenOptions {
   keyStoreDeps?: KeyStoreDeps
 }
 
-/** While this file sits in the data dir, `kinfold encrypt|decrypt|rekey` is changing memory.db and nothing else may open it. */
+/** While this file sits in the data dir, `kinfold encrypt|decrypt|rekey|restore` is changing memory.db and nothing else may open it. */
 export const MAINTENANCE_FILE = 'maintenance'
 
 export function maintenancePath(dbPath: string): string {
@@ -109,7 +109,7 @@ export function plaintextBesideKey(path: string, keys: DbKeyStore = dbKeyStoreFo
 /** The store as its file says: plaintext, encrypted with the key, or (new) encrypted when a key exists. */
 export function openStoreFile(path: string, options: StoreOpenOptions = {}): Database {
   if (existsSync(maintenancePath(path))) {
-    throw new SqliteError('memory.db is being converted (kinfold encrypt, decrypt or rekey); try again when it finishes', 'SQLITE_BUSY', 5, 'maintenance')
+    throw new SqliteError('memory.db is being changed (kinfold encrypt, decrypt, rekey or restore); try again when it finishes', 'SQLITE_BUSY', 5, 'maintenance')
   }
   const env = options.env ?? process.env
   const state = fileState(path)

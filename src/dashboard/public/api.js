@@ -17,16 +17,16 @@ export class ApiError extends Error {
 }
 
 /**
- * @param {string} method
+ * One request and its answer: a 401 goes back to the login screen, any other
+ * failure throws the daemon's own error text.
  * @param {string} path
- * @param {unknown} [body]
+ * @param {RequestInit} init
  * @returns {Promise<unknown>}
  */
-export async function api(method, path, body) {
-  const headers = { 'x-sam-request': '1', ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }
+async function request(path, init) {
   let response
   try {
-    response = await fetch(path, { method, headers, credentials: 'same-origin', ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
+    response = await fetch(path, init)
   } catch {
     throw new ApiError(0, 'the daemon did not answer; is it running?')
   }
@@ -40,6 +40,28 @@ export async function api(method, path, body) {
     throw new ApiError(response.status, message)
   }
   return parsed
+}
+
+/**
+ * @param {string} method
+ * @param {string} path
+ * @param {unknown} [body]
+ * @returns {Promise<unknown>}
+ */
+export function api(method, path, body) {
+  const headers = { 'x-sam-request': '1', ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }
+  return request(path, { method, headers, credentials: 'same-origin', ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
+}
+
+/**
+ * Posts a file as the request body, as it is: the browser streams it, so a
+ * large backup is never held in this page's memory.
+ * @param {string} path
+ * @param {Blob} file
+ * @returns {Promise<unknown>}
+ */
+export function uploadFile(path, file) {
+  return request(path, { method: 'POST', headers: { 'x-sam-request': '1', 'content-type': 'application/octet-stream' }, credentials: 'same-origin', body: file })
 }
 
 /** @param {unknown} error */
