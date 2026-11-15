@@ -34,7 +34,7 @@ export interface ContextRouteDeps {
   /** Monotonic ms for the duration. */
   clock?: () => number
   /** Where update-check.json lives and which version is running; absent means no update notice. */
-  updates?: { dataDir: string; version: string; envVars?: () => Readonly<Record<string, string | undefined>> }
+  updates?: { dataDir: string; version: string; envVars?: () => Readonly<Record<string, string | undefined>>; /** This daemon applies patch releases itself, so their notice is held back. */ canAutoUpdate?: boolean }
 }
 
 /** Past this the hook has likely aborted (it waits DAEMON_SHARE_MS, connection included). */
@@ -52,14 +52,21 @@ export function shownBudgetMs(host: string): number {
   return host === 'opencode' ? DAEMON_ONLY_TIMEOUT_MS : PROMPT_SERVE_BUDGET_MS
 }
 
-function updateNoticeFor(updates: ContextRouteDeps['updates'], request: ContextRequest, durationMs: number): UpdateNotice | null {
+function updateNoticeFor(updates: ContextRouteDeps['updates'], request: ContextRequest, durationMs: number, at: number): UpdateNotice | null {
   if (updates === undefined || request.channel === 'prompt') return null
   try {
     const env = updates.envVars?.() ?? process.env
-    return durationMs <= shownBudgetMs(request.host) ? takeNotice(updates.dataDir, request.host, updates.version, env) : peekNotice(updates.dataDir, request.host, updates.version, env)
+    const context = { capable: updates.canAutoUpdate === true, now: at }
+    return durationMs <= shownBudgetMs(request.host) ? takeNotice(updates.dataDir, request.host, updates.version, env, context) : peekNotice(updates.dataDir, request.host, updates.version, env, context)
   } catch {
     return null
   }
+}
+
+/** A release to install rides on the key every hook and plugin has always read; the newer kinds get their own, which an older reader ignores. */
+function noticeField(notice: UpdateNotice | null): Pick<ContextResult, 'updateNotice' | 'selfNotice'> {
+  if (notice === null) return {}
+  return notice.kind === undefined || notice.kind === 'available' ? { updateNotice: notice } : { selfNotice: notice }
 }
 
 export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest) => Promise<ContextResult> {
@@ -95,7 +102,7 @@ export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest
     if (typeof injectionId === 'number') recordRelatedServed(deps.db, prepared.relatedServed, { projectKey, host: request.host, occurredAt: at })
     deps.log(`context host=${request.host} channel=${request.channel} injection=${injectionId ?? 'none'} ids=${prepared.observationIds.length}`
       + ` tokens=${prepared.tokens} rebuilt=${prepared.rebuilt}${prepared.promptDetail} key_ms=${keyMs} ms=${durationMs}`)
-    const notice = updateNoticeFor(deps.updates, request, durationMs)
-    return { text: prepared.text, observationIds: prepared.observationIds, tokens: prepared.tokens, ...(prepared.relatedText !== '' ? { relatedText: prepared.relatedText } : {}), ...(notice !== null ? { updateNotice: notice } : {}) }
+    const notice = updateNoticeFor(deps.updates, request, durationMs, at)
+    return { text: prepared.text, observationIds: prepared.observationIds, tokens: prepared.tokens, ...(prepared.relatedText !== '' ? { relatedText: prepared.relatedText } : {}), ...noticeField(notice) }
   }
 }

@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { applyAction } from './plan'
-import { CANNOT_RUN_EXIT, KILL_GRACE_MS, NOT_FOUND_EXIT, createCommandRunner } from './system'
+import { HIDDEN_WINDOW, CANNOT_RUN_EXIT, KILL_GRACE_MS, NOT_FOUND_EXIT, createCommandRunner } from './system'
 import { type FakeWorld, createWorld } from './test-support'
 
 const CHILD_ENV = { PATH: '/usr/bin:/bin' }
@@ -51,4 +51,20 @@ test.skipIf(onWindows)('only a missing binary counts as not installed', async ()
   const action = { kind: 'command', argv: ['claude', 'mcp', 'remove', 'kinfold'], summary: 'remove', whenMissing: 'claude not found; skipped' } as const
   await expect(applyAction(world.env, action)).rejects.toThrow('claude mcp failed (exit 126)')
   expect(world.out.some((line) => line.includes('claude not found'))).toBe(false)
+})
+
+test('every command the installer runs is started with a hidden window', async () => {
+  // An automatic update has no console, and on Windows a console program started without one opens a window.
+  const seen: Record<string, unknown>[] = []
+  const spawn = ((argv: string[], options: Record<string, unknown>) => {
+    seen.push(options)
+    return Bun.spawn(argv, options as never)
+  }) as unknown as typeof Bun.spawn
+  const run = createCommandRunner({ PATH: process.env.PATH ?? '' }, spawn)
+  const result = await run({ argv: [process.execPath, '--version'], timeoutMs: 20_000 })
+  expect(result.exitCode).toBe(0)
+  expect(result.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/)
+  expect(seen).toHaveLength(1)
+  expect(seen[0]?.windowsHide).toBe(true)
+  expect(HIDDEN_WINDOW).toEqual({ windowsHide: true })
 })

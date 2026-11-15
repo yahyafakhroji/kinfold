@@ -28,3 +28,9 @@ test('INSTALL_CHANNEL and NO_UPDATE_CHECK never read a SAM_ name and never get a
   expect(readEnv({ KINFOLD_INSTALL_CHANNEL: 'npx' }, 'INSTALL_CHANNEL')).toBe('npx')
   expect(deprecationLines({ SAM_INSTALL_CHANNEL: 'npx', SAM_NO_UPDATE_CHECK: '1' })).toEqual([])
 })
+
+test('NO_AUTO_UPDATE is read under its KINFOLD_ name only', () => {
+  expect(readEnv({ KINFOLD_NO_AUTO_UPDATE: '1' }, 'NO_AUTO_UPDATE')).toBe('1')
+  expect(readEnv({ SAM_NO_AUTO_UPDATE: '1' }, 'NO_AUTO_UPDATE')).toBeUndefined()
+  expect(deprecationLines({ SAM_NO_AUTO_UPDATE: '1' })).toEqual([])
+})

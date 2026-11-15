@@ -18,6 +18,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { currentPlatform } from '../src/platform/platform'
+import { detachPlan, spawnDetached } from '../src/update/detach'
 import { SmokeError, loadSmokePlatform } from './smoke/platform'
 import type { SmokePlatform, SmokeResult, SmokeWorld } from './smoke/platform'
 
@@ -506,6 +507,50 @@ async function probeCompiledStatus(ctx: Run): Promise<void> {
   }
 }
 
+const DETACHED_INSTALL_TIMEOUT_MS = 300_000
+
+/**
+ * What an automatic update does on Windows, short of the download: a process
+ * started the way the daemon starts its updater (detached, hidden, no
+ * console) runs the program's `install --yes` with a hidden window, and that
+ * install runs its own commands (schtasks, powershell) hidden too. No runner
+ * can show whether a window flashed; this shows that hiding them does not
+ * stop the install, and that the service and the wiring are intact after it.
+ */
+async function detachedReinstall(ctx: Run): Promise<void> {
+  const { world, kinfold } = ctx
+  const step = 'detached install'
+  const wrapper = join(world.root, 'detached-install.ts')
+  const exitFile = join(world.root, 'detached-install.exit')
+  const logFile = join(world.root, 'detached-install.log')
+  writeFileSync(wrapper, [
+    "import { openSync, writeFileSync } from 'node:fs'",
+    'const [program, dataDir, logFile, exitFile] = process.argv.slice(2)',
+    "const log = openSync(logFile ?? '', 'a')",
+    "const child = Bun.spawn([program ?? '', '--data-dir', dataDir ?? '', 'install', '--yes'], { stdin: 'ignore', stdout: log, stderr: log, windowsHide: true })",
+    "writeFileSync(exitFile ?? '', String(await child.exited))",
+    '',
+  ].join('\n'))
+  const plan = detachPlan({ os: 'windows', program: process.execPath, args: [wrapper, world.program, world.dataDir, logFile, exitFile], envVars: world.env })
+  if (!plan.ok) throw new SmokeError(step, plan.reason)
+  spawnDetached(plan.argv, world.env)
+  const deadline = Date.now() + DETACHED_INSTALL_TIMEOUT_MS
+  while (!existsSync(exitFile)) {
+    if (Date.now() >= deadline) throw new SmokeError(step, `the detached install did not finish in ${DETACHED_INSTALL_TIMEOUT_MS / 1000} s\n${existsSync(logFile) ? cap(readFileSync(logFile, 'utf8')) : 'it wrote no output'}`)
+    await Bun.sleep(500)
+  }
+  const code = readFileSync(exitFile, 'utf8').trim()
+  const output = existsSync(logFile) ? readFileSync(logFile, 'utf8') : ''
+  if (code !== '0') throw new SmokeError(step, `the detached install exited ${code}\n${cap(output)}`)
+  process.stdout.write(`smoke: the detached install exited 0 and wrote ${output.split('\n').length} lines\n`)
+  const status = await kinfold(world, ['status'])
+  expectOk(step, status)
+  expectContains(step, status.stdout, /daemon \/health: up on 127\.0\.0\.1:37811\b/)
+  expectContains(step, status.stdout, /^service \(scheduled task\): config present; running: yes/m)
+  expectContains(step, status.stdout, /^ {2}claude-code: .*wired: yes/m)
+  expectContains(step, status.stdout, /^ {2}opencode: .*wired: yes/m)
+}
+
 async function steps(ctx: Run): Promise<void> {
   const { world, platform, kinfold, daemon } = ctx
   process.stdout.write('smoke: install\n')
@@ -532,6 +577,11 @@ async function steps(ctx: Run): Promise<void> {
   expectContains('status', status.stdout, /^ {2}opencode: .*wired: yes/m)
   expectContains('status', status.stdout, encryptedLine(platform))
   for (const line of platform.statusLines?.(world) ?? []) expectContains('status', status.stdout, line)
+
+  if (platform.name === 'windows') {
+    process.stdout.write('smoke: install from a detached process with no console\n')
+    await detachedReinstall(ctx)
+  }
 
   process.stdout.write('smoke: hook\n')
   const hook = await kinfold(world, ['hook', '--host', 'claude-code'], `${JSON.stringify({

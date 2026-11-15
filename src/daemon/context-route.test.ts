@@ -207,14 +207,14 @@ describe('update notices', () => {
     expect(readUpdateState(NOTICE_HOME()).notified).toEqual({})
     daemon = startDaemon({ dataDir: temp.dataDir, port: 0, version: '0.1.0', fallbackDrainMs: 60_000, log: () => undefined, updateCheck: { fetch: () => new Promise<Response>(() => undefined), envVars: () => ({ KINFOLD_NO_UPDATE_CHECK: '1' }) } })
     const banner = await fetch(url('/update'), { headers: { authorization: `Bearer ${token()}` } })
-    expect(await banner.json()).toEqual({ notice: null })
+    expect(await banner.json()).toMatchObject({ notice: null })
   })
 
   test('GET /update answers the banner and never marks anything shown', async () => {
     writeUpdateState(NOTICE_HOME(), { lastAttemptAt: 1, latestVersion: '0.2.0', checkedAt: 1, notified: {} })
     daemon = startDaemon({ dataDir: temp.dataDir, port: 0, version: '0.1.0', fallbackDrainMs: 60_000, log: () => undefined, updateCheck: { fetch: () => new Promise<Response>(() => undefined), envVars: () => ({}) } })
     const response = await fetch(url('/update'), { headers: { authorization: `Bearer ${token()}` } })
-    expect(await response.json()).toEqual({ notice: { version: '0.2.0', message: 'Kinfold 0.2.0 is available. Run `kinfold update`.' } })
+    expect(await response.json()).toMatchObject({ notice: { version: '0.2.0', message: 'Kinfold 0.2.0 is available. Run `kinfold update`.' } })
     expect(readUpdateState(NOTICE_HOME()).notified).toEqual({})
     expect((await fetch(url('/update'))).status).toBe(401)
     const viaContext = (await (await post('/context', contextBody())).json()) as { updateNotice?: unknown }

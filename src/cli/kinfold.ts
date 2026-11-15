@@ -173,7 +173,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
   }
   if (installArgs.command === 'update') {
     const { runUpdate } = await import('../update/update')
-    return runUpdate(effective, { dryRun: installArgs.dryRun })
+    return runUpdate(effective, { dryRun: installArgs.dryRun, auto: installArgs.auto })
   }
   if (installArgs.command === 'uninstall') {
     const { uninstall } = await import('../install/uninstall')
@@ -194,6 +194,8 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       noEncrypt: installArgs.noEncrypt,
       port: installArgs.port,
       noUpdateCheck: installArgs.noUpdateCheck,
+      noAutoUpdate: installArgs.noAutoUpdate,
+      autoUpdate: installArgs.autoUpdate,
     })
   } catch (error: unknown) {
     // Ctrl-C or a closed stdin at a question; install has said so and written nothing.

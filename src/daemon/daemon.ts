@@ -62,9 +62,10 @@ import { createObserverTester, observerTestRoute } from './observer-test'
 import { startDataTicks } from './data-ticks'
 import { VERSION } from '../version'
 import { type UpdateCheckDeps, startUpdateChecks } from '../update/check'
-import { availableMessage, pendingNotice } from '../update/notice'
-import { readUpdateState } from '../update/state'
-import { readInstallRecord } from '../install/setup/record'
+import { type AutoUpdateDeps, autoUpdateView, startAutoUpdates } from '../update/auto'
+import { bannerNotice, userMessage } from '../update/notice'
+import { setAutoUpdate } from '../install/setup/record'
+import type { OsName } from '../platform/platform'
 import { MAX_UPLOAD_BYTES, type ServerDeps, startServer } from './server'
 import { type BackupRoutes, backupRoutes, uploadLimitFor } from './backup-routes'
 import { snapshotInWorker, snapshotInto } from '../backup/snapshot'
@@ -106,6 +107,12 @@ export interface DaemonOptions {
   vectors?: DaemonVectorOptions
   /** The daily update check's fetch, clock and environment, for tests. It never runs for a 0.0.0-dev version. */
   updateCheck?: Partial<Pick<UpdateCheckDeps, 'fetch' | 'now' | 'envVars'>>
+  /**
+   * Set only when this daemon is the installed program: patch releases are
+   * then applied by starting that program's `update --auto` detached. Absent
+   * (a checkout, a copy run from elsewhere, the tests) nothing is ever started.
+   */
+  autoUpdate?: { program: string; os: OsName; tickMs?: number } & Pick<AutoUpdateDeps, 'spawn' | 'exists'>
   /** Where a restored store's key is written; null: none. Default: the store key-store.json names, read when a restore needs it. */
   keyStore?: KeyStore | null
   /** Test seams for the backup and restore routes. */
@@ -366,6 +373,15 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const log = options.log ?? ((line: string) => process.stderr.write(logLine(line)))
   const version = options.version ?? VERSION
   const envVars = options.updateCheck?.envVars ?? (() => process.env)
+  const updateNow = options.updateCheck?.now ?? Date.now
+  const canAutoUpdate = options.autoUpdate !== undefined
+  // When anything last reached the daemon: a hook's event, a context request, an MCP read or the dashboard.
+  // An update waits for a quiet spell after it. The start counts, so a daemon restarted by an update never
+  // restarts again at once.
+  let lastEventAt = updateNow()
+  const agentEvent = (): void => {
+    lastEventAt = updateNow()
+  }
   const token = readOrCreateSecret(join(dataDir, TOKEN_FILE))
   const hmacKeys = createHmacKeys({ dataDir, keychain: options.keychain ?? NO_CREDENTIALS, now: options.hmac?.now ?? Date.now, log })
   const projectKeyFor = createProjectKeyResolver(gitRunnerWithTimeout(DAEMON_GIT_TIMEOUT_MS))
@@ -395,13 +411,14 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     observer = observing?.observer ?? null
     const dataTicks = startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, exclusive: vectors.queries.exclusive, ...options.dataControl })
 
+    const context = contextHandler({ db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, updates: { dataDir, version, envVars, canAutoUpdate } })
     const routes: CoreRoutes = {
       schemaVersion: store.schemaVersion,
       vectorSearch: vectors.support.ok ? 'on' : 'off',
       semanticSearch: vectors.search,
       onNudge: () => scheduler.request(),
       listSessions: (projectKey) => listRecentSessions(store.db, projectKey),
-      context: contextHandler({ db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, updates: { dataDir, version, envVars } }),
+      context,
       retryFailed: (target) => retryFailed(store.db, target, observer, log),
       observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? []),
       data: dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log }),
@@ -485,14 +502,27 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     ...(options.backup?.lockAttempts !== undefined ? { lockAttempts: options.backup.lockAttempts } : {}),
   })
 
+  // A restore in progress is the user at work on the store: it counts as activity until it ends.
+  const quietSince = (): number => (down || restarting !== null ? updateNow() : lastEventAt)
+
   const deps: ServerDeps = {
+    onActivity: agentEvent,
     port: options.port,
     token,
     version,
     hmacMode: () => hmacKeys.mode(),
-    updateBanner: () => {
-      const notice = pendingNotice(readUpdateState(dataDir), readInstallRecord(dataDir), version, envVars())
-      return notice === null ? null : { version: notice.version, message: availableMessage(notice) }
+    update: {
+      banner: (markShown) => {
+        const notice = bannerNotice(dataDir, version, envVars(), { capable: canAutoUpdate, now: updateNow() }, markShown)
+        return notice === null ? null : { version: notice.version, message: userMessage(notice) }
+      },
+      auto: () => autoUpdateView(dataDir, version, envVars(), updateNow()),
+      quietForMs: () => Math.max(0, updateNow() - quietSince()),
+      setAuto: (enabled) => {
+        const saved = setAutoUpdate(dataDir, enabled, updateNow())
+        if (saved) log(`auto-update turned ${enabled ? 'on' : 'off'} from the dashboard`)
+        return saved
+      },
     },
     observerModels: observerModelsRoute(options.observer?.cliRunnerFor ?? null, log, Date.now),
     observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log)),
@@ -511,15 +541,29 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     dataDir,
     version,
     fetch: options.updateCheck?.fetch ?? ((url, init) => fetch(url, init)),
-    now: options.updateCheck?.now ?? Date.now,
+    now: updateNow,
     envVars,
     log,
   })
+  const autoUpdates = options.autoUpdate === undefined ? null : startAutoUpdates({
+    dataDir,
+    version,
+    program: options.autoUpdate.program,
+    os: options.autoUpdate.os,
+    now: updateNow,
+    envVars,
+    log,
+    // A restore in progress is the user at work on the store: it counts as activity until it ends.
+    lastEventAt: quietSince,
+    ...(options.autoUpdate.spawn !== undefined ? { spawn: options.autoUpdate.spawn } : {}),
+    ...(options.autoUpdate.exists !== undefined ? { exists: options.autoUpdate.exists } : {}),
+  }, options.autoUpdate.tickMs)
   log(`listening on 127.0.0.1:${server.port} schema=${core.routes.schemaVersion} observer=${core.observer !== null ? 'on' : 'off'}`)
 
   const stop = async (): Promise<void> => {
     clearInterval(rotation)
     updateChecks.stop()
+    autoUpdates?.stop()
     // A restore between its journal and its last step would leave the marker, and the next daemon
     // could not open the store until someone ran kinfold key resume. It ends on its own: the wait
     // for the store is bounded, and then it finishes or puts the old store back.

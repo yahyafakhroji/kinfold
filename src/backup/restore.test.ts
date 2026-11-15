@@ -11,7 +11,7 @@ import type { Database } from '../sqlite/types'
 import { DB_FILE } from '../store/data-dir'
 import { type Store, openStore } from '../store/db'
 import { LATEST_SCHEMA_VERSION, MIGRATIONS } from '../store/schema'
-import { BackupError, type BackupErrorKind } from './archive'
+import { BackupError, type BackupErrorKind, extractSnapshot, readArchive, writeArchive } from './archive'
 import { createBackup } from './create'
 import { FAULT_POINTS, type FaultPoint, RestoreCrash, RestoreStranded, applyRestore, asidePath, inspectBackup, replacedPath, resumeRestore, stageSnapshot, stagingDir } from './restore'
 import { snapshotInto } from './snapshot'
@@ -213,19 +213,59 @@ describe('a restore that succeeds', () => {
     plain.close()
   })
 
-  test("the backup's update-check choice replaces the install's, and nothing else in install.json", async () => {
+  /** A backup of a store whose install.json is `sourceRecord`, restored over a target whose install.json is `targetRecord`. */
+  async function restoredRecord(sourceRecord: Record<string, unknown>, targetRecord: Record<string, unknown>): Promise<Record<string, unknown>> {
+    serial += 1
+    const sourceDir = join(root, `source-${serial}`)
+    const key = newDbKey()
+    const store = openStore(sourceDir, { keys: fixedKeys(key) })
+    writeFileSync(join(sourceDir, 'install.json'), JSON.stringify(sourceRecord))
+    const archive = join(root, `settings-${serial}.kfb`)
+    await createBackup({ dataDir: sourceDir, dest: archive, snapshot: (path) => snapshotInto(store.db, path), version: '0.2.0', now: () => 1 })
+    store.db.close()
+    const target = makeTarget()
+    writeFileSync(join(target.dataDir, 'install.json'), JSON.stringify(targetRecord))
+    await restore(target, { archive, key })
+    return JSON.parse(readFileSync(join(target.dataDir, 'install.json'), 'utf8')) as Record<string, unknown>
+  }
+
+  test("the backup's update choices replace the install's, and nothing else in install.json", async () => {
+    const restored = await restoredRecord(
+      { channel: 'npx', updateCheck: false, autoUpdate: false, firstInstalledAt: 5 },
+      { channel: 'curl', updateCheck: true, autoUpdate: true, firstInstalledAt: 9, agentHomes: { CODEX_HOME: '/opt/codex-home' } },
+    )
+    expect(restored).toMatchObject({ channel: 'curl', updateCheck: false, autoUpdate: false, firstInstalledAt: 9, agentHomes: { CODEX_HOME: '/opt/codex-home' } })
+    // Stamped as a choice made now, so a switch flipped earlier in the dashboard does not win over the restore.
+    expect(typeof restored.autoUpdateAt).toBe('number')
+  })
+
+  test('a backup that turned auto-update on brings that back too', async () => {
+    const restored = await restoredRecord(
+      { channel: 'curl', updateCheck: true, autoUpdate: true, firstInstalledAt: 5 },
+      { channel: 'curl', updateCheck: true, autoUpdate: false, firstInstalledAt: 9 },
+    )
+    expect(restored).toMatchObject({ updateCheck: true, autoUpdate: true })
+  })
+
+  test('a backup from before auto-update still restores, and leaves the auto-update choice alone', async () => {
     serial += 1
     const sourceDir = join(root, `source-${serial}`)
     const key = newDbKey()
     const store = openStore(sourceDir, { keys: fixedKeys(key) })
     writeFileSync(join(sourceDir, 'install.json'), JSON.stringify({ channel: 'npx', updateCheck: false, firstInstalledAt: 5 }))
-    const archive = join(root, 'settings.kfb')
-    await createBackup({ dataDir: sourceDir, dest: archive, snapshot: (path) => snapshotInto(store.db, path), version: '0.2.0', now: () => 1 })
+    const made = join(root, `made-${serial}.kfb`)
+    await createBackup({ dataDir: sourceDir, dest: made, snapshot: (path) => snapshotInto(store.db, path), version: '0.2.0', now: () => 1 })
     store.db.close()
+    // The same backup as a build from before this field wrote it: the update check alone in its settings.
+    const header = readArchive(made)
+    const snapshot = join(root, `old-snapshot-${serial}.db`)
+    await extractSnapshot(made, header, snapshot)
+    const archive = join(root, `old-${serial}.kfb`)
+    await writeArchive(archive, { ...header.manifest, settings: { updateCheck: false } }, snapshot)
     const target = makeTarget()
-    writeFileSync(join(target.dataDir, 'install.json'), JSON.stringify({ channel: 'curl', updateCheck: true, firstInstalledAt: 9 }))
+    writeFileSync(join(target.dataDir, 'install.json'), JSON.stringify({ channel: 'curl', updateCheck: true, autoUpdate: false, firstInstalledAt: 9 }))
     await restore(target, { archive, key })
-    expect(JSON.parse(readFileSync(join(target.dataDir, 'install.json'), 'utf8'))).toEqual({ channel: 'curl', updateCheck: false, firstInstalledAt: 9 })
+    expect(JSON.parse(readFileSync(join(target.dataDir, 'install.json'), 'utf8'))).toEqual({ channel: 'curl', updateCheck: false, autoUpdate: false, firstInstalledAt: 9 })
   })
 })
 

@@ -45,6 +45,9 @@ export interface SetupFlags {
   noEncrypt: boolean
   port: number | null
   noUpdateCheck: boolean
+  noAutoUpdate: boolean
+  /** --auto-update: on, whatever was saved. */
+  autoUpdate: boolean
   yes: boolean
 }
 
@@ -62,6 +65,7 @@ export interface SetupAnswers {
   encryption: EncryptionAnswer
   port: number
   updateCheck: boolean
+  autoUpdate: boolean
 }
 
 export const NO_TTY_ENCRYPTION_CHANGE = 'changing encryption on an existing store needs a terminal; run kinfold encrypt or kinfold decrypt'
@@ -363,14 +367,32 @@ async function summaryStep(ask: Prompts, answers: SetupAnswers): Promise<void> {
   ask.say(`Encryption      ${ENCRYPTION_TEXT[answers.encryption.kind]}`)
   ask.say(`Port            ${answers.port}`)
   ask.say(`Update check    ${answers.updateCheck ? 'daily' : 'off'}`)
+  ask.say(`Auto-update     ${!answers.updateCheck ? 'off (the update check is off)' : answers.autoUpdate ? 'patch releases' : 'off'}`)
   if (!(await ask.confirm('Install with these choices?', true))) throw new PromptCancelled()
 }
 
 // ---- the sequence -----------------------------------------------------------
 
-async function updateCheckStep(ask: Prompts | null, state: SetupState, flags: SetupFlags): Promise<boolean> {
-  if (flags.noUpdateCheck) return false
-  return ask === null ? state.updateCheck : ask.confirm('Check for updates once a day?', state.updateCheck)
+type UpdatesChoice = 'auto' | 'notify' | 'off'
+
+const UPDATES_CHOICES: readonly Choice<UpdatesChoice>[] = [
+  { value: 'auto', label: 'Check daily and install patch releases', hint: 'larger releases wait for kinfold update' },
+  { value: 'notify', label: 'Check daily and tell me' },
+  { value: 'off', label: 'Off' },
+]
+
+/**
+ * One question for both settings, since auto-update only means something
+ * while the daily check runs. Turning the check off keeps the saved
+ * auto-update choice, so turning it back on later brings that choice back.
+ */
+async function updatesStep(ask: Prompts | null, state: SetupState, flags: SetupFlags): Promise<{ updateCheck: boolean; autoUpdate: boolean }> {
+  const autoUpdate = flags.noAutoUpdate ? false : flags.autoUpdate ? true : state.autoUpdate
+  if (flags.noUpdateCheck) return { updateCheck: false, autoUpdate }
+  if (ask === null) return { updateCheck: state.updateCheck, autoUpdate }
+  const choices = flags.noAutoUpdate ? UPDATES_CHOICES.filter((choice) => choice.value !== 'auto') : UPDATES_CHOICES
+  const picked = await ask.select('Updates:', choices, !state.updateCheck ? 'off' : autoUpdate ? 'auto' : 'notify')
+  return picked === 'off' ? { updateCheck: false, autoUpdate } : { updateCheck: true, autoUpdate: picked === 'auto' }
 }
 
 /** The machine as seen from another folder: the env aimed there and the state read from it. */
@@ -403,8 +425,8 @@ export async function runWizard(
   const observers = await observersStep(env, ask, state, flags, choice, hosts)
   const encryption = await encryptionStep(env, ask, state, flags, choice.dryRun)
   const port = await portStep(env, ask, state, flags)
-  const updateCheck = await updateCheckStep(ask, state, flags)
-  const answers: SetupAnswers = { dataDir, hosts, observers, encryption, port, updateCheck }
+  const { updateCheck, autoUpdate } = await updatesStep(ask, state, flags)
+  const answers: SetupAnswers = { dataDir, hosts, observers, encryption, port, updateCheck, autoUpdate }
   if (ask !== null) await summaryStep(ask, answers)
   return answers
 }

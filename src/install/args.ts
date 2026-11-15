@@ -27,10 +27,14 @@ export interface CliArgs {
   observers: ObserverFlag[]
   noEncrypt: boolean
   noUpdateCheck: boolean
+  noAutoUpdate: boolean
+  autoUpdate: boolean
+  /** `update --auto`: the run the daemon starts for a patch release. Not in USAGE, since no one types it. */
+  auto: boolean
   port: number | null
 }
 
-type BooleanFlag = 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck'
+type BooleanFlag = 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck' | 'noAutoUpdate' | 'autoUpdate' | 'auto'
 
 const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: readonly Command[] }>> = {
   '--dry-run': { key: 'dryRun', commands: ['install', 'uninstall', 'update'] },
@@ -41,6 +45,9 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
   '--takeover': { key: 'takeover', commands: ['install'] },
   '--no-encrypt': { key: 'noEncrypt', commands: ['install'] },
   '--no-update-check': { key: 'noUpdateCheck', commands: ['install'] },
+  '--no-auto-update': { key: 'noAutoUpdate', commands: ['install'] },
+  '--auto-update': { key: 'autoUpdate', commands: ['install'] },
+  '--auto': { key: 'auto', commands: ['update'] },
   '--remove-credentials': { key: 'removeCredentials', commands: ['uninstall'] },
   '--remove-hmac-keys': { key: 'removeHmacKeys', commands: ['uninstall'] },
 }
@@ -49,7 +56,7 @@ export const USAGE = [
   'usage: kinfold <install|uninstall|status|update|size|retention|scan|findings|purge|dashboard|backup|restore|encrypt|decrypt|rekey|key|hook|mcp|daemon|observe> [--data-dir <path>] [--version] [flags]',
   '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>]...',
   '             [--skip-check] [--replace-credential] [--credential-stdin] [--takeover]',
-  '             [--no-encrypt] [--port <1024-65535>] [--no-update-check]',
+  '             [--no-encrypt] [--port <1024-65535>] [--no-update-check] [--auto-update | --no-auto-update]',
   '  update     [--dry-run]',
   '  uninstall  [--dry-run] [--remove-credentials] [--remove-hmac-keys]',
   '             --remove-hmac-keys deletes the stored hmac-master and hmac-legacy keys and hmac.d/: stored refs can no longer',
@@ -273,7 +280,7 @@ export function parseObserverFlag(value: string): Parsed<ObserverFlag> {
 }
 
 function initial(command: Command): CliArgs {
-  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], noEncrypt: false, noUpdateCheck: false, port: null }
+  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null }
 }
 
 /** `--flag value` or `--flag=value`; returns the value and how many argv slots it used. */
@@ -331,5 +338,6 @@ export function parseArgs(argv: readonly string[]): Parsed<CliArgs> {
     args = applied.value
     index += found.used
   }
+  if (args.autoUpdate && args.noAutoUpdate) return { ok: false, error: '--auto-update and --no-auto-update cannot be given together' }
   return { ok: true, value: args }
 }

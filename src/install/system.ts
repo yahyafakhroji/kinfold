@@ -42,11 +42,20 @@ async function readUntil(stream: ReadableStream<Uint8Array>, deadline: Promise<v
   return text + decoder.decode()
 }
 
-export function createCommandRunner(childEnv: Readonly<Record<string, string>>): CommandRunner {
+/**
+ * How every child of an install is started. An automatic update runs with no
+ * console, and on Windows a console program (schtasks, powershell) started
+ * from such a process opens a window of its own unless it is told to hide
+ * it. From a terminal the child shares that terminal and the flag changes
+ * nothing; other systems ignore it.
+ */
+export const HIDDEN_WINDOW = { windowsHide: true } as const
+
+export function createCommandRunner(childEnv: Readonly<Record<string, string>>, spawn: typeof Bun.spawn = Bun.spawn): CommandRunner {
   return async ({ argv, timeoutMs }) => {
     let child: ReturnType<typeof Bun.spawn>
     try {
-      child = Bun.spawn([...argv], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore', env: { ...childEnv } })
+      child = spawn([...argv], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore', env: { ...childEnv }, ...HIDDEN_WINDOW })
     } catch (error: unknown) {
       return { exitCode: spawnErrorExit(error), stdout: '' }
     }

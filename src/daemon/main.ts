@@ -13,12 +13,13 @@ import { resolveDataDir } from '../store/data-dir'
 import { applyDataDirFlag } from '../store/data-dir-flag'
 import { type Embedder, createOpenRouterEmbedder } from '../vectors/embedder'
 import { VERSION } from '../version'
-import { closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, writeSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, realpathSync, writeSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { parsePort, startDaemon } from './daemon'
 import { SHUTDOWN_SIGNALS, parseDaemonArgs } from './daemon-args'
 import { applyServicePath } from '../install/service/service-path'
-import { currentPlatform } from '../platform/platform'
+import { currentPlatform, osOf } from '../platform/platform'
+import { installedProgramPath, isCompiledProgram } from '../install/entry'
 import { logLine } from './log-line'
 import { parseIdleMs, parseMaxWaitMs } from './observer-scheduler'
 
@@ -46,6 +47,31 @@ function embedderFrom(credentials: CredentialProvider): Embedder | null {
 export function daemonSecrets(dataDir: string, deps: KeyStoreDeps): { credentials: CredentialProvider; dbKeys: DbKeyStore; keyStore: KeyStore | null } {
   const store = resolveKeyStore(dataDir, deps)
   return { credentials: credentialProviderOf(store), dbKeys: dbKeyStoreOf(store), keyStore: store }
+}
+
+/** The path with its symlinks followed; as written when it does not exist, so a missing program never matches by accident of spelling. */
+function realPath(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return resolve(path)
+  }
+}
+
+/**
+ * The program an automatic update replaces and restarts, when this daemon is
+ * that program: compiled, and running from <dataDir>/bin. A checkout, or a
+ * copy started from somewhere else, would not be the file `kinfold update`
+ * puts in place, so it never updates itself.
+ */
+export function autoUpdateProgram(compiled: boolean, execPath: string, dataDir: string, platform: string): string | null {
+  if (!compiled) return null
+  // By real path: the OS reports the running program's, while the service may name the folder through a symlink.
+  const installed = realPath(installedProgramPath(dataDir, platform))
+  const running = realPath(execPath)
+  // Windows paths differ in case between the task XML and what the OS reports.
+  const same = osOf(platform) === 'windows' ? installed.toLowerCase() === running.toLowerCase() : installed === running
+  return same ? installed : null
 }
 
 const LOG_FILE_MODE = 0o600
@@ -144,7 +170,10 @@ export async function runDaemon(argv: readonly string[]): Promise<void> {
     applyServicePath(dataDir, process.env, currentPlatform().os)
     const { credentials, dbKeys, keyStore } = daemonSecrets(dataDir, processKeyStoreDeps(dataDir))
     const runnerDeps: RunnerDeps = { dataDir, credentials }
+    const platform = currentPlatform()
+    const program = autoUpdateProgram(isCompiledProgram(), process.execPath, dataDir, platform.node)
     daemon = startDaemon({
+      ...(program !== null ? { autoUpdate: { program, os: platform.os } } : {}),
       dataDir,
       port: args.port ?? parsePort(readEnv(process.env, 'PORT')),
       version: VERSION,

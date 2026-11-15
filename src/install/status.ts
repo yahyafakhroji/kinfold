@@ -6,6 +6,7 @@
 
 import { readBackupRecord } from '../backup/record'
 import type { EffectiveSettings } from '../daemon/settings-route'
+import { envName, readEnv } from '../env-names'
 import { OPENROUTER_CREDENTIAL_REF, providerTakesKey } from '../observer/settings'
 import { getObserverSettings } from './daemon-client'
 import { dbStatusLines } from './db-encryption'
@@ -14,15 +15,19 @@ import { isFoldedAbsent } from './detectors'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
 import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
 import { keyStoreStatusLine, noStoreWord, readKeyStore } from './key-store-choice'
-import { EXIT_OK, daemonSituation } from './install'
-import { serviceOf } from './service/control'
+import { type DaemonSituation, EXIT_OK, daemonSituation } from './install'
+import { managedServiceOf, serviceOf } from './service/control'
 import { hmacStatusLines } from './hmac-migration'
 import { mcpStatusLines } from './mcp-wiring'
 import { dataDirAccessFor } from './access/check'
 import { vectorStatusLine } from './vec0-install'
-import { updatesEnabled } from '../update/enabled'
+import { QUIET_MS, autoUpdateView } from '../update/auto'
+import { readAutoState } from '../update/auto-state'
+import { detachPlan } from '../update/detach'
+import { autoUpdateSetting, updatesEnabled } from '../update/enabled'
 import { availableMessage, pendingNotice } from '../update/notice'
 import { readUpdateState } from '../update/state'
+import { isPatchUpdate } from '../update/version-order'
 import { VERSION } from '../version'
 import { readInstallRecord } from './setup/record'
 import { type WslStatus, wslStatus } from '../wsl/entry'
@@ -68,8 +73,7 @@ export async function hostStatusLines(env: InstallEnv, profiles: ProfileTable = 
   return [...(await hostLines(env, profiles, specs)), ...mcpStatusLines(env)]
 }
 
-async function daemonLines(env: InstallEnv): Promise<string[]> {
-  const situation = await daemonSituation(env)
+function daemonLines(env: InstallEnv, situation: DaemonSituation): string[] {
   const service = serviceOf(env)
   const label = service?.label ?? 'none'
   const config = service !== null && service.isConfigured() ? 'present' : 'missing'
@@ -115,14 +119,37 @@ async function databaseLines(env: InstallEnv): Promise<string[]> {
   return database === undefined ? [keyStoreStatusLine(env)] : [database, keyStoreStatusLine(env), ...rest]
 }
 
-/** The saved update state only: status never fetches. */
-export function updateLine(env: InstallEnv, running: string = VERSION): string {
+/**
+ * Why a patch release cannot install itself here though the setting is on;
+ * null when it can. The update stops and starts the service, so the service
+ * must be the one running the daemon, and the updater must be able to leave it.
+ */
+export function autoUpdateBlocker(env: InstallEnv, loaded: boolean, exists?: (path: string) => boolean): string | null {
+  const service = managedServiceOf(env)
+  if (service === null) return 'no background service runs the daemon here'
+  if (!loaded) return `the daemon is not run by the ${service.label}`
+  const plan = detachPlan({ os: platformOf(env).os, program: '', args: [], envVars: env.envVars ?? {}, ...(exists !== undefined ? { exists } : {}) })
+  return plan.ok ? null : plan.reason
+}
+
+/**
+ * The saved update state only: status never fetches. A patch that auto-update
+ * holds back from the notice is named here either way: as about to install
+ * itself, or, where `blocker` says it cannot, as available to install by hand.
+ */
+export function updateLine(env: InstallEnv, running: string = VERSION, blocker: string | null = null): string {
   const record = readInstallRecord(env.dataDir)
   const vars = env.envVars ?? {}
   if (!updatesEnabled(running, record, vars)) return 'update check: off'
   const state = readUpdateState(env.dataDir)
-  const notice = pendingNotice(state, record, running, vars)
+  // Held back only where the patch will install itself; elsewhere it is offered by hand like any release.
+  const hold = blocker === null ? { auto: readAutoState(env.dataDir), now: env.now() } : undefined
+  const notice = pendingNotice(state, record, running, vars, hold)
   if (notice !== null) return `update: ${availableMessage(notice)}`
+  const latest = state.latestVersion
+  if (hold !== undefined && latest !== null && isPatchUpdate(running, latest) && autoUpdateSetting(running, record, vars).on) {
+    return `update: Kinfold ${latest} will install itself once no agent has been active for ${QUIET_MS / 60_000} minutes`
+  }
   return `update: none known (${state.checkedAt === null ? 'never checked' : `last checked ${new Date(state.checkedAt).toISOString()}`})`
 }
 
@@ -130,6 +157,24 @@ export function updateLine(env: InstallEnv, running: string = VERSION): string {
 export function backupLine(env: InstallEnv): string | null {
   const record = readBackupRecord(env.dataDir)
   return record === null ? null : `backup: last made ${new Date(record.lastBackupAt).toISOString()}`
+}
+
+/** Whether patch releases install themselves, the last one that did, and the last attempt that failed. Reads only. */
+export function autoUpdateLines(env: InstallEnv, running: string, blocker: string | null): string[] {
+  const vars = env.envVars ?? {}
+  // The daemon runs under the service and reads its own environment, so this shell's variable is reported, not obeyed.
+  const shellOnly = readEnv(vars, 'NO_AUTO_UPDATE') === '1'
+  const view = autoUpdateView(env.dataDir, running, { ...vars, [envName('NO_AUTO_UPDATE')]: undefined }, env.now())
+  const state = !view.on ? `off (${view.reason})` : blocker === null ? 'on (patch releases install themselves)' : `manual (${blocker}; run kinfold update for each release)`
+  const note = shellOnly && view.on ? `; ${envName('NO_AUTO_UPDATE')} is set in this shell only, which the daemon does not read: run kinfold install --no-auto-update to turn it off` : ''
+  const date = (at: number): string => new Date(at).toISOString()
+  const homes = Object.entries(readInstallRecord(env.dataDir)?.agentHomes ?? {})
+  return [
+    `auto-update: ${state}${note}`,
+    ...(view.lastUpdate === null ? [] : [`  last update: ${view.lastUpdate.version} (was ${view.lastUpdate.previous}) on ${date(view.lastUpdate.at)}`]),
+    ...(view.lastError === null ? [] : [`  last error: ${view.lastError.version} on ${date(view.lastError.at)}: ${view.lastError.reason}. ${view.lastError.blocked === true ? 'It is tried again when the daemon restarts or the install changes.' : 'It is tried again after the next daily check.'}`]),
+    ...(homes.length === 0 ? [] : [`  agent homes used by an automatic update: ${homes.map(([name, value]) => `${name}=${value}`).join(', ')}`]),
+  ]
 }
 
 export async function status(env: InstallEnv, running: string = VERSION, profiles: ProfileTable = INSTALL_PROFILES): Promise<number> {
@@ -146,17 +191,20 @@ export async function status(env: InstallEnv, running: string = VERSION, profile
   if (wsl?.replaces === true) return EXIT_OK
   const observer = await observerLines(env)
   const duplicates = findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings])
+  const situation = await daemonSituation(env)
+  const blocker = autoUpdateBlocker(env, situation.loaded)
   const lines = [
     'hosts:',
     ...(await hostStatusLines(env, profiles)),
-    ...(await daemonLines(env)),
+    ...daemonLines(env, situation),
     ...(await databaseLines(env)),
     ...observer.lines,
     ...keyStoreLines(env, observer.refs),
     ...hmacStatusLines(env),
     ...(await dataDirAccessFor(env).statusLines(env.dataDir)),
     ...[backupLine(env)].filter((line) => line !== null),
-    updateLine(env, running),
+    updateLine(env, running, blocker),
+    ...autoUpdateLines(env, running, blocker),
     ...(duplicates.length === 0 ? ['duplicate wiring: none in this directory'] : duplicateWarning(duplicates)),
   ]
   for (const line of lines) env.out(line)

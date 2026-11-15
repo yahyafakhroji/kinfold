@@ -33,8 +33,18 @@ export interface ContextRequest {
 
 /** A newer release than the running one; the channel picks the command the user is told to run. */
 export const NOTICE_CHANNELS = ['npx', 'bunx', 'curl', 'powershell'] as const
+/**
+ * What the notice says: a newer release to install by hand (the default, so an
+ * absent kind reads as it always did), an update Kinfold installed itself, or
+ * that automatic patch updates are now on for an install that predates them.
+ */
+export const NOTICE_KINDS = ['available', 'updated', 'auto-on'] as const
 export interface UpdateNotice {
+  kind?: (typeof NOTICE_KINDS)[number]
+  /** The release on offer, the one just installed, or the running one for `auto-on`. */
   version: string
+  /** `updated` only: the version that was running before. */
+  previous?: string
   channel: (typeof NOTICE_CHANNELS)[number]
 }
 
@@ -47,6 +57,13 @@ export interface ContextResult {
   relatedText?: string
   /** Session start and OpenCode's first request only: a release this host has not been told about yet. */
   updateNotice?: UpdateNotice
+  /**
+   * On the wire only: a notice of a kind other than `available`. It has its own
+   * key because a hook or plugin from before these kinds reads `updateNotice`
+   * as a release to install, whatever its kind. parseContextResult hands it on
+   * as `updateNotice`, so readers look in one place.
+   */
+  selfNotice?: UpdateNotice
 }
 
 /** One stored observation as a pack sees it: no narrative, no facts, no payload. */
@@ -112,10 +129,10 @@ export function parseContextRequest(body: unknown): Parsed<ContextRequest> {
 /** Checks a daemon reply before the hook or plugin trusts it. */
 export function parseContextResult(body: unknown): ContextResult | null {
   if (!isRecord(body)) return null
-  const { text, observationIds, tokens, relatedText, updateNotice } = body
+  const { text, observationIds, tokens, relatedText, updateNotice, selfNotice } = body
   if (typeof text !== 'string' || typeof tokens !== 'number' || !Array.isArray(observationIds)) return null
   if (!observationIds.every((id) => Number.isSafeInteger(id))) return null
-  const notice = parseUpdateNotice(updateNotice)
+  const notice = parseAvailableNotice(updateNotice) ?? parseSelfNotice(selfNotice)
   const result = { text, observationIds: observationIds as number[], tokens, ...(notice !== null ? { updateNotice: notice } : {}) }
   if (relatedText === undefined) return result
   if (typeof relatedText !== 'string' || relatedText === '' || !text.endsWith(relatedText)) return null
@@ -123,10 +140,24 @@ export function parseContextResult(body: unknown): ContextResult | null {
 }
 
 /** A malformed notice is dropped, never an error: the pack is still good. The version is only ever printed, so it stays short and plain. */
-function parseUpdateNotice(value: unknown): UpdateNotice | null {
+function parseAvailableNotice(value: unknown): UpdateNotice | null {
   if (!isRecord(value)) return null
   const { version, channel } = value
-  if (typeof version !== 'string' || !/^[0-9A-Za-z.+-]{1,64}$/.test(version)) return null
   const known = NOTICE_CHANNELS.find((name) => name === channel)
-  return known === undefined ? null : { version, channel: known }
+  return isPrintableVersion(version) && known !== undefined ? { version, channel: known } : null
+}
+
+/** A kind this build does not know has no wording here, so it is dropped rather than shown as the wrong thing. */
+function parseSelfNotice(value: unknown): UpdateNotice | null {
+  if (!isRecord(value)) return null
+  const { kind, version, previous, channel } = value
+  const known = NOTICE_CHANNELS.find((name) => name === channel)
+  if (!isPrintableVersion(version) || known === undefined) return null
+  if (kind === 'auto-on') return { kind, version, channel: known }
+  if (kind === 'updated' && isPrintableVersion(previous)) return { kind, version, previous, channel: known }
+  return null
+}
+
+function isPrintableVersion(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9A-Za-z.+-]{1,64}$/.test(value)
 }

@@ -29,6 +29,28 @@ test('USAGE lists the new flags and the update command', () => {
   expect(USAGE).toMatch(/update\s+\[--dry-run\]/)
 })
 
+test('update --auto is the run the daemon starts, and is not advertised', () => {
+  expect(parseArgs(['update', '--auto'])).toMatchObject({ ok: true, value: { command: 'update', auto: true, dryRun: false } })
+  expect(parseArgs(['update'])).toMatchObject({ ok: true, value: { auto: false } })
+  expect(parseArgs(['install', '--auto'])).toEqual({ ok: false, error: '--auto does not apply to install' })
+  expect(USAGE).not.toContain(' --auto')
+  expect(USAGE).not.toContain('[--auto]')
+})
+
+test('install --no-auto-update turns automatic patch updates off', () => {
+  expect(parseArgs(['install', '--no-auto-update'])).toMatchObject({ ok: true, value: { command: 'install', noAutoUpdate: true } })
+  expect(parseArgs(['install'])).toMatchObject({ ok: true, value: { noAutoUpdate: false } })
+  expect(parseArgs(['update', '--no-auto-update'])).toEqual({ ok: false, error: '--no-auto-update does not apply to update' })
+})
+
+test('install --auto-update turns automatic patch updates back on, and cannot be combined with its opposite', () => {
+  expect(parseArgs(['install', '--auto-update'])).toMatchObject({ ok: true, value: { command: 'install', autoUpdate: true, noAutoUpdate: false } })
+  expect(parseArgs(['install'])).toMatchObject({ ok: true, value: { autoUpdate: false } })
+  expect(parseArgs(['install', '--auto-update', '--no-auto-update'])).toEqual({ ok: false, error: '--auto-update and --no-auto-update cannot be given together' })
+  expect(parseArgs(['update', '--auto-update'])).toEqual({ ok: false, error: '--auto-update does not apply to update' })
+  expect(USAGE).toContain('[--auto-update | --no-auto-update]')
+})
+
 test('update takes only --dry-run', () => {
   expect(parseArgs(['update'])).toMatchObject({ ok: true, value: { command: 'update', dryRun: false } })
   expect(parseArgs(['update', '--dry-run'])).toMatchObject({ ok: true, value: { command: 'update', dryRun: true } })

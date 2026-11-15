@@ -31,7 +31,7 @@ plan (dry run, nothing is changed): 22 actions
   19. wait up to 180 s for GET /health (a large store takes a while to open)
   20. PUT /observer/settings host=claude-code provider=claude-cli model=haiku credentialRef=none
   21. PUT /observer/settings host=opencode provider=openrouter model=openrouter/auto credentialRef=openrouter
-  22. write <root>/home/.kinfold/install.json: record the install channel (checkout) and the update check (on)
+  22. write <root>/home/.kinfold/install.json: record the install channel (checkout), the update check (on) and auto-update (on)
 == re-run, dry run
 daemon: answers on port <port>; LaunchAgent loaded
 host claude-code 2.1.310 (Claude Code): install (claude --version answered)

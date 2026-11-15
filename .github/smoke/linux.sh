@@ -53,6 +53,24 @@ start_user_manager() {
   SMOKE_SERVICE=foreground
 }
 
+# A real user unit with a probe name: the child the daemon would start as its
+# updater must still run after systemctl stops the unit, which ends the unit's
+# whole cgroup. It needs the user manager, so a runner without one says so and
+# moves on; there the daemon runs in the foreground and no service stops it.
+run_live_detach_test() {
+  local log="$RUNNER_TEMP/detach-live.log"
+  if [ "$SMOKE_SERVICE" != systemd ]; then
+    echo "::notice::no user service manager, so the live detach test did not run on this runner"
+    return
+  fi
+  KINFOLD_SQLITE3MC_LIB=/nonexistent KINFOLD_TEST_DETACH=1 \
+    bun test ./src/update/detach.live.test.ts 2>&1 | tee "$log"
+  if grep -q '(skip)' "$log" || ! grep -q '(pass)' "$log"; then
+    echo "the live detach test skipped or passed nothing"
+    exit 1
+  fi
+}
+
 install_claude_code() {
   local prefix="$RUNNER_TEMP/npm-global"
   npm install --global --prefix "$prefix" --no-audit --no-fund @anthropic-ai/claude-code
@@ -220,6 +238,7 @@ case "${1:-}" in
     install_packages
     refuse_xdg_config_home
     start_user_manager
+    run_live_detach_test
     install_claude_code
     install_opencode
     check_agent_clis

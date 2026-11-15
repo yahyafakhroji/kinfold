@@ -63,3 +63,17 @@ test('no notice on prompt deltas', async () => {
   expect(out).not.toContain('Kinfold 0.2.0')
   expect(out).not.toContain('systemMessage')
 })
+
+test('an update that installed itself reaches the user through Claude Code and the agent elsewhere', async () => {
+  const updated = { kind: 'updated', version: '0.2.1', previous: '0.2.0', channel: 'curl' } as const
+  const claude = JSON.parse((await run('claude-code', 'session-start', { selfNotice: updated })) ?? '') as Record<string, any>
+  expect(claude.systemMessage).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0).')
+  const codex = JSON.parse((await run('codex', 'session-start', { selfNotice: updated })) ?? '') as Record<string, any>
+  expect(codex.hookSpecificOutput.additionalContext).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0); you may tell the user.')
+})
+
+test('a notice of a kind this hook does not know is dropped, and the pack still arrives', async () => {
+  const out = JSON.parse((await run('claude-code', 'session-start', { text: '<kinfold>pack</kinfold>', tokens: 5, selfNotice: { kind: 'rolled-back', version: '0.2.1', channel: 'curl' } as never })) ?? '') as Record<string, any>
+  expect(out.systemMessage).toBeUndefined()
+  expect(out.hookSpecificOutput.additionalContext).toBe('<kinfold>pack</kinfold>')
+})

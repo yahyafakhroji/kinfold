@@ -28,7 +28,7 @@ afterEach(async () => {
 })
 
 const HAIKU: ObserverSettingsInput = { host: 'opencode', provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: true }
-const RECORD = { channel: 'curl', updateCheck: false, firstInstalledAt: 1_700_000_000_000 } as const
+const RECORD = { channel: 'curl', updateCheck: false, autoUpdate: true, autoUpdateIntro: false, agentHomes: {}, firstInstalledAt: 1_700_000_000_000 } as const
 const holding = (key: string): DbKeyStore => ({ name: 'test', read: () => key, exists: () => true })
 
 function make(options: Parameters<typeof createWorld>[0] = {}): FakeWorld {
@@ -310,4 +310,13 @@ posixOnly('file modes')('with both side files there, a failed plain open refuses
   } finally {
     chmodSync(shm, 0o600)
   }
+})
+
+test('the saved auto-update choice, and whether its notice is owed, come from install.json', async () => {
+  world = createWorld()
+  mkdirSync(world.dataDir, { recursive: true })
+  writeFileSync(join(world.dataDir, 'install.json'), JSON.stringify({ channel: 'curl', updateCheck: true, firstInstalledAt: 5 }))
+  expect(await readSetupState(world.env)).toMatchObject({ autoUpdate: true, autoUpdateIntro: true })
+  await runPlan(world.env, [installRecordAction(world.dataDir, { ...RECORD, autoUpdate: false })], false)
+  expect(await readSetupState(world.env)).toMatchObject({ autoUpdate: false, autoUpdateIntro: false })
 })

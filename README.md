@@ -24,7 +24,7 @@ On Windows, in PowerShell:
 irm https://github.com/yahyafakhroji/kinfold/releases/latest/download/install.ps1 | iex
 ```
 
-To install a specific release, run `npx kinfold@<version> install`, or set `KINFOLD_VERSION` for the script: `curl … | KINFOLD_VERSION=<version> sh`, or `$env:KINFOLD_VERSION = '<version>'` before `irm`. The curl and PowerShell installers download the program for your machine and check it against the release's `SHA256SUMS` before they run it. A program installed through npm checks its own bytes against the same list before `install` changes anything. The setup wizard asks where to keep the memory, which agents to wire, which model observes each one, whether to encrypt the store, which port the daemon uses, and whether to check for updates. Add `--dry-run` to see every change first, or `--yes` to take the defaults.
+To install a specific release, run `npx kinfold@<version> install`, or set `KINFOLD_VERSION` for the script: `curl … | KINFOLD_VERSION=<version> sh`, or `$env:KINFOLD_VERSION = '<version>'` before `irm`. The curl and PowerShell installers download the program for your machine and check it against the release's `SHA256SUMS` before they run it. A program installed through npm checks its own bytes against the same list before `install` changes anything. The setup wizard asks where to keep the memory, which agents to wire, which model observes each one, whether to encrypt the store, which port the daemon uses, and whether to check for updates and install patch releases on its own. Add `--dry-run` to see every change first, or `--yes` to take the defaults.
 
 Install copies the program to the `bin` folder of the memory folder (`~/.kinfold/bin` by default) and starts the daemon as a user service: a LaunchAgent on macOS, a systemd user unit on Linux, a scheduled task on Windows. It doesn't change your `PATH`, so run `~/.kinfold/bin/kinfold` or add that folder yourself. The examples below say `kinfold`.
 
@@ -46,7 +46,7 @@ Kinfold needs at least one supported coding agent. `kinfold status` lists them a
 - **Dashboard.** `kinfold dashboard` opens a local page with sessions, observations, stats and the observer settings.
 - **Data control.** `kinfold retention` sets how long each kind of data is kept, `kinfold purge` removes a session, project or agent, and `kinfold scan` checks the store for secrets that slipped through.
 - **Backup and restore.** `kinfold backup <file>` writes the whole memory to one file while capture keeps running, and `kinfold restore <file>` brings it back on a fresh system. The dashboard's Backup page does both in the browser. See [Backup and restore](#backup-and-restore).
-- **Updates.** `kinfold update` fetches the latest release and checks it against `SHA256SUMS` before it replaces the program.
+- **Updates.** `kinfold update` fetches the latest release and checks it against `SHA256SUMS` before it replaces the program. Patch releases (0.2.0 to 0.2.1) install themselves: the daemon checks once a day, waits until nothing has reached it for ten minutes (a hook event, a context request, an MCP read, the dashboard or a restore), then runs the same update. The updater checks for quiet again after the download and waits up to 30 minutes for it. Minor and major releases wait for you to run `kinfold update`. A failed update leaves the running version in place and is tried again after the next daily check. The next session, `kinfold status` and the dashboard tell you when an update happened. To turn it off, pick another option at the wizard's Updates question, run `kinfold install --no-auto-update`, use the switch on the dashboard's Data page, or run install with `KINFOLD_NO_AUTO_UPDATE=1` set. `kinfold install --auto-update` turns it back on. An automatic update runs its install with the agent home variables (`CODEX_HOME`, `XDG_CONFIG_HOME` and the like) that your last install ran with; `kinfold status` lists them.
 
 ## Supported agents
 
@@ -184,9 +184,10 @@ networkingMode=mirrored
 | `KINFOLD_DATA_DIR` | An absolute path for the memory folder instead of `~/.kinfold` |
 | `KINFOLD_PORT` | The daemon's port instead of 37811 |
 | `KINFOLD_VERSION` | The release the install scripts fetch |
-| `KINFOLD_NO_UPDATE_CHECK=1` | Turns off the update check |
+| `KINFOLD_NO_UPDATE_CHECK=1` | Set when you run `kinfold install`: turns off the update check, and automatic updates with it. Install saves it, since the daemon does not read your shell's environment |
+| `KINFOLD_NO_AUTO_UPDATE=1` | Set when you run `kinfold install`: keeps the update check and turns off automatic patch updates. Install saves it, since the daemon does not read your shell's environment |
 
-Install flags: `--hosts claude-code,opencode,codex,cursor` picks agents, `--observer <agent>=<provider>:<model>` sets an observer, `--port <n>` sets the port, and `--no-encrypt` creates a new store in plaintext.
+Install flags: `--hosts claude-code,opencode,codex,cursor` picks agents, `--observer <agent>=<provider>:<model>` sets an observer, `--port <n>` sets the port, `--no-encrypt` creates a new store in plaintext, `--no-auto-update` turns off automatic patch updates, and `--auto-update` turns them back on.
 
 ## Uninstall
 

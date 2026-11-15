@@ -44,6 +44,9 @@ export interface SetupState {
   encryption: 'on' | 'off' | 'new'
   port: number
   updateCheck: boolean
+  autoUpdate: boolean
+  /** The install predates auto-update, so its hosts are still owed the notice that it is on. */
+  autoUpdateIntro: boolean
   channel: InstallChannel
   firstInstalledAt: number | null
 }
@@ -197,6 +200,8 @@ export async function readSetupState(env: InstallEnv, options: SetupStateOptions
     // A configured service without the port key runs the daemon on its default port.
     port: service !== null && service.isConfigured() ? (service.configuredPort() ?? DEFAULT_PORT) : readDaemonInfo(dataDir).port,
     updateCheck: record?.updateCheck ?? true,
+    autoUpdate: record?.autoUpdate ?? true,
+    autoUpdateIntro: record?.autoUpdateIntro ?? false,
     channel: currentChannel(env, record),
     firstInstalledAt: record?.firstInstalledAt ?? null,
   }
