@@ -49,7 +49,7 @@ export function privateTmpDir(dataDir: string, name: string, now: number): strin
 
 function settingsOf(dataDir: string): BackupManifest['settings'] {
   const record = readInstallRecord(dataDir)
-  return record === null ? {} : { updateCheck: record.updateCheck }
+  return record === null ? {} : { updateCheck: record.updateCheck, autoUpdate: record.autoUpdate }
 }
 
 /** Writes the backup to `dest` and records its time. On any failure nothing is left at `dest` or in the temp folder. */

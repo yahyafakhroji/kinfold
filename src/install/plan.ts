@@ -30,6 +30,7 @@ import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describe
 import { legacyBootoutArgv } from './launch-agent'
 import type { Vec0Asset } from '../vectors/vec0-release'
 import type { ServiceStep } from './service/control'
+import { type InstallRecord, writeInstallRecord } from './setup/record'
 
 export const HEALTH_WAIT_MS = 15_000
 export const TAKEOVER_WAIT_MS = 300_000
@@ -41,6 +42,8 @@ export type Action =
   | { kind: 'backup'; from: string; to: string }
   | { kind: 'write'; path: string; content: string; mode: number; summary: string; encoding?: TextEncoding }
   /** recursive: a directory and everything in it (hmac.d/ on --remove-hmac-keys). */
+  /** install.json, merged with what is on disk at the moment of the write (writeInstallRecord). */
+  | { kind: 'install-record'; path: string; dataDir: string; record: InstallRecord; summary: string }
   | { kind: 'remove'; path: string; summary: string; recursive?: boolean }
   /** <dataDir>/bin, through the platform's program files: a file a running program holds is named and left. */
   | { kind: 'remove-program-dir'; path: string; summary: string }
@@ -111,7 +114,8 @@ export function describeAction(action: Action): string {
     case 'chmod': return `chmod <dataDir>/${describeModeChange(action.change)}`
     case 'touch': return `create ${action.path} if missing (mode ${octal(action.mode)})`
     case 'backup': return `back up ${action.from} -> ${action.to} (mode 0600)`
-    case 'write': return `write ${action.path}: ${action.summary}`
+    case 'write':
+    case 'install-record': return `write ${action.path}: ${action.summary}`
     case 'remove': return `remove ${action.path}${action.recursive === true ? '/' : ''}: ${action.summary}`
     case 'remove-program-dir': return `remove ${action.path}/: ${action.summary}`
     case 'service': return action.description
@@ -246,6 +250,7 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'touch': return touch(action.path, action.mode)
     case 'backup': return writeBackup(action.from, action.to)
     case 'write': return writeFileAtomic(action.path, action.encoding === undefined ? action.content : encodeText(action.content, action.encoding), action.mode)
+    case 'install-record': return writeInstallRecord(action.dataDir, action.record)
     case 'remove': return rmSync(action.path, { force: true, recursive: action.recursive === true })
     case 'remove-program-dir': return removeProgramDir(env, action.path)
     case 'service': return runServiceStep(env, action.step)

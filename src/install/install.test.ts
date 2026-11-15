@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { CLAUDE_HOOK_EVENTS, samHookGroup } from './claude-hooks'
 import { getObserverSettings } from './daemon-client'
 import { installPaths } from './env'
-import { type DaemonSituation, EXIT_OK, SETTINGS_NOT_SENT_LINE, install, serviceActions } from './install'
+import { type DaemonSituation, EXIT_BLOCKED, EXIT_OK, SETTINGS_NOT_SENT_LINE, install, serviceActions } from './install'
+import { UPDATE_LOCK_FILE, acquireUpdateLock, updateLockHolder } from '../update/lock'
 import { LAUNCHCTL, bootoutArgv, bootstrapArgv, launchdPath } from './launch-agent'
 import { LaunchAgentService } from './service/launch-agent-service'
 import { StubService } from './service/stub-service'
@@ -432,4 +433,100 @@ test.skipIf(process.platform === 'win32')('hostStatusLines returns exactly the m
     '  claude-code: no in <home>/.claude.json',
     '  opencode: yes in <home>/.config/opencode/opencode.json',
   ])
+})
+
+test('install records auto-update as on, --no-auto-update as off, and keeps the notice an older install is owed', async () => {
+  const w = both()
+  const record = (): unknown => JSON.parse(readFileSync(join(w.dataDir, 'install.json'), 'utf8'))
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(record()).toMatchObject({ updateCheck: true, autoUpdate: true })
+  expect(record()).not.toHaveProperty('autoUpdateIntro')
+  expect(await install(w.env, { ...YES, noAutoUpdate: true })).toBe(EXIT_OK)
+  expect(record()).toMatchObject({ autoUpdate: false })
+  // A later plain run keeps the saved choice.
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(record()).toMatchObject({ autoUpdate: false })
+
+  // An install from before auto-update: on, and its user has not been told.
+  writeFileSync(join(w.dataDir, 'install.json'), JSON.stringify({ channel: 'npx', updateCheck: true, firstInstalledAt: 5 }))
+  expect(await install(w.env, { ...YES, noUpdateCheck: true })).toBe(EXIT_OK)
+  expect(record()).toMatchObject({ updateCheck: false, autoUpdate: true, autoUpdateIntro: true, firstInstalledAt: 5 })
+})
+
+test('KINFOLD_NO_AUTO_UPDATE=1 at install is saved, so the daemon, which never sees the shell, honours it', async () => {
+  const w = both()
+  w.env = { ...w.env, envVars: { ...w.env.envVars, KINFOLD_NO_AUTO_UPDATE: '1' } }
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(JSON.parse(readFileSync(join(w.dataDir, 'install.json'), 'utf8'))).toMatchObject({ autoUpdate: false })
+})
+
+test('install saves the agent homes it ran with, and drops one that is no longer set', async () => {
+  const w = both()
+  const record = (): Record<string, unknown> => JSON.parse(readFileSync(join(w.dataDir, 'install.json'), 'utf8')) as Record<string, unknown>
+  w.env = { ...w.env, xdgConfigHomeEnv: join(w.home, '.xdg') }
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(record().agentHomes).toEqual({ XDG_CONFIG_HOME: join(w.home, '.xdg') })
+  w.env = { ...w.env, xdgConfigHomeEnv: undefined }
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(record()).not.toHaveProperty('agentHomes')
+})
+
+test('KINFOLD_NO_UPDATE_CHECK=1 at install is saved, like KINFOLD_NO_AUTO_UPDATE', async () => {
+  const w = both()
+  w.env = { ...w.env, envVars: { ...w.env.envVars, KINFOLD_NO_UPDATE_CHECK: '1' } }
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(JSON.parse(readFileSync(join(w.dataDir, 'install.json'), 'utf8'))).toMatchObject({ updateCheck: false })
+})
+
+test('install --auto-update turns auto-update back on', async () => {
+  const w = both()
+  const autoUpdate = (): unknown => (JSON.parse(readFileSync(join(w.dataDir, 'install.json'), 'utf8')) as Record<string, unknown>).autoUpdate
+  expect(await install(w.env, { ...YES, noAutoUpdate: true })).toBe(EXIT_OK)
+  expect(autoUpdate()).toBe(false)
+  expect(await install(w.env, { ...YES, autoUpdate: true })).toBe(EXIT_OK)
+  expect(autoUpdate()).toBe(true)
+})
+
+// ---- install and the update lock ----
+
+test('install waits its turn: it refuses while an update runs, and changes nothing', async () => {
+  const w = both()
+  mkdirSync(w.dataDir, { recursive: true })
+  acquireUpdateLock(w.dataDir, { pid: 4242, alive: () => true })
+  expect(await install(w.env, { ...YES, lock: { alive: () => true, parentPid: 1 } })).toBe(EXIT_BLOCKED)
+  expect(w.out.at(-1)).toBe('install: an update is running (pid 4242); run install again when it has finished. Nothing was changed.')
+  // The read-only `launchctl print` has run; nothing that starts or stops the service has.
+  expect(launchctlCalls(w).filter((call) => call[1] !== 'print')).toEqual([])
+  expect(existsSync(join(w.dataDir, 'install.json'))).toBe(false)
+})
+
+test('the install an update started runs under that update\'s lock', async () => {
+  const w = both()
+  mkdirSync(w.dataDir, { recursive: true })
+  acquireUpdateLock(w.dataDir, { pid: 4242, alive: () => true })
+  expect(await install(w.env, { ...YES, lock: { alive: () => true, parentPid: 4242 } })).toBe(EXIT_OK)
+  // The update's lock is its own to release.
+  expect(updateLockHolder(w.dataDir, () => true)).toBe(4242)
+})
+
+test('install holds the lock while it runs and lets it go after, and a dry run takes none', async () => {
+  const w = both()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(existsSync(join(w.dataDir, UPDATE_LOCK_FILE))).toBe(false)
+  acquireUpdateLock(w.dataDir, { pid: 4242, alive: () => true })
+  expect(await install(w.env, { ...YES, dryRun: true, lock: { alive: () => true, parentPid: 1 } })).toBe(EXIT_OK)
+})
+
+test('an update refuses to start while an install holds the lock', async () => {
+  const w = both()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  let during = null as number | null
+  // The settings PUT happens mid-install; by then the lock is held.
+  const realFetch = w.env.fetch
+  w.env = { ...w.env, fetch: async (url, init) => {
+    if (during === null) during = updateLockHolder(w.dataDir)
+    return realFetch(url, init)
+  } }
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(during).toBe(process.pid)
 })

@@ -30,6 +30,19 @@ check_agent_clis() {
   fi
 }
 
+# A real LaunchAgent with a probe label: the child the daemon would start as
+# its updater must still run after launchctl bootout. The test opens no store,
+# so a placeholder satisfies the preload that wants a sqlite3mc build.
+run_live_detach_test() {
+  local log="$RUNNER_TEMP/detach-live.log"
+  KINFOLD_SQLITE3MC_LIB=not-opened-by-the-live-tests KINFOLD_TEST_DETACH=1 \
+    bun test ./src/update/detach.live.test.ts 2>&1 | tee "$log"
+  if grep -q '(skip)' "$log" || ! grep -q '(pass)' "$log"; then
+    echo "the live detach test skipped or passed nothing"
+    exit 1
+  fi
+}
+
 # The commands write their keys to the default keychain. A throwaway one
 # keeps the runner's login keychain untouched and goes away afterwards.
 create_keychain() {
@@ -71,6 +84,7 @@ restore_keychain() {
 
 case "${1:-}" in
   setup)
+    run_live_detach_test
     install_claude_code
     install_opencode
     check_agent_clis

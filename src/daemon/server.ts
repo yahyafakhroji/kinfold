@@ -14,7 +14,7 @@
 
 import { timingSafeEqual } from 'node:crypto'
 import { type ContextRequest, type ContextResult, type Parsed, parseContextRequest } from '../context/types'
-import { type Access, type AccessResult, accessFor, checkAccess } from '../dashboard/access'
+import { type Access, type AccessResult, type Credential, accessFor, checkAccess } from '../dashboard/access'
 import type { DashboardAuth } from '../dashboard/auth'
 import { withSecurityHeaders } from '../dashboard/headers'
 import { dashboardRoute } from '../dashboard/routes'
@@ -32,6 +32,7 @@ import type { ObserverTestRoute } from './observer-test'
 import { type ObserverSettingsHandlers, parseRecheck, parseSettingsPut } from './settings-route'
 import { type SemanticAnswer, type SemanticRequest, parseSemanticRequest } from '../vectors/search'
 import type { Exclusive } from '../vectors/vector-worker'
+import type { AutoUpdateView } from '../update/auto'
 
 export interface ServerDeps {
   /** 0 picks a free port. */
@@ -61,8 +62,14 @@ export interface ServerDeps {
   exclusive?: Exclusive
   /** GET /memory/observations, /memory/observations/:id, /memory/facets (the dashboard's memory browser). */
   memory: MemoryHandlers
-  /** GET /update: the banner the dashboard shows; absent or null means none. Reads only, never marks a notice shown. */
-  updateBanner?: () => { version: string; message: string } | null
+  /** GET /update, GET /update/quiet and GET or PUT /update/auto; absent means no banner and no switch. */
+  update?: UpdateHandlers
+  /**
+   * Called for every request that passed its access check, except /health and
+   * the update questions: an agent, an MCP client or the dashboard is at work,
+   * and an update must not restart the daemon under it.
+   */
+  onActivity?: () => void
   /** GET /metrics/summary. */
   metrics: (window: string | null) => RouteAnswer
   /** POST /metrics/mcp-read: one MCP tool call reported by the read-only MCP server (token only). */
@@ -196,7 +203,7 @@ async function semanticRoute(request: Request, deps: ServerDeps): Promise<Respon
   return json(200, answer)
 }
 
-async function route(request: Request, url: URL, deps: ServerDeps): Promise<Response> {
+async function route(request: Request, url: URL, deps: ServerDeps, via: Credential): Promise<Response> {
   if (url.pathname === '/observer/settings') return observerSettingsRoute(request, deps.observerSettings)
   if (url.pathname === '/observer/recheck') {
     return postJson(request, parseRecheck, (provider) => json(200, { ok: true, cleared: deps.observerSettings.recheck(provider) }))
@@ -217,18 +224,20 @@ async function route(request: Request, url: URL, deps: ServerDeps): Promise<Resp
     const sessions = deps.listSessions(url.searchParams.get('project'))
     return json(200, { sessions })
   }
-  const answer = await panelRoute(request, url, deps)
+  const answer = await panelRoute(request, url, deps, via)
   return answer === null ? json(404, { error: 'not found' }) : json(answer.status, answer.body)
 }
 
 /** The routes the dashboard reads and writes besides /observer/settings: data control, memory, metrics, model test. */
-async function panelRoute(request: Request, url: URL, deps: ServerDeps): Promise<RouteAnswer | null> {
+async function panelRoute(request: Request, url: URL, deps: ServerDeps, via: Credential): Promise<RouteAnswer | null> {
   const path = url.pathname
   if (path.startsWith('/data/')) return dataRoute(request.method, url, () => readJson(request), deps.data, deps.exclusive)
   if (path.startsWith('/memory/')) return memoryRoute(request.method, url, deps.memory)
   if (path === '/observer/models') return deps.observerModels(request.method, url)
   if (path === '/observer/test') return deps.observerTest(request.method, () => readJson(request))
-  if (path === '/update') return request.method === 'GET' ? { status: 200, body: { notice: deps.updateBanner?.() ?? null } } : { status: 405, body: { error: 'method not allowed' } }
+  if (path === '/update') return request.method === 'GET' ? { status: 200, body: { notice: deps.update?.banner(via === 'cookie') ?? null, auto: deps.update?.auto() ?? null } } : { status: 405, body: { error: 'method not allowed' } }
+  if (path === '/update/auto') return autoUpdateRoute(request, deps.update)
+  if (path === '/update/quiet' && deps.update !== undefined) return request.method === 'GET' ? { status: 200, body: { quietForMs: deps.update.quietForMs() } } : { status: 405, body: { error: 'method not allowed' } }
   if (path === '/metrics/summary') return request.method === 'GET' ? deps.metrics(url.searchParams.get('window')) : { status: 405, body: { error: 'method not allowed' } }
   if (path.startsWith('/read/') && deps.reads !== undefined) return readRoute(request.method, path, () => readJson(request), deps.reads, deps.log)
   return null
@@ -246,9 +255,39 @@ async function backupRoute(request: Request, path: string, deps: ServerDeps): Pr
   return answered(path === UPLOAD_PATH ? await routes.upload(request) : await routes.start(() => readJson(request)))
 }
 
-async function storeRoute(request: Request, url: URL, deps: ServerDeps): Promise<Response> {
+async function storeRoute(request: Request, url: URL, deps: ServerDeps, via: Credential): Promise<Response> {
   const down = deps.unavailable?.() ?? null
-  return down === null ? route(request, url, deps) : json(503, { error: down })
+  return down === null ? route(request, url, deps, via) : json(503, { error: down })
+}
+
+export interface UpdateHandlers {
+  /**
+   * The banner the dashboard shows; null means none. With `markShown`, "updated
+   * itself" is marked as seen, so it shows once: only the dashboard's own
+   * session asks that way, so a script reading with the token never uses it up.
+   * A release to install by hand is never marked.
+   */
+  banner(markShown: boolean): { version: string; message: string } | null
+  /** How long it has been since anything but an update question reached the daemon: what the updater waits on before it installs. */
+  quietForMs(): number
+  /** Whether patch releases install themselves, why not, and how the last attempt went. */
+  auto(): AutoUpdateView
+  /** Saves the switch in install.json; false when this data folder has no install record to hold it. */
+  setAuto(enabled: boolean): boolean
+}
+
+/** GET /update/auto reads the switch; PUT {"enabled": boolean} sets it. */
+async function autoUpdateRoute(request: Request, handlers: UpdateHandlers | undefined): Promise<RouteAnswer | null> {
+  if (handlers === undefined) return null
+  // The data page reads here, so its read never uses up the banner's once-only notice.
+  if (request.method === 'GET') return { status: 200, body: { auto: handlers.auto() } }
+  if (request.method !== 'PUT') return { status: 405, body: { error: 'method not allowed' } }
+  const body = await readJson(request)
+  if (!body.ok) return { status: 400, body: { error: body.error } }
+  const enabled = typeof body.value === 'object' && body.value !== null && !Array.isArray(body.value) ? (body.value as { enabled?: unknown }).enabled : undefined
+  if (typeof enabled !== 'boolean') return { status: 400, body: { error: 'body must be {"enabled": true} or {"enabled": false}' } }
+  if (!handlers.setAuto(enabled)) return { status: 409, body: { error: 'this data folder has no install record; run kinfold install first' } }
+  return { status: 200, body: { auto: handlers.auto() } }
 }
 
 const DASHBOARD_PAGES = new Set(['/dashboard', '/dashboard/'])
@@ -276,6 +315,11 @@ export function localhostRedirect(host: string | null, url: URL, port: number): 
   return new Response(null, { status: 303, headers: { location: `http://${LOOPBACK_HOST}:${port}${url.pathname}${url.search}` } })
 }
 
+/** The updater, `kinfold status` and the dashboard's banner ask these; asking must not itself keep an update waiting. */
+function isUpdateQuestion(path: string): boolean {
+  return path === '/update' || path.startsWith('/update/')
+}
+
 async function answer(request: Request, port: number, deps: ServerDeps): Promise<Response> {
   if (!isAllowedHost(request.headers.get('host'), port)) return json(403, { error: 'forbidden host' })
   const url = new URL(request.url)
@@ -289,13 +333,14 @@ async function answer(request: Request, port: number, deps: ServerDeps): Promise
   const access = accessFor(url.pathname)
   const checked = checkAccess(request, access, { port, hasToken: (header) => hasToken(header, deps.token), auth: deps.auth })
   if (!checked.ok) return refused(request, url.pathname, access, checked, deps)
+  if (!isUpdateQuestion(url.pathname)) deps.onActivity?.()
   // Every route but the upload keeps the 16 KB limit Bun's cap used to give it, body-reading or not.
   if (url.pathname !== UPLOAD_PATH && declaredLength(request) > MAX_BODY_BYTES) return json(413, { error: 'body too large' })
   const startedAt = performance.now()
   const dashboard = url.pathname === '/dashboard' || url.pathname.startsWith('/dashboard/')
     ? await dashboardRoute(request, url.pathname, { port, auth: deps.auth, readBody: () => readJson(request), log: deps.log })
     : undefined
-  const other = (): Promise<Response> => (BACKUP_PATHS.has(url.pathname) ? backupRoute(request, url.pathname, deps) : storeRoute(request, url, deps))
+  const other = (): Promise<Response> => (BACKUP_PATHS.has(url.pathname) ? backupRoute(request, url.pathname, deps) : storeRoute(request, url, deps, checked.via))
   const response = dashboard === undefined ? await other() : (dashboard ?? json(404, { error: 'not found' }))
   // Route, status and time only: no query string, body or cookie.
   if (checked.via === 'cookie') deps.log(`dashboard ${request.method} ${url.pathname} status=${response.status} ms=${Math.round(performance.now() - startedAt)}`)

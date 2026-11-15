@@ -23,7 +23,7 @@
 import { existsSync, mkdirSync, renameSync, rmSync, statfsSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeFileAtomic } from '../fs/atomic'
-import { installRecordAction, readInstallRecord } from '../install/setup/record'
+import { readInstallRecord, writeInstallRecord } from '../install/setup/record'
 import { DB_KEY_NEXT_REF, DB_KEY_REF, DB_KEY_REPLACED_REF } from '../secrets/credentials'
 import type { KeyStore } from '../secrets/key-store'
 import { foundBackupPath } from '../sqlite/convert'
@@ -319,12 +319,16 @@ function removeStore(path: string): void {
 function applySettings(dataDir: string, settings: BackupManifest['settings'], log: (line: string) => void): void {
   try {
     const record = readInstallRecord(dataDir)
-    if (record === null || settings.updateCheck === undefined || record.updateCheck === settings.updateCheck) return
-    const action = installRecordAction(dataDir, { ...record, updateCheck: settings.updateCheck })
-    if (action.kind === 'write') writeFileAtomic(action.path, action.content, action.mode)
+    if (record === null) return
+    const updateCheck = settings.updateCheck ?? record.updateCheck
+    // An older backup carries no auto-update choice; the install keeps its own.
+    const autoUpdate = settings.autoUpdate ?? record.autoUpdate
+    if (updateCheck === record.updateCheck && autoUpdate === record.autoUpdate) return
+    // The restored choice is the newest one, so it is stamped: a dashboard switch from before the restore does not win over it.
+    writeInstallRecord(dataDir, { ...record, updateCheck, autoUpdate, ...(autoUpdate === record.autoUpdate ? {} : { autoUpdateAt: Date.now() }) })
   } catch (error: unknown) {
     // The memory is restored either way; the choice can be set again with kinfold install.
-    log(`warning: the backup's update-check choice was not applied (${error instanceof Error ? error.name : 'error'})`)
+    log(`warning: the backup's update choices were not applied (${error instanceof Error ? error.name : 'error'})`)
   }
 }
 

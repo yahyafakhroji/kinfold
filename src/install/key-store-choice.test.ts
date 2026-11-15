@@ -189,7 +189,7 @@ const ENTER = '\r'
 const CTRL_C = '\u0003'
 const CODE = /(?:[0-9A-Z]{5}-){10}[0-9A-Z]{5}/g
 const NO_CHOICE = { yes: false, dryRun: false, skipCheck: false, replaceCredential: false, credentialStdin: false, flags: [] } as const
-const flagsOf = (over: Partial<SetupFlags> = {}): SetupFlags => ({ dataDir: null, hosts: [], observers: [], noEncrypt: false, port: null, noUpdateCheck: false, yes: false, ...over })
+const flagsOf = (over: Partial<SetupFlags> = {}): SetupFlags => ({ dataDir: null, hosts: [], observers: [], noEncrypt: false, port: null, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, yes: false, ...over })
 
 /** The wizard on a new store up to the recovery code, where Ctrl-C stops it; the terminal's text with the code masked. */
 async function encryptionScreen(notes: readonly string[] | null): Promise<string> {

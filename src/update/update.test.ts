@@ -5,9 +5,14 @@ import { basename, dirname, join } from 'node:path'
 import { installedProgramPath } from '../install/entry'
 import { installProgram, releaseAssetName } from '../install/self-install'
 import { type FakeService, type FakeWorld, countingService, createWorld, fakeService } from '../install/test-support'
+import type { ServiceControl } from '../install/service/control'
 import { StubService } from '../install/service/stub-service'
+import { mergeAutoState, readAutoState } from './auto-state'
 import { LATEST_RELEASE_URL } from './check'
-import { programUrl, runUpdate } from './update'
+import { UPDATE_LOCK_FILE, acquireUpdateLock, updateLockHolder } from './lock'
+import { writeUpdateState } from './state'
+import { QUIET_MS } from './auto'
+import { AUTO_INSTALL_TIMEOUT_MS, AUTO_LOG_KEEP_BYTES, AUTO_LOG_MAX_BYTES, QUIET_WAIT_CAP_MS, programUrl, runUpdate } from './update'
 import { posixOnly } from '../../test/platform-guards'
 
 const ARCH = 'arm64'
@@ -49,10 +54,11 @@ function updateWorld(release: Release = {}, mode: 'program' | 'checkout' = 'prog
   writeFileSync(binPath, OLD_PROGRAM, { mode: 0o755 })
   const service = fakeService()
   const fetched: string[] = []
+  const tag = release.tag ?? 'v0.2.0'
   const answers: Record<string, () => Response> = {
-    [LATEST_RELEASE_URL]: () => new Response(JSON.stringify({ tag_name: release.tag ?? 'v0.2.0', draft: false, prerelease: false })),
-    [SUMS_URL]: () => new Response(release.sums ?? `${sha(NEW_PROGRAM)}  ${ASSET}\n`),
-    [PROGRAM_URL]: release.program ?? (() => new Response(NEW_PROGRAM)),
+    [LATEST_RELEASE_URL]: () => new Response(JSON.stringify({ tag_name: tag, draft: false, prerelease: false })),
+    [SUMS_URL.replace('v0.2.0', tag)]: () => new Response(release.sums ?? `${sha(NEW_PROGRAM)}  ${ASSET}\n`),
+    [programUrl(tag.slice(1), ASSET)]: release.program ?? (() => new Response(NEW_PROGRAM)),
   }
   w.env = {
     ...w.env,
@@ -370,4 +376,271 @@ test('with an unavailable service the hand-off never starts or stops it', async 
   expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: async () => 3 })).toBe(1)
   expect(w.out.at(-1)).toEndWith('; this platform has no background service')
   expect(service.steps).toEqual([])
+})
+
+// ---- the lock, and `update --auto` as the daemon starts it ------------------
+
+const AUTO_LOG = (w: FakeWorld): string => join(w.dataDir, 'logs', 'auto-update.log')
+const ok = async (): Promise<number> => 0
+
+test('a second update is refused while another runs, and changes nothing', async () => {
+  const { w, binPath, fetched } = updateWorld()
+  acquireUpdateLock(w.dataDir, { pid: 4242, alive: () => true })
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: noRun, lock: { alive: () => true } })).toBe(1)
+  expect(w.out).toEqual(['kinfold update: another update is running (pid 4242); nothing was changed'])
+  expect(fetched).toEqual([])
+  expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
+  expect(updateLockHolder(w.dataDir, () => true)).toBe(4242)
+})
+
+test('the lock is released after an update, whether it worked or not', async () => {
+  const { w } = updateWorld()
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: ok })).toBe(0)
+  expect(existsSync(join(w.dataDir, UPDATE_LOCK_FILE))).toBe(false)
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: async () => 3 })).toBe(1)
+  expect(existsSync(join(w.dataDir, UPDATE_LOCK_FILE))).toBe(false)
+})
+
+test('a dry run takes no lock and runs beside an update', async () => {
+  const { w } = updateWorld()
+  acquireUpdateLock(w.dataDir, { pid: 4242, alive: () => true })
+  expect(await runUpdate(w.env, { dryRun: true }, { version: '0.1.0', runProgram: noRun, lock: { alive: () => true } })).toBe(0)
+  expect(w.out[0]).toContain('dry run')
+})
+
+test('an automatic run installs a patch release, records it and logs to a file', async () => {
+  const { w, service } = updateWorld({ tag: 'v0.1.1' })
+  let ran: readonly string[] = []
+  const code = await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: async (_path, argv) => ((ran = argv), 0) })
+  expect(code).toBe(0)
+  expect(ran).toEqual(['--data-dir', w.dataDir, 'install', '--yes'])
+  const state = readAutoState(w.dataDir)
+  expect(state.updated).toMatchObject({ version: '0.1.1', previous: '0.1.0' })
+  expect(state.failure).toBeNull()
+  // Its terminal is gone, so every line goes to the log.
+  expect(w.out).toEqual([])
+  expect(readFileSync(AUTO_LOG(w), 'utf8')).toContain('kinfold updated to 0.1.1')
+  expect(existsSync(join(w.dataDir, UPDATE_LOCK_FILE))).toBe(false)
+  expect(service.calls).toContain('isRunning')
+})
+
+posixOnly('file modes')('the automatic run\'s log is owner-only', async () => {
+  const { w } = updateWorld({ tag: 'v0.1.1' })
+  await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: ok })
+  expect(statSync(AUTO_LOG(w)).mode & 0o777).toBe(0o600)
+})
+
+test('an automatic run clears the failure an earlier one recorded', async () => {
+  const { w } = updateWorld({ tag: 'v0.1.1' })
+  mergeAutoState(w.dataDir, { failure: { version: '0.1.1', at: 1, reason: 'earlier' } })
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: ok })).toBe(0)
+  expect(readAutoState(w.dataDir).failure).toBeNull()
+})
+
+test('an automatic run leaves a release that is no longer a patch for kinfold update', async () => {
+  // The daemon saw 0.1.1; by the time the updater asks, the latest release is a minor.
+  const { w, binPath, fetched } = updateWorld({ tag: 'v0.2.0' })
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: noRun })).toBe(0)
+  expect(fetched).toEqual([LATEST_RELEASE_URL])
+  expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
+  expect(readAutoState(w.dataDir)).toEqual({ attempt: null, failure: null, updated: null })
+  expect(readFileSync(AUTO_LOG(w), 'utf8')).toContain('0.2.0 is not a patch release of 0.1.0')
+})
+
+test('an automatic run that is already up to date records nothing', async () => {
+  const { w } = updateWorld({ tag: 'v0.1.0' })
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: noRun })).toBe(0)
+  expect(readAutoState(w.dataDir)).toEqual({ attempt: null, failure: null, updated: null })
+})
+
+test('an automatic run records why it failed and leaves the running version', async () => {
+  const { w, binPath } = updateWorld({ tag: 'v0.1.1', program: () => new Response('kinfold program, tampered\n') })
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: noRun })).toBe(1)
+  const state = readAutoState(w.dataDir)
+  expect(state.failure).toMatchObject({ version: '0.1.1', reason: 'the downloaded program does not match the release checksums; nothing was changed' })
+  expect(state.updated).toBeNull()
+  expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
+  expect(existsSync(join(w.dataDir, UPDATE_LOCK_FILE))).toBe(false)
+})
+
+test('an automatic run whose install stops records that as the failure', async () => {
+  const { w } = updateWorld({ tag: 'v0.1.1' })
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: async () => 3 })).toBe(1)
+  expect(readAutoState(w.dataDir).failure?.reason).toContain("the new program's install stopped (exit 3)")
+})
+
+test('an automatic run that cannot reach GitHub is a failure for the release the daemon saw', async () => {
+  const { w } = updateWorld({ tag: 'v0.1.1' })
+  writeUpdateState(w.dataDir, { lastAttemptAt: 1, latestVersion: '0.1.1', checkedAt: 1, notified: {} })
+  w.env = { ...w.env, fetch: async () => { throw new TypeError('offline') } }
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: noRun })).toBe(1)
+  expect(readAutoState(w.dataDir).failure).toMatchObject({ version: '0.1.1', reason: 'could not ask GitHub for the latest release (TypeError)' })
+})
+
+test('an automatic run needs the background service to be running the daemon', async () => {
+  const services: ((w: FakeWorld) => ServiceControl | null)[] = [() => fakeService({ running: false }), (w) => new StubService(w.env, 'test service'), () => null]
+  for (const serviceFor of services) {
+    const { w, fetched } = updateWorld({ tag: 'v0.1.1' })
+    const service = serviceFor(w)
+    writeUpdateState(w.dataDir, { lastAttemptAt: 1, latestVersion: '0.1.1', checkedAt: 1, notified: {} })
+    w.env = { ...w.env, service }
+    expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: noRun })).toBe(1)
+    expect(fetched).toEqual([])
+    // A blocker, not a failure to retry tomorrow: the daemon waits for the install or the service to change.
+    expect(readAutoState(w.dataDir).failure).toMatchObject({ version: '0.1.1', reason: 'the daemon is not run by a background service here; run kinfold update', blocked: true, running: '0.1.0' })
+    await w.cleanup()
+  }
+})
+
+test('an automatic run started while another update runs does nothing at all', async () => {
+  const { w, fetched } = updateWorld({ tag: 'v0.1.1' })
+  acquireUpdateLock(w.dataDir, { pid: 4242, alive: () => true })
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: noRun, lock: { alive: () => true } })).toBe(0)
+  expect(fetched).toEqual([])
+  expect(readAutoState(w.dataDir)).toEqual({ attempt: null, failure: null, updated: null })
+  expect(existsSync(AUTO_LOG(w))).toBe(false)
+})
+
+test('an automatic install that hangs is given up on and recorded, and the lock is let go', async () => {
+  const { w } = updateWorld({ tag: 'v0.1.1' })
+  const hung = (): Promise<number> => new Promise<number>(() => undefined)
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: hung, installTimeoutMs: 20 })).toBe(1)
+  expect(readAutoState(w.dataDir).failure?.reason).toContain("the new program's install stopped (exit 124)")
+  expect(existsSync(join(w.dataDir, UPDATE_LOCK_FILE))).toBe(false)
+  expect(AUTO_INSTALL_TIMEOUT_MS).toBe(900_000)
+})
+
+test('an automatic run hands the install the agent homes saved at install time, and only those', async () => {
+  const { w } = updateWorld({ tag: 'v0.1.1' })
+  writeFileSync(join(w.dataDir, 'install.json'), JSON.stringify({ channel: 'curl', updateCheck: true, autoUpdate: true, firstInstalledAt: 1, agentHomes: { CODEX_HOME: '/opt/codex-home' } }))
+  // The daemon's environment: no CODEX_HOME, and a JUNIE_HOME the install never ran with.
+  w.env = { ...w.env, envVars: { ...w.env.envVars, JUNIE_HOME: '/not/from/install' } }
+  let seen: Readonly<Record<string, string>> = {}
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: async (_path, _argv, vars) => ((seen = vars), 0) })).toBe(0)
+  expect(seen.CODEX_HOME).toBe('/opt/codex-home')
+  expect(seen.JUNIE_HOME).toBeUndefined()
+  expect(seen.PATH).toBe('/usr/bin')
+})
+
+test('a manual update leaves the shell\'s agent homes as they are', async () => {
+  const { w } = updateWorld()
+  writeFileSync(join(w.dataDir, 'install.json'), JSON.stringify({ channel: 'curl', updateCheck: true, autoUpdate: true, firstInstalledAt: 1, agentHomes: { CODEX_HOME: '/opt/codex-home' } }))
+  w.env = { ...w.env, envVars: { ...w.env.envVars, JUNIE_HOME: '/from/the/shell' } }
+  let seen: Readonly<Record<string, string>> = {}
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: async (_path, _argv, vars) => ((seen = vars), 0) })).toBe(0)
+  expect(seen.JUNIE_HOME).toBe('/from/the/shell')
+  expect(seen.CODEX_HOME).toBeUndefined()
+})
+
+test('the automatic run\'s log is trimmed to its newest part once it passes its cap', async () => {
+  const { w } = updateWorld({ tag: 'v0.1.1' })
+  mkdirSync(join(w.dataDir, 'logs'), { recursive: true })
+  const line = (index: number): string => `2026-01-01T00:00:00.000Z old line ${String(index).padStart(6, '0')}\n`
+  const count = Math.ceil((AUTO_LOG_MAX_BYTES + 4096) / line(0).length)
+  writeFileSync(AUTO_LOG(w), Array.from({ length: count }, (_, index) => line(index)).join(''))
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: ok })).toBe(0)
+  const text = readFileSync(AUTO_LOG(w), 'utf8')
+  expect(text.length).toBeLessThan(AUTO_LOG_KEEP_BYTES + 4096)
+  // Whole lines only, the newest of the old ones kept, and this run's lines after them.
+  expect(text.startsWith('2026-01-01T00:00:00.000Z old line ')).toBe(true)
+  expect(text).toContain(line(count - 1))
+  expect(text).not.toContain(line(0))
+  expect(text).toContain('kinfold updated to 0.1.1')
+  expect(AUTO_LOG_MAX_BYTES).toBe(262_144)
+  expect(AUTO_LOG_KEEP_BYTES).toBe(131_072)
+})
+
+test('a log under its cap is left as it is', async () => {
+  const { w } = updateWorld({ tag: 'v0.1.1' })
+  mkdirSync(join(w.dataDir, 'logs'), { recursive: true })
+  writeFileSync(AUTO_LOG(w), 'an earlier run\n')
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: ok })).toBe(0)
+  expect(readFileSync(AUTO_LOG(w), 'utf8').startsWith('an earlier run\n')).toBe(true)
+})
+
+test('an interrupt during the download releases the lock before the run ends', async () => {
+  let arrived: () => void = () => undefined
+  const reached = new Promise<void>((resolve) => { arrived = resolve })
+  let finish: () => void = () => undefined
+  const { w, binPath } = updateWorld({ program: () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(NEW_PROGRAM.slice(0, 5)))
+      arrived()
+      finish = () => {
+        controller.enqueue(new TextEncoder().encode(NEW_PROGRAM.slice(5)))
+        controller.close()
+      }
+    },
+  })) })
+  const realExit = process.exit
+  let exitedWith = null as number | null
+  process.exit = ((code?: number) => { exitedWith = code ?? 0 }) as typeof process.exit
+  try {
+    const running = runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: ok })
+    await reached
+    await Bun.sleep(20)
+    expect(existsSync(join(w.dataDir, UPDATE_LOCK_FILE))).toBe(true)
+    process.emit('SIGINT')
+    expect(exitedWith).toBe(130)
+    expect(existsSync(join(w.dataDir, UPDATE_LOCK_FILE))).toBe(false)
+    expect(tempFiles(binPath)).toEqual([])
+    finish()
+    await running.catch(() => undefined)
+  } finally {
+    process.exit = realExit
+  }
+})
+
+// ---- quiet is checked again after the download ----
+
+/** A world whose clock moves only when the updater sleeps, so a wait is as long as it says. */
+function timedWorld(): { w: FakeWorld; binPath: string; fetched: string[]; slept: number[] } {
+  const made = updateWorld({ tag: 'v0.1.1' })
+  let clock = 1_792_900_000_000
+  const slept: number[] = []
+  made.w.env = { ...made.w.env, now: () => clock, sleep: async (ms) => { slept.push(ms); clock += ms } }
+  return { ...made, slept }
+}
+
+test('an automatic run asks again whether agents are quiet once the download is checked, and waits out the rest', async () => {
+  const { w, fetched, slept } = timedWorld()
+  const answers = [QUIET_MS - 60_000, QUIET_MS]
+  const askedAfter: number[] = []
+  const quietForMs = async (): Promise<number | null> => {
+    askedAfter.push(fetched.length)
+    return answers.shift() ?? QUIET_MS
+  }
+  let installed = false
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: async () => ((installed = true), 0), quietForMs })).toBe(0)
+  // Asked only once the release, the checksums and the program had all been fetched.
+  expect(askedAfter).toEqual([3, 3])
+  expect(slept).toEqual([60_000])
+  expect(installed).toBe(true)
+  expect(readFileSync(AUTO_LOG(w), 'utf8')).toContain('an agent was active 9 minutes ago; waiting 1 minute before installing')
+})
+
+test('agents that stay active past the cap leave the update for the next daily check, with nothing changed', async () => {
+  const { w, binPath, slept } = timedWorld()
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: noRun, quietForMs: async () => 0 })).toBe(1)
+  expect(slept.reduce((sum, ms) => sum + ms, 0)).toBeLessThanOrEqual(QUIET_WAIT_CAP_MS)
+  expect(slept.length).toBeGreaterThan(1)
+  expect(readAutoState(w.dataDir).failure).toMatchObject({ version: '0.1.1', reason: 'agents were still active 30 minutes after the download; nothing was changed' })
+  expect(readAutoState(w.dataDir).failure?.blocked).toBeUndefined()
+  expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
+  expect(tempFiles(binPath)).toEqual([])
+  expect(QUIET_WAIT_CAP_MS).toBe(1_800_000)
+})
+
+test('a daemon that does not answer the quiet question holds nothing up: no agent can be mid-session with it', async () => {
+  const { w, slept } = timedWorld()
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: ok, quietForMs: async () => null })).toBe(0)
+  expect(slept).toEqual([])
+})
+
+test('a manual update never waits for quiet: the user asked for it now', async () => {
+  const { w } = updateWorld()
+  const quietForMs = async (): Promise<number | null> => {
+    throw new Error('a manual update must not ask')
+  }
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: ok, quietForMs })).toBe(0)
 })

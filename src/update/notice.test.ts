@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import type { InstallChannel, InstallRecord } from '../install/setup/record'
 import { parseContextResult } from '../context/types'
 import { runUpdateCheck } from './check'
-import { agentLine, availableMessage, pendingNotice, takeNotice, updateCommand } from './notice'
+import { mergeAutoState, readAutoState } from './auto-state'
+import { STALE_ATTEMPT_MS, agentLine, availableMessage, bannerNotice, peekNotice, pendingNotice, takeNotice, updateCommand, userMessage } from './notice'
 import { UPDATE_STATE_FILE, markNotified, readUpdateState, writeUpdateState } from './state'
 
 let dir: string
@@ -14,7 +15,7 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
-const record = (channel: InstallChannel, updateCheck = true): InstallRecord => ({ channel, updateCheck, firstInstalledAt: 1 })
+const record = (channel: InstallChannel, updateCheck = true): InstallRecord => ({ channel, updateCheck, autoUpdate: true, autoUpdateIntro: false, agentHomes: {}, firstInstalledAt: 1 })
 const writeRecord = (value: InstallRecord): void => writeFileSync(join(dir, 'install.json'), JSON.stringify(value))
 const state = (latestVersion: string | null, notified: Record<string, string> = {}) => ({ lastAttemptAt: 1, latestVersion, checkedAt: 1, notified })
 
@@ -95,10 +96,157 @@ test('parseContextResult keeps a valid notice and ignores a malformed one', () =
   }
 })
 
+// ---- automatic updates -------------------------------------------------------
+
+const DONE = { version: '0.2.1', previous: '0.2.0', at: 5 }
+/** A daemon that is the installed program, so it will apply a patch itself. */
+const CAN = { capable: true, now: 10 }
+
+test('the wording for an update that installed itself, and for auto-update being on', () => {
+  const updated = { kind: 'updated', version: '0.2.1', previous: '0.2.0', channel: 'curl' } as const
+  expect(userMessage(updated)).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0).')
+  expect(agentLine(updated)).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0); you may tell the user.')
+  const on = { kind: 'auto-on', version: '0.3.0', channel: 'curl' } as const
+  expect(userMessage(on)).toBe('Kinfold now installs patch releases on its own. To turn that off, run `kinfold install --no-auto-update` or use the dashboard.')
+  expect(agentLine(on)).toBe('Kinfold now installs its own patch releases; you may tell the user that `kinfold install --no-auto-update` turns it off.')
+  expect(userMessage({ ...on, channel: 'npx' })).toContain('`npx kinfold@latest install --no-auto-update`')
+  expect(userMessage({ version: '0.2.0', channel: 'curl' })).toBe(availableMessage({ version: '0.2.0', channel: 'curl' }))
+  expect(userMessage({ kind: 'available', version: '0.2.0', channel: 'curl' })).toBe('Kinfold 0.2.0 is available. Run `kinfold update`.')
+})
+
+test('each host is told once that Kinfold updated itself', () => {
+  writeRecord(record('curl'))
+  writeUpdateState(dir, state('0.2.1'))
+  mergeAutoState(dir, { updated: DONE })
+  expect(takeNotice(dir, 'claude-code', '0.2.1', {})).toEqual({ kind: 'updated', version: '0.2.1', previous: '0.2.0', channel: 'curl' })
+  expect(takeNotice(dir, 'claude-code', '0.2.1', {})).toBeNull()
+  expect(peekNotice(dir, 'codex', '0.2.1', {})?.kind).toBe('updated')
+  expect(takeNotice(dir, 'codex', '0.2.1', {})?.kind).toBe('updated')
+  expect(readUpdateState(dir).notified).toEqual({ 'updated:claude-code': '0.2.1', 'updated:codex': '0.2.1' })
+})
+
+test('an update record for another version than the running one says nothing', () => {
+  writeRecord(record('curl'))
+  mergeAutoState(dir, { updated: DONE })
+  // Updated again by hand since, or the install was rolled back by hand.
+  expect(takeNotice(dir, 'claude-code', '0.2.2', {})).toBeNull()
+  expect(takeNotice(dir, 'claude-code', '0.2.0', {})).toBeNull()
+})
+
+test('a patch that will install itself is not announced as available', () => {
+  writeRecord(record('curl'))
+  writeUpdateState(dir, state('0.2.1'))
+  expect(pendingNotice(state('0.2.1'), record('curl'), '0.2.0', {}, { auto: readAutoState(dir), now: 10 })).toBeNull()
+  expect(takeNotice(dir, 'claude-code', '0.2.0', {}, CAN)).toBeNull()
+  expect(bannerNotice(dir, '0.2.0', {}, CAN)).toBeNull()
+})
+
+test('a daemon that cannot update itself announces the patch as before', () => {
+  // A checkout, or a copy run from outside the data folder: nothing here will install it.
+  writeRecord(record('curl'))
+  writeUpdateState(dir, state('0.2.1'))
+  expect(pendingNotice(state('0.2.1'), record('curl'), '0.2.0', {})).toEqual({ version: '0.2.1', channel: 'curl' })
+  expect(bannerNotice(dir, '0.2.0', {})).toEqual({ version: '0.2.1', channel: 'curl' })
+  expect(takeNotice(dir, 'claude-code', '0.2.0', {})).toEqual({ version: '0.2.1', channel: 'curl' })
+})
+
+test('an attempt that left no result within the hour stops holding the notice back', () => {
+  // The updater was killed, or never started: no failure was written, and none ever will be.
+  writeRecord(record('curl'))
+  writeUpdateState(dir, state('0.2.1'))
+  mergeAutoState(dir, { attempt: { version: '0.2.1', checkedAt: 1, startedAt: 1000 } })
+  expect(takeNotice(dir, 'claude-code', '0.2.0', {}, { capable: true, now: 1000 + STALE_ATTEMPT_MS })).toBeNull()
+  expect(takeNotice(dir, 'claude-code', '0.2.0', {}, { capable: true, now: 1001 + STALE_ATTEMPT_MS })).toEqual({ version: '0.2.1', channel: 'curl' })
+  expect(STALE_ATTEMPT_MS).toBe(3_600_000)
+})
+
+test('a patch is announced once its automatic update has failed, or when auto-update is off', () => {
+  writeRecord(record('curl'))
+  writeUpdateState(dir, state('0.2.1'))
+  mergeAutoState(dir, { failure: { version: '0.2.1', at: 1, reason: 'x' } })
+  expect(takeNotice(dir, 'claude-code', '0.2.0', {}, CAN)).toEqual({ version: '0.2.1', channel: 'curl' })
+  mergeAutoState(dir, { failure: null })
+  expect(takeNotice(dir, 'codex', '0.2.0', { KINFOLD_NO_AUTO_UPDATE: '1' }, CAN)).toEqual({ version: '0.2.1', channel: 'curl' })
+  writeRecord({ ...record('curl'), autoUpdate: false })
+  expect(takeNotice(dir, 'cursor', '0.2.0', {}, CAN)).toEqual({ version: '0.2.1', channel: 'curl' })
+})
+
+test('a minor release is announced as before, with auto-update on', () => {
+  writeRecord(record('curl'))
+  writeUpdateState(dir, state('0.3.0'))
+  expect(takeNotice(dir, 'claude-code', '0.2.0', {})).toEqual({ version: '0.3.0', channel: 'curl' })
+})
+
+test('an install from before auto-update tells each host once that it is on', () => {
+  writeRecord({ ...record('bunx'), autoUpdateIntro: true })
+  expect(takeNotice(dir, 'claude-code', '0.3.0', {})).toEqual({ kind: 'auto-on', version: '0.3.0', channel: 'bunx' })
+  expect(takeNotice(dir, 'claude-code', '0.3.0', {})).toBeNull()
+  expect(takeNotice(dir, 'codex', '0.3.0', {})?.kind).toBe('auto-on')
+  expect(readUpdateState(dir).notified).toEqual({ 'auto-on:claude-code': '1', 'auto-on:codex': '1' })
+})
+
+test('nothing is said about auto-update being on where it is off or was chosen in the wizard', () => {
+  writeRecord({ ...record('curl'), autoUpdateIntro: true, autoUpdate: false })
+  expect(takeNotice(dir, 'claude-code', '0.3.0', {})).toBeNull()
+  writeRecord({ ...record('curl'), autoUpdateIntro: true })
+  expect(takeNotice(dir, 'claude-code', '0.3.0', { KINFOLD_NO_AUTO_UPDATE: '1' })).toBeNull()
+  writeRecord(record('curl'))
+  expect(takeNotice(dir, 'claude-code', '0.3.0', {})).toBeNull()
+})
+
+test('one notice per session start: auto-update being on comes first, then the update that happened, then what is available', () => {
+  writeRecord({ ...record('curl'), autoUpdateIntro: true })
+  writeUpdateState(dir, state('0.3.0'))
+  mergeAutoState(dir, { updated: DONE })
+  expect(takeNotice(dir, 'claude-code', '0.2.1', {})?.kind).toBe('auto-on')
+  expect(takeNotice(dir, 'claude-code', '0.2.1', {})?.kind).toBe('updated')
+  expect(takeNotice(dir, 'claude-code', '0.2.1', {})).toEqual({ version: '0.3.0', channel: 'curl' })
+  expect(takeNotice(dir, 'claude-code', '0.2.1', {})).toBeNull()
+})
+
+test('the dashboard banner says once that Kinfold updated itself, then shows what is available for as long as it is', () => {
+  writeRecord({ ...record('curl'), autoUpdateIntro: true })
+  writeUpdateState(dir, state('0.3.0'))
+  mergeAutoState(dir, { updated: DONE })
+  expect(bannerNotice(dir, '0.2.1', {})?.kind).toBe('updated')
+  expect(bannerNotice(dir, '0.2.1', {})).toEqual({ version: '0.3.0', channel: 'curl' })
+  expect(bannerNotice(dir, '0.2.1', {})).toEqual({ version: '0.3.0', channel: 'curl' })
+  writeUpdateState(dir, { ...readUpdateState(dir), latestVersion: '0.2.1' })
+  // The toggle is on the page, so the banner never carries the auto-update notice.
+  expect(bannerNotice(dir, '0.2.1', {})).toBeNull()
+})
+
+test('the new kinds travel under their own key, so a hook or plugin from before them never reads one as a release', () => {
+  const base = { text: '', observationIds: [], tokens: 0 }
+  const own = (selfNotice: unknown) => parseContextResult({ ...base, selfNotice })?.updateNotice
+  expect(own({ kind: 'updated', version: '0.2.1', previous: '0.2.0', channel: 'curl' })).toEqual({ kind: 'updated', version: '0.2.1', previous: '0.2.0', channel: 'curl' })
+  expect(own({ kind: 'auto-on', version: '0.3.0', channel: 'npx' })).toEqual({ kind: 'auto-on', version: '0.3.0', channel: 'npx' })
+  for (const bad of [{ kind: 'rolled-back', version: '0.2.1', channel: 'curl' }, { kind: 'updated', version: '0.2.1', channel: 'curl' }, { kind: 'updated', version: '0.2.1', previous: 'a b\n', channel: 'curl' }, { kind: 7, version: '0.2.1', channel: 'curl' }, { kind: 'available', version: '0.2.1', channel: 'curl' }, { version: '0.2.1', channel: 'curl' }]) {
+    expect(parseContextResult({ ...base, selfNotice: bad })).not.toBeNull()
+    expect(own(bad)).toBeUndefined()
+  }
+  // The old key only ever means a release to install, whatever else rides on it.
+  expect(parseContextResult({ ...base, updateNotice: { kind: 'updated', version: '0.3.0', previous: '0.2.0', channel: 'npx' } })?.updateNotice).toEqual({ version: '0.3.0', channel: 'npx' })
+})
+
+test('KINFOLD_NO_UPDATE_CHECK=1 silences every notice', () => {
+  writeRecord({ ...record('curl'), autoUpdateIntro: true })
+  mergeAutoState(dir, { updated: DONE })
+  expect(takeNotice(dir, 'claude-code', '0.2.1', { KINFOLD_NO_UPDATE_CHECK: '1' })).toBeNull()
+})
+
 test('KINFOLD_NO_UPDATE_CHECK=1 silences the notice even with a newer version cached', () => {
   writeUpdateState(dir, state('0.2.0'))
   const off = { KINFOLD_NO_UPDATE_CHECK: '1' }
   expect(pendingNotice(state('0.2.0'), null, '0.1.0', off)).toBeNull()
   expect(takeNotice(dir, 'claude-code', '0.1.0', off)).toBeNull()
   expect(readUpdateState(dir).notified).toEqual({})
+})
+
+test('where auto-update is blocked, a patch is announced even after a newer one replaces it', () => {
+  // The blocker was recorded for 0.2.1; 0.2.2 will not install itself either, and nothing would say so.
+  writeRecord(record('curl'))
+  writeUpdateState(dir, state('0.2.2'))
+  mergeAutoState(dir, { failure: { version: '0.2.1', at: 1, reason: 'the daemon is not run by a background service here; run kinfold update', blocked: true, running: '0.2.0' } })
+  expect(takeNotice(dir, 'claude-code', '0.2.0', {}, CAN)).toEqual({ version: '0.2.2', channel: 'curl' })
 })

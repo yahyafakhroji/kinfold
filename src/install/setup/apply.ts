@@ -24,6 +24,7 @@ import {
   foreignDaemonMessage,
   reportDetections,
   restartService,
+  takeInstallLock,
 } from '../install'
 import { type InstallKeyStore, keyStoreOf, readKeyStore } from '../key-store-choice'
 import { ChoiceError, describeInput } from '../observer-choice'
@@ -118,11 +119,15 @@ export async function applySetup(env: InstallEnv, state: SetupState, answers: Se
     }
     const found = detections.filter((detection) => detection.selected && answers.hosts.includes(detection.host))
     const plan = await buildPlan(env, { hosts: answers.hosts, detections: found, situation, keyStore: given?.keyStore }, answers, state, options, check)
+    const lock = takeInstallLock(env, options)
+    if (lock === 'blocked') return EXIT_BLOCKED
     try {
       await runPlan(env, plan.actions, options.dryRun)
     } catch (error: unknown) {
       if (!options.dryRun && plan.stopsService) await restartService(env)
       throw error
+    } finally {
+      lock.release()
     }
     if (options.dryRun) {
       if (conversion !== null) env.out(`then: kinfold ${conversion}`)

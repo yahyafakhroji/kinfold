@@ -15,7 +15,7 @@ import { normalizeCursor } from '../adapters/cursor'
 import type { UpdateNotice } from '../context/types'
 import { normalizeClaudeStyle } from './families/claude-style-parse'
 import { GEMINI_CLI_EVENTS, normalizeGeminiStyle } from './families/gemini-style-parse'
-import { agentLine, availableMessage } from '../update/notice-text'
+import { agentLine, userMessage } from '../update/notice-text'
 import type { HookHostSpec } from './hook-spec'
 import type { AgentId } from './profile'
 
@@ -24,7 +24,7 @@ const hookSpecific = (text: string): string => JSON.stringify({ hookSpecificOutp
 
 /** Claude Code shows `systemMessage` to the user, so the notice never enters the model's context; the pack may be empty. */
 const claudeWithNotice = (text: string, notice: UpdateNotice): string =>
-  JSON.stringify({ systemMessage: availableMessage(notice), ...(text !== '' ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {}) })
+  JSON.stringify({ systemMessage: userMessage(notice), ...(text !== '' ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {}) })
 
 /** Hosts with no user channel get one agent line as the last line of Kinfold's block. */
 const withAgentLine = (text: string, notice: UpdateNotice): string => [text.replace(/\n$/, ''), agentLine(notice)].filter((part) => part !== '').join('\n')

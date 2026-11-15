@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { PlatformInfo } from '../platform/platform'
 import { readMaster } from '../secrets/hmac-keys'
 import type { KeyStoreDeps } from '../secrets/key-store'
@@ -11,7 +11,7 @@ import { openStoreFile } from '../sqlite/open'
 import { SqliteError } from '../sqlite/types'
 import { loadMarkerKey } from '../store/hmac-key'
 import { envName } from '../env-names'
-import { daemonSecrets, fileSink, runDaemon } from './main'
+import { autoUpdateProgram, daemonSecrets, fileSink, runDaemon } from './main'
 import { posixOnly } from '../../test/platform-guards'
 
 let dir = ''
@@ -145,4 +145,29 @@ test.skipIf(process.platform === 'win32')('an existing log file at 0644 ends at 
     file.close()
   }
   expect(readFileSync(logFile, 'utf8')).toBe('old line\nnew line\n')
+})
+
+test('only the installed program, running from its own data folder, may update itself', () => {
+  // resolve, as the function answers: on Windows a rooted path gains the drive letter.
+  expect(autoUpdateProgram(true, '/home/u/.kinfold/bin/kinfold', '/home/u/.kinfold', 'linux')).toBe(resolve('/home/u/.kinfold/bin/kinfold'))
+  expect(autoUpdateProgram(true, '/Users/u/.kinfold/bin/kinfold', '/Users/u/.kinfold/', 'darwin')).toBe(resolve('/Users/u/.kinfold/bin/kinfold'))
+  // A checkout runs under bun, and a copy elsewhere is not the file an update replaces.
+  expect(autoUpdateProgram(false, '/home/u/.kinfold/bin/kinfold', '/home/u/.kinfold', 'linux')).toBeNull()
+  expect(autoUpdateProgram(true, '/usr/local/bin/kinfold', '/home/u/.kinfold', 'linux')).toBeNull()
+  expect(autoUpdateProgram(true, '/home/u/.kinfold/bin/kinfold', '/home/u/other', 'linux')).toBeNull()
+})
+
+// Windows path rules come from node:path, so this runs only there.
+test.skipIf(process.platform !== 'win32')('on Windows the installed program is matched whatever the case of its path', () => {
+  expect(autoUpdateProgram(true, 'c:\\users\\u\\.kinfold\\BIN\\Kinfold.exe', 'C:\\Users\\u\\.kinfold', 'win32')).not.toBeNull()
+})
+
+test.skipIf(process.platform === 'win32')('a data folder reached through a symlink is still the installed program\'s own', () => {
+  // process.execPath is the real path, while the service names the folder as the user typed it.
+  const real = join(dir, 'real-home', '.kinfold')
+  mkdirSync(join(real, 'bin'), { recursive: true })
+  writeFileSync(join(real, 'bin', 'kinfold'), '')
+  symlinkSync(join(dir, 'real-home'), join(dir, 'home'))
+  expect(autoUpdateProgram(true, realpathSync(join(real, 'bin', 'kinfold')), join(dir, 'home', '.kinfold'), 'linux')).not.toBeNull()
+  expect(autoUpdateProgram(true, join(dir, 'home', '.kinfold', 'bin', 'kinfold'), real, 'linux')).not.toBeNull()
 })

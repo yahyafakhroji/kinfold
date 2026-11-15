@@ -63,9 +63,9 @@ test('the backup file holds no key, recovery code, token or HMAC key', async () 
   const code = encodeRecoveryCode(key)
   for (const secret of [key, code, code.replace(/-/g, ''), token, hmac]) expect(bytes.includes(Buffer.from(secret))).toBe(false)
   for (const secret of [key, token, hmac]) expect(bytes.includes(Buffer.from(secret, 'hex'))).toBe(false)
-  // Machine records stay out: only the user's update-check choice travels.
+  // Machine records stay out: only the user's update choices travel.
   const manifest = readArchive(dest).manifest
-  expect(manifest.settings).toEqual({ updateCheck: false })
+  expect(manifest.settings).toEqual({ updateCheck: false, autoUpdate: true })
   const manifestText = JSON.stringify(manifest)
   for (const machine of ['curl', 'key-file', '/somewhere/private', 'firstInstalledAt']) expect(manifestText).not.toContain(machine)
   // The plaintext memory is not readable from the file either.
@@ -99,4 +99,13 @@ test('a damaged record reads as no backup', () => {
   expect(readBackupRecord(dataDir)).toBeNull()
   writeFileSync(join(dataDir, BACKUP_RECORD_FILE), 'nope')
   expect(readBackupRecord(dataDir)).toBeNull()
+})
+
+test('the backup carries the auto-update choice', async () => {
+  writeFileSync(join(dataDir, 'install.json'), JSON.stringify({ channel: 'curl', updateCheck: true, autoUpdate: false, firstInstalledAt: 1, agentHomes: { CODEX_HOME: '/opt/codex-home' } }))
+  await make()
+  const manifest = readArchive(dest).manifest
+  expect(manifest.settings).toEqual({ updateCheck: true, autoUpdate: false })
+  // The agent homes are this machine's paths, so they stay behind with the other machine records.
+  expect(JSON.stringify(manifest)).not.toContain('codex-home')
 })

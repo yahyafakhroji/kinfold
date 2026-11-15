@@ -41,6 +41,7 @@ export function readRestoreJournal(dbPath: string): RestoreJournal | null {
     if (previous !== 'none' && previous !== 'plain' && previous !== 'encrypted') return null
     if (typeof encrypted !== 'boolean' || typeof keepPrevious !== 'boolean') return null
     const updateCheck = isRecord(settings) && typeof settings.updateCheck === 'boolean' ? { updateCheck: settings.updateCheck } : {}
+    const autoUpdate = isRecord(settings) && typeof settings.autoUpdate === 'boolean' ? { autoUpdate: settings.autoUpdate } : {}
     return {
       op: 'restore',
       pid: value.pid,
@@ -48,7 +49,7 @@ export function readRestoreJournal(dbPath: string): RestoreJournal | null {
       previous,
       encrypted,
       keepPrevious,
-      settings: updateCheck,
+      settings: { ...updateCheck, ...autoUpdate },
       ...(value.abandoned === true ? { abandoned: true } : {}),
     }
   } catch {

@@ -14,6 +14,7 @@ export type EnvKey =
   | 'RELEASE_SUMS_URL'
   | 'INSTALL_CHANNEL'
   | 'NO_UPDATE_CHECK'
+  | 'NO_AUTO_UPDATE'
 
 type Env = Readonly<Record<string, string | undefined>>
 
@@ -28,7 +29,7 @@ export function legacyName(key: EnvKey): string {
 }
 
 /** These names never existed under SAM_, so no legacy fallback and no deprecation line. */
-const NEW_ONLY_KEYS: readonly EnvKey[] = ['INSTALL_CHANNEL', 'NO_UPDATE_CHECK']
+const NEW_ONLY_KEYS: readonly EnvKey[] = ['INSTALL_CHANNEL', 'NO_UPDATE_CHECK', 'NO_AUTO_UPDATE']
 
 /** The KINFOLD_ value, else the legacy SAM_ one; an empty KINFOLD_ value counts as unset. */
 export function readEnv(env: Env, key: EnvKey): string | undefined {

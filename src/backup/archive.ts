@@ -37,7 +37,7 @@ export interface BackupManifest {
   encrypted: boolean
   snapshot: { sha256: string; bytes: number }
   /** The user's choices that live outside the database. */
-  settings: { updateCheck?: boolean }
+  settings: { updateCheck?: boolean; autoUpdate?: boolean }
 }
 
 export type BackupErrorKind = 'format' | 'truncated' | 'tampered' | 'schema' | 'code' | 'busy' | 'state' | 'space' | 'key-store'
@@ -75,8 +75,10 @@ export function parseManifest(value: unknown): BackupManifest {
   if (!isCount(schemaVersion) || !isCount(createdAt) || typeof encrypted !== 'boolean') throw notOurs()
   if (!isRecord(snapshot) || !hasOnly(snapshot, ['sha256', 'bytes'])) throw notOurs()
   if (typeof snapshot.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(snapshot.sha256) || !isCount(snapshot.bytes) || snapshot.bytes === 0) throw notOurs()
-  if (!isRecord(settings) || !hasOnly(settings, ['updateCheck'])) throw notOurs()
+  // autoUpdate came later: a backup without it is an older one, and restores with the install's own choice kept.
+  if (!isRecord(settings) || !hasOnly(settings, ['updateCheck', 'autoUpdate'])) throw notOurs()
   if (settings.updateCheck !== undefined && typeof settings.updateCheck !== 'boolean') throw notOurs()
+  if (settings.autoUpdate !== undefined && typeof settings.autoUpdate !== 'boolean') throw notOurs()
   return {
     format,
     kinfoldVersion,
@@ -84,7 +86,7 @@ export function parseManifest(value: unknown): BackupManifest {
     createdAt,
     encrypted,
     snapshot: { sha256: snapshot.sha256, bytes: snapshot.bytes },
-    settings: settings.updateCheck === undefined ? {} : { updateCheck: settings.updateCheck },
+    settings: { ...(settings.updateCheck === undefined ? {} : { updateCheck: settings.updateCheck }), ...(settings.autoUpdate === undefined ? {} : { autoUpdate: settings.autoUpdate }) },
   }
 }
 

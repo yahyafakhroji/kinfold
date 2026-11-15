@@ -144,6 +144,7 @@ test('a manifest must hold exactly the known fields, well formed', () => {
     { ...good, snapshot: { ...good.snapshot, bytes: 0 } },
     { ...good, snapshot: { ...good.snapshot, extra: 1 } },
     { ...good, settings: { updateCheck: 'on' } },
+    { ...good, settings: { updateCheck: true, autoUpdate: 'on' } },
     { ...good, settings: { token: 'x' } },
     (() => {
       const { settings: _settings, ...rest } = good

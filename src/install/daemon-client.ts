@@ -149,3 +149,22 @@ export async function getObserverSettings(env: InstallEnv): Promise<SettingsRead
     return { ok: false, reason: error instanceof Error ? error.message : 'request failed' }
   }
 }
+
+/**
+ * How long the daemon has gone without an agent, an MCP client or the
+ * dashboard reaching it (GET /update/quiet); null when it cannot say: no
+ * daemon, an older one, or no answer in time. The question itself does not
+ * count as activity.
+ */
+export async function getQuietForMs(env: InstallEnv): Promise<number | null> {
+  try {
+    const { base, token } = authorized(env)
+    const response = await env.fetch(`${base}/update/quiet`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+    if (response.status !== 200) return null
+    const body: unknown = await response.json()
+    const quietFor = isRecord(body) ? body.quietForMs : undefined
+    return typeof quietFor === 'number' && Number.isFinite(quietFor) && quietFor >= 0 ? quietFor : null
+  } catch {
+    return null
+  }
+}

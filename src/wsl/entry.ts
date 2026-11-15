@@ -84,9 +84,13 @@ function recordActions(env: InstallEnv, wslHome: string, options: InstallOptions
   const record = {
     channel: currentChannel(env, saved),
     updateCheck: options.noUpdateCheck === true ? false : (saved?.updateCheck ?? true),
+    autoUpdate: options.noAutoUpdate === true ? false : options.autoUpdate === true ? true : (saved?.autoUpdate ?? true),
+    autoUpdateIntro: saved?.autoUpdateIntro ?? false,
+    agentHomes: saved?.agentHomes ?? {},
+    ...(saved?.autoUpdateAt !== undefined ? { autoUpdateAt: saved.autoUpdateAt } : {}),
     firstInstalledAt: saved?.firstInstalledAt ?? env.now(),
   }
-  const same = saved !== null && saved.channel === record.channel && saved.updateCheck === record.updateCheck
+  const same = saved !== null && saved.channel === record.channel && saved.updateCheck === record.updateCheck && saved.autoUpdate === record.autoUpdate
   return same ? [] : [installRecordAction(wslHome, record)]
 }
 

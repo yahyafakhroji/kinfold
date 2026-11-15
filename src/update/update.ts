@@ -8,18 +8,25 @@
 // service as they were. A run killed outright (SIGKILL, a crash, a power loss)
 // cannot clean up, so each run first removes the temp files of runs no longer alive.
 
-import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync, writeSync } from 'node:fs'
+import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { envName } from '../env-names'
+import { writeFileAtomic } from '../fs/atomic'
 import { type InstallEnv, platformOf } from '../install/env'
-import { serviceOf } from '../install/service/control'
+import { managedServiceOf, serviceOf } from '../install/service/control'
 import { installedProgramPath } from '../install/entry'
 import { restartService } from '../install/install'
 import { RELEASE_BASE, fetchReleaseSums, fileSha256, parseSha256Sums, releaseAssetName, releaseSumsUrl } from '../install/self-install'
-import { currentChannel, readInstallRecord } from '../install/setup/record'
+import { applyAgentHomes, currentChannel, readInstallRecord } from '../install/setup/record'
 import { VERSION } from '../version'
+import { getQuietForMs } from '../install/daemon-client'
+import { HIDDEN_WINDOW } from '../install/system'
+import { QUIET_MS } from './auto'
+import { mergeAutoState } from './auto-state'
 import { UpdateCheckError, fetchLatestRelease } from './check'
-import { compareVersions, parseVersion } from './version-order'
+import { type UpdateLockDeps, acquireUpdateLock, updateLockHolder } from './lock'
+import { readUpdateState } from './state'
+import { compareVersions, isPatchUpdate, parseVersion } from './version-order'
 
 export const MAX_PROGRAM_BYTES = 300_000_000
 export const DOWNLOAD_TIMEOUT_MS = 300_000
@@ -44,6 +51,12 @@ export interface UpdateDeps {
   version?: string
   /** Default MAX_PROGRAM_BYTES; a test lowers it rather than stream 300 MB. */
   maxProgramBytes?: number
+  /** Test seam for the update lock's pid and liveness check. */
+  lock?: UpdateLockDeps
+  /** How long an automatic run waits for the new program's install; default AUTO_INSTALL_TIMEOUT_MS. */
+  installTimeoutMs?: number
+  /** How long the daemon has been quiet, or null when it cannot say; default asks the daemon (getQuietForMs). */
+  quietForMs?: () => Promise<number | null>
 }
 
 /** Failures before the hand-off: each message already says nothing was changed. */
@@ -56,11 +69,14 @@ async function spawnProgram(path: string, argv: readonly string[], env: Readonly
 }
 
 /** The child's environment: this one's, as strings, with the saved channel. */
-function childEnv(env: InstallEnv): Record<string, string> {
+function childEnv(env: InstallEnv, savedHomes: boolean): Record<string, string> {
   const vars: Record<string, string> = {}
   for (const [key, value] of Object.entries(env.envVars ?? {})) if (typeof value === 'string') vars[key] = value
-  vars[envName('INSTALL_CHANNEL')] = currentChannel(env, readInstallRecord(env.dataDir))
-  return vars
+  const record = readInstallRecord(env.dataDir)
+  vars[envName('INSTALL_CHANNEL')] = currentChannel(env, record)
+  // The daemon's environment is the service's, not the shell the install ran in: an automatic run puts back the
+  // agent homes that install saved, so its own install finds the same agents in the same folders.
+  return savedHomes ? applyAgentHomes(vars, record?.agentHomes ?? {}) : vars
 }
 
 function binDir(env: InstallEnv): string {
@@ -231,12 +247,14 @@ const SIGNAL_EXITS: Readonly<Record<'SIGHUP' | 'SIGINT' | 'SIGTERM', number>> = 
  * file first. During the hand-off the child gets the same Ctrl-C and decides,
  * so this process only waits for it and cleans up afterwards.
  */
-function guardSignals(temp: TempFile): { handingOff(): void; release(): void } {
+function guardSignals(temp: TempFile, beforeExit: () => void): { handingOff(): void; release(): void } {
   let waiting = false
   const handlers = Object.entries(SIGNAL_EXITS).map(([signal, code]) => {
     const handler = (): void => {
       if (waiting) return
       removeTemp(temp)
+      // The update lock goes with the temp file: an exit here skips runUpdate's own release.
+      beforeExit()
       process.exit(code)
     }
     process.on(signal, handler)
@@ -280,13 +298,13 @@ async function isRunning(env: InstallEnv): Promise<boolean> {
   }
 }
 
-async function handOff(env: InstallEnv, temp: string, running: string, latest: string, run: NonNullable<UpdateDeps['runProgram']>): Promise<number> {
+async function handOff(env: InstallEnv, temp: string, running: string, latest: string, run: NonNullable<UpdateDeps['runProgram']>, savedHomes: boolean): Promise<number> {
   const binPath = installedProgramPath(env.dataDir, env.platform)
   const before = await hashOrNull(binPath)
   const wasRunning = await isRunning(env)
   let code: number
   try {
-    code = await run(temp, ['--data-dir', env.dataDir, 'install', '--yes'], childEnv(env))
+    code = await run(temp, ['--data-dir', env.dataDir, 'install', '--yes'], childEnv(env, savedHomes))
   } catch (error: unknown) {
     env.out(`${PREFIX} could not start the new program (${error instanceof Error ? error.name : 'error'}); ${binPath} is still ${running}`)
     return EXIT_FAILED
@@ -307,11 +325,43 @@ async function handOff(env: InstallEnv, temp: string, running: string, latest: s
   return EXIT_FAILED
 }
 
-export async function runUpdate(env: InstallEnv, options: { dryRun: boolean }, deps: UpdateDeps = {}): Promise<number> {
-  if (env.mode.kind === 'checkout') {
-    env.out(`${PREFIX} this is a checkout install; update it with git pull and bun src/cli/kinfold.ts install`)
-    return EXIT_FAILED
+/** How long an automatic run waits, after its download, for agents to go quiet before it gives up until the next daily check. */
+export const QUIET_WAIT_CAP_MS = 1_800_000
+
+const minutes = (ms: number): string => {
+  const count = Math.max(1, Math.round(ms / 60_000))
+  return `${count} minute${count === 1 ? '' : 's'}`
+}
+
+/**
+ * Waits until the daemon has been quiet for the full spell again; false when
+ * agents stay active past the cap. A daemon that does not answer holds
+ * nothing up: with it down, no agent is mid-session with it.
+ */
+async function quietAgain(env: InstallEnv, deps: UpdateDeps): Promise<boolean> {
+  const ask = deps.quietForMs ?? (() => getQuietForMs(env))
+  const deadline = env.now() + QUIET_WAIT_CAP_MS
+  for (;;) {
+    const quietFor = await ask()
+    if (quietFor === null || quietFor >= QUIET_MS) return true
+    const wait = QUIET_MS - quietFor
+    if (env.now() + wait > deadline) return false
+    env.out(`${PREFIX} an agent was active ${minutes(quietFor)} ago; waiting ${minutes(wait)} before installing`)
+    await env.sleep(wait)
   }
+}
+
+/** How a run ended: `current` had nothing newer, `skipped` found a release an automatic run does not apply. */
+interface Applied {
+  code: number
+  outcome: 'updated' | 'current' | 'skipped' | 'failed'
+  /** The release GitHub named; null when it could not be asked. */
+  latest: string | null
+}
+
+const failed = (latest: string | null): Applied => ({ code: EXIT_FAILED, outcome: 'failed', latest })
+
+async function applyUpdate(env: InstallEnv, options: { dryRun: boolean; patchOnly: boolean; onInterrupt?: () => void }, deps: UpdateDeps, run: NonNullable<UpdateDeps['runProgram']>): Promise<Applied> {
   // A dry run only lists these (describeDryRun); it removes nothing.
   if (!options.dryRun) sweepLeftovers(env)
   const running = deps.version ?? VERSION
@@ -320,40 +370,187 @@ export async function runUpdate(env: InstallEnv, options: { dryRun: boolean }, d
     latest = (await fetchLatestRelease(env.fetch, env.now)).latestVersion
   } catch (error: unknown) {
     env.out(`${PREFIX} could not ask GitHub for the latest release (${error instanceof UpdateCheckError ? error.label : 'error'})`)
-    return EXIT_FAILED
+    return failed(null)
   }
   if (parseVersion(running) !== null && compareVersions(latest, running) <= 0) {
     env.out(`kinfold is up to date (${running})`)
-    return EXIT_OK
+    return { code: EXIT_OK, outcome: 'current', latest }
+  }
+  // Asked again here, not taken from the daemon: the release may have changed since its daily check.
+  if (options.patchOnly && !isPatchUpdate(running, latest)) {
+    env.out(`${PREFIX} ${latest} is not a patch release of ${running}; it is left for kinfold update`)
+    return { code: EXIT_OK, outcome: 'skipped', latest }
   }
   const arch = env.arch ?? process.arch
   const assetName = releaseAssetName(env.platform, arch)
   if (assetName === null) {
     env.out(`${PREFIX} no release build for ${env.platform}-${arch}`)
-    return EXIT_FAILED
+    return failed(latest)
   }
   const temp: TempFile = { path: tempPath(env), created: false }
   if (options.dryRun) {
     for (const line of describeDryRun(env, running, latest, assetName, temp.path)) env.out(line)
-    return EXIT_OK
+    return { code: EXIT_OK, outcome: 'current', latest }
   }
-  const signals = guardSignals(temp)
+  const signals = guardSignals(temp, options.onInterrupt ?? (() => undefined))
   try {
     const expected = await fetchExpectedHash(env, latest, assetName)
     await download(env, programUrl(latest, assetName), temp, deps.maxProgramBytes ?? MAX_PROGRAM_BYTES)
     if ((await fileSha256(temp.path)) !== expected) throw new UpdateStop('the downloaded program does not match the release checksums; nothing was changed')
     chmodSync(temp.path, VERIFIED_MODE)
+    // The daemon waited for quiet before it started this run, but the download took time: an agent may have begun since.
+    if (options.patchOnly && !(await quietAgain(env, deps))) throw new UpdateStop(`agents were still active ${QUIET_WAIT_CAP_MS / 60_000} minutes after the download; nothing was changed`)
     env.out(`kinfold update: ${latest} downloaded and checked; installing it`)
     signals.handingOff()
-    return await handOff(env, temp.path, running, latest, deps.runProgram ?? spawnProgram)
+    const code = await handOff(env, temp.path, running, latest, run, options.patchOnly)
+    return code === EXIT_OK ? { code, outcome: 'updated', latest } : failed(latest)
   } catch (error: unknown) {
     // handOff catches its own failures, so anything here came before it: a full
     // disk or a permission error while writing the download.
     const message = error instanceof UpdateStop ? error.message : `could not write the download (${errorLabel(error)}); nothing was changed`
     env.out(`${PREFIX} ${message}`)
-    return EXIT_FAILED
+    return failed(latest)
   } finally {
     removeTemp(temp)
     signals.release()
+  }
+}
+
+export const AUTO_UPDATE_LOG = 'auto-update.log'
+const LOG_DIR_MODE = 0o700
+const LOG_FILE_MODE = 0o600
+export const NOT_RUN_BY_SERVICE = 'the daemon is not run by a background service here; run kinfold update'
+
+/** Past this the log is cut back before a run adds to it. A run writes a few kilobytes, so this is years of them. */
+export const AUTO_LOG_MAX_BYTES = 262_144
+/** What a cut keeps: the newest half, from the start of a line. */
+export const AUTO_LOG_KEEP_BYTES = 131_072
+
+/** Keeps the newest AUTO_LOG_KEEP_BYTES of a log that has passed its cap, whole lines only, replaced in one rename. */
+function trimAutoLog(path: string): void {
+  let size: number
+  try {
+    size = statSync(path).size
+  } catch {
+    return
+  }
+  if (size <= AUTO_LOG_MAX_BYTES) return
+  const bytes = readFileSync(path)
+  const tail = bytes.subarray(bytes.length - AUTO_LOG_KEEP_BYTES)
+  const firstLine = tail.indexOf(0x0a) + 1
+  writeFileAtomic(path, tail.subarray(firstLine), LOG_FILE_MODE)
+}
+
+/** The append-only log of automatic runs, opened once; null when it cannot be opened, which never stops an update. */
+function openAutoLog(dataDir: string): number | null {
+  try {
+    const dir = join(dataDir, 'logs')
+    mkdirSync(dir, { recursive: true, mode: LOG_DIR_MODE })
+    trimAutoLog(join(dir, AUTO_UPDATE_LOG))
+    return openSync(join(dir, AUTO_UPDATE_LOG), 'a', LOG_FILE_MODE)
+  } catch {
+    return null
+  }
+}
+
+/** Whether the service runs the daemon: only then does stopping and starting it restart the daemon on the new program. */
+async function serviceRunsDaemon(env: InstallEnv): Promise<boolean> {
+  const service = managedServiceOf(env)
+  try {
+    return service !== null && (await service.isRunning())
+  } catch {
+    return false
+  }
+}
+
+/** An install that has not finished by now is stuck: with no one watching, the daemon would stay down. */
+export const AUTO_INSTALL_TIMEOUT_MS = 900_000
+/** What a shell reports for a command it gave up on. */
+const EXIT_TIMED_OUT = 124
+
+/**
+ * The install an automatic run hands over to, with a deadline. Past it the
+ * child is killed and the run reports a failed install, which is what makes
+ * handOff start the service again from the program in place.
+ */
+function boundedInstall(deps: UpdateDeps, output: number | 'ignore'): NonNullable<UpdateDeps['runProgram']> {
+  return (path, argv, vars) => {
+    let child: ReturnType<typeof Bun.spawn> | null = null
+    const run = deps.runProgram ?? ((program, args, env) => {
+      // Hidden, like the commands that install then runs: this process has no console for the new program to share.
+      child = Bun.spawn([program, ...args], { stdin: 'ignore', stdout: output, stderr: output, env: { ...env }, ...HIDDEN_WINDOW })
+      return child.exited
+    })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<number>((resolve) => {
+      timer = setTimeout(() => {
+        child?.kill()
+        resolve(EXIT_TIMED_OUT)
+      }, deps.installTimeoutMs ?? AUTO_INSTALL_TIMEOUT_MS)
+    })
+    return Promise.race([run(path, argv, vars), deadline]).finally(() => clearTimeout(timer))
+  }
+}
+
+/**
+ * The run the daemon starts, with no terminal: every line goes to the log, the
+ * new program's install writes there too, and the outcome is saved for the
+ * notice, `kinfold status` and the dashboard. Only a patch release is applied.
+ */
+async function runAuto(env: InstallEnv, deps: UpdateDeps, onInterrupt: () => void): Promise<number> {
+  const fd = openAutoLog(env.dataDir)
+  const lines: string[] = []
+  const out = (line: string): void => {
+    lines.push(line)
+    if (fd === null) return
+    try {
+      writeSync(fd, `${new Date(env.now()).toISOString()} ${line}\n`)
+    } catch {
+      // The outcome is still saved below.
+    }
+  }
+  const logged = { ...env, out }
+  const running = deps.version ?? VERSION
+  const fail = (version: string, reason: string, blocked: boolean = false): number => {
+    mergeAutoState(env.dataDir, { failure: { version, at: env.now(), reason, ...(blocked ? { blocked: true as const, running } : {}) } })
+    return EXIT_FAILED
+  }
+  // What the daemon decided to apply; the failure is filed under it until GitHub names the release.
+  const expected = readUpdateState(env.dataDir).latestVersion ?? running
+  try {
+    if (!(await serviceRunsDaemon(env))) {
+      out(`${PREFIX} ${NOT_RUN_BY_SERVICE}`)
+      // Waiting a day changes nothing here, so the daemon is told not to try again until the install or the service does.
+      return fail(expected, NOT_RUN_BY_SERVICE, true)
+    }
+    const applied = await applyUpdate(logged, { dryRun: false, patchOnly: true, onInterrupt }, deps, boundedInstall(deps, fd ?? 'ignore'))
+    if (applied.outcome === 'updated' && applied.latest !== null) mergeAutoState(env.dataDir, { updated: { version: applied.latest, previous: running, at: env.now() }, failure: null })
+    if (applied.outcome === 'failed') return fail(applied.latest ?? expected, (lines.at(-1) ?? 'the update failed').replace(`${PREFIX} `, ''))
+    return applied.code
+  } finally {
+    if (fd !== null) closeSync(fd)
+  }
+}
+
+export async function runUpdate(env: InstallEnv, options: { dryRun: boolean; auto?: boolean }, deps: UpdateDeps = {}): Promise<number> {
+  if (env.mode.kind === 'checkout') {
+    env.out(`${PREFIX} this is a checkout install; update it with git pull and bun src/cli/kinfold.ts install`)
+    return EXIT_FAILED
+  }
+  if (options.dryRun) return (await applyUpdate(env, { dryRun: true, patchOnly: false }, deps, deps.runProgram ?? spawnProgram)).code
+  // Two installs replacing the same program at once would each stop and start the service under the other.
+  const lock = acquireUpdateLock(env.dataDir, deps.lock)
+  if (lock === null) {
+    // The daemon's own run finds the user's update in progress and has nothing to add.
+    if (options.auto === true) return EXIT_OK
+    const holder = updateLockHolder(env.dataDir, deps.lock?.alive)
+    env.out(`${PREFIX} another update is running${holder === null ? '' : ` (pid ${holder})`}; nothing was changed`)
+    return EXIT_FAILED
+  }
+  try {
+    if (options.auto === true) return await runAuto(env, deps, lock.release)
+    return (await applyUpdate(env, { dryRun: false, patchOnly: false, onInterrupt: lock.release }, deps, deps.runProgram ?? spawnProgram)).code
+  } finally {
+    lock.release()
   }
 }

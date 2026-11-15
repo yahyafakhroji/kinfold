@@ -19,6 +19,18 @@ export function parseVersion(text: string): ParsedVersion | null {
   return { major: numbers[0]!, minor: numbers[1]!, patch: numbers[2]!, pre: pre ?? null }
 }
 
+/**
+ * The only step applied without the user asking: the same major and minor, a
+ * higher patch, and a release on both sides. A running prerelease is left
+ * alone, since its user chose a build outside the release line.
+ */
+export function isPatchUpdate(running: string, latest: string): boolean {
+  const from = parseVersion(running)
+  const to = parseVersion(latest)
+  if (from === null || to === null || from.pre !== null || to.pre !== null) return false
+  return from.major === to.major && from.minor === to.minor && to.patch > from.patch
+}
+
 function comparePre(a: string, b: string): number {
   const left = a.split('.')
   const right = b.split('.')

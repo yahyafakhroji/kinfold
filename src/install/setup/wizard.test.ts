@@ -40,7 +40,7 @@ const CLAUDE_ROW: ObserverSettingsInput = { host: 'claude-code', provider: 'clau
 const CODEX_ROW: ObserverSettingsInput = { host: 'codex', provider: 'codex-cli', model: 'gpt-x', credentialRef: null, enabled: true }
 const NO_CHOICE: ChoiceOptions = { yes: false, dryRun: false, skipCheck: false, replaceCredential: false, credentialStdin: false, flags: [] }
 
-const flagsOf = (over: Partial<SetupFlags> = {}): SetupFlags => ({ dataDir: null, hosts: null, observers: [], noEncrypt: false, port: null, noUpdateCheck: false, yes: false, ...over })
+const flagsOf = (over: Partial<SetupFlags> = {}): SetupFlags => ({ dataDir: null, hosts: null, observers: [], noEncrypt: false, port: null, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, yes: false, ...over })
 
 interface Setup {
   w: FakeWorld
@@ -79,7 +79,7 @@ async function installedWithTwoHosts(w: FakeWorld): Promise<void> {
   writeFileSync(paths.claudeSettings, JSON.stringify(mergeSamHooks({}, { entry: entryCommand(w.env.mode, 'hook', w.dataDir) }).settings))
   await runPlan(w.env, hostHookInstallActions(w.env, 'codex'), false)
   mkdirSync(w.dataDir, { recursive: true })
-  await runPlan(w.env, [installRecordAction(w.dataDir, { channel: 'curl', updateCheck: false, firstInstalledAt: 1_700_000_000_000 })], false)
+  await runPlan(w.env, [installRecordAction(w.dataDir, { channel: 'curl', updateCheck: false, autoUpdate: true, autoUpdateIntro: false, agentHomes: {}, firstInstalledAt: 1_700_000_000_000 })], false)
   const store = openStore(w.dataDir, { keys: NO_DB_KEYS })
   try {
     upsertObserverSettings(store.db, CLAUDE_ROW, 1)
@@ -486,4 +486,54 @@ test('agents neither detected nor wired are named on one not-found line, not off
   // The one choice is Claude Code; no other agent is drawn as a row.
   expect(term.output()).not.toContain('no claude on PATH')
   expect(term.output().split('Gemini CLI').length - 1).toBe(1)
+})
+
+test('auto-update is on by default, and a flag or a saved choice turns it off', async () => {
+  const { w } = setup([], { interactive: false, terminal: null, claudeVersion: '2.0.0', codexVersion: '1.0.0', keychainRefs: ['openrouter'] })
+  const state = await readSetupState(w.env)
+  expect(state).toMatchObject({ autoUpdate: true, autoUpdateIntro: false })
+  const yes = { ...NO_CHOICE, yes: true }
+  expect((await runWizard(w.env, null, state, flagsOf({ yes: true }), yes)).autoUpdate).toBe(true)
+  expect((await runWizard(w.env, null, state, flagsOf({ yes: true, noAutoUpdate: true }), yes)).autoUpdate).toBe(false)
+  expect((await runWizard(w.env, null, { ...state, autoUpdate: false }, flagsOf({ yes: true }), yes)).autoUpdate).toBe(false)
+})
+
+test('one Updates question sets the daily check and automatic patch updates, with both on by default', async () => {
+  const flags = flagsOf({ hosts: [], noEncrypt: true })
+  const kept = setup([ENTER, ENTER, ENTER, ENTER])
+  expect(await runWizard(kept.w.env, ask(kept.w), await readSetupState(kept.w.env), flags, NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: true })
+  expect(kept.term.output()).toContain('Check daily and install patch releases')
+  expect(kept.term.output()).toContain('Auto-update     patch releases')
+  await kept.w.cleanup()
+
+  const notify = setup([ENTER, ENTER, DOWN, ENTER, ENTER])
+  expect(await runWizard(notify.w.env, ask(notify.w), await readSetupState(notify.w.env), flags, NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: false })
+  expect(notify.term.output()).toContain('Auto-update     off')
+  await notify.w.cleanup()
+
+  const off = setup([ENTER, ENTER, DOWN, DOWN, ENTER, ENTER])
+  expect(await runWizard(off.w.env, ask(off.w), await readSetupState(off.w.env), flags, NO_CHOICE)).toMatchObject({ updateCheck: false, autoUpdate: true })
+  expect(off.term.output()).toContain('Auto-update     off (the update check is off)')
+})
+
+test('a saved choice is where the Updates question starts, and --no-auto-update takes that option away', async () => {
+  const flags = flagsOf({ hosts: [], noEncrypt: true })
+  const saved = setup([ENTER, ENTER, ENTER, ENTER])
+  const state = rerun(await readSetupState(saved.w.env), { updateCheck: true, autoUpdate: false, encryption: 'off' })
+  expect(await runWizard(saved.w.env, ask(saved.w), state, flagsOf({ hosts: [] }), NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: false })
+  await saved.w.cleanup()
+
+  const flagged = setup([ENTER, ENTER, ENTER, ENTER])
+  expect(await runWizard(flagged.w.env, ask(flagged.w), await readSetupState(flagged.w.env), { ...flags, noAutoUpdate: true }, NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: false })
+  expect(flagged.term.output()).not.toContain('install patch releases')
+})
+
+test('--auto-update turns a saved off back on, with or without a terminal', async () => {
+  const quiet = setup([], { interactive: false, terminal: null, claudeVersion: '2.0.0', codexVersion: '1.0.0', keychainRefs: ['openrouter'] })
+  const off = { ...(await readSetupState(quiet.w.env)), autoUpdate: false }
+  expect((await runWizard(quiet.w.env, null, off, flagsOf({ yes: true, autoUpdate: true }), { ...NO_CHOICE, yes: true })).autoUpdate).toBe(true)
+  await quiet.w.cleanup()
+  const typed = setup([ENTER, ENTER, ENTER, ENTER])
+  const state = { ...(await readSetupState(typed.w.env)), autoUpdate: false }
+  expect(await runWizard(typed.w.env, ask(typed.w), state, flagsOf({ hosts: [], noEncrypt: true, autoUpdate: true }), NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: true })
 })

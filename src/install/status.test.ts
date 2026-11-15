@@ -11,7 +11,9 @@ import { EXIT_OK, install, reportDetections } from './install'
 import { claudeMcpEntry } from './mcp-config'
 import { mcpPaths, mcpTarget } from './mcp-wiring'
 import { VERSION } from '../version'
-import { status } from './status'
+import { autoUpdateBlocker, status } from './status'
+import { mergeAutoState } from '../update/auto-state'
+import { fakeService } from './test-support'
 import { writeUpdateState } from '../update/state'
 import { BUN, type FakeWorld, YES, createWorld, profilesWithDocsAgent, snapshotTree } from './test-support'
 import { posixOnly } from '../../test/platform-guards'
@@ -54,6 +56,7 @@ test('before install: hosts detected but not wired, daemon down, nothing created
     `  sub-keys in ${join(w.dataDir, 'hmac.d')}: none`,
     `data dir ${w.dataDir}: missing`,
     'update check: off',
+    'auto-update: off (no install record)',
     'duplicate wiring: none in this directory',
   ])
   expect(w.securityCalls.every((call) => !call.args.includes('-w'))).toBe(true)
@@ -293,4 +296,103 @@ test('a wired agent whose binary is gone keeps its own line in install, and is n
   reportDetections(w.env, await detectHosts(w.env, null), [])
   expect(w.out.some((line) => line.startsWith('host codex') && line.includes('not found'))).toBe(true)
   expect(w.out.find((line) => line.startsWith('not found: '))).not.toContain('codex')
+})
+
+// ---- automatic updates -------------------------------------------------------
+
+const AUTO_RECORD = { channel: 'curl', updateCheck: true, autoUpdate: true, firstInstalledAt: 1 }
+const ON_DATE = 1_800_000_000_000
+
+function installed(record: Record<string, unknown> = AUTO_RECORD): FakeWorld {
+  const w = make({ withLibrary: false })
+  mkdirSync(w.dataDir, { recursive: true })
+  writeFileSync(join(w.dataDir, 'install.json'), JSON.stringify(record))
+  w.env = { ...w.env, service: fakeService() }
+  return w
+}
+
+async function linesOf(w: FakeWorld, running = '0.2.0'): Promise<string[]> {
+  w.out.length = 0
+  await status(w.env, running)
+  return [...w.out]
+}
+
+test('status says auto-update is on, or off and why', async () => {
+  const w = installed()
+  expect(await linesOf(w)).toContain('auto-update: on (patch releases install themselves)')
+  writeFileSync(join(w.dataDir, 'install.json'), JSON.stringify({ ...AUTO_RECORD, autoUpdate: false }))
+  expect(await linesOf(w)).toContain('auto-update: off (turned off)')
+  writeFileSync(join(w.dataDir, 'install.json'), JSON.stringify({ ...AUTO_RECORD, updateCheck: false }))
+  expect(await linesOf(w)).toContain('auto-update: off (the update check is off)')
+  writeFileSync(join(w.dataDir, 'install.json'), JSON.stringify(AUTO_RECORD))
+  w.env = { ...w.env, envVars: { KINFOLD_NO_AUTO_UPDATE: '1' } }
+  // The daemon runs under the service, not this shell: the variable alone turns nothing off there.
+  expect(await linesOf(w)).toContain('auto-update: on (patch releases install themselves); KINFOLD_NO_AUTO_UPDATE is set in this shell only, which the daemon does not read: run kinfold install --no-auto-update to turn it off')
+})
+
+test('status says auto-update is manual where the daemon cannot restart itself, and why', async () => {
+  const w = installed()
+  w.env = { ...w.env, service: fakeService({ running: false }) }
+  expect(await linesOf(w)).toContain('auto-update: manual (the daemon is not run by the FakeService; run kinfold update for each release)')
+  w.env = { ...w.env, service: null }
+  expect(await linesOf(w)).toContain('auto-update: manual (no background service runs the daemon here; run kinfold update for each release)')
+})
+
+test('a Linux user service without systemd-run cannot promise a detached update', () => {
+  const w = installed()
+  const linux = { ...w.env, platform: 'linux' as const, envVars: { XDG_RUNTIME_DIR: '/run/user/1000' } }
+  const managerOnly = (path: string): boolean => path === '/run/user/1000/systemd/private'
+  expect(autoUpdateBlocker(linux, true, managerOnly)).toBe('systemd-run is not installed, so an update started by the service would be stopped with it')
+  expect(autoUpdateBlocker(linux, true, (path) => managerOnly(path) || path === '/usr/bin/systemd-run')).toBeNull()
+  expect(autoUpdateBlocker(w.env, true)).toBeNull()
+})
+
+test('status shows the last automatic update, and the last error with when it is tried again', async () => {
+  const w = installed()
+  writeUpdateState(w.dataDir, { lastAttemptAt: 1, latestVersion: '0.2.1', checkedAt: ON_DATE, notified: {} })
+  mergeAutoState(w.dataDir, {
+    updated: { version: '0.2.0', previous: '0.1.9', at: ON_DATE },
+    failure: { version: '0.2.1', at: ON_DATE, reason: 'the program download answered 503; nothing was changed' },
+  })
+  const lines = await linesOf(w)
+  expect(lines).toContain('  last update: 0.2.0 (was 0.1.9) on 2027-01-15T08:00:00.000Z')
+  expect(lines).toContain('  last error: 0.2.1 on 2027-01-15T08:00:00.000Z: the program download answered 503; nothing was changed. It is tried again after the next daily check.')
+  // After a failure the user is told the release exists, so they can install it by hand.
+  expect(lines).toContain('update: Kinfold 0.2.1 is available. Run `kinfold update`.')
+  // Once that release is installed the error is history.
+  expect((await linesOf(w, '0.2.1')).some((line) => line.includes('last error'))).toBe(false)
+})
+
+test('status says a patch release will install itself, and offers it by hand where it will not', async () => {
+  const w = installed()
+  writeUpdateState(w.dataDir, { lastAttemptAt: 1, latestVersion: '0.2.1', checkedAt: ON_DATE, notified: {} })
+  expect(await linesOf(w)).toContain('update: Kinfold 0.2.1 will install itself once no agent has been active for 10 minutes')
+  w.env = { ...w.env, service: fakeService({ running: false }) }
+  expect(await linesOf(w)).toContain('update: Kinfold 0.2.1 is available. Run `kinfold update`.')
+  writeUpdateState(w.dataDir, { lastAttemptAt: 1, latestVersion: '0.3.0', checkedAt: ON_DATE, notified: {} })
+  w.env = { ...w.env, service: fakeService() }
+  expect(await linesOf(w)).toContain('update: Kinfold 0.3.0 is available. Run `kinfold update`.')
+})
+
+test('status stays read-only: it marks no notice shown', async () => {
+  const w = installed()
+  mergeAutoState(w.dataDir, { updated: { version: '0.2.0', previous: '0.1.9', at: ON_DATE } })
+  const before = snapshotTree(w.dataDir)
+  await linesOf(w)
+  await linesOf(w)
+  expect(snapshotTree(w.dataDir)).toEqual(before)
+})
+
+test('status shows the agent homes saved for automatic updates', async () => {
+  const w = installed({ ...AUTO_RECORD, agentHomes: { CODEX_HOME: '/opt/codex-home', XDG_CONFIG_HOME: '/home/u/.xdg' } })
+  expect(await linesOf(w)).toContain('  agent homes used by an automatic update: CODEX_HOME=/opt/codex-home, XDG_CONFIG_HOME=/home/u/.xdg')
+  const none = installed()
+  expect((await linesOf(none)).some((line) => line.includes('agent homes'))).toBe(false)
+})
+
+test('status says a blocker is tried again on a change, not daily', async () => {
+  const w = installed()
+  writeUpdateState(w.dataDir, { lastAttemptAt: 1, latestVersion: '0.2.1', checkedAt: ON_DATE, notified: {} })
+  mergeAutoState(w.dataDir, { failure: { version: '0.2.1', at: ON_DATE, reason: 'the daemon is not run by a background service here; run kinfold update', blocked: true, running: '0.2.0' } })
+  expect(await linesOf(w)).toContain('  last error: 0.2.1 on 2027-01-15T08:00:00.000Z: the daemon is not run by a background service here; run kinfold update. It is tried again when the daemon restarts or the install changes.')
 })

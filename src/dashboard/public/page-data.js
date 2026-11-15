@@ -8,6 +8,7 @@ import { api, errorText } from './api.js'
 import { h, notice, replaceContent, table } from './dom.js'
 import { formatAge, formatBytes } from './format.js'
 import { canConfirm, confirmBody, describeCounts, dryRunBody, idleFlow, previewed } from './purge-flow.js'
+import { loadUpdatesBlock } from './updates-block.js'
 import { canSave, describePreview, idleRetention, previewBody, previewedRetention, saveBody } from './retention-flow.js'
 
 export const RETENTION_TABLES = ['events', 'prompts', 'observations', 'summaries']
@@ -190,9 +191,9 @@ function purgeBlock(projects) {
 
 /** @param {unknown} _state @param {{ now: number }} ctx */
 export async function renderData(_state, ctx) {
-  const [size, settings] = await Promise.all([api('GET', '/data/size'), api('GET', '/data/retention')])
+  const [size, settings, updates] = await Promise.all([api('GET', '/data/size'), api('GET', '/data/retention'), loadUpdatesBlock()])
   return h('section', { class: 'page', 'aria-labelledby': 'page-title' },
     h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '03'), h('h1', { id: 'page-title' }, 'Data control'),
       h('p', { class: 'lede' }, 'What stays, for how long, and what goes.')),
-    sizeBlock(size), retentionBlock(settings), findingsBlock(ctx.now), purgeBlock(size.projects))
+    sizeBlock(size), retentionBlock(settings), findingsBlock(ctx.now), purgeBlock(size.projects), updates)
 }
