@@ -89,3 +89,21 @@ test('a forced OpenCode with no readable version says why, then that --hosts wir
   const exited = await detectHosts(world.env, ['opencode'])
   expect(exited.find((d) => d.host === 'opencode')?.note).toBe('opencode --version exited 3; wired because --hosts names it')
 })
+
+test('a detection names the binary that answered --version, and none for an app bundle or a config folder', async () => {
+  world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', opencodeVersion: '1.18.35', codexVersion: '0.9.0' })
+  const found = await detectHosts(world.env, null)
+  expect(found.find((d) => d.host === 'claude-code')?.binary).toBe('claude')
+  expect(found.find((d) => d.host === 'codex')?.binary).toBe('codex')
+  // A 1.x OpenCode is not wired, but its CLI is on this machine.
+  expect(found.find((d) => d.host === 'opencode')).toMatchObject({ selected: false, binary: 'opencode' })
+  await world.cleanup()
+  world = createWorld()
+  mkdirSync(join(world.home, '.claude'), { recursive: true })
+  mkdirSync(join(world.root, 'Applications', 'Codex.app'), { recursive: true })
+  const other = await detectHosts(world.env, null)
+  expect(other.find((d) => d.host === 'claude-code')).toMatchObject({ selected: true })
+  expect(other.find((d) => d.host === 'claude-code')?.binary).toBeUndefined()
+  expect(other.find((d) => d.host === 'codex')).toMatchObject({ selected: true })
+  expect(other.find((d) => d.host === 'codex')?.binary).toBeUndefined()
+})

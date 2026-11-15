@@ -88,3 +88,46 @@ test('the prompt says the list is unavailable when listing fails, and still take
   expect(world.out).toContain('model list unavailable (cli_missing); type a model name')
   expect(world.out.join('\n')).not.toContain('/x')
 })
+
+/** Records each question the plain prompt asks. */
+function recordingAsk(w: FakeWorld): string[] {
+  const asked: string[] = []
+  const ask = w.env.io.ask
+  w.env.io.ask = async (question) => (asked.push(question), ask(question))
+  return asked
+}
+
+const CODEX_MISSING = async () => new Map([['codex-cli', 'codex not installed']] as const)
+
+test('the plain prompt marks a provider whose CLI is missing and refuses it when typed', async () => {
+  world = createWorld({ interactive: true, answers: ['codex-cli:gpt-x', 'codex-cli', 'opencode-cli:m'] })
+  const asked = recordingAsk(world)
+  const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: CODEX_MISSING })
+  expect(choice?.input).toMatchObject({ provider: 'opencode-cli', model: 'm' })
+  expect(asked[0]).toContain('Providers: claude-cli, openrouter, codex-cli (codex not installed), opencode-cli.')
+  expect(asked[0]).toContain('a bare opencode-cli lists')
+  expect(asked[0]).not.toContain('a bare codex-cli')
+  expect(world.out.filter((line) => line === 'codex-cli cannot be picked: codex not installed')).toHaveLength(2)
+})
+
+test('the plain prompt does not keep a default whose CLI is missing', async () => {
+  world = createWorld({ interactive: true, answers: ['', 'openrouter:some/model'], keychainRefs: ['openrouter'] })
+  const asked = recordingAsk(world)
+  const claudeMissing = async () => new Map([['claude-cli', 'claude not installed']] as const)
+  const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: claudeMissing })
+  expect(choice?.input).toMatchObject({ provider: 'openrouter', model: 'some/model' })
+  expect(asked[0]).toContain('default claude-cli/haiku (claude not installed; pick another). Providers: claude-cli (claude not installed), openrouter,')
+  expect(asked[0]).not.toContain('Press Enter to keep the default')
+  expect(world.out).toContain('claude not installed; pick another')
+})
+
+test('with every CLI found the plain prompt reads as it always did', async () => {
+  world = createWorld({ interactive: true, answers: [''] })
+  const asked = recordingAsk(world)
+  const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: async () => new Map() })
+  expect(choice?.origin).toBe('default')
+  expect(asked[0]).toBe(
+    'Observer for claude-code: default claude-cli/haiku. Providers: claude-cli, openrouter, codex-cli, opencode-cli.\n' +
+      "Press Enter to keep the default, or type provider:model (a bare codex-cli or opencode-cli lists that CLI's models) > ",
+  )
+})

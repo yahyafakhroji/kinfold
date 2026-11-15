@@ -14,6 +14,7 @@ import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, OBSERVER_PROVIDERS, type Ob
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import type { InstallHost } from './detect'
 import type { InstallEnv } from './env'
+import type { MissingClis } from './observer-clis'
 import { keyStoreOf } from './key-store-choice'
 
 export const MAX_CHOICE_ATTEMPTS = 5
@@ -38,6 +39,8 @@ export interface ChoiceOptions {
   flags: readonly ObserverFlag[]
   /** What each host has now (setup/prefill.ts); under --yes a host with no flag keeps its row instead of taking the built-in default. */
   saved?: ReadonlyMap<InstallHost, ObserverSettingsInput>
+  /** The providers whose CLI is not on this machine; read only when a question is asked, so a run that asks nothing looks for no CLI. Absent: every provider is offered. */
+  missingClis?: () => Promise<MissingClis>
 }
 
 export interface PendingCredential {
@@ -128,18 +131,36 @@ async function askModel(env: InstallEnv, host: InstallHost, provider: CliLoginPr
   throw new ChoiceError(`no model named for the ${host} observer`)
 }
 
-async function promptCandidate(env: InstallEnv, host: InstallHost): Promise<Candidate> {
+/** What a default that cannot run here says, on a row and as a line. */
+export const pickAnother = (reason: string): string => `${reason}; pick another`
+
+/** The plain question: the wizard's list as two lines, each provider that cannot run here with its reason. */
+function candidateQuestion(host: InstallHost, fallback: ObserverSettingsInput, missing: MissingClis): string {
+  const stale = missing.get(fallback.provider)
+  const providers = OBSERVER_PROVIDERS.map((provider) => (missing.has(provider) ? `${provider} (${missing.get(provider)})` : provider))
+  const listing = CLI_LOGIN_PROVIDERS.filter((provider) => !missing.has(provider))
+  const bare = listing.length === 0 ? '' : ` (a bare ${listing.join(' or ')} lists that CLI's models)`
+  return (
+    `Observer for ${host}: default ${describeInput(fallback)}${stale === undefined ? '' : ` (${pickAnother(stale)})`}. Providers: ${providers.join(', ')}.\n` +
+    `${stale === undefined ? 'Press Enter to keep the default, or type' : 'Type'} provider:model${bare} > `
+  )
+}
+
+async function promptCandidate(env: InstallEnv, host: InstallHost, options: ChoiceOptions): Promise<Candidate> {
   const fallback = defaultInput(host)
+  const missing: MissingClis = (await options.missingClis?.()) ?? new Map()
+  const stale = missing.get(fallback.provider)
   for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
-    const answer = (await env.io.ask(
-      `Observer for ${host}: default ${describeInput(fallback)}. Providers: ${OBSERVER_PROVIDERS.join(', ')}.\n` +
-        `Press Enter to keep the default, or type provider:model (a bare ${CLI_LOGIN_PROVIDERS.join(' or ')} lists that CLI's models) > `,
-    )).trim()
-    if (answer === '') return { input: fallback, origin: 'default' }
+    const answer = (await env.io.ask(candidateQuestion(host, fallback, missing))).trim()
+    if (answer === '' && stale === undefined) return { input: fallback, origin: 'default' }
     const parsed = parseProviderModel(answer)
-    if (parsed !== null) return { input: settingsInputFor(host, parsed.provider, parsed.model), origin: 'prompt' }
-    if (isCliLoginProvider(answer)) return { input: settingsInputFor(host, answer, await askModel(env, host, answer)), origin: 'prompt' }
-    env.out(`"provider:model" expected, with provider one of ${OBSERVER_PROVIDERS.join(', ')}`)
+    const named = parsed?.provider ?? (isCliLoginProvider(answer) ? answer : null)
+    const reason = named === null ? undefined : missing.get(named)
+    if (answer === '' && stale !== undefined) env.out(pickAnother(stale))
+    else if (named !== null && reason !== undefined) env.out(`${named} cannot be picked: ${reason}`)
+    else if (parsed !== null) return { input: settingsInputFor(host, parsed.provider, parsed.model), origin: 'prompt' }
+    else if (isCliLoginProvider(answer)) return { input: settingsInputFor(host, answer, await askModel(env, host, answer)), origin: 'prompt' }
+    else env.out(`"provider:model" expected, with provider one of ${OBSERVER_PROVIDERS.join(', ')}`)
   }
   throw new ChoiceError(`no valid observer choice for ${host}`)
 }
@@ -150,7 +171,7 @@ async function pickCandidate(env: InstallEnv, host: InstallHost, options: Choice
   const saved = options.saved?.get(host)
   if (!retry && options.yes && saved !== undefined) return { input: saved, origin: 'saved' }
   if (!retry && options.yes) return { input: defaultInput(host), origin: 'default' }
-  if (env.io.interactive && !options.yes) return promptCandidate(env, host)
+  if (env.io.interactive && !options.yes) return promptCandidate(env, host, options)
   throw new ChoiceError(`cannot ask about the ${host} observer without a TTY; pass --yes or --observer ${host}=<provider>:<model>`)
 }
 

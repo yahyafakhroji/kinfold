@@ -27,6 +27,8 @@ export interface Choice<T extends string> {
   value: T
   label: string
   hint?: string
+  /** A caution about a choice that can still be taken; shown on its row whether or not the row is focused. */
+  warn?: string
   /** Why the choice cannot be taken; a disabled choice is shown but skipped. */
   disabled?: string
 }
@@ -126,6 +128,7 @@ export function withShortHome(prompts: Prompts, homeDir: string): Prompts {
     ...given,
     label: short(given.label),
     ...(given.hint !== undefined ? { hint: short(given.hint) } : {}),
+    ...(given.warn !== undefined ? { warn: short(given.warn) } : {}),
     ...(given.disabled !== undefined ? { disabled: short(given.disabled) } : {}),
   })
   return {
@@ -225,7 +228,9 @@ function step<T extends string>(choices: readonly Choice<T>[], from: number, dir
 function choiceLine<T extends string>(choice: Choice<T>, current: boolean, mark: string): string {
   const label = clean(choice.label)
   if (choice.disabled !== undefined) return `    ${DIM}${mark}${label} (${clean(choice.disabled)})${RESET}`
-  const hint = choice.hint === undefined ? '' : `  ${DIM}${clean(choice.hint)}${RESET}`
+  // The caution is not dimmed: it has to be read on a row the cursor is not on.
+  const dim = choice.hint === undefined ? '' : `  ${DIM}${clean(choice.hint)}${RESET}`
+  const hint = choice.warn === undefined ? dim : `${dim}${choice.hint === undefined ? '  ' : ' · '}${clean(choice.warn)}`
   return current ? `  ${BOLD}> ${mark}${label}${RESET}${hint}` : `    ${mark}${label}${hint}`
 }
 
