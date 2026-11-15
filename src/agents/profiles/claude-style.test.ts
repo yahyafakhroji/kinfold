@@ -34,6 +34,8 @@ beforeEach(() => {
   mkdirSync(dataDir, { recursive: true })
   writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 4 }))
   writeFileSync(join(dataDir, 'daemon.token'), 'a'.repeat(64))
+  // The recall line has its own tests (hook-recall.test.ts); with it off, these pin the context output alone.
+  writeFileSync(join(dataDir, 'display.json'), '{"showRecall":false}')
   asked = []
 })
 afterEach(async () => {

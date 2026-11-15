@@ -11,9 +11,10 @@ import { renderData } from './page-data.js'
 import { renderMemory } from './page-memory.js'
 import { renderMetrics } from './page-metrics.js'
 import { renderModels } from './page-models.js'
+import { renderSessions } from './page-sessions.js'
 import { showUpdateBanner } from './update-banner.js'
 
-const PAGES = { models: renderModels, memory: renderMemory, data: renderData, metrics: renderMetrics, backup: renderBackup }
+const PAGES = { models: renderModels, sessions: renderSessions, memory: renderMemory, data: renderData, metrics: renderMetrics, backup: renderBackup }
 let generation = 0
 
 /** @param {import('./hash.js').HashState} state */

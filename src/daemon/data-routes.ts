@@ -13,6 +13,7 @@ import { type ScanResult, describeScan, scanUntil } from '../data-control/scanne
 import { type SizeReport, sizeReport } from '../data-control/size'
 import type { Database } from '../sqlite/types'
 import { type DataSettings, type DataSettingsChange, readDataSettings, writeDataSettings } from '../store/data-settings-store'
+import { type DisplayChange, type DisplaySettings, readDisplaySettings, writeDisplaySettings } from '../store/display-settings'
 import { type Finding, type FindingQuery, listFindings, pendingByRule } from '../store/findings-store'
 import type { MarkerKey } from '../redaction/redact'
 import { type Exclusive, runNow } from '../vectors/vector-worker'
@@ -36,6 +37,14 @@ export interface DataHandlers {
   findings: (query: FindingQuery) => FindingsView
   resolve: (id: number, action: ResolveAction) => ResolveOutcome
   purge: (request: PurgeRequest) => PurgeReport
+  /** GET /data/display: whether agents show what was recalled, and the opt-in impact test. */
+  display: () => DisplayView
+  putDisplay: (change: DisplayChange) => DisplayView
+}
+
+/** The two switches, plus which agents the impact test can hold a prompt out for, so a page can say "on for Claude Code". */
+export interface DisplayView extends DisplaySettings {
+  holdoutHosts: readonly string[]
 }
 
 export interface DataDeps {
@@ -44,11 +53,34 @@ export interface DataDeps {
   markerKey: () => MarkerKey
   now: () => number
   log: (line: string) => void
+  /** The agents the impact test covers. */
+  holdoutHosts?: readonly string[]
+  /** Called after the display switches are saved; the daemon rewrites display.json for the hooks. */
+  onDisplay?: (settings: DisplaySettings) => void
+}
+
+/** PUT /data/display takes {"showRecall": boolean} and/or {"holdout": boolean}, and nothing else. */
+export function parseDisplayChange(body: unknown): Parsed<DisplayChange> {
+  const usage = 'body must be {"showRecall": boolean} and/or {"holdout": boolean}'
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return { ok: false, error: usage }
+  const keys = Object.keys(body)
+  if (keys.length === 0 || keys.some((key) => key !== 'showRecall' && key !== 'holdout')) return { ok: false, error: usage }
+  const { showRecall, holdout } = body as { showRecall?: unknown; holdout?: unknown }
+  if ((showRecall !== undefined && typeof showRecall !== 'boolean') || (holdout !== undefined && typeof holdout !== 'boolean')) return { ok: false, error: usage }
+  return { ok: true, value: { ...(showRecall !== undefined ? { showRecall } : {}), ...(holdout !== undefined ? { holdout } : {}) } }
 }
 
 export function dataHandlers(deps: DataDeps): DataHandlers {
   const { db, log } = deps
+  const displayView = (settings: DisplaySettings): DisplayView => ({ ...settings, holdoutHosts: deps.holdoutHosts ?? [] })
   return {
+    display: () => displayView(readDisplaySettings(db)),
+    putDisplay: (change) => {
+      const saved = writeDisplaySettings(db, change, deps.now())
+      deps.onDisplay?.(saved)
+      log(`display settings saved show_recall=${saved.showRecall} holdout=${saved.holdout}`)
+      return displayView(saved)
+    },
     size: () => sizeReport(db, deps.dbPath),
     retention: () => readDataSettings(db),
     putRetention: (change) => {
@@ -122,6 +154,11 @@ export async function dataRoute(method: string, url: URL, readBody: ReadBody, ha
   const path = url.pathname
   if (path === '/data/size') return method === 'GET' ? { status: 200, body: handlers.size() } : METHOD_NOT_ALLOWED
   if (path === '/data/retention') return retentionRoute(method, readBody, handlers, exclusive)
+  if (path === '/data/display') {
+    if (method === 'GET') return { status: 200, body: handlers.display() }
+    if (method !== 'PUT') return METHOD_NOT_ALLOWED
+    return withBody(readBody, parseDisplayChange, (change) => ({ status: 200, body: handlers.putDisplay(change) }))
+  }
   if (path === '/data/scan') return method === 'POST' ? { status: 200, body: handlers.scan() } : METHOD_NOT_ALLOWED
   if (path === '/data/findings') {
     if (method !== 'GET') return METHOD_NOT_ALLOWED

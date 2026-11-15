@@ -134,7 +134,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
   // --plain is the terminal taken away: every command then prints what it prints into a pipe.
   const effective = global.value.plain ? { ...located, terminal: null } : located
   const { runFramed } = await import('../install/prompt/frame')
-  const { parseArgs, parseBackupArgs, parseDashboardArgs, parseDataArgs, parseKeyArgs } = await import('../install/args')
+  const { parseArgs, parseBackupArgs, parseDashboardArgs, parseDataArgs, parseKeyArgs, parseWatchArgs } = await import('../install/args')
   const dashboard = parseDashboardArgs(args)
   if (dashboard !== null) {
     if (!dashboard.ok) {
@@ -143,6 +143,23 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     }
     const { runDashboard } = await import('../dashboard/cli')
     return runFramed(effective, 'dashboard', (env) => runDashboard(env, dashboard.value))
+  }
+  const watch = parseWatchArgs(args)
+  if (watch !== null) {
+    if (!watch.ok) {
+      effective.out(watch.error)
+      return EXIT_USAGE
+    }
+    const { runWatch } = await import('../watch/cli')
+    // Ctrl-C is how a watch ends, so it stops the loop and the command exits 0 with the frame closed.
+    const stop = new AbortController()
+    const onInterrupt = (): void => stop.abort()
+    process.once('SIGINT', onInterrupt)
+    try {
+      return await runFramed(effective, 'watch', (env) => runWatch(env, watch.value, { stop: stop.signal }))
+    } finally {
+      process.off('SIGINT', onInterrupt)
+    }
   }
   const key = parseKeyArgs(args)
   if (key !== null) {
@@ -190,6 +207,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     return uninstall(effective, { dryRun: installArgs.dryRun, removeCredentials: installArgs.removeCredentials, removeHmacKeys: installArgs.removeHmacKeys, verbose: installArgs.verbose })
   }
   const { install } = await import('../install/install')
+  const { displayChangeOf } = await import('../install/args')
   try {
     return await install(effective, {
       dryRun: installArgs.dryRun,
@@ -206,6 +224,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       noUpdateCheck: installArgs.noUpdateCheck,
       noAutoUpdate: installArgs.noAutoUpdate,
       autoUpdate: installArgs.autoUpdate,
+      display: displayChangeOf(installArgs),
       path: installArgs.path,
       verbose: installArgs.verbose,
     })

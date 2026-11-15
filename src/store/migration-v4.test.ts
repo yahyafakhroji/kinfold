@@ -41,7 +41,7 @@ test('migration 3 -> 4 keeps every v3 row and records rules version 1 for it', (
     }
     expect(store.db.query('SELECT title FROM observations').get()).toEqual({ title: 'old fact' })
     expect(store.db.query("SELECT rowid FROM observations_fts WHERE observations_fts MATCH 'fact'").all()).toEqual([{ rowid: 1 }])
-    expect(store.db.query('SELECT key, value FROM data_settings ORDER BY key').all()).toEqual([
+    expect(store.db.query("SELECT key, value FROM data_settings WHERE key LIKE 'retention.%' OR key LIKE 'size.%' ORDER BY key").all()).toEqual([
       { key: 'retention.events', value: 30 },
       { key: 'retention.observations', value: null },
       { key: 'retention.prompts', value: null },

@@ -9,7 +9,7 @@ observer opencode: openrouter/openrouter/auto (default); keychain entry openrout
 database library: sqlite3mc 2.6.1 already in <root>/home/.kinfold/lib
 semantic search: no pinned sqlite-vec build for darwin-test-arch; search stays keyword-only
 database: the new store is created encrypted; its key goes in the Keychain
-plan (dry run, nothing is changed): 22 actions
+plan (dry run, nothing is changed): 25 actions
   1. mkdir <root>/home/.kinfold/logs (mode 0700)
   2. create <root>/home/.kinfold/logs/daemon.log if missing (mode 0600)
   3. record the key store (keychain) in <root>/home/.kinfold/key-store.json (mode 0600)
@@ -23,15 +23,18 @@ plan (dry run, nothing is changed): 22 actions
   11. register the Kinfold MCP server with Claude Code (user scope): claude mcp add-json --scope user kinfold {"type":"stdio","command":"/opt/fake/bin/bun","args":["<root>/checkout/src/mcp/server.ts","--data-dir","<root>/home/.kinfold"],"env":{"KINFOLD_MCP_HOST":"claude-code"}}
   12. mkdir <root>/home/.config/opencode/plugins (mode 0755)
   13. write <root>/home/.config/opencode/plugins/kinfold.js: create (6 lines)
-  14. mkdir <root>/home/.config/opencode (mode 0755)
-  15. write <root>/home/.config/opencode/opencode.json: add the Kinfold MCP server under "mcp"; every other key kept
-  16. mkdir <root>/home/Library/LaunchAgents (mode 0755)
-  17. write <root>/home/Library/LaunchAgents/dev.kinfold.daemon.plist: create (22 lines)
-  18. /bin/launchctl bootstrap gui/501 <root>/home/Library/LaunchAgents/dev.kinfold.daemon.plist
-  19. wait up to 180 s for GET /health (a large store takes a while to open)
-  20. PUT /observer/settings host=claude-code provider=claude-cli model=haiku credentialRef=none
-  21. PUT /observer/settings host=opencode provider=openrouter model=openrouter/auto credentialRef=openrouter
-  22. write <root>/home/.kinfold/install.json: record the install channel (checkout), the update check (on) and auto-update (on)
+  14. mkdir <root>/home/.config/opencode/plugins/kinfold-recall (mode 0755)
+  15. write <root>/home/.config/opencode/plugins/kinfold-recall/server.js: create (3 lines)
+  16. write <root>/home/.config/opencode/plugins/kinfold-recall/tui.js: create (84 lines)
+  17. mkdir <root>/home/.config/opencode (mode 0755)
+  18. write <root>/home/.config/opencode/opencode.json: add the Kinfold MCP server under "mcp"; every other key kept
+  19. mkdir <root>/home/Library/LaunchAgents (mode 0755)
+  20. write <root>/home/Library/LaunchAgents/dev.kinfold.daemon.plist: create (22 lines)
+  21. /bin/launchctl bootstrap gui/501 <root>/home/Library/LaunchAgents/dev.kinfold.daemon.plist
+  22. wait up to 180 s for GET /health (a large store takes a while to open)
+  23. PUT /observer/settings host=claude-code provider=claude-cli model=haiku credentialRef=none
+  24. PUT /observer/settings host=opencode provider=openrouter model=openrouter/auto credentialRef=openrouter
+  25. write <root>/home/.kinfold/install.json: record the install channel (checkout), the update check (on) and auto-update (on)
 == re-run, dry run
 daemon: answers on port <port>; LaunchAgent loaded
 host claude-code 2.1.310 (Claude Code): install (claude --version answered)

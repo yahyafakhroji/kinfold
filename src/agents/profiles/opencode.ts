@@ -7,6 +7,7 @@ import { detectOpenCode } from '../../install/detectors'
 import { opencodeInstallActions, opencodeUninstallActions, opencodeWiringLine, opencodeWiringState } from '../../install/host-wiring'
 import { opencodeMcpInstallActions, opencodeMcpUninstallActions } from '../../install/mcp-wiring'
 import { legacyShimRemoval } from '../../install/rename-migration'
+import { opencodeTuiInstallActions, opencodeTuiUninstallActions } from '../families/opencode-tui'
 import type { AgentProfile, Capabilities } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: false, prompt: false }, search: true, observer: true }
@@ -21,8 +22,8 @@ export const OPENCODE_PROFILE: AgentProfile = {
   // A 1.x OpenCode is refused even under --hosts, so the detector stays custom.
   detection: (env, forced) => detectOpenCode(env, forced),
   wiring: {
-    install: async (env, options) => [...(await opencodeInstallActions(env, options?.opencodeAssets)), ...opencodeMcpInstallActions(env), ...legacyShimRemoval(env)],
-    uninstall: (env) => [...opencodeUninstallActions(env), ...opencodeMcpUninstallActions(env)],
+    install: async (env, options) => [...(await opencodeInstallActions(env, options?.opencodeAssets)), ...opencodeTuiInstallActions(env), ...opencodeMcpInstallActions(env), ...legacyShimRemoval(env)],
+    uninstall: (env) => [...opencodeUninstallActions(env), ...opencodeTuiUninstallActions(env), ...opencodeMcpUninstallActions(env)],
     // A plugin file by our name that is not ours is not our wiring.
     state: (env) => {
       const state = opencodeWiringState(env)

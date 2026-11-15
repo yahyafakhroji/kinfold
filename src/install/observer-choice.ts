@@ -28,7 +28,12 @@ export interface ObserverFlag {
   host: InstallHost
   provider: ObserverProvider
   model: string
+  /** `--observer <host>=off`: capture only. The provider and model are then the built-in ones, used when the agent has no saved row to keep. */
+  off?: true
 }
+
+/** What the wizard and the plain prompt call the choice that stops summaries for one agent. */
+export const OFF_LABEL = 'off (capture only, no summaries)'
 
 export interface ChoiceOptions {
   yes: boolean
@@ -54,7 +59,7 @@ export interface ObserverChoice {
   /** A key entered this run, stored in the key store only once the plan runs. */
   credential: PendingCredential | null
   credentialNote: string
-  check: 'ok' | 'skipped' | 'unchanged' | 'not run (dry run)'
+  check: 'ok' | 'skipped' | 'unchanged' | 'not run (dry run)' | 'not run (observer off)'
 }
 
 /** Ends the install with a non-zero exit; the message carries no secret. */
@@ -86,7 +91,21 @@ export function parseProviderModel(value: string): { provider: ObserverProvider;
 }
 
 export function describeInput(input: ObserverSettingsInput): string {
-  return `${input.provider}/${input.model}`
+  return input.enabled ? `${input.provider}/${input.model}` : 'off (capture only)'
+}
+
+/**
+ * The same agent with its observer off. The provider and model stay in the
+ * row, so switching it back on (the dashboard, or a later install) returns to
+ * what was chosen rather than to the built-in default.
+ */
+export function offInput(current: ObserverSettingsInput): ObserverSettingsInput {
+  return { ...current, enabled: false }
+}
+
+/** What a flag names: a provider and model, or off, which keeps the agent's saved provider and model when it has one. */
+export function flagInput(host: InstallHost, flag: ObserverFlag, saved?: ObserverSettingsInput): ObserverSettingsInput {
+  return flag.off === true ? offInput(saved ?? settingsInputFor(host, flag.provider, flag.model)) : settingsInputFor(host, flag.provider, flag.model)
 }
 
 export interface Candidate {
@@ -142,7 +161,7 @@ function candidateQuestion(host: InstallHost, fallback: ObserverSettingsInput, m
   const bare = listing.length === 0 ? '' : ` (a bare ${listing.join(' or ')} lists that CLI's models)`
   return (
     `Observer for ${host}: default ${describeInput(fallback)}${stale === undefined ? '' : ` (${pickAnother(stale)})`}. Providers: ${providers.join(', ')}.\n` +
-    `${stale === undefined ? 'Press Enter to keep the default, or type' : 'Type'} provider:model${bare} > `
+    `${stale === undefined ? 'Press Enter to keep the default, or type' : 'Type'} provider:model${bare}, or ${OFF_LABEL} > `
   )
 }
 
@@ -153,6 +172,7 @@ async function promptCandidate(env: InstallEnv, host: InstallHost, options: Choi
   for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
     const answer = (await env.io.ask(candidateQuestion(host, fallback, missing))).trim()
     if (answer === '' && stale === undefined) return { input: fallback, origin: 'default' }
+    if (answer.toLowerCase() === 'off') return { input: offInput(options.saved?.get(host) ?? fallback), origin: 'prompt' }
     const parsed = parseProviderModel(answer)
     const named = parsed?.provider ?? (isCliLoginProvider(answer) ? answer : null)
     const reason = named === null ? undefined : missing.get(named)
@@ -160,15 +180,15 @@ async function promptCandidate(env: InstallEnv, host: InstallHost, options: Choi
     else if (named !== null && reason !== undefined) env.out(`${named} cannot be picked: ${reason}`)
     else if (parsed !== null) return { input: settingsInputFor(host, parsed.provider, parsed.model), origin: 'prompt' }
     else if (isCliLoginProvider(answer)) return { input: settingsInputFor(host, answer, await askModel(env, host, answer)), origin: 'prompt' }
-    else env.out(`"provider:model" expected, with provider one of ${OBSERVER_PROVIDERS.join(', ')}`)
+    else env.out(`"provider:model" or "off" expected, with provider one of ${OBSERVER_PROVIDERS.join(', ')}`)
   }
   throw new ChoiceError(`no valid observer choice for ${host}`)
 }
 
 async function pickCandidate(env: InstallEnv, host: InstallHost, options: ChoiceOptions, retry: boolean): Promise<Candidate> {
   const flag = options.flags.find((entry) => entry.host === host)
-  if (!retry && flag !== undefined) return { input: settingsInputFor(host, flag.provider, flag.model), origin: 'flag' }
   const saved = options.saved?.get(host)
+  if (!retry && flag !== undefined) return { input: flagInput(host, flag, saved), origin: 'flag' }
   if (!retry && options.yes && saved !== undefined) return { input: saved, origin: 'saved' }
   if (!retry && options.yes) return { input: defaultInput(host), origin: 'default' }
   if (env.io.interactive && !options.yes) return promptCandidate(env, host, options)
@@ -271,6 +291,10 @@ export async function chooseObserverWith(
   options: ChoiceOptions,
   session: CredentialSession = newCredentialSession(),
 ): Promise<ObserverChoice | CheckFailure> {
+  // Off runs no model, so there is no key to ask for and nothing to test. A row already saved as off and kept is unchanged like any other.
+  if (!candidate.input.enabled && candidate.origin !== 'saved') {
+    return { ...candidate, credential: null, credentialNote: 'no key needed while off', check: options.dryRun ? 'not run (dry run)' : 'not run (observer off)' }
+  }
   const ref = credentialRefFor(asSettings(candidate.input))
   const state = await resolveCredential(env, candidate.input, options, session)
   const base = { ...candidate, credential: state.kind === 'entered' && ref !== null ? { ref, value: state.value } : null, credentialNote: credentialNote(state, ref) }

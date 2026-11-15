@@ -119,6 +119,18 @@ export function markProcessing(db: Database, eventIds: readonly string[]): void 
   setStates(db, eventIds, "UPDATE events SET observer_state = 'processing' WHERE event_id = $eventId")
 }
 
+/**
+ * Events that waited while their agent's observer was switched off. They are
+ * finished without a summary, so switching it back on starts from what
+ * arrives next and never spends on a backlog the user did not ask to have
+ * summarised. The rows and payloads stay, for the Sessions view.
+ */
+export function markSkipped(db: Database, sessionId: number): number {
+  // The whole session at once, not one batch: a backlog left half pending would be summarised the moment the observer is switched back on.
+  return db.query("UPDATE events SET observer_state = 'skipped', observer_retry_at = NULL WHERE session_id = $sessionId AND observer_state IN ('pending', 'failed')")
+    .run({ sessionId }).changes
+}
+
 export function markDone(db: Database, eventIds: readonly string[]): void {
   setStates(db, eventIds, "UPDATE events SET observer_state = 'done', observer_retry_at = NULL WHERE event_id = $eventId")
 }

@@ -13,6 +13,7 @@ test('parseProviderModel keeps the slash in the model and splits only on the fir
 import { afterEach } from 'bun:test'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
 import { ObserverError } from '../observer/types'
+import { parseObserverFlag } from './args'
 import { ChoiceError, chooseObservers, describeInput, runCheck } from './observer-choice'
 import { type FakeWorld, createWorld } from './test-support'
 
@@ -128,6 +129,41 @@ test('with every CLI found the plain prompt reads as it always did', async () =>
   expect(choice?.origin).toBe('default')
   expect(asked[0]).toBe(
     'Observer for claude-code: default claude-cli/haiku. Providers: claude-cli, openrouter, codex-cli, opencode-cli.\n' +
-      "Press Enter to keep the default, or type provider:model (a bare codex-cli or opencode-cli lists that CLI's models) > ",
+      "Press Enter to keep the default, or type provider:model (a bare codex-cli or opencode-cli lists that CLI's models), or off (capture only, no summaries) > ",
   )
+})
+
+// ---- off: capture only ---------------------------------------------------------
+
+test('the plain prompt takes "off": capture only, with no key asked and no model call', async () => {
+  const calls: string[] = []
+  world = createWorld({ interactive: true, answers: ['off'], cliRunner: () => cli({ calls }) })
+  const asked = recordingAsk(world)
+  const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, missingClis: async () => new Map() })
+  expect(choice?.input).toEqual({ host: 'claude-code', provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: false })
+  expect(choice?.origin).toBe('prompt')
+  expect(choice?.check).toBe('not run (observer off)')
+  expect(choice?.credential).toBeNull()
+  expect(calls).toEqual([])
+  expect(asked).toHaveLength(1)
+  expect(asked[0]).toContain('or off (capture only, no summaries)')
+  expect(describeInput(choice!.input)).toBe('off (capture only)')
+})
+
+test('--observer <host>=off turns that observer off and keeps the model it had', async () => {
+  const flag = parseObserverFlag('codex=off')
+  // The built-in choice for Codex rides along, for an agent with no saved row to keep.
+  expect(flag).toEqual({ ok: true, value: { host: 'codex', provider: 'openrouter', model: 'openrouter/auto', off: true } })
+  if (!flag.ok) throw new Error('flag did not parse')
+  world = createWorld({})
+  const saved = new Map([['codex', { host: 'codex', provider: 'codex-cli', model: 'gpt-x', credentialRef: null, enabled: true }]] as const)
+  const [kept] = await chooseObservers(world.env, ['codex'], { ...options, yes: true, flags: [flag.value], saved })
+  expect(kept?.input).toEqual({ host: 'codex', provider: 'codex-cli', model: 'gpt-x', credentialRef: null, enabled: false })
+  expect(kept?.check).toBe('not run (observer off)')
+  const [fresh] = await chooseObservers(world.env, ['codex'], { ...options, yes: true, flags: [flag.value] })
+  expect(fresh?.input).toMatchObject({ host: 'codex', provider: 'openrouter', model: 'openrouter/auto', enabled: false })
+  // Off needs no key, so none is asked for or stored.
+  expect(fresh?.credential).toBeNull()
+  // A model can be named "off" only with its provider in front.
+  expect(parseObserverFlag('codex=openrouter:off')).toEqual({ ok: true, value: { host: 'codex', provider: 'openrouter', model: 'off' } })
 })

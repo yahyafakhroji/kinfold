@@ -41,7 +41,7 @@ export function recentRuns(db: Database, limit: number = METRICS_SAMPLE_LIMIT): 
 export function injectionTotals(db: Database): InjectionTotals[] {
   return db.query<InjectionTotals, []>(
     `SELECT host, channel, count(*) AS count, coalesce(sum(tokens), 0) AS tokens
-     FROM injections GROUP BY host, channel ORDER BY host, channel`,
+     FROM injections WHERE held_out = 0 GROUP BY host, channel ORDER BY host, channel`,
   ).all()
 }
 
@@ -75,6 +75,6 @@ export interface InjectionDuration {
 export function injectionDurations(db: Database, since: number): InjectionDuration[] {
   return db.query<InjectionDuration, { since: number }>(
     `SELECT host, channel, duration_ms AS durationMs FROM injections
-     WHERE occurred_at >= $since AND duration_ms IS NOT NULL ORDER BY host, channel`,
+     WHERE occurred_at >= $since AND duration_ms IS NOT NULL AND held_out = 0 ORDER BY host, channel`,
   ).all({ since })
 }

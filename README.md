@@ -63,7 +63,8 @@ Kinfold needs at least one supported coding agent. `kinfold status` lists them a
 - **Observations.** A background observer reads finished turns and writes short observations that cite the events they came from: decisions, fixes, gotchas, how things work.
 - **Context.** Where an agent's hooks allow it, Kinfold adds a small block of related memory to the agent's context at session start, on each prompt, or both. `kinfold status` shows which.
 - **Search.** An MCP server gives agents `search`, `timeline` and `get_observations`. Goose and Continue need the server added by hand; Warp may need a setting turned on. Search is full-text, plus semantic search when you give Kinfold an OpenRouter key for embeddings.
-- **Dashboard.** `kinfold dashboard` opens a local page with sessions, observations, stats and the observer settings.
+- **What it recalled, on your screen.** After each prompt your agent shows one line, for example `kinfold · recalled 2 · #28771 Bun 1.4.4 is pinned · #94451 Schema version from MIGRATIONS`, or `kinfold · nothing recalled`. At session start it shows the newest memories it put in context. You see both; the model sees neither. See [Seeing what Kinfold does](#seeing-what-kinfold-does).
+- **Dashboard.** `kinfold dashboard` opens a local page. Sessions shows your prompts and the agents' replies as plain text, with what Kinfold recalled for each turn. Memory, Metrics and the observer settings sit beside it.
 - **Data control.** `kinfold retention` sets how long each kind of data is kept, `kinfold purge` removes a session, project or agent, and `kinfold scan` checks the store for secrets that slipped through. Purge shows what it would delete and asks first, and so does `kinfold findings --purge <id>`, which shows the finding and never the secret. A script passes `--yes`. Without a terminal or `--yes`, neither deletes anything.
 - **Backup and restore.** `kinfold backup <file>` writes the whole memory to one file while capture keeps running, and `kinfold restore <file>` brings it back on a fresh system. The dashboard's Backup page does both in the browser. See [Backup and restore](#backup-and-restore).
 - **Updates.** `kinfold update` fetches the latest release and checks it against `SHA256SUMS` before it replaces the program. Patch releases (0.2.0 to 0.2.1) install themselves: the daemon checks once a day, waits until nothing has reached it for ten minutes (a hook event, a context request, an MCP read, the dashboard or a restore), then runs the same update. The updater checks for quiet again after the download and waits up to 30 minutes for it. Minor and major releases wait for you to run `kinfold update`. A failed update leaves the running version in place and is tried again after the next daily check. The next session, `kinfold status` and the dashboard tell you when an update happened. To turn it off, pick another option at the wizard's Updates question, run `kinfold install --no-auto-update`, use the switch on the dashboard's Data page, or run install with `KINFOLD_NO_AUTO_UPDATE=1` set. `kinfold install --auto-update` turns it back on. An automatic update runs its install with the agent home variables (`CODEX_HOME`, `XDG_CONFIG_HOME` and the like) that your last install ran with; `kinfold status` lists them.
@@ -118,6 +119,29 @@ What Kinfold wires for each agent on macOS and Linux. **Observer** is `yes` when
 18. The agent has no hooks; search needs the MCP block added to ~/.continue/config.yaml by hand.
 <!-- agents:end -->
 
+## Seeing what Kinfold does
+
+**The recall line.** Kinfold builds the line from the memory ids it sent with that prompt, so the line and the model's context match. It names two kinds of memory: memory related to your prompt, and memory other sessions wrote since this one last received any. A missing line means Kinfold did not run. If the daemon is down, the line says so and your prompt is captured once the daemon starts.
+
+**Where it shows.**
+
+| Agents | How |
+|---|---|
+| Claude Code, Codex, Gemini CLI, Qwen Code, Factory Droid, Junie, Auggie | A message from the hook, on session start and on each prompt. Codex and Droid style it as a warning. |
+| OpenCode | A toast. Install adds a small folder, `kinfold-recall`, beside the plugin in `~/.config/opencode/plugins/`. |
+| Amp | A notification from the plugin. |
+| Every other agent | `kinfold watch` and the dashboard. |
+
+**`kinfold watch`** prints one line per prompt for every agent, with the time, the agent and the project. `--host <agent>` and `--project <name>` narrow it. Ctrl-C stops it.
+
+**Sessions in the dashboard.** Open a session to read it turn by turn: your prompt, the memories recalled, the agent's reply, and the memories saved from that turn. Prompt and reply are the stored text after the secret scan, so a secret shows as its redaction marker. The AI summary of a turn is folded away under it. Replies follow the prompts retention setting.
+
+**Turning the line off.** Run `kinfold install --no-show-recall`, or use the switch on the dashboard's Data page. Memory still reaches the model.
+
+**What it costs.** The Metrics page shows, per agent, the tokens Kinfold added to context per session and per prompt, the tokens the observer spent where its provider reports them, and embedding calls. These numbers start on the day your store was upgraded, and the page shows that date.
+
+**The impact test (opt-in).** `kinfold install --holdout`, or the switch on the Data page, turns on a test that measures what memory changes. About 1 prompt in 10 on Claude Code goes without recalled memory, and the line says `kinfold · recall held out for this prompt (impact test)`. Kinfold then reads that turn's token counts from Claude Code's transcript, and nothing else from it. The Metrics page sets held-out turns beside normal turns of the same projects: median tokens, tool calls and time per turn, with sample sizes. Below 30 turns in either group it says "not enough turns yet". Other agents keep full recall. `kinfold status` says when the test is on.
+
 ## Choosing the observer model
 
 Each agent's sessions are summarised by a model you choose:
@@ -130,6 +154,8 @@ Each agent's sessions are summarised by a model you choose:
 | `openrouter` | any OpenRouter model | an OpenRouter API key, kept in the system key store |
 
 Claude Code defaults to `claude-cli` with Haiku. The others default to OpenRouter. Pick one in the wizard, with `--observer <agent>=<provider>:<model>` (for example `--observer codex=codex-cli:<model>`), or later in the dashboard.
+
+To stop summaries for one agent, pick "off (capture only, no summaries)" in the wizard or pass `--observer <agent>=off`. Kinfold still captures that agent's prompts and replies, shows them in Sessions, and recalls memory that exists. Turns captured while the observer is off are not summarised later, so turning it back on starts from the next turn.
 
 The observer sends session text to the model you picked. That text can include web pages and files someone else wrote, so every login-based observer runs with its tools off, from a private folder, without your settings, hooks, plugins or MCP servers. Before Kinfold uses Codex or OpenCode as an observer, it plants an instruction to read a file. If the model calls a tool or repeats the file's contents, Kinfold stops that observer until its version or path changes, or you press Re-check in the dashboard.
 

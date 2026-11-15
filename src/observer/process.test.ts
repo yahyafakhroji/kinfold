@@ -147,13 +147,44 @@ test('an unknown provider in settings fails the run as config_invalid without ca
   expect(runs()[0]).toMatchObject({ provider: 'unresolved', model: 'unresolved' })
 })
 
-test('a disabled host leaves events pending and records no run', async () => {
+test('a disabled host records no run, and its waiting events are marked skipped', async () => {
   const session = seedSession(temp.store, 'claude-code', 's1')
   seedTurn(session)
   temp.store.db.run("INSERT INTO observer_settings (host, provider, model, enabled, updated_at) VALUES ('claude-code', 'claude-cli', 'haiku', 0, 1)")
   expect(await process(fakeRunner(['{}']), session)).toEqual({ status: 'disabled' })
-  expect(stateCounts(temp.store, session)).toEqual({ pending: 4 })
+  expect(stateCounts(temp.store, session)).toEqual({ skipped: 4 })
   expect(runs()).toEqual([])
+  // The events themselves stay: the Sessions view still shows the turn.
+  expect((temp.store.db.query('SELECT count(*) AS n FROM events WHERE payload IS NOT NULL').get() as { n: number }).n).toBe(4)
+})
+
+test('a backlog larger than one batch is skipped whole in one pass, so none of it is left to be summarised after the switch', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  for (let turn = 0; turn < 20; turn += 1) seedTurn(session, T0 + turn * 1000, turn + 1)
+  temp.store.db.run("INSERT INTO observer_settings (host, provider, model, enabled, updated_at) VALUES ('claude-code', 'claude-cli', 'haiku', 0, 1)")
+  expect(await process(fakeRunner(['{}']), session)).toEqual({ status: 'disabled' })
+  expect(stateCounts(temp.store, session)).toEqual({ skipped: 80 })
+})
+
+test('turning the observer back on summarises only what arrives afterwards, never the backlog parked while it was off', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  const parked = seedTurn(session, T0, 1)
+  temp.store.db.run("INSERT INTO observer_settings (host, provider, model, enabled, updated_at) VALUES ('claude-code', 'claude-cli', 'haiku', 0, 1)")
+  expect(await process(fakeRunner(['{}']), session)).toEqual({ status: 'disabled' })
+
+  temp.store.db.run("UPDATE observer_settings SET enabled = 1 WHERE host = 'claude-code'")
+  // Nothing new: nothing to do, and no model call for the parked turn.
+  const idle = fakeRunner([citingReply()])
+  expect(await process(idle, session)).toEqual({ status: 'idle' })
+  expect(idle.prompts).toEqual([])
+
+  const fresh = seedTurn(session, T0 + 60_000, 2)
+  const runner = fakeRunner([citingReply('After the switch')])
+  expect((await process(runner, session)).status).toBe('succeeded')
+  expect(runner.prompts).toHaveLength(1)
+  expect(runner.prompts[0]!.eventIds).toEqual(fresh)
+  expect(runner.prompts[0]!.eventIds.some((id) => parked.includes(id))).toBe(false)
+  expect(stateCounts(temp.store, session)).toEqual({ skipped: 4, done: 4 })
 })
 
 test('logs carry ids, counts, provider and error class, never payload text or model output', async () => {
@@ -277,7 +308,7 @@ test('settings that change during the gate check are read again: a host disabled
   expect(await processSessionBatch({ db: temp.store.db, runnerFor, safety: gate, now: () => clock }, session)).toEqual({ status: 'disabled' })
   expect(built).toBe(0)
   expect(runs()).toEqual([])
-  expect(stateCounts(temp.store, session)).toEqual({ pending: 4 })
+  expect(stateCounts(temp.store, session)).toEqual({ skipped: 4 })
 })
 
 test('a provider changed during the gate check goes through the gate again with the new settings', async () => {

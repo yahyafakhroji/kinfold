@@ -11,10 +11,13 @@
 
 import { DAEMON_SHARE_MS } from '../context/client'
 import { DAEMON_ONLY_TIMEOUT_MS } from '../context/daemon'
+import { HOLDOUT_HOSTS, HOLDOUT_RATE } from '../context/holdout'
 import { type LateMatches, createLateMatches } from '../context/late-matches'
 import { type PreparedContext, prepareContext, recordServed } from '../context/packs'
 import { type PromptContextDeps, createEmbedSlots, preparePromptContext } from '../context/prompt-context'
-import type { ContextRequest, ContextResult, UpdateNotice } from '../context/types'
+import { FIRST_SCREEN_ROWS } from '../context/recall-line'
+import { type ContextDisplay, type ContextRequest, type ContextResult, EMPTY_CONTEXT, type UpdateNotice } from '../context/types'
+import { firstScreenFor, titlesFor } from '../store/context-store'
 import { peekNotice, takeNotice } from '../update/notice'
 import type { Database } from '../sqlite/types'
 import type { ProjectKeyResolver } from '../store/project-key'
@@ -33,6 +36,11 @@ export interface ContextRouteDeps {
   now?: () => number
   /** Monotonic ms for the duration. */
   clock?: () => number
+  /**
+   * The opt-in impact test: `on` reads the setting, `pick` decides one prompt
+   * (default: HOLDOUT_RATE at random). Absent means no prompt is ever held out.
+   */
+  holdout?: { on: () => boolean; pick?: () => boolean }
   /** Where update-check.json lives and which version is running; absent means no update notice. */
   updates?: { dataDir: string; version: string; envVars?: () => Readonly<Record<string, string | undefined>>; /** This daemon applies patch releases itself, so their notice is held back. */ canAutoUpdate?: boolean }
 }
@@ -40,7 +48,23 @@ export interface ContextRouteDeps {
 /** Past this the hook has likely aborted (it waits DAEMON_SHARE_MS, connection included). */
 export const PROMPT_SERVE_BUDGET_MS = DAEMON_SHARE_MS - 20
 
+export { HOLDOUT_HOSTS, HOLDOUT_RATE }
+
 type Prepared = PreparedContext & { promptDetail: string; relatedText: string; relatedServed: ServedRelated[] }
+
+const NOTHING: Prepared = { ...EMPTY_CONTEXT, rebuilt: false, promptDetail: '', relatedText: '', relatedServed: [] }
+
+/** Titles and a header for the ids the answer carries; it adds no id of its own. */
+function displayFor(deps: ContextRouteDeps, request: ContextRequest, projectKey: string, prepared: Prepared, heldOut: boolean): ContextDisplay {
+  if (heldOut) return { heldOut: true }
+  if (request.channel === 'prompt') {
+    const titles = titlesFor(deps.db, prepared.observationIds)
+    const related = new Set(prepared.relatedServed.map((line) => line.observationId))
+    return { recalled: prepared.observationIds.map((id) => ({ id, title: titles.get(id) ?? '', part: related.has(id) ? 'related' as const : 'new' as const })) }
+  }
+  const firstScreen = firstScreenFor(deps.db, { projectKey, host: request.host, hostSessionId: request.hostSessionId, ids: prepared.observationIds, rows: FIRST_SCREEN_ROWS })
+  return firstScreen === null ? {} : { firstScreen }
+}
 
 /**
  * Session start and OpenCode's first request carry the notice; prompt deltas never do.
@@ -94,15 +118,22 @@ export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest
     const at = now()
     const projectKey = deps.projectKeyFor(request.cwd).key
     const keyMs = Math.round(clock() - startedAt)
-    const prepared = await prepare(request, projectKey, at, startedAt)
+    // Held out before anything is matched: the delta is not computed, so its cursor stays where it was and the
+    // same memory arrives with the next prompt that is not held out; parked late hits wait for that prompt too.
+    const heldOut = request.channel === 'prompt' && HOLDOUT_HOSTS.includes(request.host) && deps.holdout?.on() === true
+      && (deps.holdout.pick ?? (() => Math.random() < HOLDOUT_RATE))()
+    const prepared = heldOut || request.displayOnly === true ? NOTHING : await prepare(request, projectKey, at, startedAt)
     const durationMs = Math.round(clock() - startedAt)
     const overBudget = request.prompt !== undefined && durationMs > PROMPT_SERVE_BUDGET_MS && prepared.observationIds.length > 0
-    const injectionId = overBudget ? 'skipped_late' : recordServed(deps.db, request, projectKey, prepared, at, durationMs)
+    const injectionId = overBudget ? 'skipped_late' : recordServed(deps.db, request, projectKey, prepared, at, durationMs, { relatedCount: prepared.relatedServed.length, heldOut })
     // Labels only for lines the hook got: an answer past the budget was never shown.
     if (typeof injectionId === 'number') recordRelatedServed(deps.db, prepared.relatedServed, { projectKey, host: request.host, occurredAt: at })
     deps.log(`context host=${request.host} channel=${request.channel} injection=${injectionId ?? 'none'} ids=${prepared.observationIds.length}`
-      + ` tokens=${prepared.tokens} rebuilt=${prepared.rebuilt}${prepared.promptDetail} key_ms=${keyMs} ms=${durationMs}`)
+      + ` tokens=${prepared.tokens} rebuilt=${prepared.rebuilt}${prepared.promptDetail}${heldOut ? ' held_out=1' : ''} key_ms=${keyMs} ms=${durationMs}`)
     const notice = updateNoticeFor(deps.updates, request, durationMs, at)
-    return { text: prepared.text, observationIds: prepared.observationIds, tokens: prepared.tokens, ...(prepared.relatedText !== '' ? { relatedText: prepared.relatedText } : {}), ...noticeField(notice) }
+    return {
+      text: prepared.text, observationIds: prepared.observationIds, tokens: prepared.tokens, ...(prepared.relatedText !== '' ? { relatedText: prepared.relatedText } : {}),
+      display: displayFor(deps, request, projectKey, prepared, heldOut), ...noticeField(notice),
+    }
   }
 }

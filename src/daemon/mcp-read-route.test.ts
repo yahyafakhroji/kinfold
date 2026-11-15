@@ -97,6 +97,6 @@ test('POST /context records duration_ms on every injection, for the pack and for
   expect(logs.some((line) => /^context host=claude-code channel=prompt injection=\d+ ids=1 tokens=\d+ rebuilt=false key_ms=\d+ ms=\d+$/.test(line))).toBe(true)
   expect(logs.join('\n')).not.toContain('Learned after the pack')
   // A second prompt has nothing new: empty text, nothing recorded.
-  expect(await (await post('/context', { ...body, channel: 'prompt' })).json()).toEqual({ text: '', observationIds: [], tokens: 0 })
+  expect(await (await post('/context', { ...body, channel: 'prompt' })).json()).toEqual({ text: '', observationIds: [], tokens: 0, display: { recalled: [] } })
   expect(rows('SELECT count(*) AS n FROM injections')).toEqual([{ n: 2 }])
 })

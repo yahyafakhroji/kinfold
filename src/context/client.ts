@@ -22,6 +22,8 @@ export interface ContextFetch {
   source: ContextSource
   result: ContextResult | null
   ms: number
+  /** True when no daemon was listening, whatever the fallback then found: the user is told so. */
+  daemonDown: boolean
 }
 
 export interface ContextClientOptions {
@@ -65,10 +67,12 @@ export async function fetchContext(dataDir: string, request: ContextRequest, opt
   const budget = options.budgetMs ?? CONTEXT_BUDGET_MS
   const startedAt = now()
   const elapsed = (): number => now() - startedAt
-  const none = (): ContextFetch => ({ source: 'none', result: null, ms: elapsed() })
-
   const daemon = await askDaemon(dataDir, request, Math.min(options.daemonShareMs ?? DAEMON_SHARE_MS, budget), options.fetch ?? fetch)
-  if (!isMiss(daemon)) return { source: 'daemon', result: daemon, ms: elapsed() }
+  if (!isMiss(daemon)) return { source: 'daemon', result: daemon, ms: elapsed(), daemonDown: false }
+  const daemonDown = daemon.down
+  const none = (): ContextFetch => ({ source: 'none', result: null, ms: elapsed(), daemonDown })
+  // The header is all a display-only ask is for, and the stored pack has none.
+  if (request.displayOnly === true) return none()
   if (!(options.fallback ?? !isCompiledProgram())) {
     log(`context: ${daemon.reason}; no read-only fallback in a compiled program`)
     return none()
@@ -86,5 +90,5 @@ export async function fetchContext(dataDir: string, request: ContextRequest, opt
     log(`context: fallback finished past the budget ms=${elapsed()}; nothing injected`)
     return none()
   }
-  return stored === null ? none() : { source: 'fallback', result: stored, ms: elapsed() }
+  return stored === null ? none() : { source: 'fallback', result: stored, ms: elapsed(), daemonDown }
 }

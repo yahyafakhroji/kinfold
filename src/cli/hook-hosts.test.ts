@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HOST_VERSIONS_FILE, serializeHostVersions } from '../adapters/host-version'
 import { rebuildProjectPacks } from '../context/packs'
-import { seedObservation } from '../context/test-support'
+import { hideRecallLine, seedObservation } from '../context/test-support'
 import type { NormalizedEvent } from '../contract/event'
 import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
 import { openStore } from '../store/db'
@@ -20,6 +20,8 @@ let dataDir: string
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'sam-hook-hosts-'))
   dataDir = join(root, 'data')
+  // The recall line has its own tests (hook-recall.test.ts); with it off, these pin the context output alone.
+  hideRecallLine(dataDir)
 })
 afterEach(() => {
   rmSync(root, { recursive: true, force: true })

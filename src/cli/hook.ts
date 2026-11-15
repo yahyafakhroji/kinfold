@@ -20,8 +20,15 @@ import { defaultAdapterContext } from '../adapters/context'
 import { recordedHostVersion } from '../adapters/host-version'
 import { HOOK_SPECS, hookSpecFor } from '../agents/hook-specs'
 import type { AgentId } from '../agents/profile'
-import { type ContextClientOptions, fetchContext } from '../context/client'
-import { type ContextChannel, MAX_CONTEXT_PROMPT_CHARS, type UpdateNotice } from '../context/types'
+import type { HookHostSpec } from '../agents/hook-spec'
+import { type ContextClientOptions, type ContextFetch, fetchContext } from '../context/client'
+import { readDisplayFile } from '../context/display-file'
+import {
+  DAEMON_DOWN_LINE, DAEMON_DOWN_START_LINE, HELD_OUT_LINE, NO_ANSWER_LINE, NO_ANSWER_START_LINE, NO_PROMPT_MEMORY_LINE,
+  daemonDownWith, firstScreenList, recallLine,
+} from '../context/recall-line'
+import { type ContextChannel, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
+import { userMessage as noticeMessage } from '../update/notice-text'
 import type { NormalizedEvent } from '../contract/event'
 import { isObserverProcess } from '../observer/env'
 import { resolveDataDir } from '../store/data-dir'
@@ -84,10 +91,55 @@ function contextFor(event: NormalizedEvent, host: HookHost): { channel: ContextC
   return null
 }
 
-/** The one stdout object the host reads as context (the pack, or the prompt delta), or null when there is nothing to add. */
+/**
+ * What the user reads about one answer. It is built from the answer the hook
+ * is about to print and from nothing else: the ids are the ones in the context
+ * line (none when no context is printed), so the line cannot name a memory the
+ * model was not sent, and it costs no second request.
+ */
+function recallMessage(channel: ContextChannel, fetched: ContextFetch, takesPack: boolean): string {
+  const result = fetched.result
+  const start = channel === 'session_start'
+  if (result === null) {
+    if (fetched.daemonDown) return start ? DAEMON_DOWN_START_LINE : DAEMON_DOWN_LINE
+    return start ? NO_ANSWER_START_LINE : NO_ANSWER_LINE
+  }
+  if (result.display?.heldOut === true) return HELD_OUT_LINE
+  const ids = result.text === '' ? [] : result.observationIds
+  const line = start
+    ? firstScreenList(result.display?.firstScreen ?? null, ids, Date.now(), { takesPack })
+    : recallLine(ids, result.display?.recalled ?? [])
+  // The stored copy is also read after a daemon that was only slow; "not running" is said only when nothing was listening.
+  return fetched.source === 'fallback' && fetched.daemonDown ? daemonDownWith(line) : line
+}
+
+/** The one stdout line: the context for the model, the message for the user, both in one object, or null for neither. */
+function printed(spec: HookHostSpec, context: string | null, message: string | null): string | null {
+  if (message === null || spec.userMessage === undefined) return context
+  return spec.userMessage(context, message)
+}
+
+/**
+ * The one stdout object the host reads: the context for the model (the pack,
+ * or the prompt delta) and, for an agent with a user channel, what Kinfold
+ * recalled. Null when there is neither.
+ */
 async function contextOutput(event: NormalizedEvent, dataDir: string, host: HookHost, stderr: ErrorSink, inject: InjectOptions): Promise<string | null> {
+  const spec = hookSpecFor(host)
+  if (spec === null || (event.kind !== 'session_start' && event.kind !== 'user_prompt')) return null
+  // An agent running this host's hooks under its own name is not known to show the message, so it gets the context alone.
+  const hasUserChannel = spec.userMessage !== undefined && event.host === host
+  const show = hasUserChannel && readDisplayFile(dataDir).showRecall
   const wanted = contextFor(event, host)
-  if (wanted === null) return null
+  if (wanted === null) {
+    if (!show) return null
+    // The agent takes no memory here, so the daemon is not asked on a prompt; at session start only the header is.
+    if (event.kind === 'user_prompt') return printed(spec, null, NO_PROMPT_MEMORY_LINE)
+    const header = await fetchContext(dataDir, { host: event.host, cwd: event.cwd, hostSessionId: event.hostSessionId, channel: 'session_start', displayOnly: true },
+      { ...inject, log: (line) => stderr(`kinfold-hook: ${line}`) })
+    const notice = header.result?.updateNotice
+    return printed(spec, null, [...(notice !== undefined ? [noticeMessage(notice)] : []), recallMessage('session_start', header, false)].join('\n'))
+  }
   const prompt = wanted.channel === 'prompt' ? (event.promptText ?? '').slice(0, MAX_CONTEXT_PROMPT_CHARS) : ''
   const fetched = await fetchContext(
     dataDir,
@@ -95,10 +147,16 @@ async function contextOutput(event: NormalizedEvent, dataDir: string, host: Hook
     { ...inject, log: (line) => stderr(`kinfold-hook: ${line}`) },
   )
   const result = fetched.result
-  if (result === null) return null
   // The notice rides on session start only; the route never attaches it to a prompt delta.
-  if (wanted.channel === 'session_start' && result.updateNotice !== undefined) return hookSpecFor(host)?.sessionContextWithNotice(result.text, result.updateNotice) ?? null
-  return result.text === '' ? null : wanted.render(result.text)
+  const notice = wanted.channel === 'session_start' ? result?.updateNotice : undefined
+  if (!hasUserChannel) {
+    if (result === null) return null
+    if (notice !== undefined) return spec.sessionContextWithNotice(result.text, notice)
+    return result.text === '' ? null : wanted.render(result.text)
+  }
+  const context = result === null || result.text === '' ? null : wanted.render(result.text)
+  const lines = [...(notice !== undefined ? [noticeMessage(notice)] : []), ...(show ? [recallMessage(wanted.channel, fetched, true)] : [])]
+  return printed(spec, context, lines.length === 0 ? null : lines.join('\n'))
 }
 
 /**

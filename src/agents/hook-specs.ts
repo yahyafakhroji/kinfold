@@ -26,6 +26,16 @@ const hookSpecific = (text: string): string => JSON.stringify({ hookSpecificOutp
 const claudeWithNotice = (text: string, notice: UpdateNotice): string =>
   JSON.stringify({ systemMessage: userMessage(notice), ...(text !== '' ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {}) })
 
+/**
+ * `systemMessage` beside whatever the hook already prints. Claude Code, Codex,
+ * Gemini CLI, Qwen Code, Factory Droid, Junie and Auggie each document it as
+ * text shown to the user and kept out of the model's context (checked
+ * 2026-11-15); Codex and Droid style it as a warning. Every one of them prints
+ * a JSON object, so the message is one more key on it.
+ */
+const withSystemMessage = (output: string | null, message: string): string =>
+  JSON.stringify({ systemMessage: message, ...(output === null ? {} : (JSON.parse(output) as Record<string, unknown>)) })
+
 /** Hosts with no user channel get one agent line as the last line of Kinfold's block. */
 const withAgentLine = (text: string, notice: UpdateNotice): string => [text.replace(/\n$/, ''), agentLine(notice)].filter((part) => part !== '').join('\n')
 
@@ -50,11 +60,15 @@ const CLAUDE_CODE_SPEC: HookHostSpec = {
   sessionContext: hookSpecific,
   sessionContextWithNotice: claudeWithNotice,
   promptContext: userPromptContextOutput,
+  userMessage: withSystemMessage,
   callerOf: claudeCaller,
 }
 
 // Codex documents the same UserPromptSubmit hookSpecificOutput shape as Claude Code.
-const CODEX_SPEC: HookHostSpec = { normalize: normalizeCodex, sessionContext: hookSpecific, sessionContextWithNotice: (text, notice) => hookSpecific(withAgentLine(text, notice)), promptContext: userPromptContextOutput }
+const CODEX_SPEC: HookHostSpec = {
+  normalize: normalizeCodex, sessionContext: hookSpecific, sessionContextWithNotice: (text, notice) => hookSpecific(withAgentLine(text, notice)),
+  promptContext: userPromptContextOutput, userMessage: withSystemMessage,
+}
 
 const CURSOR_SPEC: HookHostSpec = {
   normalize: normalizeCursor,
@@ -70,9 +84,16 @@ const CLAUDE_STYLE_EVENTS = CLAUDE_CODE_EVENTS
 /** Factory Droid, Junie and Devin document no PostToolUseFailure. */
 const { PostToolUseFailure: _noFailureEvent, ...WITHOUT_FAILURE_EVENT } = CLAUDE_STYLE_EVENTS
 
-/** Qwen Code, Droid and Devin take Claude Code's hookSpecificOutput lines on both events. */
-function claudeShapedSpec(normalize: HookHostSpec['normalize']): HookHostSpec {
-  return { normalize, sessionContext: hookSpecific, sessionContextWithNotice: (text, notice) => hookSpecific(withAgentLine(text, notice)), promptContext: userPromptContextOutput }
+/**
+ * Qwen Code, Droid and Devin take Claude Code's hookSpecificOutput lines on
+ * both events. Qwen and Droid also document systemMessage; Devin's docs don't
+ * say, so it gets none until a live run shows what it does with one.
+ */
+function claudeShapedSpec(normalize: HookHostSpec['normalize'], userChannel: boolean): HookHostSpec {
+  return {
+    normalize, sessionContext: hookSpecific, sessionContextWithNotice: (text, notice) => hookSpecific(withAgentLine(text, notice)), promptContext: userPromptContextOutput,
+    ...(userChannel ? { userMessage: withSystemMessage } : {}),
+  }
 }
 
 /** Junie and Copilot read a top-level additionalContext. */
@@ -85,6 +106,7 @@ const JUNIE_SPEC: HookHostSpec = {
   sessionContextWithNotice: (text, notice) => topLevelContext(withAgentLine(text, notice)),
   sessionContextIgnored: true,
   promptContext: topLevelContext,
+  userMessage: withSystemMessage,
 }
 
 // Copilot drops command-hook output on UserPromptSubmit; sessionStart reads a top-level additionalContext.
@@ -101,6 +123,7 @@ const GEMINI_CLI_SPEC: HookHostSpec = {
   sessionContext: hookSpecific,
   sessionContextWithNotice: (text, notice) => hookSpecific(withAgentLine(text, notice)),
   promptContext: (text) => JSON.stringify({ hookSpecificOutput: { hookEventName: 'BeforeAgent', additionalContext: text } }),
+  userMessage: withSystemMessage,
 }
 
 // Antigravity reads injectSteps on SessionStart (antigravity.google/docs/hooks.md,
@@ -140,6 +163,8 @@ const AMP_SPEC: HookHostSpec = {
   sessionContext: ampMessageOutput,
   sessionContextWithNotice: (text, notice) => ampMessageOutput(withAgentLine(text, notice)),
   promptContext: ampMessageOutput,
+  // The plugin hands `notify` to ctx.ui.notify, a notification Amp shows the user and keeps out of the thread.
+  userMessage: (output, message) => JSON.stringify({ ...(output === null ? {} : (JSON.parse(output) as Record<string, unknown>)), notify: message }),
 }
 
 // Kimi Code appends a UserPromptSubmit hook's plain stdout to the context and
@@ -154,9 +179,13 @@ const KIMI_CODE_SPEC: HookHostSpec = {
 
 // Auggie, Goose and Crush document no hook output reaching the model at
 // session start or on a prompt (see each profile), so their hook captures
-// and prints nothing.
-function captureOnlySpec(normalize: HookHostSpec['normalize']): HookHostSpec {
-  return { normalize, sessionContext: (text) => text, sessionContextWithNotice: (text, notice) => withAgentLine(text, notice), sessionContextIgnored: true }
+// and hands the model nothing. Auggie does show the user a systemMessage, so
+// it alone prints one.
+function captureOnlySpec(normalize: HookHostSpec['normalize'], userChannel = false): HookHostSpec {
+  return {
+    normalize, sessionContext: (text) => text, sessionContextWithNotice: (text, notice) => withAgentLine(text, notice), sessionContextIgnored: true,
+    ...(userChannel ? { userMessage: withSystemMessage } : {}),
+  }
 }
 
 export const HOOK_SPECS: Readonly<Record<AgentId, HookHostSpec | null>> = {
@@ -165,9 +194,9 @@ export const HOOK_SPECS: Readonly<Record<AgentId, HookHostSpec | null>> = {
   cursor: CURSOR_SPEC,
   opencode: null,
   'gemini-cli': GEMINI_CLI_SPEC,
-  'qwen-code': claudeShapedSpec(normalizeClaudeStyle(CLAUDE_STYLE_EVENTS, 'qwen-code')),
-  'factory-droid': claudeShapedSpec(normalizeClaudeStyle(WITHOUT_FAILURE_EVENT, 'factory-droid')),
-  devin: claudeShapedSpec(normalizeClaudeStyle(WITHOUT_FAILURE_EVENT, 'devin')),
+  'qwen-code': claudeShapedSpec(normalizeClaudeStyle(CLAUDE_STYLE_EVENTS, 'qwen-code'), true),
+  'factory-droid': claudeShapedSpec(normalizeClaudeStyle(WITHOUT_FAILURE_EVENT, 'factory-droid'), true),
+  devin: claudeShapedSpec(normalizeClaudeStyle(WITHOUT_FAILURE_EVENT, 'devin'), false),
   'kilo-code': null,
   cline: CLINE_SPEC,
   copilot: COPILOT_SPEC,
@@ -176,7 +205,7 @@ export const HOOK_SPECS: Readonly<Record<AgentId, HookHostSpec | null>> = {
   kiro: KIRO_SPEC,
   amp: AMP_SPEC,
   'kimi-code': KIMI_CODE_SPEC,
-  auggie: captureOnlySpec(normalizeAuggie),
+  auggie: captureOnlySpec(normalizeAuggie, true),
   goose: captureOnlySpec(normalizeGoose),
   crush: captureOnlySpec(normalizeCrush),
   zed: null,

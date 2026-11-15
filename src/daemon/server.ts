@@ -72,6 +72,10 @@ export interface ServerDeps {
   onActivity?: () => void
   /** GET /metrics/summary. */
   metrics: (window: string | null) => RouteAnswer
+  /** GET /memory/sessions and /memory/sessions/:id/turns (the dashboard's Sessions view); null for any other path. Absent: those paths are 404. */
+  sessions?: (method: string, url: URL) => RouteAnswer | null
+  /** GET /watch (token only): the prompts since a cursor with what was recalled for each, for `kinfold watch`. Absent: 404. */
+  watch?: (method: string, url: URL) => RouteAnswer
   /** POST /metrics/mcp-read: one MCP tool call reported by the read-only MCP server (token only). */
   mcpRead: (read: McpRead) => number
   /** POST /observer/test: one fixed prompt through the chosen runner. */
@@ -219,6 +223,10 @@ async function route(request: Request, url: URL, deps: ServerDeps, via: Credenti
     deps.onNudge()
     return json(202, { accepted: true })
   }
+  if (url.pathname === '/watch' && deps.watch !== undefined) {
+    const answer = deps.watch(request.method, url)
+    return json(answer.status, answer.body)
+  }
   if (url.pathname === '/sessions') {
     if (request.method !== 'GET') return json(405, { error: 'method not allowed' })
     const sessions = deps.listSessions(url.searchParams.get('project'))
@@ -232,7 +240,7 @@ async function route(request: Request, url: URL, deps: ServerDeps, via: Credenti
 async function panelRoute(request: Request, url: URL, deps: ServerDeps, via: Credential): Promise<RouteAnswer | null> {
   const path = url.pathname
   if (path.startsWith('/data/')) return dataRoute(request.method, url, () => readJson(request), deps.data, deps.exclusive)
-  if (path.startsWith('/memory/')) return memoryRoute(request.method, url, deps.memory)
+  if (path.startsWith('/memory/')) return deps.sessions?.(request.method, url) ?? memoryRoute(request.method, url, deps.memory)
   if (path === '/observer/models') return deps.observerModels(request.method, url)
   if (path === '/observer/test') return deps.observerTest(request.method, () => readJson(request))
   if (path === '/update') return request.method === 'GET' ? { status: 200, body: { notice: deps.update?.banner(via === 'cookie') ?? null, auto: deps.update?.auto() ?? null } } : { status: 405, body: { error: 'method not allowed' } }
@@ -315,9 +323,14 @@ export function localhostRedirect(host: string | null, url: URL, port: number): 
   return new Response(null, { status: 303, headers: { location: `http://${LOOPBACK_HOST}:${port}${url.pathname}${url.search}` } })
 }
 
-/** The updater, `kinfold status` and the dashboard's banner ask these; asking must not itself keep an update waiting. */
+/**
+ * The updater, `kinfold status` and the dashboard's banner ask these; asking
+ * must not itself keep an update waiting. Nor must a watcher: `kinfold watch`
+ * and OpenCode's toast poll /watch once a second for as long as they are
+ * open, which would otherwise mean the daemon is never quiet.
+ */
 function isUpdateQuestion(path: string): boolean {
-  return path === '/update' || path.startsWith('/update/')
+  return path === '/update' || path.startsWith('/update/') || path === '/watch'
 }
 
 async function answer(request: Request, port: number, deps: ServerDeps): Promise<Response> {

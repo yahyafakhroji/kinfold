@@ -12,13 +12,13 @@ export const PROMPT_EXPIRED_MARKER = '<expired reason="retention"/>'
 
 /**
  * Events older than the cutoff get the marker once the observer is finished
- * with them: done, or failed with every attempt used. A pending or retryable
+ * with them: done, skipped (its agent's observer was off), or failed with every attempt used. A pending or retryable
  * event keeps its payload however old it is, or a long observer outage would
  * turn its backlog into markers it can never read. The preview counts with
  * the same clause, so it names exactly the rows a run would expire.
  */
 const EVENT_EXPIRES = `payload_expired_at IS NULL AND occurred_at < $cutoff
-  AND (observer_state = 'done' OR (observer_state = 'failed' AND observer_attempts >= $maxAttempts))`
+  AND (observer_state IN ('done', 'skipped') OR (observer_state = 'failed' AND observer_attempts >= $maxAttempts))`
 const PROMPT_EXPIRES = 'text_expired_at IS NULL AND occurred_at < $cutoff'
 
 /** Returns the ids of the events whose payloads became markers. */
@@ -39,7 +39,8 @@ export function expireEventPayloads(db: Database, cutoff: number, now: number, l
  */
 export function expirePromptTexts(db: Database, cutoff: number, now: number, limit: number): string[] {
   return db.query<{ id: string }, Record<string, number | string>>(
-    `UPDATE prompts SET text = $marker, text_hash = NULL, text_expired_at = $now, scanned_version = $version
+    `UPDATE prompts SET text = $marker, reply_text = CASE WHEN reply_text IS NULL THEN NULL ELSE $marker END,
+       text_hash = NULL, text_expired_at = $now, scanned_version = $version
      WHERE id IN (SELECT id FROM prompts WHERE ${PROMPT_EXPIRES} LIMIT $limit)
      RETURNING CAST(id AS TEXT) AS id`,
   ).all({ cutoff, now, limit, marker: PROMPT_EXPIRED_MARKER, version: RULES_VERSION }).map((row) => row.id)
@@ -70,7 +71,7 @@ export const EXPIRE_WHERE: Readonly<Record<'observations' | 'summaries', string>
 /** Per table: the text that goes, and the rows a run picks. Observations and summaries use EXPIRE_WHERE, as purge does. */
 const EXPIRING_SQL: Readonly<Record<ExpiringTable, string>> = {
   events: `SELECT count(*) AS rows, coalesce(sum(length(coalesce(payload, ''))), 0) AS bytes FROM events WHERE ${EVENT_EXPIRES}`,
-  prompts: `SELECT count(*) AS rows, coalesce(sum(length(text)), 0) AS bytes FROM prompts WHERE ${PROMPT_EXPIRES}`,
+  prompts: `SELECT count(*) AS rows, coalesce(sum(length(text) + length(coalesce(reply_text, ''))), 0) AS bytes FROM prompts WHERE ${PROMPT_EXPIRES}`,
   observations: `SELECT count(*) AS rows, coalesce(sum(length(title) + length(narrative) + length(facts) + length(files)), 0) AS bytes
     FROM observations WHERE ${EXPIRE_WHERE.observations}`,
   summaries: `SELECT count(*) AS rows, coalesce(sum(length(coalesce(request, '')) + length(coalesce(learned, '')) + length(coalesce(completed, ''))

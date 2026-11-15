@@ -8,6 +8,9 @@ import { DEFAULT_MAX_FIELD_CHARS, type PrepareOptions, type RedactedEvent, prepa
 import type { NormalizedEvent } from '../contract/event'
 import { type QuarantinedEntry, type SpoolEntry, type SpoolRead, readSpool, removeSpoolEntry } from '../spool/spool'
 import type { Database } from '../sqlite/types'
+import { HOLDOUT_HOSTS } from '../context/holdout'
+import { stampInjectionPrompts } from '../store/context-store'
+import type { TurnEnd } from './transcript-usage'
 import type { ProjectKeyResolver } from '../store/project-key'
 import {
   eventExists,
@@ -16,6 +19,7 @@ import {
   latestPromptNumber,
   markSessionEnded,
   promptNumberForHostId,
+  setPromptReply,
   upsertProject,
   upsertSession,
 } from '../store/writes'
@@ -33,6 +37,12 @@ export interface DrainResult {
   duplicates: number
   removed: number
   quarantined: QuarantinedEntry[]
+  /**
+   * The turn_end events this drain stored for an agent whose transcript holds
+   * the turn's usage, each with the transcript's path: the daemon reads them
+   * after the commit, while the impact test is on.
+   */
+  turnEnds: TurnEnd[]
   /** Set when a batch failed to commit; its spool files are still in place. */
   error?: string
 }
@@ -90,6 +100,8 @@ function assignPromptNumber(db: Database, sessionId: number, event: NormalizedEv
       occurredAt: event.occurredAt,
       ...(event.hostPromptId !== undefined ? { hostPromptId: event.hostPromptId } : {}),
     })
+    // The hook asked for recall right after it spooled this prompt, so that row is usually here before the prompt is.
+    stampInjectionPrompts(db, { sessionId, host: event.host, hostSessionId: event.hostSessionId, promptNumber, occurredAt: event.occurredAt })
     return promptNumber
   }
   if (event.hostPromptId !== undefined) {
@@ -100,8 +112,8 @@ function assignPromptNumber(db: Database, sessionId: number, event: NormalizedEv
   return latest === 0 ? null : latest
 }
 
-/** Returns false for an event_id already stored. Checked first so a retried prompt never takes a second number. */
-function ingestEvent(db: Database, raw: NormalizedEvent, options: DrainOptions, now: number): boolean {
+/** Returns false for an event_id already stored. Checked first so a retried prompt never takes a second number. A stored turn_end whose usage can be read is added to `turnEnds`. */
+function ingestEvent(db: Database, raw: NormalizedEvent, options: DrainOptions, now: number, turnEnds: TurnEnd[]): boolean {
   if (eventExists(db, raw.eventId)) return false
   const event = secondPass(raw, options)
   const project = options.projectKeyFor(event.cwd)
@@ -116,10 +128,15 @@ function ingestEvent(db: Database, raw: NormalizedEvent, options: DrainOptions, 
   })
   if (event.kind === 'session_end') markSessionEnded(db, sessionId, event.occurredAt)
 
-  return insertEvent(db, {
+  const promptNumber = assignPromptNumber(db, sessionId, event)
+  // The reply is kept with its prompt, under prompts retention; the event keeps its copy for the observer until events retention takes it.
+  if (event.kind === 'turn_end' && promptNumber !== null && event.assistantText !== undefined && event.assistantText !== '') {
+    setPromptReply(db, sessionId, promptNumber, event.assistantText)
+  }
+  const inserted = insertEvent(db, {
     eventId: event.eventId,
     sessionId,
-    promptNumber: assignPromptNumber(db, sessionId, event),
+    promptNumber,
     kind: event.kind,
     toolName: event.tool?.name ?? null,
     payload: JSON.stringify(event),
@@ -129,11 +146,20 @@ function ingestEvent(db: Database, raw: NormalizedEvent, options: DrainOptions, 
     occurredAt: event.occurredAt,
     ingestedAt: now,
   })
+  if (inserted && event.kind === 'turn_end' && promptNumber !== null && event.transcriptPath !== undefined && HOLDOUT_HOSTS.includes(event.host)) {
+    turnEnds.push({ sessionId, promptNumber, host: event.host, projectKey: project.key, transcriptPath: event.transcriptPath, occurredAt: event.occurredAt })
+  }
+  return inserted
 }
 
-function commitBatch(db: Database, entries: readonly SpoolEntry[], options: DrainOptions): number {
+/** One batch in one transaction. The turn ends are handed back only when it commits, so nothing is read for rows that rolled back. */
+function commitBatch(db: Database, entries: readonly SpoolEntry[], options: DrainOptions): { inserted: number; turnEnds: TurnEnd[] } {
   const now = (options.now ?? Date.now)()
-  return db.transaction(() => entries.filter((entry) => ingestEvent(db, entry.event, options, now)).length)()
+  return db.transaction(() => {
+    const turnEnds: TurnEnd[] = []
+    const inserted = entries.filter((entry) => ingestEvent(db, entry.event, options, now, turnEnds)).length
+    return { inserted, turnEnds }
+  })()
 }
 
 function errorMessage(error: unknown): string {
@@ -143,7 +169,7 @@ function errorMessage(error: unknown): string {
 /** Drains until the spool is empty or a batch fails. Quarantined entries are reported, never ingested. */
 export function drainSpool(db: Database, options: DrainOptions): DrainResult {
   const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE
-  let result: DrainResult = { read: 0, inserted: 0, duplicates: 0, removed: 0, quarantined: [] }
+  let result: DrainResult = { read: 0, inserted: 0, duplicates: 0, removed: 0, quarantined: [], turnEnds: [] }
 
   for (;;) {
     let batch: SpoolRead
@@ -156,8 +182,9 @@ export function drainSpool(db: Database, options: DrainOptions): DrainResult {
     if (batch.entries.length === 0) return result
 
     let inserted: number
+    let turnEnds: TurnEnd[]
     try {
-      inserted = commitBatch(db, batch.entries, options)
+      ;({ inserted, turnEnds } = commitBatch(db, batch.entries, options))
     } catch (error: unknown) {
       return { ...result, error: `batch rolled back: ${errorMessage(error)}` }
     }
@@ -167,6 +194,7 @@ export function drainSpool(db: Database, options: DrainOptions): DrainResult {
       inserted: result.inserted + inserted,
       duplicates: result.duplicates + batch.entries.length - inserted,
       removed: result.removed + batch.entries.length,
+      turnEnds: [...result.turnEnds, ...turnEnds],
     }
     if (batch.entries.length < batchSize) return result
   }

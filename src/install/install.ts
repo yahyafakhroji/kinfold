@@ -27,6 +27,7 @@ import { entryCommand } from './entry'
 import { type InstallKeyStore, chooseInstallKeyStore, keyStoreOf, keyStoreRecordActions, refusalLines, secretSetAction } from './key-store-choice'
 import { describeTextChange, readTextOrNull } from './files'
 import { isAgentLoaded, legacyPrintArgv } from './launch-agent'
+import type { DisplayChange } from '../store/display-settings'
 import { ChoiceError, type ChoiceOptions, type ObserverChoice } from './observer-choice'
 import { hmacMigrationActions } from './hmac-migration'
 import { hostVersionActions } from './host-wiring'
@@ -80,6 +81,8 @@ export interface InstallOptions extends ChoiceOptions {
   noAutoUpdate?: boolean
   /** --auto-update: turns automatic patch updates back on. */
   autoUpdate?: boolean
+  /** --show-recall, --holdout and their opposites: only the switches a flag named. */
+  display?: DisplayChange
   /** Test seam for the update lock: its pid and liveness check, and the pid of the process that started this install. */
   lock?: UpdateLockDeps & { parentPid?: number }
   /** --path or --no-path: the answer to the PATH question, given up front. */
@@ -345,6 +348,16 @@ async function plannedSettingsActions(env: InstallEnv, choices: readonly Observe
   return []
 }
 
+export const DISPLAY_NOT_SENT_LINE = 'recall line and impact test: not sent, since no daemon is running; run kinfold install again once it runs'
+
+/** The display switches a flag named, sent once the daemon answers; a run that named none plans nothing, so both stay as they are. */
+export function displayActions(env: InstallEnv, change: DisplayChange, noDaemon: boolean): Action[] {
+  if (change.showRecall === undefined && change.holdout === undefined) return []
+  if (!noDaemon) return [{ kind: 'display-put', change }]
+  noticeOf(env)(DISPLAY_NOT_SENT_LINE)
+  return []
+}
+
 export interface InstallPlan {
   actions: Action[]
   /** A progress-bar label for each action, by index. */
@@ -430,6 +443,7 @@ export async function buildPlan(
     ...dropped.map((host): [string, Action[]] => [`unwiring ${profileOf(host).name}`, hostUnwireActions(env, host)]),
     [null, serviceActions(env, service, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon, answers.port)],
     [null, await plannedSettingsActions(env, choices, state, manual && !situation.health.up)],
+    [null, displayActions(env, options.display ?? {}, manual && !situation.health.up)],
     [null, hmac.cleanup],
     [null, recordActions(env, state, answers, saved, path)],
   ]

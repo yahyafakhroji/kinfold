@@ -1,7 +1,9 @@
 // Test scaffolding for context packs: seeds observations and summaries with
 // synthetic titles into a temp store. Tests only; nothing in the daemon imports it.
 
-import type { Store } from '../store/db'
+import { type Store, openStore } from '../store/db'
+import { writeDisplaySettings } from '../store/display-settings'
+import { writeDisplayFile } from './display-file'
 import { insertObservation, upsertSummary } from '../store/observer-store'
 import type { EvidenceStrength } from '../evidence'
 
@@ -15,6 +17,22 @@ export interface SeedObservation {
 }
 
 export const NARRATIVE_MARKER = 'NARRATIVE-THAT-MUST-NOT-BE-INJECTED'
+
+/**
+ * Turns the recall line off for a test data folder, in the store (a daemon
+ * started later publishes display.json from it) and in the file (for a hook
+ * that runs with no daemon). Tests that pin the context a hook prints use it;
+ * the line itself is tested in cli/hook-recall.test.ts.
+ */
+export function hideRecallLine(dataDir: string): void {
+  const store = openStore(dataDir)
+  try {
+    writeDisplaySettings(store.db, { showRecall: false }, 0)
+  } finally {
+    store.db.close()
+  }
+  writeDisplayFile(dataDir, { showRecall: false })
+}
 
 let sequence = 0
 

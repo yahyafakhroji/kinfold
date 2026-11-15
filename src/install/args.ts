@@ -2,13 +2,15 @@
 // flag that does not apply to the command is an error rather than ignored, so
 // `kinfold status --dry-run` cannot be mistaken for a promise.
 
+import { KNOWN_HOSTS } from '../contract/event'
 import type { Parsed } from '../context/types'
 import { parsePurgeBody, parseRetentionPut } from '../data-control/requests'
 import type { ResolveAction } from '../data-control/resolve'
 import type { DataSettingsChange } from '../store/data-settings-store'
 import { builtProfiles } from '../agents/install-profiles'
 import { INSTALL_HOSTS, type InstallHost } from './detect'
-import { type ObserverFlag, parseProviderModel } from './observer-choice'
+import type { DisplayChange } from '../store/display-settings'
+import { type ObserverFlag, defaultInput, parseProviderModel } from './observer-choice'
 
 export const COMMANDS = ['install', 'uninstall', 'status', 'update'] as const
 export type Command = (typeof COMMANDS)[number]
@@ -38,9 +40,24 @@ export interface CliArgs {
   noPath: boolean
   /** On a terminal, the numbered action list is shown beside the progress bar. */
   verbose: boolean
+  /** --show-recall / --no-show-recall: whether agents show what Kinfold recalled. Neither: left as it is. */
+  showRecall: boolean
+  noShowRecall: boolean
+  /** --holdout / --no-holdout: the opt-in impact test. Neither: left as it is. */
+  holdout: boolean
+  noHoldout: boolean
 }
 
 type BooleanFlag = 'addPath' | 'noPath' | 'verbose' | 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck' | 'noAutoUpdate' | 'autoUpdate' | 'auto'
+  | 'showRecall' | 'noShowRecall' | 'holdout' | 'noHoldout'
+
+/** What the display flags ask for: only the switches a flag named. */
+export function displayChangeOf(args: Pick<CliArgs, 'showRecall' | 'noShowRecall' | 'holdout' | 'noHoldout'>): DisplayChange {
+  return {
+    ...(args.showRecall ? { showRecall: true } : args.noShowRecall ? { showRecall: false } : {}),
+    ...(args.holdout ? { holdout: true } : args.noHoldout ? { holdout: false } : {}),
+  }
+}
 
 const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: readonly Command[] }>> = {
   '--dry-run': { key: 'dryRun', commands: ['install', 'uninstall', 'update'] },
@@ -53,6 +70,10 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
   '--no-update-check': { key: 'noUpdateCheck', commands: ['install'] },
   '--no-auto-update': { key: 'noAutoUpdate', commands: ['install'] },
   '--auto-update': { key: 'autoUpdate', commands: ['install'] },
+  '--show-recall': { key: 'showRecall', commands: ['install'] },
+  '--no-show-recall': { key: 'noShowRecall', commands: ['install'] },
+  '--holdout': { key: 'holdout', commands: ['install'] },
+  '--no-holdout': { key: 'noHoldout', commands: ['install'] },
   '--auto': { key: 'auto', commands: ['update'] },
   '--path': { key: 'addPath', commands: ['install'] },
   '--no-path': { key: 'noPath', commands: ['install'] },
@@ -62,11 +83,13 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
 }
 
 export const USAGE = [
-  'usage: kinfold <install|uninstall|status|update|size|retention|scan|findings|purge|dashboard|backup|restore|encrypt|decrypt|rekey|key|hook|mcp|daemon|observe> [--data-dir <path>] [--version] [flags]',
-  '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>]...',
+  'usage: kinfold <install|uninstall|status|update|size|retention|scan|findings|purge|dashboard|watch|backup|restore|encrypt|decrypt|rekey|key|hook|mcp|daemon|observe> [--data-dir <path>] [--version] [flags]',
+  '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>|off]...',
   '             [--skip-check] [--replace-credential] [--credential-stdin] [--takeover]',
   '             [--no-encrypt] [--port <1024-65535>] [--no-update-check] [--auto-update | --no-auto-update]',
-  '             [--path | --no-path] [--verbose]',
+  '             [--path | --no-path] [--verbose] [--show-recall|--no-show-recall] [--holdout|--no-holdout]',
+  '             --no-show-recall hides the line and list agents show for what Kinfold recalled; --holdout turns on the impact test, which',
+  '             holds recall back on about 1 prompt in 10 (Claude Code only, and says so each time) to measure what memory changes',
   '             --path puts the kinfold command on your PATH without asking; --no-path adds nothing and takes out what an earlier install added;',
   '             --verbose shows every step on a terminal (the full list is always in <data-dir>/logs/install.log)',
   '  update     [--dry-run]',
@@ -75,6 +98,7 @@ export const USAGE = [
   '             be checked, and a later install starts a new master (hmac.key is written back from hmac-legacy first)',
   '  status',
   '  dashboard  [--print]',
+  '  watch      [--host <agent>] [--project <name>]   what Kinfold recalled for each prompt, live, for every agent; Ctrl-C stops it',
   '  size',
   '  retention  [--set <events|prompts|observations|summaries>=<days|keep>]... [--set warn_bytes=<n>] [--yes]',
   '  scan',
@@ -246,6 +270,40 @@ export interface DashboardArgs {
   print: boolean
 }
 
+export interface WatchArgs {
+  command: 'watch'
+  /** Only this agent's prompts; null for every agent. */
+  host: string | null
+  /** Only this project's prompts, by its name or key; null for every project. */
+  project: string | null
+}
+
+const MAX_WATCH_PROJECT_CHARS = 300
+
+/** Null when argv is not `watch`, so every other command parses exactly as before. */
+export function parseWatchArgs(argv: readonly string[]): Parsed<WatchArgs> | null {
+  if (argv[0] !== 'watch') return null
+  const usage = `watch takes --host <agent> and --project <name>\n${USAGE}`
+  let host: string | null = null
+  let project: string | null = null
+  for (let index = 1; index < argv.length; index += 1) {
+    const arg = argv[index] ?? ''
+    const name = ['--host', '--project'].find((flag) => arg === flag || arg.startsWith(`${flag}=`))
+    if (name === undefined) return { ok: false, error: usage }
+    const value = arg === name ? argv[index + 1] : arg.slice(name.length + 1)
+    if (value === undefined || value === '') return { ok: false, error: `${name} needs a value` }
+    if (arg === name) index += 1
+    if (name === '--host') {
+      if (!(KNOWN_HOSTS as readonly string[]).includes(value)) return { ok: false, error: `--host takes one agent: ${KNOWN_HOSTS.join(', ')}` }
+      host = value
+    } else {
+      if (value.length > MAX_WATCH_PROJECT_CHARS) return { ok: false, error: '--project takes a project name or key' }
+      project = value
+    }
+  }
+  return { ok: true, value: { command: 'watch', host, project } }
+}
+
 /** Null when argv is not `dashboard`, so every other command parses exactly as before. */
 export function parseDashboardArgs(argv: readonly string[]): Parsed<DashboardArgs> | null {
   if (argv[0] !== 'dashboard') return null
@@ -300,15 +358,20 @@ export function parseObserverFlag(value: string): Parsed<ObserverFlag> {
   const host = value.slice(0, at)
   const problem = at <= 0 ? '' : hostProblem(host)
   if (problem !== null) {
-    return { ok: false, error: withReasons(`--observer takes <host>=<provider>:<model>, host one of ${supportedList()}`, [problem]) }
+    return { ok: false, error: withReasons(`--observer takes <host>=<provider>:<model> or <host>=off, host one of ${supportedList()}`, [problem]) }
   }
-  const parsed = parseProviderModel(value.slice(at + 1))
-  if (parsed === null) return { ok: false, error: `--observer ${host}=... needs <provider>:<model> with a known provider and a model` }
+  const choice = value.slice(at + 1).trim()
+  if (choice.toLowerCase() === 'off') {
+    const builtIn = defaultInput(host as InstallHost)
+    return { ok: true, value: { host: host as InstallHost, provider: builtIn.provider, model: builtIn.model, off: true } }
+  }
+  const parsed = parseProviderModel(choice)
+  if (parsed === null) return { ok: false, error: `--observer ${host}=... needs <provider>:<model> with a known provider and a model, or off` }
   return { ok: true, value: { host: host as InstallHost, ...parsed } }
 }
 
 function initial(command: Command): CliArgs {
-  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false }
+  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false }
 }
 
 /** `--flag value` or `--flag=value`; returns the value and how many argv slots it used. */
@@ -368,5 +431,7 @@ export function parseArgs(argv: readonly string[]): Parsed<CliArgs> {
   }
   if (args.autoUpdate && args.noAutoUpdate) return { ok: false, error: '--auto-update and --no-auto-update cannot be given together' }
   if (args.addPath && args.noPath) return { ok: false, error: '--path and --no-path cannot be given together' }
+  if (args.showRecall && args.noShowRecall) return { ok: false, error: '--show-recall and --no-show-recall cannot be given together' }
+  if (args.holdout && args.noHoldout) return { ok: false, error: '--holdout and --no-holdout cannot be given together' }
   return { ok: true, value: { ...args, path: args.addPath ? 'path' : args.noPath ? 'no-path' : null } }
 }

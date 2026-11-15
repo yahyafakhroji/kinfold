@@ -5,6 +5,8 @@
 // not even the data dir.
 
 import { readBackupRecord } from '../backup/record'
+import { readDisplayFile } from '../context/display-file'
+import { HOLDOUT_HOSTS } from '../context/holdout'
 import type { EffectiveSettings } from '../daemon/settings-route'
 import { envName, readEnv } from '../env-names'
 import { OPENROUTER_CREDENTIAL_REF, providerTakesKey } from '../observer/settings'
@@ -35,7 +37,7 @@ import { readInstallRecord } from './setup/record'
 import { type WslStatus, wslStatus } from '../wsl/entry'
 import type { HookHostSpec } from '../agents/hook-spec'
 import { HOOK_SPECS } from '../agents/hook-specs'
-import { INSTALL_PROFILES, hasWiring, isWired, overlapPlan, overlapState } from '../agents/install-profiles'
+import { INSTALL_PROFILES, hasWiring, isWired, overlapPlan, overlapState, profileOf } from '../agents/install-profiles'
 import { type AgentId, type ProfileTable, capabilityBrief, capabilityLine, verificationNote } from '../agents/profile'
 
 type SpecTable = Readonly<Record<AgentId, HookHostSpec | null>>
@@ -90,13 +92,30 @@ function daemonLines(env: InstallEnv, situation: DaemonSituation): string[] {
 function effectiveLine(entry: EffectiveSettings): string {
   if ('error' in entry) return `  ${entry.host}: invalid setting (${entry.error})`
   const { provider, model, credentialRef, enabled, source } = entry.settings
-  return `  ${entry.host}: ${provider}/${model}${credentialRef !== null && providerTakesKey(provider) ? ` key ${credentialRef}` : ''}${enabled ? '' : ' (disabled)'}; source ${source}`
+  // Off runs no model: the agent is still captured, and nothing is summarised.
+  if (!enabled) return `  ${entry.host}: off (capture only); source ${source}`
+  return `  ${entry.host}: ${provider}/${model}${credentialRef !== null && providerTakesKey(provider) ? ` key ${credentialRef}` : ''}; source ${source}`
+}
+
+/**
+ * The two display switches, said only when they are not at their defaults: a
+ * hidden recall line and a running impact test are the states a person needs
+ * to be told about. Read from display.json, which the daemon keeps in step
+ * with the store, so status can say it with the daemon down.
+ */
+function displayLines(env: InstallEnv): string[] {
+  const display = readDisplayFile(env.dataDir)
+  const agents = HOLDOUT_HOSTS.map((host) => profileOf(host as AgentId).name).join(', ')
+  return [
+    ...(display.showRecall ? [] : ['recall line: off; agents show nothing about what Kinfold recalled (turn it on with kinfold install --show-recall or in the dashboard)']),
+    ...(display.holdout ? [`impact test: on for ${agents}; about 1 prompt in 10 goes without recalled memory, and says so (turn it off with kinfold install --no-holdout or in the dashboard)`] : []),
+  ]
 }
 
 async function observerLines(env: InstallEnv): Promise<{ lines: string[]; refs: string[] }> {
   const read = await getObserverSettings(env)
   if (!read.ok) return { lines: [`observer settings: unknown (${read.reason})`], refs: [OPENROUTER_CREDENTIAL_REF] }
-  const refs = read.view.effective.flatMap((entry) => ('settings' in entry && providerTakesKey(entry.settings.provider) ? [entry.settings.credentialRef ?? OPENROUTER_CREDENTIAL_REF] : []))
+  const refs = read.view.effective.flatMap((entry) => ('settings' in entry && entry.settings.enabled && providerTakesKey(entry.settings.provider) ? [entry.settings.credentialRef ?? OPENROUTER_CREDENTIAL_REF] : []))
   return { lines: ['observer settings:', ...read.view.effective.map(effectiveLine)], refs: [...new Set([OPENROUTER_CREDENTIAL_REF, ...refs])] }
 }
 
@@ -311,6 +330,7 @@ export async function status(env: InstallEnv, running: string = VERSION, profile
   for (const line of wsl?.lines ?? []) env.out(line)
   if (wsl?.replaces === true) return EXIT_OK
   const observer = await observerLines(env)
+  const display = displayLines(env)
   const duplicates = findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings])
   const situation = await daemonSituation(env)
   const blocker = autoUpdateBlocker(env, situation.loaded)
@@ -331,14 +351,14 @@ export async function status(env: InstallEnv, running: string = VERSION, profile
     env.ui.section('Agents', [...agents.rows, ...rowsForPresent(mcpStatusLines(env), agents.present)])
     env.ui.section('Daemon', rowsOf(daemon))
     env.ui.section('Memory', [...rowsOf(database), ...credentialRows(credentials, neededRefs(observer.lines, agents.present)), ...rowsOf(keys.slice(credentials.length))])
-    env.ui.section('Observers', observerRows(observer.lines))
+    env.ui.section('Observers', [...observerRows(observer.lines), ...rowsOf(display)])
     env.ui.section('Updates', rowsOf(updates))
     env.ui.section('Command', rowsOf(command))
     env.ui.next(!situation.health.up ? 'Start the daemon with: kinfold install' : statusMark(update) === 'warn' ? update.replace(/^update: /, '') : 'Open the dashboard with: kinfold dashboard')
     return EXIT_OK
   }
   // The order scripts have always read: the observer lines sit between the database and the key entries.
-  const lines = ['hosts:', ...(await hostStatusLines(env, profiles)), ...daemon, ...database, ...observer.lines, ...keys, ...updates, ...command]
+  const lines = ['hosts:', ...(await hostStatusLines(env, profiles)), ...daemon, ...database, ...observer.lines, ...display, ...keys, ...updates, ...command]
   for (const line of lines) env.out(line)
   return EXIT_OK
 }

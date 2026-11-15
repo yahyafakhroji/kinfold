@@ -90,6 +90,35 @@ test('the Amp plugin returns the delta from agent.start, against a stub amp obje
   expect(payloads.find((payload) => payload.event === 'agent.end').messages).toBeUndefined()
 })
 
+test('the Amp plugin shows what the hook says to show through ctx.ui.notify, on session start and on each prompt, and never in the message', async () => {
+  const script = join(bench.root, 'notify-hook.ts')
+  writeFileSync(script, [
+    `const payload = JSON.parse(await Bun.stdin.text());`,
+    `if (payload.event === 'session.start') console.log(JSON.stringify({ message: { content: 'pack', display: false }, notify: 'kinfold · repo · 12 memories' }));`,
+    `if (payload.event === 'agent.start') console.log(JSON.stringify(payload.message === 'quiet' ? { notify: 'kinfold · nothing recalled' } : { message: { content: 'delta', display: false }, notify: 'kinfold · recalled 1 · #7 Bun is pinned' }));`,
+  ].join('\n'))
+  const file = join(bench.root, 'notify.ts')
+  writeFileSync(file, ampPluginContent({ command: process.execPath, args: [script] }))
+  const plugin = (await import(file)) as { default: (amp: unknown) => void }
+  const { amp, handlers } = stubAmp()
+  plugin.default(amp)
+  const shown: string[] = []
+  const ctx = { ui: { notify: (text: string) => void shown.push(text) } }
+  const thread = { id: 'T-N' }
+
+  await handlers.get('session.start')?.({ thread }, ctx)
+  expect(await handlers.get('agent.start')?.({ thread, message: 'fix it', id: 1 }, ctx)).toEqual({ message: { content: 'pack\n\ndelta', display: false } })
+  expect(shown).toEqual(['kinfold · repo · 12 memories', 'kinfold · recalled 1 · #7 Bun is pinned'])
+  // Nothing recalled: the user is told, and the model gets no message at all.
+  expect(await handlers.get('agent.start')?.({ thread, message: 'quiet', id: 2 }, ctx)).toBeUndefined()
+  expect(shown.at(-1)).toBe('kinfold · nothing recalled')
+
+  // An Amp without ui.notify, or one whose notify throws, still gets its context.
+  expect(await handlers.get('agent.start')?.({ thread, message: 'fix it', id: 3 }, {})).toEqual({ message: { content: 'delta', display: false } })
+  const throwing = { ui: { notify: () => { throw new Error('no UI') } } }
+  expect(await handlers.get('agent.start')?.({ thread, message: 'fix it', id: 4 }, throwing)).toEqual({ message: { content: 'delta', display: false } })
+})
+
 /** A hook stand-in that logs when each payload arrives and when its answer leaves, answering session.start only after `packMs`. */
 function slowHook(root: string, packMs: number): { argv: string[]; log: string } {
   const script = join(root, 'slow-hook.ts')

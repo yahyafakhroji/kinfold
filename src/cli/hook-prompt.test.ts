@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { seedObservation } from '../context/test-support'
+import { hideRecallLine, seedObservation } from '../context/test-support'
 import { type RunningDaemon, startDaemon } from '../daemon/daemon'
 import { openStore } from '../store/db'
 import { upsertProject, upsertSession } from '../store/writes'
@@ -18,6 +18,8 @@ let stderr: string[]
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'sam-hook-prompt-'))
   dataDir = join(root, 'data')
+  // The recall line has its own tests (hook-recall.test.ts); with it off, these pin the context output alone.
+  hideRecallLine(dataDir)
   daemon = null
   stderr = []
 })

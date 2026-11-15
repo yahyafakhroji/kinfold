@@ -92,6 +92,19 @@ export function insertPrompt(db: Database, prompt: PromptInput): void {
   ).run({ ...prompt, hostPromptId: prompt.hostPromptId ?? null, rulesVersion: RULES_VERSION })
 }
 
+/**
+ * The agent's final reply for a prompt (schema v12), already through the same
+ * redaction pass as the event it came from. Stop can fire more than once for
+ * one prompt, so a later reply replaces the earlier one. A prompt whose text
+ * retention already expired takes none: its reply would outlive it.
+ */
+export function setPromptReply(db: Database, sessionId: number, promptNumber: number, reply: string): boolean {
+  return db.query(
+    `UPDATE prompts SET reply_text = $reply, scanned_version = $rulesVersion
+     WHERE session_id = $sessionId AND prompt_number = $promptNumber AND text_expired_at IS NULL`,
+  ).run({ sessionId, promptNumber, reply, rulesVersion: RULES_VERSION }).changes > 0
+}
+
 export function eventExists(db: Database, eventId: string): boolean {
   return db.query('SELECT 1 FROM events WHERE event_id = $eventId').get({ eventId }) !== null
 }

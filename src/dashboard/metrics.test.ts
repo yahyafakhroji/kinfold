@@ -91,8 +91,8 @@ test('GET /metrics/summary answers the same numbers over HTTP', async () => {
   try {
     const response = await rig.bearer('GET', '/metrics/summary')
     expect(response.status).toBe(200)
-    const { latency, hitRate, injectionLatency, ...rest } = (await response.json()) as Record<string, unknown>
-      & { latency: { window: string; groups: unknown[] }; hitRate: { window: string; reads: unknown[] }; injectionLatency: unknown[] }
+    const { latency, hitRate, injectionLatency, impact, ...rest } = (await response.json()) as Record<string, unknown>
+      & { latency: { window: string; groups: unknown[] }; hitRate: { window: string; reads: unknown[] }; injectionLatency: unknown[]; impact: Record<string, unknown> }
     expect(rest).toEqual({
       runs: [{ host: 'claude-code', provider: 'claude-cli', runs: 1, succeeded: 1, failed: 0, running: 0, successRate: 1, durationMs: { samples: 1, p50: 120, p95: 120 }, errorClasses: {} }],
       injections: [],
@@ -103,6 +103,7 @@ test('GET /metrics/summary answers the same numbers over HTTP', async () => {
     expect(latency.groups).toEqual([])
     expect(hitRate).toMatchObject({ window: '24h', reads: [], fetchAfterInject: { injected: 0, fetched: 0, rate: null }, searchHit: { searches: 0, rate: null } })
     expect(injectionLatency).toEqual([])
+    expect(impact).toMatchObject({ window: '24h', context: [], embedding: { calls: 0, texts: 0 }, holdout: { on: false, comparison: { enough: false } } })
     expect((await rig.bearer('POST', '/metrics/summary')).status).toBe(405)
   } finally {
     await rig.stop()
