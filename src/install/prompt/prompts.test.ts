@@ -126,3 +126,10 @@ test('locked takes no input', () => {
   expect(out).toContain('set by --observer')
   expect(term.rawStates()).toEqual([])
 })
+
+test('a warning sits on its row whether or not the row is focused', async () => {
+  const term = fakeTerminal(['\r'])
+  const rows: Choice<string>[] = [{ value: 'a', label: 'Alpha', hint: 'default', warn: 'gone; pick another' }, { value: 'b', label: 'Beta' }]
+  expect(await createPrompts(term).select('Pick:', rows, 'b')).toBe('b')
+  expect(term.output()).toContain('gone; pick another')
+})

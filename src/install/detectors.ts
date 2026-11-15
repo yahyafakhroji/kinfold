@@ -26,6 +26,10 @@ export interface HostDetection {
   undetectable?: boolean
   /** The binary or Info.plist whose mtime pins `version`; null when unknown. */
   stampPath?: string | null
+  /** The binary that answered `--version`, wired or not; unset when the agent was found another way (an app, a config folder) or not at all. */
+  binary?: string
+  /** A binary that is there but whose `--version` gave nothing to read: the fixed one-line reason. Unset when it answered or was not found. */
+  binaryProblem?: string
 }
 
 /** Whether a host's detection line folds into the one `not found:` line: absent, and not wired anyway. */
@@ -107,25 +111,28 @@ export function findApp(env: Pick<InstallEnv, 'homeDir' | 'applicationsDirs'>, b
 export async function detectClaudeCode(env: InstallEnv, forced: boolean): Promise<HostDetection> {
   const answer = await versionOf(env, 'claude')
   const hasDir = existsSync(installPaths(env).claudeDir)
-  if (answer.ok) return { host: 'claude-code', selected: true, version: answer.stdout, note: 'claude --version answered', stampPath: await resolveBinary(env, 'claude') }
-  if (hasDir) return { host: 'claude-code', selected: true, version: null, note: '~/.claude exists' }
+  if (answer.ok) return { host: 'claude-code', selected: true, version: answer.stdout, note: 'claude --version answered', stampPath: await resolveBinary(env, 'claude'), binary: 'claude' }
+  if (hasDir) return { host: 'claude-code', selected: true, version: null, note: '~/.claude exists', ...(answer.reason === 'not-found' ? {} : { binaryProblem: reasonNote('claude', answer) }) }
   const missing = answer.reason === 'not-found'
-  if (forced) return { host: 'claude-code', selected: true, version: null, note: `${missing ? 'not found' : reasonNote('claude', answer)}; wired because --hosts names it` }
-  return { host: 'claude-code', selected: false, version: null, note: missing ? 'not found (no claude on PATH, no ~/.claude)' : reasonNote('claude', answer), ...(missing ? { absent: true } : {}) }
+  const problem = missing ? {} : { binaryProblem: reasonNote('claude', answer) }
+  if (forced) return { host: 'claude-code', selected: true, version: null, note: `${missing ? 'not found' : reasonNote('claude', answer)}; wired because --hosts names it`, ...problem }
+  return { host: 'claude-code', selected: false, version: null, note: missing ? 'not found (no claude on PATH, no ~/.claude)' : reasonNote('claude', answer), ...(missing ? { absent: true } : {}), ...problem }
 }
 
 export async function detectOpenCode(env: InstallEnv, forced: boolean): Promise<HostDetection> {
   const answer = await versionOf(env, 'opencode')
   const parsed = answer.ok ? parseOpenCodeVersion(answer.stdout) : null
   const version = parsed === null ? null : parsed.join('.')
+  // The CLI is on this machine whatever its version says about wiring.
+  const cli = answer.ok ? { binary: 'opencode' } : answer.reason === 'not-found' ? {} : { binaryProblem: reasonNote('opencode', answer) }
   if (parsed !== null && parsed[0] < MIN_OPENCODE_MAJOR) {
-    return { host: 'opencode', selected: false, version, note: `OpenCode ${version} is not supported: the plugin needs OpenCode 2.0 or later` }
+    return { host: 'opencode', selected: false, version, note: `OpenCode ${version} is not supported: the plugin needs OpenCode 2.0 or later`, ...cli }
   }
-  if (parsed !== null) return { host: 'opencode', selected: true, version, note: 'opencode --version answered 2.x or later', stampPath: await resolveBinary(env, 'opencode') }
+  if (parsed !== null) return { host: 'opencode', selected: true, version, note: 'opencode --version answered 2.x or later', stampPath: await resolveBinary(env, 'opencode'), ...cli }
   const reason = answer.ok ? 'opencode --version printed no version we could read' : answer.reason === 'not-found' ? 'not found (no opencode on PATH)' : reasonNote('opencode', answer)
   return forced
-    ? { host: 'opencode', selected: true, version: null, note: `${reason}; wired because --hosts names it` }
-    : { host: 'opencode', selected: false, version: null, note: reason, ...(!answer.ok && answer.reason === 'not-found' ? { absent: true } : {}) }
+    ? { host: 'opencode', selected: true, version: null, note: `${reason}; wired because --hosts names it`, ...cli }
+    : { host: 'opencode', selected: false, version: null, note: reason, ...(!answer.ok && answer.reason === 'not-found' ? { absent: true } : {}), ...cli }
 }
 
 /** pressly/goose, a database migration tool, answers `goose version: v3.x`; Block's Goose prints its bare version. */
@@ -135,7 +142,7 @@ export async function detectGoose(env: InstallEnv, forced: boolean): Promise<Hos
   const answer = await versionOf(env, 'goose')
   if (answer.ok && !MIGRATION_GOOSE.test(answer.stdout)) {
     const version = answer.stdout.split('\n')[0]?.trim() || null
-    return { host: 'goose', selected: true, version, note: 'goose --version answered', stampPath: await resolveBinary(env, 'goose') }
+    return { host: 'goose', selected: true, version, note: 'goose --version answered', stampPath: await resolveBinary(env, 'goose'), binary: 'goose' }
   }
   const reason = answer.ok
     ? 'goose on PATH is pressly/goose (database migrations), not Block\'s Goose'
@@ -159,7 +166,7 @@ function tooOld(id: AgentId, binary: string, stdout: string, min: Semver | undef
   if (match === null) return null
   const version: Semver = [Number(match[1]), Number(match[2]), Number(match[3])]
   if (!olderThan(version, min)) return null
-  return { host: id, selected: false, version: version.join('.'), note: `${binary} ${version.join('.')} is not supported: Kinfold needs ${min.join('.')} or later` }
+  return { host: id, selected: false, version: version.join('.'), note: `${binary} ${version.join('.')} is not supported: Kinfold needs ${min.join('.')} or later`, binary }
 }
 
 /** The first binary that answers `--version`, else an app bundle. A config folder alone never counts: other tools write there. */
@@ -174,17 +181,18 @@ export async function detectFromSpec(env: InstallEnv, id: AgentId, spec: Detecti
     const refused = tooOld(id, binary, answer.stdout, spec.minVersion)
     if (refused !== null) return refused
     const version = answer.stdout.split('\n')[0]?.trim() || null
-    return { host: id, selected: true, version, note: `${binary} --version answered`, stampPath: await resolveBinary(env, binary) }
+    return { host: id, selected: true, version, note: `${binary} --version answered`, stampPath: await resolveBinary(env, binary), binary }
   }
+  const problem = failures.length > 0 ? { binaryProblem: failures.join('; ') } : {}
   const bundles = spec.bundles ?? []
   for (const bundle of bundles) {
     const app = findApp(env, bundle)
-    if (app !== null) return { host: id, selected: true, version: app.version, note: `${app.app} exists`, stampPath: app.plist }
+    if (app !== null) return { host: id, selected: true, version: app.version, note: `${app.app} exists`, stampPath: app.plist, ...problem }
   }
   const where = [`no ${spec.binaries.join(' or ')} on PATH`, ...(bundles.length > 0 ? [`no ${bundles.join(' or ')}`] : [])].join(', ')
   const missing = failures.length > 0 ? failures.join('; ') : `not found (${where})`
   return forced
-    ? { host: id, selected: true, version: null, note: `${missing}; wired because --hosts names it` }
-    : { host: id, selected: false, version: null, note: missing, ...(failures.length === 0 ? { absent: true } : {}) }
+    ? { host: id, selected: true, version: null, note: `${missing}; wired because --hosts names it`, ...problem }
+    : { host: id, selected: false, version: null, note: missing, ...(failures.length === 0 ? { absent: true } : {}), ...problem }
 }
 

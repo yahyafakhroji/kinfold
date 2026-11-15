@@ -240,3 +240,16 @@ test('control and format characters in a question, a label, a hint or a line nev
   expect(s.raw()).not.toContain('‮')
   expect(s.raw()).not.toContain('\u0007')
 })
+
+test('select shows a warning on its row even when another row is focused, and a disabled row says why', async () => {
+  const s = screen()
+  s.type([ENTER])
+  const rows: Choice<string>[] = [
+    { value: 'current', label: 'claude-cli/haiku', hint: 'built-in default', warn: 'claude not installed; pick another' },
+    { value: 'claude-cli', label: 'claude-cli', disabled: 'claude not installed' },
+    { value: 'openrouter', label: 'openrouter' },
+  ]
+  expect(await s.ask.select('Observer for codex:', rows, 'openrouter')).toBe('openrouter')
+  expect(s.text()).toContain('claude-cli/haiku (claude not installed; pick another)')
+  expect(s.text()).toContain('claude-cli (claude not installed)')
+})

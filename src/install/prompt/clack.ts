@@ -29,10 +29,11 @@ function answerOf<T>(value: T): Exclude<T, symbol> {
  * clack draws a hint on a row that is focused, ticked or disabled, and leaves
  * it off the answer line. `pinned` puts the hint in the label instead, for a
  * row that would otherwise show none: one that starts unticked, whose hint is
- * the reason it is unticked.
+ * the reason it is unticked. A `warn` is always in the label.
  */
 function optionOf<T extends string>(choice: Choice<T>, pinned: boolean): { value: T; label: string; hint?: string; disabled?: boolean } {
-  const label = clean(choice.label)
+  // A caution is part of the label, so it stays on the row when the cursor starts somewhere else.
+  const label = choice.warn === undefined ? clean(choice.label) : `${clean(choice.label)} ${styleText('yellow', `(${clean(choice.warn)})`)}`
   if (choice.disabled !== undefined) return { value: choice.value, label, hint: clean(choice.disabled), disabled: true }
   if (choice.hint === undefined) return { value: choice.value, label }
   return pinned ? { value: choice.value, label: `${label} ${styleText('dim', `(${clean(choice.hint)})`)}` } : { value: choice.value, label, hint: clean(choice.hint) }

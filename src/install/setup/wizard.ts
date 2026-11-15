@@ -32,9 +32,11 @@ import {
   isCliLoginProvider,
   listModelsFor,
   newCredentialSession,
+  pickAnother,
   settingsInputFor,
   showModels,
 } from '../observer-choice'
+import { type MissingClis, missingClis } from '../observer-clis'
 import { type PathAnswer, type PathFlag, pathQuestionNeeded, planPathSetup } from '../path-setup'
 import { type Choice, PromptCancelled, type Prompts } from '../prompt/prompts'
 import { confirmRecoveryCode, recoverySinkFromPrompts } from '../recovery-confirm'
@@ -208,9 +210,19 @@ function agentChoice(found: HostDetection, profile: AgentProfile, os: OsName, wi
   return { ...row, disabled: found.absent === true ? NOT_INSTALLED_HINT : found.note }
 }
 
-async function agentsStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags, profiles: ProfileTable): Promise<InstallHost[]> {
-  if (flags.hosts !== null) return selectedHosts(await detectHosts(env, flags.hosts, profiles))
-  const detections = await detectHosts(env, null, profiles)
+/** The agents to wire, and what detection found on the way: the observer question reads it instead of looking again. */
+interface AgentsAnswer {
+  hosts: InstallHost[]
+  detections: readonly HostDetection[]
+}
+
+async function agentsStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags, profiles: ProfileTable): Promise<AgentsAnswer> {
+  const detections = await detectHosts(env, flags.hosts, profiles)
+  return { hosts: await pickAgents(env, ask, state, flags, profiles, detections), detections }
+}
+
+async function pickAgents(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags, profiles: ProfileTable, detections: readonly HostDetection[]): Promise<InstallHost[]> {
+  if (flags.hosts !== null) return selectedHosts(detections)
   const wired = new Set(state.wiredHosts)
   // A re-run starts from the saved wiring, whatever its level, so it never drops or adds wiring unasked.
   const defaults = state.installed ? state.wiredHosts : detections.filter((found) => startsTicked(found, profiles) || wired.has(found.host)).map((found) => found.host)
@@ -239,35 +251,58 @@ async function askModel(env: InstallEnv, ask: Prompts, host: InstallHost, provid
   return model.trim()
 }
 
-async function askCandidate(env: InstallEnv, ask: Prompts, host: InstallHost, current: Candidate): Promise<Candidate> {
-  const choices: Choice<ProviderPick>[] = [
-    { value: 'current', label: describeInput(current.input), hint: current.origin === 'saved' ? 'saved' : 'built-in default' },
-    ...OBSERVER_PROVIDERS.map((provider) => ({ value: provider, label: provider })),
-  ]
-  const picked = await ask.select(`Observer for ${host}:`, choices, 'current')
+/**
+ * The first row is what the agent has now, then one row per provider. A
+ * provider whose CLI is not on this machine is shown but cannot be picked. A
+ * first row that names one stays open, since a saved choice is the person's
+ * to keep, but says so, and the cursor starts on a row that will work.
+ */
+function observerChoices(current: Candidate, missing: MissingClis): { choices: Choice<ProviderPick>[]; initial: ProviderPick } {
+  const stale = missing.get(current.input.provider)
+  const providers = OBSERVER_PROVIDERS.map((provider): Choice<ProviderPick> => {
+    const reason = missing.get(provider)
+    return reason === undefined ? { value: provider, label: provider } : { value: provider, label: provider, disabled: reason }
+  })
+  const first: Choice<ProviderPick> = {
+    value: 'current',
+    label: describeInput(current.input),
+    hint: current.origin === 'saved' ? 'saved' : 'built-in default',
+    ...(stale === undefined ? {} : { warn: pickAnother(stale) }),
+  }
+  const pickable = providers.find((choice) => choice.disabled === undefined)
+  return { choices: [first, ...providers], initial: stale === undefined || pickable === undefined ? 'current' : pickable.value }
+}
+
+async function askCandidate(env: InstallEnv, ask: Prompts, host: InstallHost, current: Candidate, missing: MissingClis): Promise<Candidate> {
+  const { choices, initial } = observerChoices(current, missing)
+  const picked = await ask.select(`Observer for ${host}:`, choices, initial)
   if (picked === 'current') return current
   return { input: settingsInputFor(host, picked, await askModel(env, ask, host, picked, current)), origin: 'prompt' }
 }
 
-async function observerFor(env: InstallEnv, ask: Prompts, host: InstallHost, flags: SetupFlags, choice: ChoiceOptions, saved: ChoiceOptions['saved']): Promise<ObserverChoice> {
+async function observerFor(env: InstallEnv, ask: Prompts, host: InstallHost, flags: SetupFlags, choice: ChoiceOptions, saved: ChoiceOptions['saved'], clis: () => Promise<MissingClis>): Promise<ObserverChoice> {
   const row = saved?.get(host)
   const current: Candidate = row === undefined ? { input: defaultInput(host), origin: 'default' } : { input: row, origin: 'saved' }
   const flag = flags.observers.find((entry) => entry.host === host)
   const session = newCredentialSession()
   for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
-    const candidate: Candidate = attempt === 0 && flag !== undefined ? { input: settingsInputFor(host, flag.provider, flag.model), origin: 'flag' } : await askCandidate(env, ask, host, current)
+    const candidate: Candidate = attempt === 0 && flag !== undefined ? { input: settingsInputFor(host, flag.provider, flag.model), origin: 'flag' } : await askCandidate(env, ask, host, current, await clis())
     const result = await chooseObserverWith(env, host, candidate, choice, session)
     if (!('failed' in result)) return result
   }
   throw new ChoiceError(`no working observer for ${host} after ${MAX_CHOICE_ATTEMPTS} tries`)
 }
 
-async function observersStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags, choice: ChoiceOptions, hosts: readonly InstallHost[]): Promise<ObserverChoice[]> {
+async function observersStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags, choice: ChoiceOptions, agents: AgentsAnswer, profiles: ProfileTable): Promise<ObserverChoice[]> {
+  const { hosts } = agents
   const saved = ask !== null || flags.yes ? savedObserversForYes(state, hosts, flags.observers) : undefined
-  const options: ChoiceOptions = { ...choice, yes: choice.yes || flags.yes, flags: flags.observers, ...(saved === undefined ? {} : { saved }) }
+  // Worked out at the first question and kept: a run that asks nothing (--yes, a flag for every agent) looks for no CLI.
+  let found: Promise<MissingClis> | null = null
+  const clis = (): Promise<MissingClis> => (found ??= missingClis(env, agents.detections, profiles))
+  const options: ChoiceOptions = { ...choice, yes: choice.yes || flags.yes, flags: flags.observers, ...(saved === undefined ? {} : { saved }), missingClis: clis }
   if (ask === null) return chooseObservers(env, hosts, options)
   const choices: ObserverChoice[] = []
-  for (const host of hosts) choices.push(await observerFor(env, ask, host, flags, options, saved))
+  for (const host of hosts) choices.push(await observerFor(env, ask, host, flags, options, saved, clis))
   return choices
 }
 
@@ -448,8 +483,9 @@ export async function runWizard(
   if (problem !== null) throw new ChoiceError(problem)
   const dataDir = await folderStep(first, ask, firstState, flags)
   const { env, state } = retarget !== undefined && resolve(dataDir) !== resolve(firstState.dataDir) ? await retarget(dataDir) : { env: first, state: firstState }
-  const hosts = await agentsStep(env, ask, state, flags, profiles)
-  const observers = await observersStep(env, ask, state, flags, choice, hosts)
+  const agents = await agentsStep(env, ask, state, flags, profiles)
+  const { hosts } = agents
+  const observers = await observersStep(env, ask, state, flags, choice, agents, profiles)
   const encryption = await encryptionStep(env, ask, state, flags, choice.dryRun)
   const port = await portStep(env, ask, state, flags)
   const { updateCheck, autoUpdate } = await updatesStep(ask, state, flags)

@@ -159,7 +159,7 @@ test('a failed observer check asks again before encryption', async () => {
     listModels: async () => [],
   }
   const keys = [ENTER, DOWN, DOWN, DOWN, ENTER, 'gpt-x\r', ENTER, ENTER, ENTER, ENTER, ENTER]
-  const { w, term } = setup(keys, { claudeVersion: '2.0.0', cliRunner: () => failingOnce })
+  const { w, term } = setup(keys, { claudeVersion: '2.0.0', codexVersion: '1.0.0', cliRunner: () => failingOnce })
   await installedWithTwoHosts(w)
   const state = rerun(await readSetupState(w.env), { wiredHosts: ['claude-code'] })
   let outputAtFailure = ''
@@ -609,4 +609,99 @@ posixOnly('POSIX paths')('a block already in the startup file does not stop the 
   writeFileSync(join(w.home, '.zshrc'), withBlock('x\n', 'posix'))
   await runWizard(w.env, ask(w), await readSetupState(w.env), flagsOf({ noEncrypt: true }), NO_CHOICE)
   expect(term.output()).toContain('Add kinfold to your PATH?')
+})
+
+// ---- the observer question follows what is installed -------------------------
+
+/** The rows of the last observer question drawn, without colour. */
+function observerRows(output: string): string[] {
+  const plain = output.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '')
+  const drawn = plain.slice(plain.lastIndexOf('Observer for '))
+  return drawn.split(/\r?\n/).slice(1).map((line) => line.trim()).filter((line) => line !== '' && !line.startsWith('Model for'))
+}
+
+const versionProbes = (w: FakeWorld, binary: string): number => w.commands.filter((command) => command.argv[0] === binary && command.argv[1] === '--version').length
+
+test('the observer question offers a CLI provider only when its CLI is on this machine', async () => {
+  // Stops at the observer question: the keys run out there.
+  const { w, term } = setup([ENTER, ENTER], { claudeVersion: '2.0.0', opencodeVersion: '2.1.0' })
+  const state = await readSetupState(w.env)
+  await expect(runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)).rejects.toBeInstanceOf(PromptCancelled)
+  expect(observerRows(term.output()).slice(0, 5)).toEqual([
+    '> claude-cli/haiku  built-in default',
+    'claude-cli',
+    'openrouter',
+    'codex-cli (codex not installed)',
+    'opencode-cli',
+  ])
+  // The agent step asked each CLI for its version; the observer step asked none again.
+  for (const binary of ['claude', 'codex', 'opencode']) expect(versionProbes(w, binary)).toBe(1)
+})
+
+test('a disabled observer row is skipped by the arrows, and another agent\'s installed CLI can be picked', async () => {
+  // claude-code's observer: down, down lands on openrouter; down again skips codex-cli to opencode-cli.
+  const keys = [ENTER, DOWN, DOWN, DOWN, ENTER, 'some/model\r', ENTER, ENTER, ENTER, ENTER, ENTER]
+  const { w } = setup(keys, { claudeVersion: '2.0.0', opencodeVersion: '2.1.0' })
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ hosts: ['claude-code'], noEncrypt: true }), NO_CHOICE)
+  expect(answers.observers[0]?.input).toMatchObject({ host: 'claude-code', provider: 'opencode-cli', model: 'some/model' })
+})
+
+test('a first row that names a missing CLI says so, and the cursor starts on the first row that can be picked', async () => {
+  // Claude Code is found by its folder alone: no claude on PATH for the built-in default to run.
+  const { w, term } = setup([ENTER, ENTER, ENTER, 'some/model\r', ENTER, ENTER, ENTER, ENTER], { keychainRefs: ['openrouter'] })
+  mkdirSync(installPaths(w.env).claudeDir, { recursive: true })
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), { ...NO_CHOICE, skipCheck: true })
+  expect(answers.hosts).toEqual(['claude-code'])
+  expect(answers.observers[0]?.input).toMatchObject({ provider: 'openrouter', model: 'some/model' })
+  const plain = term.output().replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '')
+  expect(plain).toContain('claude-cli/haiku  built-in default · claude not installed; pick another')
+  expect(plain).toContain('claude-cli (claude not installed)')
+  expect(plain).toContain('> openrouter')
+})
+
+test('an agent left out by --hosts still lends its CLI, looked for once and only when a question is asked', async () => {
+  const { w, term } = setup([ENTER], { claudeVersion: '2.0.0', codexVersion: '0.9.0' })
+  const state = await readSetupState(w.env)
+  await expect(runWizard(w.env, ask(w), state, flagsOf({ hosts: ['claude-code'], noEncrypt: true }), NO_CHOICE)).rejects.toBeInstanceOf(PromptCancelled)
+  expect(observerRows(term.output()).slice(0, 5)).toEqual(['> claude-cli/haiku  built-in default', 'claude-cli', 'openrouter', 'codex-cli', 'opencode-cli (opencode not installed)'])
+  expect(versionProbes(w, 'codex')).toBe(1)
+  expect(versionProbes(w, 'claude')).toBe(1)
+})
+
+test('--yes and --observer ask nothing, so they look for no CLI beyond the agent step', async () => {
+  const { w } = setup([], { interactive: false, terminal: null, claudeVersion: '2.0.0', codexVersion: '0.9.0' })
+  const state = await readSetupState(w.env)
+  const flags = flagsOf({ yes: true, hosts: ['claude-code'], noEncrypt: true, observers: [{ host: 'claude-code', provider: 'codex-cli', model: 'gpt-x' }] })
+  const answers = await runWizard(w.env, null, state, flags, { ...NO_CHOICE, yes: true, flags: flags.observers })
+  expect(answers.observers[0]?.input.provider).toBe('codex-cli')
+  expect(versionProbes(w, 'codex')).toBe(0)
+  // A flag naming a CLI that is not there still fails at today's check, by its class.
+  w.env.cliRunnerFor = () => ({ run: async () => { throw new ObserverError('cli_missing', 'x') }, runWithFiles: async () => ({ text: '', model: 'm' }), probe: async () => ({ version: '1', binaryPath: '/x' }), listModels: async () => [] })
+  await expect(runWizard(w.env, null, state, flags, { ...NO_CHOICE, yes: true, flags: flags.observers })).rejects.toThrow('observer check for claude-code failed: cli_missing')
+})
+
+test('--plain on a terminal gets the same rules as plain lines', async () => {
+  const { w } = setup([], { terminal: null, claudeVersion: '2.0.0', answers: ['codex-cli:gpt-x', ''] })
+  const asked: string[] = []
+  const plainAsk = w.env.io.ask
+  w.env.io.ask = async (question) => (asked.push(question), plainAsk(question))
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, null, state, flagsOf({ hosts: ['claude-code'], noEncrypt: true }), { ...NO_CHOICE, skipCheck: true })
+  expect(asked[0]).toContain('codex-cli (codex not installed), opencode-cli (opencode not installed).')
+  expect(w.out).toContain('codex-cli cannot be picked: codex not installed')
+  expect(answers.observers[0]?.origin).toBe('default')
+})
+
+test('a saved choice whose CLI is gone stays on its row with the warning, and can still be kept', async () => {
+  // Wired and saved while claude was installed; now only the folder is left. Up from openrouter skips the disabled claude-cli row to the saved one.
+  const { w, term } = setup([ENTER, '\u001b[A', ENTER, ENTER, ENTER, ENTER, ENTER, ENTER], { codexVersion: '1.0.0' })
+  await installedWithTwoHosts(w)
+  const state = rerun(await readSetupState(w.env), { wiredHosts: ['claude-code'] })
+  const answers = await runWizard(w.env, ask(w), state, flagsOf(), NO_CHOICE)
+  const plain = term.output().replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '')
+  expect(plain).toContain('claude-cli/haiku  saved · claude not installed; pick another')
+  expect(plain).toContain('> openrouter')
+  expect(answers.observers[0]).toMatchObject({ input: CLAUDE_ROW, origin: 'saved', check: 'unchanged' })
 })
