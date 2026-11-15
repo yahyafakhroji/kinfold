@@ -15,7 +15,7 @@ import type { EmbeddedAssets } from '../runtime/embedded'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import { START_WAIT_MS, putObserverSettings, waitForHealth, waitForStart } from './daemon-client'
 import { createDbKey, createPlainStore, describeCreateDbKey, describeCreatePlainStore } from './db-encryption'
-import { type InstallEnv, installPaths } from './env'
+import { type InstallEnv, installPaths, noticeOf } from './env'
 import { NOT_FOUND_EXIT } from './system'
 import { requireKeyStore } from './key-store-choice'
 import { type TextEncoding, encodeText, writeBackup, writeFileAtomic } from './files'
@@ -31,6 +31,8 @@ import { legacyBootoutArgv } from './launch-agent'
 import type { Vec0Asset } from '../vectors/vec0-release'
 import type { ServiceStep } from './service/control'
 import { type InstallRecord, writeInstallRecord } from './setup/record'
+import { linkCommand, unlinkCommand } from './path-setup'
+import { type UserPathChange, changeWindowsUserPath } from './path-windows'
 
 export const HEALTH_WAIT_MS = 15_000
 export const TAKEOVER_WAIT_MS = 300_000
@@ -96,6 +98,12 @@ export type Action =
   | { kind: 'move-data-dir'; from: string; to: string; linkOnly?: boolean }
   /** Rename migration: the old service's entry deleted, only while the kinfold copy reads back equal. */
   | { kind: 'remove-legacy-keychain-entry'; ref: string }
+  /** ~/.local/bin/kinfold as a link to the installed program; never over a file that is not that link. */
+  | { kind: 'link-command'; path: string; target: string }
+  /** That link removed, only while it still points at `target`. */
+  | { kind: 'unlink-command'; path: string; target: string }
+  /** <dataDir>\bin added to or taken off the user PATH in HKCU, and open programs told. */
+  | { kind: 'windows-user-path'; change: UserPathChange; dir: string }
 
 /** A step that ran but chose to leave something in place, and why. */
 export interface StepNote {
@@ -149,6 +157,9 @@ export function describeAction(action: Action): string {
     case 'copy-keychain-entry': return describeCopyKeychainEntry(action.ref)
     case 'move-data-dir': return describeMoveDataDir(action.from, action.to, action.linkOnly === true)
     case 'remove-legacy-keychain-entry': return describeRemoveLegacyEntry(action.ref)
+    case 'link-command': return `link ${action.path} -> ${action.target}`
+    case 'unlink-command': return `remove ${action.path}: the kinfold command link`
+    case 'windows-user-path': return `${action.change === 'add' ? `add ${action.dir} to` : `remove ${action.dir} from`} the user PATH (HKCU\\Environment) and tell open programs`
   }
 }
 
@@ -235,7 +246,7 @@ async function waitForDaemonStart(env: InstallEnv): Promise<void> {
 // A file left behind does not fail the step: the agents are unwired by now, so
 // it goes once the sessions still running it close.
 function removeProgramDir(env: InstallEnv, path: string): void {
-  for (const left of programFilesOf(env).removeBinDir(path)) env.out(leftBehindLine(left))
+  for (const left of programFilesOf(env).removeBinDir(path)) noticeOf(env)(leftBehindLine(left))
 }
 
 function touch(path: string, mode: number): void {
@@ -257,7 +268,8 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'command': return runCommand(env, action)
     case 'claude-mcp-replace': return replaceClaudeMcp(env, action.previous, action.next)
     case 'wait-takeover':
-      env.out(`waiting for you to stop the running daemon: ${stopCommand(action.pid, action.port)}`)
+      // The only place the command appears under --takeover, so it goes above the bar.
+      noticeOf(env)(`waiting for you to stop the running daemon: ${stopCommand(action.pid, action.port)}`)
       return waitFor(env, false, TAKEOVER_WAIT_MS, `the daemon on port ${action.port} is still running; nothing after this step ran`)
     case 'wait-health': return waitForDaemonStart(env)
     case 'settings-put': return putObserverSettings(env, action.input)
@@ -282,6 +294,9 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'copy-keychain-entry': return copyKeychainEntry(env, action.ref)
     case 'move-data-dir': return moveDataDir(env, action.from, action.to)
     case 'remove-legacy-keychain-entry': return removeLegacyEntry(env, action.ref)
+    case 'link-command': return linkCommand(action.path, action.target)
+    case 'unlink-command': return unlinkCommand(action.path, action.target)
+    case 'windows-user-path': return changeWindowsUserPath(env, action.change, action.dir)
   }
 }
 
@@ -331,31 +346,111 @@ function createKeyStoreRecord(env: InstallEnv, path: string, record: KeyStoreRec
   return { kept: `another install recorded the ${KEY_STORE_MODULES[read.record.store].label} first; kept its record` }
 }
 
+/** What a plan run tells its listeners: the list as a whole, then each action as it starts and as it ends. */
+export type PlanEvent =
+  | { type: 'begin'; total: number; dryRun: boolean }
+  /** `label` is the short form for a progress bar; `line` is the numbered line with paths. */
+  | { type: 'start'; index: number; total: number; label: string; line: string }
+  /** `planned`: a dry run, which applies nothing. `kept`: the step ran and left something in place, and says why. */
+  | { type: 'end'; index: number; line: string; outcome: 'done' | 'kept' | 'failed' | 'planned'; kept?: string; error?: string }
+
+export type PlanListener = (event: PlanEvent) => void
+
+export interface RunPlanOptions {
+  /** Who hears the run; default the printed lines on env.out. A bar, the verbose list and the install log are each one more listener. */
+  listeners?: readonly PlanListener[]
+  /** A bar label per action, by index, where the plan knows more than the action does (which agent a write belongs to). */
+  labels?: readonly string[]
+}
+
+/** The numbered list, line for line as install and uninstall have always printed it. */
+export function linesListener(out: (line: string) => void): PlanListener {
+  return (event) => {
+    if (event.type === 'begin') {
+      if (event.total === 0) out(event.dryRun ? 'plan: nothing to change' : 'nothing to change')
+      else out(event.dryRun ? `plan (dry run, nothing is changed): ${event.total} actions` : `applying ${event.total} actions`)
+      return
+    }
+    if (event.type !== 'end') return
+    if (event.outcome === 'planned') {
+      out(event.line)
+      return
+    }
+    out(`${event.line}  [${event.outcome}]`)
+    if (event.kept !== undefined) out(`     ${event.kept}`)
+  }
+}
+
+/** A few words for the progress bar: what is happening, with no path, count or argv. */
+export function shortLabel(action: Action): string {
+  switch (action.kind) {
+    case 'mkdir': return `creating the ${basename(action.path)} folder`
+    case 'chmod': return 'setting file permissions'
+    case 'touch': return `creating ${basename(action.path)}`
+    case 'backup': return `backing up ${basename(action.from)}`
+    case 'write': return `writing ${basename(action.path)}`
+    case 'install-record': return 'saving the install record'
+    case 'remove': return `removing ${basename(action.path)}`
+    case 'remove-program-dir': return 'removing the kinfold program'
+    case 'service': return action.step === 'start' ? 'starting the daemon' : 'stopping the daemon'
+    case 'command': return action.summary
+    case 'claude-mcp-replace': return 'updating the Claude Code MCP entry'
+    case 'wait-takeover': return 'waiting for the running daemon to stop'
+    case 'wait-health': return 'waiting for the daemon to answer'
+    case 'settings-put': return `saving the observer for ${action.input.host}`
+    case 'secret-set': return 'storing a key'
+    case 'secret-delete': return 'removing a key'
+    case 'remove-hmac-backup':
+    case 'restore-hmac-legacy':
+    case 'hmac-daemon-down':
+    case 'remove-redundant-hmac-backup': return 'tidying the HMAC keys'
+    case 'install-vec0':
+    case 'install-vec0-embedded': return 'installing sqlite-vec'
+    case 'install-sqlite3mc':
+    case 'install-sqlite3mc-embedded': return 'installing the SQLite library'
+    case 'install-program': return 'installing the kinfold program'
+    case 'create-db-key': return 'creating the database key'
+    case 'create-plain-store': return 'creating the store'
+    case 'record-key-store': return 'recording the key store'
+    case 'stop-legacy-agent':
+    case 'migration-daemon-down':
+    case 'copy-keychain-entry':
+    case 'move-data-dir':
+    case 'remove-legacy-keychain-entry': return 'moving to the Kinfold names'
+    case 'link-command': return 'linking the kinfold command'
+    case 'unlink-command': return 'removing the kinfold command'
+    case 'windows-user-path': return action.change === 'add' ? 'adding kinfold to PATH' : 'taking kinfold off PATH'
+  }
+}
+
 /**
- * Prints the plan; unless dry, applies it step by step and stops at the first failure, naming the step.
+ * Runs the plan, or only lists it when dry, and stops at the first failure, naming the step. What is
+ * printed is up to the listeners; with none given, the numbered lines go to env.out as they always did.
  * failureNote adds what the failure leaves behind (the rename migration says which daemon still runs).
  */
-export async function runPlan(env: InstallEnv, actions: readonly Action[], dryRun: boolean, failureNote?: (index: number) => string | null): Promise<void> {
-  if (actions.length === 0) {
-    env.out(dryRun ? 'plan: nothing to change' : 'nothing to change')
-    return
+export async function runPlan(env: InstallEnv, actions: readonly Action[], dryRun: boolean, failureNote?: (index: number) => string | null, options: RunPlanOptions = {}): Promise<void> {
+  const listeners = options.listeners ?? [linesListener(env.out)]
+  const tell = (event: PlanEvent): void => {
+    for (const listener of listeners) listener(event)
   }
-  env.out(dryRun ? `plan (dry run, nothing is changed): ${actions.length} actions` : `applying ${actions.length} actions`)
+  const total = actions.length
+  tell({ type: 'begin', total, dryRun })
   for (const [index, action] of actions.entries()) {
     const line = `  ${index + 1}. ${describeAction(action)}`
+    tell({ type: 'start', index, total, label: options.labels?.[index] ?? shortLabel(action), line })
     if (dryRun) {
-      env.out(line)
+      tell({ type: 'end', index, line, outcome: 'planned' })
       continue
     }
     try {
       const note = await applyAction(env, action)
       const kept = note ? note.kept : null
-      env.out(`${line}  [${kept === null ? 'done' : 'kept'}]`)
-      if (kept !== null) env.out(`     ${kept}`)
+      tell(kept === null ? { type: 'end', index, line, outcome: 'done' } : { type: 'end', index, line, outcome: 'kept', kept })
     } catch (error: unknown) {
-      env.out(`${line}  [failed]`)
+      const message = error instanceof Error ? error.message : String(error)
+      tell({ type: 'end', index, line, outcome: 'failed', error: message })
       const note = failureNote?.(index) ?? null
-      throw new Error(`step ${index + 1} failed: ${error instanceof Error ? error.message : String(error)}${note === null ? '' : `; ${note}`}`)
+      throw new Error(`step ${index + 1} failed: ${message}${note === null ? '' : `; ${note}`}`)
     }
   }
 }

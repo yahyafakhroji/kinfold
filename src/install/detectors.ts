@@ -22,6 +22,8 @@ export interface HostDetection {
   absent?: boolean
   /** Not asked for: --hosts named other agents. Install lists these on one line. */
   leftOut?: boolean
+  /** Nothing on the machine can show this agent is there (an IDE extension), so the wizard lets the person pick it anyway. */
+  undetectable?: boolean
   /** The binary or Info.plist whose mtime pins `version`; null when unknown. */
   stampPath?: string | null
 }

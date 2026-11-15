@@ -9,6 +9,7 @@
 
 import { INSTALL_PROFILES } from '../agents/install-profiles'
 import type { AgentProfile, ProfileTable } from '../agents/profile'
+import { createPrompts } from './prompt/prompts'
 import type { TerminalIO } from './prompt/terminal'
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -57,6 +58,10 @@ export interface WorldOptions {
   keychainRefs?: string[]
   /** Refs held under the pre-rename service shared-agent-memory. */
   legacyKeychainRefs?: string[]
+  /** The loopback port the world's daemon listens on; default 0, a free one the system picks. */
+  daemonPort?: number
+  /** The world's daemon loads sqlite-vec from the data dir, as the real one does; default false, so a test needs no build of it. */
+  daemonVectors?: boolean
   /** A built sqlite3mc already in <dataDir>/lib, so install plans no GitHub download (sqlite3mc-install.test.ts covers that step). Default true. */
   withLibrary?: boolean
 }
@@ -84,6 +89,10 @@ export interface FakeWorld {
    */
   launchd: { loaded: boolean; daemon: RunningDaemon | null; busyAfterBootout: number; busy: number; legacyLoaded: boolean; legacyDaemon: RunningDaemon | null }
   allowedPorts: Set<number>
+  /** The port the world's daemon is started on; 0 lets the system pick a free one. */
+  daemonPort: number
+  /** Whether the world's daemon loads sqlite-vec. */
+  daemonVectors: boolean
   /** "METHOD /path" of every HTTP call the installer made, allowed or not. */
   fetches: string[]
   cleanup: () => Promise<void>
@@ -147,7 +156,7 @@ export function startWorldDaemon(world: FakeWorld, dataDir: string): RunningDaem
   const dbKeys = injected === undefined || injected === null
     ? credentialDbKeyStore('keychain', keychain, () => world.keychain.has(DB_KEY_REF) || world.legacyKeychain.has(DB_KEY_REF))
     : credentialDbKeyStore(injected.label, keychain, () => injected.exists(DB_KEY_REF))
-  const daemon = startDaemon({ dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, keychain, dbKeys, keyStore: store })
+  const daemon = startDaemon({ dataDir, port: world.daemonPort, fallbackDrainMs: 60_000, log: () => {}, keychain, dbKeys, keyStore: store, ...(world.daemonVectors ? { vectors: { embedder: null } } : {}) })
   world.allowedPorts.add(daemon.port)
   return daemon
 }
@@ -253,7 +262,7 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
     root, home, cwd, dataDir: join(home, DATA_DIR_NAME), projectRoot: join(root, 'checkout'),
     out: [], commands: [], securityCalls: [], keychain: new Set(options.keychainRefs ?? []), keychainValues: new Map<string, string>(),
     legacyKeychain: new Set(options.legacyKeychainRefs ?? []), legacyKeychainValues: new Map<string, string>(), checks: [],
-    launchd: { loaded: false, daemon: null, busyAfterBootout: 0, busy: 0, legacyLoaded: false, legacyDaemon: null }, allowedPorts: new Set<number>(), fetches: [],
+    launchd: { loaded: false, daemon: null, busyAfterBootout: 0, busy: 0, legacyLoaded: false, legacyDaemon: null }, allowedPorts: new Set<number>(), daemonPort: options.daemonPort ?? 0, daemonVectors: options.daemonVectors ?? false, fetches: [],
   } as unknown as FakeWorld
   world.env = {
     // An arch with no pinned sqlite-vec build: a fake world never plans the real GitHub download (vec0-install.test.ts covers that step).
@@ -268,6 +277,7 @@ export function createWorld(options: WorldOptions = {}): FakeWorld {
       readStdin: async () => options.stdin ?? '',
     },
     terminal: options.terminal ?? null,
+    promptsFor: createPrompts,
     runnerFor: (settings) => (world.checks.push(settings), (options.runner ?? (() => okRunner))(settings)),
     cliRunnerFor: (settings) => (world.checks.push(settings), (options.cliRunner ?? (() => okCliRunner))(settings)),
     applicationsDirs: [join(root, 'Applications')],

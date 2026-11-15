@@ -11,7 +11,7 @@ import { readDaemonEndpoint } from '../daemon/daemon-info'
 import type { DashboardArgs } from '../install/args'
 import type { InstallEnv } from '../install/env'
 
-export type DashboardCliEnv = Pick<InstallEnv, 'dataDir' | 'fetch' | 'out' | 'run' | 'platform'>
+export type DashboardCliEnv = Pick<InstallEnv, 'dataDir' | 'fetch' | 'out' | 'run' | 'platform' | 'ui'>
 
 const EXIT_OK = 0
 const EXIT_FAILED = 1
@@ -48,7 +48,7 @@ async function requestCode(env: DashboardCliEnv): Promise<CodeAnswer> {
 export async function runDashboard(env: DashboardCliEnv, args: DashboardArgs): Promise<number> {
   const answer = await requestCode(env)
   if (!answer.ok) {
-    env.out(`kinfold dashboard failed: ${answer.error}`)
+    ;(env.ui?.error ?? env.out)(`kinfold dashboard failed: ${answer.error}`)
     return EXIT_FAILED
   }
   const url = loginUrl(answer.port, answer.code)

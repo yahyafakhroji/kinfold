@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path'
 import { envName } from '../env-names'
 import { writeFileAtomic } from '../fs/atomic'
 import { type InstallEnv, platformOf } from '../install/env'
+import type { CommandBusy } from '../install/prompt/frame'
 import { managedServiceOf, serviceOf } from '../install/service/control'
 import { installedProgramPath } from '../install/entry'
 import { restartService } from '../install/install'
@@ -61,6 +62,30 @@ export interface UpdateDeps {
 
 /** Failures before the hand-off: each message already says nothing was changed. */
 class UpdateStop extends Error {}
+
+/**
+ * The same run with its output kept, for a terminal: the new program's
+ * `install --yes` prints its whole numbered plan, which would scroll the
+ * spinner away. Its lines are shown only when that install fails.
+ */
+export async function captureProgram(path: string, argv: readonly string[], env: Readonly<Record<string, string>>): Promise<{ code: number; lines: string[] }> {
+  const child = Bun.spawn([path, ...argv], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', env: { ...env } })
+  const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+  return { code, lines: `${stdout}\n${stderr}`.split(/\r?\n/).filter((line) => line !== '') }
+}
+
+function quietProgram(env: InstallEnv): NonNullable<UpdateDeps['runProgram']> {
+  return async (path, argv, childEnv) => {
+    const { code, lines } = await captureProgram(path, argv, childEnv)
+    if (code !== EXIT_OK) for (const line of lines) env.out(line)
+    return code
+  }
+}
+
+/** How the new program's install is run: quietly behind the spinner on a terminal, else with this process's own output. */
+function runnerFor(env: InstallEnv, deps: UpdateDeps): NonNullable<UpdateDeps['runProgram']> {
+  return deps.runProgram ?? (env.ui !== undefined ? quietProgram(env) : spawnProgram)
+}
 
 async function spawnProgram(path: string, argv: readonly string[], env: Readonly<Record<string, string>>): Promise<number> {
   // No stdin: `install --yes` never asks, and a question it did reach could not hang on a pipe.
@@ -310,6 +335,8 @@ async function handOff(env: InstallEnv, temp: string, running: string, latest: s
     return EXIT_FAILED
   }
   if (code === EXIT_OK) {
+    // Behind the spinner the new install's own notes are not shown, and the one that matters is this: nothing restarted a daemon the service does not run.
+    if (env.ui !== undefined && !(await isRunning(env))) env.out(`${PREFIX} the service is not running the daemon; restart the daemon if you started it yourself, so it runs ${latest}`)
     env.out(`kinfold updated to ${latest}`)
     return EXIT_OK
   }
@@ -361,7 +388,21 @@ interface Applied {
 
 const failed = (latest: string | null): Applied => ({ code: EXIT_FAILED, outcome: 'failed', latest })
 
+/** On a terminal the whole update runs under one spinner, which ends on the last line the update said. */
 async function applyUpdate(env: InstallEnv, options: { dryRun: boolean; patchOnly: boolean; onInterrupt?: () => void }, deps: UpdateDeps, run: NonNullable<UpdateDeps['runProgram']>): Promise<Applied> {
+  const busy = options.dryRun ? undefined : env.ui?.busy('looking for a newer release')
+  try {
+    const applied = await applyUpdateSteps(env, options, deps, run, busy)
+    if (applied.code === EXIT_OK) busy?.done()
+    else busy?.fail()
+    return applied
+  } catch (error: unknown) {
+    busy?.fail()
+    throw error
+  }
+}
+
+async function applyUpdateSteps(env: InstallEnv, options: { dryRun: boolean; patchOnly: boolean; onInterrupt?: () => void }, deps: UpdateDeps, run: NonNullable<UpdateDeps['runProgram']>, busy: CommandBusy | undefined): Promise<Applied> {
   // A dry run only lists these (describeDryRun); it removes nothing.
   if (!options.dryRun) sweepLeftovers(env)
   const running = deps.version ?? VERSION
@@ -394,6 +435,7 @@ async function applyUpdate(env: InstallEnv, options: { dryRun: boolean; patchOnl
   }
   const signals = guardSignals(temp, options.onInterrupt ?? (() => undefined))
   try {
+    busy?.label(`downloading Kinfold ${latest}`)
     const expected = await fetchExpectedHash(env, latest, assetName)
     await download(env, programUrl(latest, assetName), temp, deps.maxProgramBytes ?? MAX_PROGRAM_BYTES)
     if ((await fileSha256(temp.path)) !== expected) throw new UpdateStop('the downloaded program does not match the release checksums; nothing was changed')
@@ -401,6 +443,7 @@ async function applyUpdate(env: InstallEnv, options: { dryRun: boolean; patchOnl
     // The daemon waited for quiet before it started this run, but the download took time: an agent may have begun since.
     if (options.patchOnly && !(await quietAgain(env, deps))) throw new UpdateStop(`agents were still active ${QUIET_WAIT_CAP_MS / 60_000} minutes after the download; nothing was changed`)
     env.out(`kinfold update: ${latest} downloaded and checked; installing it`)
+    busy?.label(`installing Kinfold ${latest}`)
     signals.handingOff()
     const code = await handOff(env, temp.path, running, latest, run, options.patchOnly)
     return code === EXIT_OK ? { code, outcome: 'updated', latest } : failed(latest)
@@ -537,7 +580,7 @@ export async function runUpdate(env: InstallEnv, options: { dryRun: boolean; aut
     env.out(`${PREFIX} this is a checkout install; update it with git pull and bun src/cli/kinfold.ts install`)
     return EXIT_FAILED
   }
-  if (options.dryRun) return (await applyUpdate(env, { dryRun: true, patchOnly: false }, deps, deps.runProgram ?? spawnProgram)).code
+  if (options.dryRun) return (await applyUpdate(env, { dryRun: true, patchOnly: false }, deps, runnerFor(env, deps))).code
   // Two installs replacing the same program at once would each stop and start the service under the other.
   const lock = acquireUpdateLock(env.dataDir, deps.lock)
   if (lock === null) {
@@ -549,7 +592,7 @@ export async function runUpdate(env: InstallEnv, options: { dryRun: boolean; aut
   }
   try {
     if (options.auto === true) return await runAuto(env, deps, lock.release)
-    return (await applyUpdate(env, { dryRun: false, patchOnly: false, onInterrupt: lock.release }, deps, deps.runProgram ?? spawnProgram)).code
+    return (await applyUpdate(env, { dryRun: false, patchOnly: false, onInterrupt: lock.release }, deps, runnerFor(env, deps))).code
   } finally {
     lock.release()
   }

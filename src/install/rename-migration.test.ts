@@ -436,6 +436,7 @@ test('after the move, the wizard sees an installed machine and shows the folder 
   await expect(install(w.env, { ...YES, yes: false })).rejects.toBeInstanceOf(PromptCancelled)
   expect(existsSync(join(w.dataDir, 'memory.db'))).toBe(true)
   expect(term.output()).toContain(LOCKED_FOLDER_NOTE)
-  expect(term.output()).toContain(w.dataDir)
+  // On a terminal the folder reads as it does in a shell.
+  expect(term.output()).toContain(w.dataDir.replace(w.home, '~'))
   expect(term.output()).not.toContain('Memory folder:')
 })

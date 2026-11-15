@@ -4,8 +4,7 @@
 
 import { RECOVERY_GROUP } from '../sqlite/recovery'
 import type { InstallEnv } from './env'
-import { createPrompts } from './prompt/prompts'
-import type { TerminalIO } from './prompt/terminal'
+import type { Prompts } from './prompt/prompts'
 
 const normalize = (text: string): string => text.toUpperCase().replace(/[\s-]/g, '').replace(/[IL]/g, '1').replace(/O/g, '0')
 
@@ -30,10 +29,9 @@ function mint(sink: Omit<RecoverySink, 'kind'>): RecoverySink {
   return made
 }
 
-/** From the wizard's terminal, which exists only when stdin and stdout are both TTYs. */
-export function recoverySinkFromTerminal(terminal: TerminalIO | null): RecoverySink {
-  if (terminal === null) throw new Error(NOT_A_TERMINAL)
-  const prompts = createPrompts(terminal)
+/** From the wizard's questions, which exist only when stdin and stdout are both TTYs. The code goes to the screen and never to the install log. */
+export function recoverySinkFromPrompts(prompts: Prompts | null): RecoverySink {
+  if (prompts === null) throw new Error(NOT_A_TERMINAL)
   return mint({ say: (line) => prompts.say(line), ask: (question) => prompts.text(question, '') })
 }
 

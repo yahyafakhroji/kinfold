@@ -1,4 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
+import { fakeTerminal } from './prompt/fake-terminal'
+import { runFramed } from './prompt/frame'
+import { decodeKeys } from './prompt/keys'
 import { copyFileSync, existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { seedObservation } from '../context/test-support'
@@ -391,4 +394,58 @@ test("encrypt's old-blocks note names each other OS's own places", async () => {
     expect(line).toContain('(Test)')
     expect(line).not.toContain('APFS')
   }
+})
+
+// ---- on a terminal -------------------------------------------------------------
+
+const drawnLines = (term: ReturnType<typeof fakeTerminal>): string[] =>
+  term.output().split('\n').map((line) => line.slice(line.lastIndexOf('\r') + 1).replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').trimEnd()).filter((line) => line !== '')
+
+test('on a terminal decrypt asks through the layer, shows a spinner for the conversion and ends on its result', async () => {
+  const { w, env, path } = world(newDbKey())
+  const term = fakeTerminal([...'decrypt', '\r'])
+  expect(await runFramed({ ...env, terminal: term }, 'decrypt', (framed) => runKeyCommand(framed, 'decrypt'))).toBe(EXIT_OK)
+  expect(fileState(path)).toBe('plain')
+  expect(w.out).toEqual([])
+  const lines = drawnLines(term)
+  expect(lines[0]).toMatch(/^Kinfold \S+ decrypt$/)
+  expect(term.output()).toContain('Type decrypt to go on:')
+  expect(term.output()).toContain('decrypting memory.db')
+  expect(lines.slice(-2)).toEqual(['o  memory.db is plaintext.', 'Done.'])
+})
+
+test('on a terminal a refusal is drawn as an error and the run does not end with Done', async () => {
+  const { env, path } = world(newDbKey())
+  const term = fakeTerminal([...'yes', '\r'])
+  expect(await runFramed({ ...env, terminal: term }, 'decrypt', (framed) => runKeyCommand(framed, 'decrypt'))).toBe(EXIT_FAILED)
+  expect(fileState(path)).toBe('encrypted')
+  expect(drawnLines(term).slice(-2)).toEqual(['x kinfold decrypt: nothing changed', 'kinfold decrypt did not finish.'])
+})
+
+test('Ctrl-C at the question exits 130 and leaves the store as it was', async () => {
+  const { env, path } = world(newDbKey())
+  const term = fakeTerminal(['\u0003'])
+  expect(await runFramed({ ...env, terminal: term }, 'decrypt', (framed) => runKeyCommand(framed, 'decrypt'))).toBe(130)
+  expect(fileState(path)).toBe('encrypted')
+  expect(drawnLines(term).at(-1)).toBe('decrypt cancelled; nothing was changed')
+})
+
+test('on a terminal encrypt shows the code on the screen only, takes its last groups through the layer, then converts', async () => {
+  const { w, env, path } = world(null)
+  // Types the last two groups of whatever code is on the screen when the question comes.
+  const base = fakeTerminal([])
+  let typed = false
+  const term = {
+    ...base,
+    async *keys() {
+      if (typed) return
+      typed = true
+      const code = /(?:[0-9A-Z]{5}-){10}[0-9A-Z]{5}/.exec(base.output())?.[0] ?? ''
+      for (const key of decodeKeys(`${code.split('-').slice(-2).join('-')}\r`)) yield key
+    },
+  }
+  expect(await runFramed({ ...env, terminal: term }, 'encrypt', (framed) => runKeyCommand(framed, 'encrypt'))).toBe(EXIT_OK)
+  expect(fileState(path)).toBe('encrypted')
+  expect(w.out).toEqual([])
+  expect(drawnLines(base).slice(-2)).toEqual(['o  memory.db is encrypted.', 'Done.'])
 })

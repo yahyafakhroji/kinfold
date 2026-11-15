@@ -11,6 +11,11 @@
 // hmac-legacy, then deletes both entries and hmac.d/ (hmac-cleanup.ts).
 // With an unreadable key-store.json the store is unknown, so no key is
 // deleted; everything else is still removed, and the record is named.
+// What the PATH step added goes too (the ~/.local/bin link, the marked block,
+// the Windows PATH entry), and install.json forgets that choice, so a later
+// install asks again. On a terminal the plan runs behind a progress bar and
+// ends with what was kept; elsewhere it prints the lines it always printed.
+// Both write them to logs/install.log.
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -20,11 +25,16 @@ import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
 import { getObserverSettings } from './daemon-client'
 import { type InstallEnv, errorMessage, platformOf } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
+import { pathRemovalActions } from './path-setup'
+import { uiFor } from './prompt/ui'
+import { INSTALL_RECORD_FILE, type InstallRecord, readInstallRecord } from './setup/record'
+import { openSession } from './setup/session'
+import { VERSION } from '../version'
 import { INSTALL_HOSTS, type InstallHost } from './detect'
 import { hmacRemoval } from './hmac-cleanup'
 import { hmacKeptNotes } from './hmac-migration'
 import { readKeyStore, secretDeleteAction } from './key-store-choice'
-import { type Action, runPlan } from './plan'
+import { type Action, linesListener, runPlan, shortLabel } from './plan'
 import { managedServiceOf } from './service/control'
 import { wslUninstall } from '../wsl/entry'
 import { profileOf } from '../agents/install-profiles'
@@ -34,6 +44,8 @@ export interface UninstallOptions {
   removeCredentials: boolean
   /** Delete the key store's hmac-master and hmac-legacy and hmac.d/, after restoring hmac.key. */
   removeHmacKeys?: boolean
+  /** On a terminal, show each numbered step above the progress bar. */
+  verbose?: boolean
 }
 
 /** Stops the service and removes its config; a service install cannot set up here has neither. */
@@ -99,31 +111,62 @@ function unknownStoreNote(reason: string, options: UninstallOptions): string[] {
   return [`key store: unknown (${reason})${skipped}`]
 }
 
-export async function uninstall(env: InstallEnv, options: UninstallOptions): Promise<number> {
+/** install.json without the PATH choice, so the next install asks again; none when there is nothing to forget. */
+function forgetPathActions(env: InstallEnv, saved: InstallRecord | null): Action[] {
+  if (saved === null || saved.pathSetup === undefined) return []
+  const { pathSetup: _setup, pathLink: _link, pathFiles: _files, ...record } = saved
+  return [{ kind: 'install-record', path: join(env.dataDir, INSTALL_RECORD_FILE), dataDir: env.dataDir, record, summary: 'forget how the kinfold command was set up, so a later install asks again' }]
+}
+
+export async function uninstall(base: InstallEnv, options: UninstallOptions): Promise<number> {
+  // Uninstall asks nothing, so there is no --yes to make it plain: a terminal is framed, anything else is not.
+  const ui = await uiFor(base, { yes: false })
+  const session = openSession(base, ui, 'uninstall', { dryRun: options.dryRun, verbose: options.verbose ?? false })
+  const env = session.env
+  ui.output.intro(`Kinfold ${VERSION} uninstall`)
+  const end = (code: number): number => {
+    if (code === EXIT_OK) session.view?.finish('', [], options.dryRun ? 'Dry run: nothing was changed.' : 'Done.')
+    else session.view?.fail('uninstall did not finish')
+    return code
+  }
   try {
     if (platformOf(env).wsl) {
       const code = await wslUninstall(env, options)
-      if (code !== null) return code
+      if (code !== null) return end(code)
     }
     const refs = await ourRefs(env, options.dryRun)
     const read = readKeyStore(env)
     const store = read.ok ? read.store : null
     const hmac = read.ok && options.removeHmacKeys === true ? hmacRemoval(env, options.dryRun) : null
-    const actions = [
-      ...(await serviceActions(env)),
-      ...INSTALL_HOSTS.flatMap((host) => hostUnwireActions(env, host)),
-      ...(options.removeCredentials ? credentialActions(store, refs) : []),
-      ...(hmac?.actions ?? []),
+    const saved = readInstallRecord(env.dataDir)
+    // Each part with the bar's words for it; null leaves every action its own short label.
+    const parts: [string | null, Action[]][] = [
+      [null, await serviceActions(env)],
+      ...INSTALL_HOSTS.map((host): [string, Action[]] => [`unwiring ${profileOf(host).name}`, hostUnwireActions(env, host)]),
+      [null, options.removeCredentials ? credentialActions(store, refs) : []],
+      [null, hmac?.actions ?? []],
+      ['removing the kinfold command', [...pathRemovalActions(env, saved), ...forgetPathActions(env, saved)]],
       // Last: until every host entry is gone, each of them still names this program.
-      ...installedFilesActions(env),
+      [null, installedFilesActions(env)],
     ]
-    await runPlan(env, actions, options.dryRun)
+    const actions = parts.flatMap(([, part]) => part)
+    const labels = parts.flatMap(([label, part]) => part.map((action) => label ?? shortLabel(action)))
+    // From here the bar draws; what each step says goes to the log.
+    session.hideLines()
+    await runPlan(env, actions, options.dryRun, undefined, { listeners: [linesListener(env.out), ...session.planListeners], labels })
     const keyNotes = read.ok ? (hmac?.notes ?? hmacKeptNotes(env)) : unknownStoreNote(read.reason, options)
-    for (const note of [...keptNotes(env, store, refs, options.removeCredentials), ...keyNotes]) env.out(note)
+    const notes = [...keptNotes(env, store, refs, options.removeCredentials), ...keyNotes]
+    for (const note of notes) env.out(note)
     const skippedDeletes = !read.ok && (options.removeCredentials || options.removeHmacKeys === true)
-    return skippedDeletes ? EXIT_FAILED : EXIT_OK
+    // On a terminal the notes went to the log; a run that ends as failed has to show why.
+    if (skippedDeletes) for (const note of keyNotes) session.view?.note(note)
+    if (options.dryRun || skippedDeletes) return end(skippedDeletes ? EXIT_FAILED : EXIT_OK)
+    session.view?.finish('Uninstalled', notes.map((text) => ({ mark: 'none' as const, text })), `Kinfold is removed. Your memory is still in ${env.dataDir}.`)
+    return EXIT_OK
   } catch (error: unknown) {
-    env.out(`uninstall failed: ${errorMessage(error)}`)
+    session.fail(`uninstall failed: ${errorMessage(error)}`)
     return EXIT_FAILED
+  } finally {
+    session.flush()
   }
 }

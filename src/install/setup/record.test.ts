@@ -147,3 +147,39 @@ test('an install that chose auto-update itself, later than the switch, wins the 
   await runPlan(world.env, [installRecordAction(world.dataDir, { ...RECORD, autoUpdate: false, autoUpdateAt: 4000 })], false)
   expect(readInstallRecord(world.dataDir)).toMatchObject({ autoUpdate: true, autoUpdateAt: 6000 })
 })
+
+test('the PATH choice and what was written survive a round trip', () => {
+  world = createWorld()
+  mkdirSync(world.dataDir, { recursive: true })
+  const withPath: InstallRecord = { ...RECORD, pathSetup: 'added', pathLink: '/home/u/.local/bin/kinfold', pathFiles: ['/home/u/.zshrc'] }
+  writeInstallRecord(world.dataDir, withPath)
+  expect(readInstallRecord(world.dataDir)).toEqual(withPath)
+  writeInstallRecord(world.dataDir, { ...RECORD, pathSetup: 'declined' })
+  expect(readInstallRecord(world.dataDir)).toEqual({ ...RECORD, pathSetup: 'declined' })
+})
+
+test('a record written before the PATH step has no pathSetup, which reads as never asked', () => {
+  world = createWorld()
+  mkdirSync(world.dataDir, { recursive: true })
+  writeInstallRecord(world.dataDir, RECORD)
+  expect(readInstallRecord(world.dataDir)?.pathSetup).toBeUndefined()
+  expect(readFileSync(join(world.dataDir, INSTALL_RECORD_FILE), 'utf8')).not.toContain('path')
+})
+
+test('a pathSetup that is not one of the three words is dropped, with its files, and the rest still reads', () => {
+  world = createWorld()
+  mkdirSync(world.dataDir, { recursive: true })
+  writeFileSync(join(world.dataDir, INSTALL_RECORD_FILE), JSON.stringify({ channel: 'curl', updateCheck: true, autoUpdate: true, firstInstalledAt: 1, pathSetup: 'maybe', pathLink: '/x', pathFiles: ['/y'] }))
+  const read = readInstallRecord(world.dataDir)
+  expect(read?.channel).toBe('curl')
+  expect(read?.pathSetup).toBeUndefined()
+  expect(read?.pathLink).toBeUndefined()
+})
+
+test('the dashboard switch keeps the PATH fields', () => {
+  world = createWorld()
+  mkdirSync(world.dataDir, { recursive: true })
+  writeInstallRecord(world.dataDir, { ...RECORD, pathSetup: 'added', pathLink: '/home/u/.local/bin/kinfold' })
+  expect(setAutoUpdate(world.dataDir, false, 5)).toBe(true)
+  expect(readInstallRecord(world.dataDir)).toMatchObject({ autoUpdate: false, pathSetup: 'added', pathLink: '/home/u/.local/bin/kinfold' })
+})

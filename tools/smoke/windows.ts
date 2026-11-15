@@ -14,6 +14,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, win32 } from 'node:path'
 import { TASK_NAME, taskConfigPath } from '../../src/install/service/scheduled-task-service'
 import { windowsSystemTool } from '../../src/install/windows-system-path'
+import { windowsLeftoversScript, windowsNewShellScript } from './command'
 import { SmokeError } from './platform'
 import type { SmokePlatform, SmokeResult, SmokeWorld } from './platform'
 
@@ -353,6 +354,26 @@ async function addToUserPath(world: SmokeWorld, folder: string): Promise<void> {
   }
 }
 
+async function powershell(world: SmokeWorld, script: string): Promise<Captured> {
+  const program = systemTool(world.env, 'System32\\WindowsPowerShell\\v1.0\\powershell.exe')
+  return await capture([program, '-NoProfile', '-NonInteractive', '-Command', script], world.root, world.env, REGISTRY_TIMEOUT_MS)
+}
+
+/** `kinfold --version` from a PowerShell whose PATH is the registry's, as a terminal opened after install has it. */
+async function commandInNewShell(world: SmokeWorld): Promise<SmokeResult> {
+  const result = await powershell(world, windowsNewShellScript())
+  return { code: result.timedOut ? 1 : result.code, stdout: result.stdout, stderr: result.stderr }
+}
+
+/** The install's bin folder must be off the user PATH once uninstall has run. */
+async function commandLeftovers(world: SmokeWorld): Promise<string[]> {
+  const result = await powershell(world, windowsLeftoversScript())
+  if (result.timedOut || result.code !== 0) return [`the user PATH could not be read (exit ${result.code})`]
+  const bin = win32.join(world.dataDir, 'bin').toLowerCase()
+  const entries = result.stdout.trim().split(';').map((entry) => entry.replace(/\\+$/, '').toLowerCase())
+  return entries.includes(bin) ? [`${win32.join(world.dataDir, 'bin')} is still on the user PATH`] : []
+}
+
 async function writeObserverShim(world: SmokeWorld, realClaude: string | null): Promise<void> {
   if (realClaude === null) throw new SmokeError('setup', 'claude is not on PATH; the workflow installs it before the smoke')
   mkdirSync(world.fakeBin, { recursive: true, mode: 0o700 })
@@ -392,6 +413,8 @@ export const smokePlatform: SmokePlatform = {
   },
   writeObserverShim,
   runConversion,
+  commandInNewShell,
+  commandLeftovers,
   statusLines(world) {
     return [
       'service (scheduled task): config present; running: yes',

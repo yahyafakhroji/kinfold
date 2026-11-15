@@ -13,7 +13,8 @@ import { checkHealth, readDaemonInfo } from '../daemon-client'
 import { STALE_DB_KEY, staleDbKey, storedDbKey } from '../db-encryption'
 import { encryptKeyExists, isProcessAlive } from '../encrypt'
 import { INSTALL_PROFILES } from '../../agents/install-profiles'
-import { type ProfileTable, capabilityLine, verificationNote } from '../../agents/profile'
+import { type AgentProfile, type ProfileTable, capabilityBrief } from '../../agents/profile'
+import type { OsName } from '../../platform/platform'
 import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from '../detect'
 import { type InstallEnv, platformOf } from '../env'
 import { keyStoreOf } from '../key-store-choice'
@@ -34,9 +35,11 @@ import {
   settingsInputFor,
   showModels,
 } from '../observer-choice'
+import { type PathAnswer, type PathFlag, pathQuestionNeeded, planPathSetup } from '../path-setup'
 import { type Choice, PromptCancelled, type Prompts } from '../prompt/prompts'
-import { confirmRecoveryCode, recoverySinkFromTerminal } from '../recovery-confirm'
+import { confirmRecoveryCode, recoverySinkFromPrompts } from '../recovery-confirm'
 import { LOCKED_FOLDER_NOTE, type SetupState, lockedFolderProblem, savedObserversForYes } from './prefill'
+import { readInstallRecord } from './record'
 
 export interface SetupFlags {
   dataDir: string | null
@@ -49,6 +52,8 @@ export interface SetupFlags {
   /** --auto-update: on, whatever was saved. */
   autoUpdate: boolean
   yes: boolean
+  /** --path or --no-path: the PATH question answered up front. */
+  path?: PathFlag
 }
 
 export type EncryptionAnswer =
@@ -66,6 +71,8 @@ export interface SetupAnswers {
   port: number
   updateCheck: boolean
   autoUpdate: boolean
+  /** The answer to "Add kinfold to your PATH?"; null or absent when it was not asked. */
+  path?: PathAnswer | null
 }
 
 export const NO_TTY_ENCRYPTION_CHANGE = 'changing encryption on an existing store needs a terminal; run kinfold encrypt or kinfold decrypt'
@@ -177,26 +184,28 @@ function startsTicked(found: HostDetection, profiles: ProfileTable): boolean {
   return found.selected && profiles[found.host].verification === 'live'
 }
 
-function agentChoices(env: InstallEnv, detections: readonly HostDetection[], profiles: ProfileTable): Choice<InstallHost>[] {
-  const os = platformOf(env).os
-  return detections.map((found) => {
-    const profile = profiles[found.host]
-    const verification = verificationNote(profile.verification)
-    const parts = [found.note, capabilityLine(profile, os), ...(verification === null ? [] : [verification])]
-    return { value: found.host, label: profile.name, hint: parts.join(' · ') }
-  })
-}
+export const NOT_INSTALLED_HINT = 'not installed'
+export const DOCS_HINT = 'built from the docs'
+export const UNDETECTABLE_HINT = "can't detect IDE extensions; pick it if you use it"
+export const WIRED_GONE_HINT = 'wired, not found now'
+
+/** "2.1.311" out of "2.1.311 (Claude Code)"; a version with no number in it is shown whole. */
+const VERSION_NUMBER = /\d+(?:\.\d+)+\S*/
 
 /**
- * The lines naming the agents left off the list: one `not found:` line for
- * those simply absent, in KNOWN_HOSTS order, and a line of its own for any
- * with more to say (Continue's --hosts hint, an unsupported version).
+ * One row per supported agent, found or not, so the list also says what
+ * Kinfold supports. A row that cannot be ticked says why. One that is wired
+ * but no longer found stays open, so it can still be unticked.
  */
-function leftOffLines(left: readonly HostDetection[], profiles: ProfileTable): string[] {
-  const name = (found: HostDetection): string => profiles[found.host].name
-  const absent = left.filter((found) => found.absent === true)
-  const told = left.filter((found) => found.absent !== true)
-  return [...(absent.length === 0 ? [] : [`not found: ${absent.map(name).join(', ')}`]), ...told.map((found) => `${name(found)}: ${found.note}`)]
+function agentChoice(found: HostDetection, profile: AgentProfile, os: OsName, wiredNow: boolean): Choice<InstallHost> {
+  const row = { value: found.host, label: profile.name }
+  if (found.selected) {
+    const version = found.version === null ? found.note : (VERSION_NUMBER.exec(found.version)?.[0] ?? found.version)
+    return { ...row, hint: [version, capabilityBrief(profile, os), ...(profile.verification === 'docs' ? [DOCS_HINT] : [])].join(' · ') }
+  }
+  if (wiredNow) return { ...row, hint: WIRED_GONE_HINT }
+  if (found.undetectable === true) return { ...row, hint: UNDETECTABLE_HINT }
+  return { ...row, disabled: found.absent === true ? NOT_INSTALLED_HINT : found.note }
 }
 
 async function agentsStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags, profiles: ProfileTable): Promise<InstallHost[]> {
@@ -210,15 +219,13 @@ async function agentsStep(env: InstallEnv, ask: Prompts | null, state: SetupStat
     if (defaults.length === 0) env.out(NO_AGENTS_NOTE)
     return defaults
   }
-  // Not detected and not wired can't be ticked, so it is named, not listed; a wired one whose agent is gone stays listed so it can be unticked.
-  const listed = detections.filter((found) => found.selected || wired.has(found.host))
-  // Said even with nothing to list: Continue's line is the only place its --hosts hint appears.
-  for (const line of leftOffLines(detections.filter((found) => !listed.includes(found)), profiles)) ask.say(line)
-  if (listed.length === 0) {
+  const os = platformOf(env).os
+  const choices = detections.map((found) => agentChoice(found, profiles[found.host], os, wired.has(found.host)))
+  if (choices.every((choice) => choice.disabled !== undefined)) {
     ask.say(NO_AGENTS_NOTE)
     return []
   }
-  return ask.multiSelect('Which agents should share memory?', agentChoices(env, listed, profiles), defaults)
+  return ask.multiSelect('Which agents should share memory?', choices, defaults)
 }
 
 // ---- observers --------------------------------------------------------------
@@ -277,7 +284,7 @@ async function keyWithConfirmedCode(env: InstallEnv, ask: Prompts, reuseStored: 
       key = stored.key
     }
   }
-  const sink = recoverySinkFromTerminal(env.terminal)
+  const sink = recoverySinkFromPrompts(ask)
   const code = encodeRecoveryCode(key)
   for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
     if (await confirmRecoveryCode(sink, code)) return key
@@ -359,16 +366,36 @@ const ENCRYPTION_TEXT: Readonly<Record<EncryptionAnswer['kind'], string>> = {
   'decrypt-existing': 'will be stored in plaintext',
 }
 
-async function summaryStep(ask: Prompts, answers: SetupAnswers): Promise<void> {
-  ask.say('')
-  ask.say(`Memory folder   ${answers.dataDir}`)
-  ask.say(`Agents          ${answers.hosts.length === 0 ? 'none' : answers.hosts.join(', ')}`)
-  for (const observer of answers.observers) ask.say(`Observer        ${observer.input.host}: ${describeInput(observer.input)} (${observer.check})`)
-  ask.say(`Encryption      ${ENCRYPTION_TEXT[answers.encryption.kind]}`)
-  ask.say(`Port            ${answers.port}`)
-  ask.say(`Update check    ${answers.updateCheck ? 'daily' : 'off'}`)
-  ask.say(`Auto-update     ${!answers.updateCheck ? 'off (the update check is off)' : answers.autoUpdate ? 'patch releases' : 'off'}`)
+const COMMAND_PREFIX = 'kinfold command: '
+
+/** What the PATH step will do with these answers, in the words the done screen uses; null when it does nothing here. */
+function commandRow(env: InstallEnv, answers: SetupAnswers, flags: SetupFlags): string | null {
+  const summary = planPathSetup(env, readInstallRecord(env.dataDir), { answer: answers.path ?? null, yes: false, flag: flags.path ?? null }).summary
+  return summary === null ? null : summary.startsWith(COMMAND_PREFIX) ? summary.slice(COMMAND_PREFIX.length) : summary
+}
+
+async function summaryStep(env: InstallEnv, ask: Prompts, answers: SetupAnswers, flags: SetupFlags): Promise<void> {
+  const command = commandRow(env, answers, flags)
+  const rows = [
+    `Memory folder   ${tildeHome(env, answers.dataDir)}`,
+    `Agents          ${answers.hosts.length === 0 ? 'none' : answers.hosts.join(', ')}`,
+    ...answers.observers.map((observer) => `Observer        ${observer.input.host}: ${describeInput(observer.input)} (${observer.check})`),
+    `Encryption      ${ENCRYPTION_TEXT[answers.encryption.kind]}`,
+    `Port            ${answers.port}`,
+    `Update check    ${answers.updateCheck ? 'daily' : 'off'}`,
+    `Auto-update     ${!answers.updateCheck ? 'off (the update check is off)' : answers.autoUpdate ? 'patch releases' : 'off'}`,
+    ...(command === null ? [] : [`kinfold command ${command}`]),
+  ]
+  ask.section('Your choices', rows.map((text) => ({ mark: 'none' as const, text })))
   if (!(await ask.confirm('Install with these choices?', true))) throw new PromptCancelled()
+}
+
+// ---- the kinfold command ------------------------------------------------------
+
+/** Asked only where Kinfold would change PATH and nothing has answered yet: a flag, a saved choice, or ~/.local/bin already on PATH. */
+async function pathStep(env: InstallEnv, ask: Prompts | null, flags: SetupFlags): Promise<PathAnswer | null> {
+  if (ask === null || !pathQuestionNeeded(env, readInstallRecord(env.dataDir), flags.path ?? null)) return null
+  return (await ask.confirm('Add kinfold to your PATH?', true)) ? 'add' : 'decline'
 }
 
 // ---- the sequence -----------------------------------------------------------
@@ -426,7 +453,8 @@ export async function runWizard(
   const encryption = await encryptionStep(env, ask, state, flags, choice.dryRun)
   const port = await portStep(env, ask, state, flags)
   const { updateCheck, autoUpdate } = await updatesStep(ask, state, flags)
-  const answers: SetupAnswers = { dataDir, hosts, observers, encryption, port, updateCheck, autoUpdate }
-  if (ask !== null) await summaryStep(ask, answers)
+  const path = await pathStep(env, ask, flags)
+  const answers: SetupAnswers = { dataDir, hosts, observers, encryption, port, updateCheck, autoUpdate, path }
+  if (ask !== null) await summaryStep(env, ask, answers, flags)
   return answers
 }

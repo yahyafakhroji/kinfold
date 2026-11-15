@@ -1,8 +1,18 @@
-// Select, multi-select, text and confirm prompts on a raw terminal, drawn with
-// plain ANSI. Every prompt puts the terminal back in cooked mode with the
+// The output layer every command speaks through. A command says what it has
+// to say (a section, rows with marks, a question, progress) and never writes
+// an escape code; the renderer decides how it looks. Two renderers draw it: a
+// framed one built on @clack/prompts for a terminal (clack.ts) and a plain
+// one that prints lines (plain.ts). One of them is chosen for a whole run
+// (ui.ts).
+//
+// This file also holds a third, key-driven implementation on a raw
+// TerminalIO. It is the scripted double the wizard's tests run on: a test
+// lists the keys, and the same questions are asked and answered without a
+// real terminal. Every prompt puts the terminal back in cooked mode with the
 // cursor shown however it ends. Ctrl-C, Ctrl-D and a closed key stream all
 // reject with PromptCancelled; the caller decides the exit code.
 
+import { createBar } from './bar'
 import type { Key } from './keys'
 import type { TerminalIO } from './terminal'
 
@@ -21,15 +31,62 @@ export interface Choice<T extends string> {
   disabled?: string
 }
 
-export interface Prompts {
+/** How a row reads at a glance: fine, worth a look, broken, or no mark at all. */
+export type Mark = 'ok' | 'warn' | 'fail' | 'none'
+
+export interface Row {
+  mark: Mark
+  text: string
+}
+
+/** One bar for a run of steps. */
+export interface Progress {
+  /** The next step starts; its short label sits beside the bar. */
+  step(label: string): void
+  /** A line shown above the bar while it runs. */
+  note(line: string, mark?: Mark): void
+  done(message: string): void
+  fail(message: string): void
+}
+
+/** A wait with no count: a download, a check. */
+export interface Busy {
+  /** What the spinner says from now on. */
+  label(text: string): void
+  /** A line shown above the spinner while it runs. */
+  note(line: string, mark?: Mark): void
+  done(message: string): void
+  fail(message: string): void
+}
+
+/** What a command says. Both renderers implement it; neither asks anything. */
+export interface Output {
+  /** True for a terminal frame; false for plain lines. */
+  readonly framed: boolean
+  intro(title: string): void
+  outro(message: string): void
+  /** The last line of a run the person stopped. */
+  cancelled(message: string): void
+  /** One line of running text. */
+  say(line: string): void
+  warn(line: string): void
+  error(line: string): void
+  /** A titled group of rows, each with its mark. */
+  section(title: string, rows: readonly Row[]): void
+  progress(total: number): Progress
+  busy(label: string): Busy
+}
+
+/** The questions, which only a terminal can answer. */
+export interface Prompts extends Output {
   select<T extends string>(question: string, choices: readonly Choice<T>[], initial: T): Promise<T>
   multiSelect<T extends string>(question: string, choices: readonly Choice<T>[], initial: readonly T[]): Promise<T[]>
   text(question: string, initial: string, validate?: (value: string) => string | null): Promise<string>
+  /** A line typed without echo, for a key or a recovery code. */
+  password(question: string): Promise<string>
   confirm(question: string, initial: boolean): Promise<boolean>
   /** A display-only line: the label, the value and a note; takes no input. */
   locked(label: string, value: string, note: string): void
-  /** Plain lines between questions. */
-  say(line: string): void
 }
 
 const HIDE_CURSOR = '\u001b[?25l'
@@ -41,7 +98,66 @@ const RESET = '\u001b[0m'
 const up = (lines: number): string => (lines > 0 ? `\u001b[${lines}A` : '')
 
 /** Labels can come from files, hosts or models; control and format characters (escapes, bidi marks) never reach the screen. */
-const clean = (text: string): string => text.replace(/[\p{Cc}\p{Cf}]/gu, '')
+export const clean = (text: string): string => text.replace(/[\p{Cc}\p{Cf}]/gu, '')
+
+const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g
+
+/**
+ * Turns a path under the person's home into ~/..., as a shell shows it. Only
+ * a whole folder name counts: /home/ann-backup is not under /home/ann.
+ */
+export function homeShortener(homeDir: string): (text: string) => string {
+  const home = homeDir.replace(/[\\/]+$/, '')
+  // A home of "/" or nothing would turn every path into ~.
+  if (home.length < 2) return (text) => text
+  const pattern = new RegExp(`${home.replace(REGEX_SPECIALS, '\\$&')}(?![\\w.-])`, 'g')
+  return (text) => text.replace(pattern, '~')
+}
+
+/**
+ * The same prompts, drawing ~ for the home in everything they show. A screen
+ * is read by the person whose home it is, so the long prefix says nothing;
+ * plain output goes to scripts and logs and keeps the full path. Answers are
+ * never touched: a default folder is still returned whole.
+ */
+export function withShortHome(prompts: Prompts, homeDir: string): Prompts {
+  const short = homeShortener(homeDir)
+  const choice = <T extends string>(given: Choice<T>): Choice<T> => ({
+    ...given,
+    label: short(given.label),
+    ...(given.hint !== undefined ? { hint: short(given.hint) } : {}),
+    ...(given.disabled !== undefined ? { disabled: short(given.disabled) } : {}),
+  })
+  return {
+    framed: prompts.framed,
+    intro: (title) => prompts.intro(short(title)),
+    outro: (message) => prompts.outro(short(message)),
+    cancelled: (message) => prompts.cancelled(short(message)),
+    say: (line) => prompts.say(short(line)),
+    warn: (line) => prompts.warn(short(line)),
+    error: (line) => prompts.error(short(line)),
+    section: (title, rows) => prompts.section(short(title), rows.map((row) => ({ mark: row.mark, text: short(row.text) }))),
+    progress(total) {
+      const bar = prompts.progress(total)
+      return { step: (label) => bar.step(short(label)), note: (line, mark) => bar.note(short(line), mark), done: (message) => bar.done(short(message)), fail: (message) => bar.fail(short(message)) }
+    },
+    busy(label) {
+      const spinner = prompts.busy(short(label))
+      return { label: (text) => spinner.label(short(text)), note: (line, mark) => spinner.note(short(line), mark), done: (message) => spinner.done(short(message)), fail: (message) => spinner.fail(short(message)) }
+    },
+    select: (question, choices, initial) => prompts.select(short(question), choices.map(choice), initial),
+    multiSelect: (question, choices, initial) => prompts.multiSelect(short(question), choices.map(choice), initial),
+    async text(question, initial, validate) {
+      // The default is drawn short and handed back whole: what is shown is not what is returned.
+      const shown = short(initial)
+      const whole = (value: string): string => (value === shown ? initial : value)
+      return whole(await prompts.text(short(question), shown, validate === undefined ? undefined : (value) => validate(whole(value))))
+    },
+    password: (question) => prompts.password(short(question)),
+    confirm: (question, initial) => prompts.confirm(short(question), initial),
+    locked: (label, value, note) => prompts.locked(short(label), short(value), short(note)),
+  }
+}
 
 type NextKey = () => Promise<Key>
 
@@ -142,7 +258,11 @@ export function askHidden(io: TerminalIO, question: string): Promise<string> {
   })
 }
 
+const MARKS: Readonly<Record<Mark, string>> = { ok: '+ ', warn: '! ', fail: 'x ', none: '' }
+const RAW_COLUMNS = 100
+
 export function createPrompts(io: TerminalIO): Prompts {
+  const say = (line: string): void => io.write(`${line}\n`)
   const answered = (question: string, answer: string): string => `${clean(question)} ${DIM}${clean(answer)}${RESET}\r\n`
 
   return {
@@ -239,12 +359,28 @@ export function createPrompts(io: TerminalIO): Prompts {
       })
     },
 
+    password: (question) => askHidden(io, question),
+
     locked(label, value, note) {
       io.write(`  ${clean(label)}  ${clean(value)}  ${DIM}${clean(note)}${RESET}\n`)
     },
 
-    say(line) {
-      io.write(`${clean(line)}\n`)
+    framed: true,
+    intro: (title) => say(`${BOLD}${clean(title)}${RESET}`),
+    outro: (message) => say(clean(message)),
+    cancelled: (message) => say(clean(message)),
+    say: (line) => say(clean(line)),
+    warn: (line) => say(`! ${clean(line)}`),
+    error: (line) => say(`x ${clean(line)}`),
+    section(title, rows) {
+      say(`${BOLD}${clean(title)}${RESET}`)
+      for (const row of rows) say(`  ${MARKS[row.mark]}${clean(row.text)}`)
+    },
+    progress: (total) => createBar((text) => io.write(text), { total, columns: RAW_COLUMNS, unicode: false, color: false }),
+    busy: (label) => {
+      const bar = createBar((text) => io.write(text), { total: 0, columns: RAW_COLUMNS, unicode: false, color: false })
+      bar.step(label)
+      return { label: (text) => bar.step(text), note: (line, mark) => bar.note(line, mark), done: (message) => bar.done(message), fail: (message) => bar.fail(message) }
     },
   }
 }

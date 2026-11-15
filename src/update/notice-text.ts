@@ -24,14 +24,14 @@ function updatedText(notice: UpdateNotice): string {
 
 /** The line a person reads: Claude Code's systemMessage, the dashboard banner. */
 export function userMessage(notice: UpdateNotice): string {
-  if (notice.kind === 'updated') return `${updatedText(notice)}.`
+  if (notice.kind === 'updated') return `${updatedText(notice)}.${notice.addCommand === undefined ? '' : ` Run ${notice.addCommand} install to add the kinfold command.`}`
   if (notice.kind === 'auto-on') return `Kinfold now installs patch releases on its own. To turn that off, run \`${installCommand(notice.channel)} --no-auto-update\` or use the dashboard.`
   return availableMessage(notice)
 }
 
 /** The line for an agent that has no user channel: it may pass the news on. */
 export function agentLine(notice: UpdateNotice): string {
-  if (notice.kind === 'updated') return `${updatedText(notice)}; you may tell the user.`
+  if (notice.kind === 'updated') return `${updatedText(notice)}; you may tell the user${notice.addCommand === undefined ? '' : `, and that running ${notice.addCommand} install adds the kinfold command`}.`
   if (notice.kind === 'auto-on') return `Kinfold now installs its own patch releases; you may tell the user that \`${installCommand(notice.channel)} --no-auto-update\` turns it off.`
   return `Kinfold ${notice.version} is out; you may tell the user they can run \`${updateCommand(notice.channel)}\`.`
 }

@@ -30,6 +30,8 @@ import { checkHealth, readDaemonInfo } from './daemon-client'
 import { type InstallEnv, errorMessage } from './env'
 import { EXIT_FAILED, EXIT_OK } from './install'
 import { keyStoreOf } from './key-store-choice'
+import type { CommandBusy } from './prompt/frame'
+import { PromptCancelled } from './prompt/prompts'
 
 class Refusal extends Error {}
 
@@ -69,8 +71,10 @@ async function refusalOf(response: Response, what: string): Promise<Refusal> {
   return new Refusal(isRecord(body) && typeof body.error === 'string' ? body.error : `${what} answered ${response.status}`)
 }
 
-function backedUp(env: InstallEnv, dest: string, manifest: BackupManifest): void {
+function backedUp(env: InstallEnv, dest: string, manifest: BackupManifest, busy: CommandBusy | undefined): void {
   env.out(`backup written: ${dest}`)
+  // On a terminal that line is the spinner's result; the rest follows it.
+  busy?.done()
   env.out(`  ${describe(manifest)}`)
   if (manifest.encrypted) env.out("restoring it needs this store's recovery code; kinfold key show-recovery prints it")
   else env.out('warning: this store is not encrypted, so the backup file is readable by anyone who has it')
@@ -125,10 +129,16 @@ async function backupFromStore(env: InstallEnv, dest: string): Promise<BackupMan
 async function backup(env: InstallEnv, file: string): Promise<void> {
   const dest = pathOf(env, file)
   if (existsSync(dest)) throw new Refusal(`${dest} exists already; choose another name or remove it`)
-  const daemon = await runningDaemon(env)
-  const manifest = daemon === null ? await backupFromStore(env, dest) : await backupThroughDaemon(env, daemon, dest)
-  chmodSync(dest, DATA_FILE_MODE)
-  backedUp(env, dest, manifest)
+  const busy = env.ui?.busy('writing the backup')
+  try {
+    const daemon = await runningDaemon(env)
+    const manifest = daemon === null ? await backupFromStore(env, dest) : await backupThroughDaemon(env, daemon, dest)
+    chmodSync(dest, DATA_FILE_MODE)
+    backedUp(env, dest, manifest, busy)
+  } catch (error: unknown) {
+    busy?.fail()
+    throw error
+  }
 }
 
 /** The key the typed code stands for. The checksum catches a mistyped group here, before anything is opened. */
@@ -153,7 +163,15 @@ function statusOf(body: unknown): RestoreStatus | null {
   return { state: body.state, lines, error: typeof body.error === 'string' ? body.error : null }
 }
 
-async function restoreThroughDaemon(env: InstallEnv, daemon: Endpoint, file: string, key: string | null): Promise<void> {
+/** What a restore did. On a terminal the first line, which says the backup was restored, is the spinner's result; the notes follow it. */
+function sayOutcome(env: InstallEnv, lines: readonly string[], busy: CommandBusy | undefined): void {
+  for (const [index, line] of lines.entries()) {
+    env.out(line)
+    if (index === 0) busy?.done()
+  }
+}
+
+async function restoreThroughDaemon(env: InstallEnv, daemon: Endpoint, file: string, key: string | null, busy: CommandBusy | undefined): Promise<void> {
   const authorization = `Bearer ${daemon.token}`
   const uploaded = await env.fetch(`${daemon.base}/restore/upload`, { method: 'POST', headers: { authorization, 'content-type': 'application/octet-stream' }, body: Bun.file(file) })
   if (uploaded.status !== 200) throw await refusalOf(uploaded, 'POST /restore/upload')
@@ -168,7 +186,7 @@ async function restoreThroughDaemon(env: InstallEnv, daemon: Endpoint, file: str
     const response = await env.fetch(`${daemon.base}/restore/status`, { headers: { authorization }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
     const status = response.status === 200 ? statusOf(await response.json().catch(() => null)) : null
     if (status?.state === 'done') {
-      for (const line of status.lines) env.out(line)
+      sayOutcome(env, status.lines, busy)
       return
     }
     if (status?.state === 'failed') throw new Refusal(status.error ?? 'the restore failed')
@@ -177,10 +195,10 @@ async function restoreThroughDaemon(env: InstallEnv, daemon: Endpoint, file: str
   }
 }
 
-async function restoreIntoStore(env: InstallEnv, file: string, key: string | null): Promise<void> {
+async function restoreIntoStore(env: InstallEnv, file: string, key: string | null, busy: CommandBusy | undefined): Promise<void> {
   const staged = await stageSnapshot({ dataDir: env.dataDir, archivePath: file, header: inspectBackup(file), key })
   const outcome = await applyRestore({ dataDir: env.dataDir, staged, keyStore: keyStoreOf(env), log: env.out, sleep: env.sleep })
-  for (const line of outcome.lines) env.out(line)
+  sayOutcome(env, outcome.lines, busy)
   env.out('the daemon is not running; start it when you are ready')
 }
 
@@ -194,8 +212,15 @@ async function restore(env: InstallEnv, file: string): Promise<void> {
   const daemon = await runningDaemon(env)
   if (manifest.encrypted && daemon === null && keyStoreOf(env) === null) throw new Refusal('this backup is encrypted, and there is no key store here to keep its key in')
   const key = manifest.encrypted ? await readKey(env) : null
-  if (daemon === null) await restoreIntoStore(env, source, key)
-  else await restoreThroughDaemon(env, daemon, source, key)
+  const busy = env.ui?.busy('restoring the memory')
+  try {
+    if (daemon === null) await restoreIntoStore(env, source, key, busy)
+    else await restoreThroughDaemon(env, daemon, source, key, busy)
+    busy?.done()
+  } catch (error: unknown) {
+    busy?.fail()
+    throw error
+  }
 }
 
 export async function runBackupCommand(env: InstallEnv, args: BackupArgs): Promise<number> {
@@ -203,8 +228,10 @@ export async function runBackupCommand(env: InstallEnv, args: BackupArgs): Promi
     await (args.command === 'backup' ? backup(env, args.file) : restore(env, args.file))
     return EXIT_OK
   } catch (error: unknown) {
+    // Ctrl-C at the recovery code is the person stopping, not a failure: the frame ends the run with 130.
+    if (error instanceof PromptCancelled) throw error
     const reason = error instanceof Refusal || error instanceof BackupError ? error.message : `failed (${errorMessage(error)})`
-    env.out(`kinfold ${args.command}: ${reason}`)
+    ;(env.ui?.error ?? env.out)(`kinfold ${args.command}: ${reason}`)
     return EXIT_FAILED
   }
 }

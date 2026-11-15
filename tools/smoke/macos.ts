@@ -1,8 +1,9 @@
 // macOS runs the daemon as a LaunchAgent and keeps the database key in the
-// keychain. The driver's own expect run and sh observer shim work here, so none
-// of the optional hooks are defined.
+// keychain. The driver's own expect run and sh observer shim work here. The
+// kinfold command is checked from zsh, the shell Terminal opens.
 
 import { posix } from 'node:path'
+import { posixLeftovers, versionInNewShell } from './command'
 import type { SmokePlatform } from './platform'
 
 const LAUNCH_AGENT_LABEL = 'dev.kinfold.daemon'
@@ -26,4 +27,8 @@ export const smokePlatform: SmokePlatform = {
     // shared tests run on Windows.
     return [posix.join(home, 'Library', 'LaunchAgents', `${LAUNCH_AGENT_LABEL}.plist`)]
   },
+  // zsh is the shell a new Mac opens, whatever shell the runner's steps use.
+  childEnv: () => ({ SHELL: '/bin/zsh' }),
+  commandInNewShell: (world) => versionInNewShell(world, '/bin/zsh', '.zshrc'),
+  commandLeftovers: (world) => posixLeftovers(world.home),
 }

@@ -1,7 +1,7 @@
 // `kinfold status`: read-only. Hosts found and wired (yes/no/stale/partial), the
 // LaunchAgent, daemon health, each host's observer and where it came from,
 // the key store and its entries (metadata lookups only, never the value), the HMAC keys (master and legacy entries, sub-key epochs, leftover plain-text keys), data dir modes, and
-// the time of the last backup, and duplicate project wiring. It creates nothing,
+// the time of the last backup, whether `kinfold` resolves on PATH and to which program, and duplicate project wiring. It creates nothing,
 // not even the data dir.
 
 import { readBackupRecord } from '../backup/record'
@@ -19,6 +19,8 @@ import { type DaemonSituation, EXIT_OK, daemonSituation } from './install'
 import { managedServiceOf, serviceOf } from './service/control'
 import { hmacStatusLines } from './hmac-migration'
 import { mcpStatusLines } from './mcp-wiring'
+import type { Mark, Row } from './prompt/prompts'
+import { commandStatusLine } from './path-setup'
 import { dataDirAccessFor } from './access/check'
 import { vectorStatusLine } from './vec0-install'
 import { QUIET_MS, autoUpdateView } from '../update/auto'
@@ -34,7 +36,7 @@ import { type WslStatus, wslStatus } from '../wsl/entry'
 import type { HookHostSpec } from '../agents/hook-spec'
 import { HOOK_SPECS } from '../agents/hook-specs'
 import { INSTALL_PROFILES, hasWiring, isWired, overlapPlan, overlapState } from '../agents/install-profiles'
-import { type AgentId, type ProfileTable, capabilityLine, verificationNote } from '../agents/profile'
+import { type AgentId, type ProfileTable, capabilityBrief, capabilityLine, verificationNote } from '../agents/profile'
 
 type SpecTable = Readonly<Record<AgentId, HookHostSpec | null>>
 
@@ -177,6 +179,125 @@ export function autoUpdateLines(env: InstallEnv, running: string, blocker: strin
   ]
 }
 
+/** "2.1.311" out of "2.1.311 (Claude Code)". */
+const VERSION_NUMBER = /\d+(?:\.\d+)+\S*/
+
+/**
+ * The agents as a terminal shows them: one short row each for those found or
+ * wired, with the rest counted. The plain lines carry paths and steps for
+ * every agent; a section is read at a glance, and `--plain` has the rest.
+ */
+async function agentRows(env: InstallEnv, profiles: ProfileTable): Promise<{ rows: Row[]; present: ReadonlySet<string> }> {
+  const os = platformOf(env).os
+  const detections = await detectHosts(env, null, profiles)
+  const rows: Row[] = []
+  // The agents that are here in some way: found, or with wiring in place.
+  const present = new Set<string>()
+  let absent = 0
+  for (const found of detections) {
+    const profile = profiles[found.host]
+    const state = overlapState(env, profile, profiles)
+    const wired = isWired(state)
+    if (isFoldedAbsent(found, hasWiring(state))) {
+      absent += 1
+      continue
+    }
+    const where = found.selected ? (found.version === null ? 'found' : (VERSION_NUMBER.exec(found.version)?.[0] ?? found.version)) : found.undetectable === true ? "can't be detected" : 'not found now'
+    if (wired || found.selected) present.add(found.host)
+    // Only wiring that is whole and current is "wired": stale or partial wiring says which.
+    const wiring = state === 'yes' ? 'wired' : state === 'no' ? 'not wired' : `wiring ${state}`
+    // Found with nothing wired, wired with nothing found, or wired in part is the row to look at.
+    const mark = state === 'yes' && found.selected ? 'ok' : wired || found.selected ? 'warn' : 'none'
+    rows.push({ mark, text: `${profile.name}: ${where}, ${wiring} · ${capabilityBrief(profile, os)}` })
+  }
+  return { rows: absent === 0 ? rows : [...rows, { mark: 'none', text: `Not installed: ${absent} other supported agent${absent === 1 ? '' : 's'}` }], present }
+}
+
+const MARK_RULES: readonly (readonly [RegExp, Mark])[] = [
+  // A line that calls itself a warning is one, whatever else it names.
+  [/^warning: /, 'warn'],
+  [/^daemon \/health: up\b/, 'ok'],
+  [/^daemon \/health: down\b/, 'fail'],
+  [/^service \(.*running: yes/, 'ok'],
+  [/^service \(.*running: no/, 'warn'],
+  [/^semantic search: on$/, 'ok'],
+  // Everything is in place and the daemon has yet to load it: a restart away.
+  [/^semantic search: off in the running daemon/, 'warn'],
+  [/^database: encrypted \(.*present\)$/, 'ok'],
+  // Encrypted with its key gone: nothing can open the memory until the key is back.
+  [/^database: encrypted \(.*missing\)$/, 'fail'],
+  [/^database: encrypted\b/, 'warn'],
+  [/^database: plaintext\b/, 'warn'],
+  [/ need fixing\b/, 'warn'],
+  [/: invalid setting \(/, 'warn'],
+  [/: present$/, 'ok'],
+  [/: (missing|unknown\b.*)$/, 'warn'],
+  [/^update: Kinfold \S+ is available/, 'warn'],
+  [/^update: /, 'ok'],
+  [/^auto-update: on\b/, 'ok'],
+  [/^last error: /, 'warn'],
+  [/^kinfold command: on PATH at .*\(this install\)$/, 'ok'],
+  [/^kinfold command: /, 'warn'],
+  [/^duplicate wiring: none\b/, 'ok'],
+  [/^duplicate wiring\b/, 'warn'],
+  [/^[a-z0-9-]+: yes in /, 'ok'],
+  [/^[a-z0-9-]+: (no|stale|partial)\b.* in /, 'warn'],
+]
+
+/** The mark a status line calls for, read from the words the plain output already uses, so the two renderers cannot disagree. */
+export function statusMark(line: string): Mark {
+  const text = line.trim()
+  return MARK_RULES.find(([pattern]) => pattern.test(text))?.[1] ?? 'none'
+}
+
+/** A marked row stands at the margin; an unmarked one keeps its indent under the line it belongs to. */
+const rowsOf = (lines: readonly string[]): Row[] => lines.map((line) => {
+  const mark = statusMark(line)
+  return { mark, text: mark === 'none' ? line.trimEnd() : line.trim() }
+})
+
+/**
+ * The observers someone chose. The plain lines list all 22 agents, most on
+ * the built-in default and not wired; on a terminal those say nothing new.
+ */
+function observerRows(lines: readonly string[]): Row[] {
+  const chosen = lines.filter((line) => line.startsWith('  ') && !line.endsWith('source built-in'))
+  if (chosen.length === 0 && lines[0] === 'observer settings:') return [{ mark: 'none', text: 'every agent is on its built-in default' }]
+  // With the heading line gone, the rows stand at the margin.
+  return rowsOf(chosen.length > 0 ? chosen.map((line) => line.trim()) : lines)
+}
+
+/** The host a `  <host>: ...` row is about, or null. */
+const hostOf = (line: string): string | null => /^\s+([a-z0-9-]+): /.exec(line)?.[1] ?? null
+
+/** A row that only matters for an agent that is here: for one that is not installed, "no" is a fact and not a fault. */
+function rowsForPresent(lines: readonly string[], present: ReadonlySet<string>): Row[] {
+  return lines.map((line) => {
+    const host = hostOf(line)
+    const mark = statusMark(line)
+    const flagged = mark !== 'warn' || host === null || present.has(host)
+    return flagged ? { mark, text: mark === 'none' ? line.trimEnd() : line.trim() } : { mark: 'none', text: line.trimEnd() }
+  })
+}
+
+/** The credentials an agent that is here needs: a missing one is flagged only when something would use it. */
+function neededRefs(observerLines: readonly string[], present: ReadonlySet<string>): ReadonlySet<string> {
+  const refs = new Set<string>()
+  for (const line of observerLines) {
+    const host = hostOf(line)
+    const ref = / key (\S+)/.exec(line)?.[1]
+    if (host !== null && ref !== undefined && present.has(host)) refs.add(ref.replace(/;$/, ''))
+  }
+  return refs
+}
+
+function credentialRows(lines: readonly string[], needed: ReadonlySet<string>): Row[] {
+  return lines.map((line) => {
+    const ref = /^\S+ (\S+): missing$/.exec(line)?.[1]
+    return ref !== undefined && !needed.has(ref) ? { mark: 'none', text: line } : rowsOf([line])[0] as Row
+  })
+}
+
 export async function status(env: InstallEnv, running: string = VERSION, profiles: ProfileTable = INSTALL_PROFILES): Promise<number> {
   let wsl: WslStatus | null = null
   if (platformOf(env).wsl) {
@@ -193,20 +314,31 @@ export async function status(env: InstallEnv, running: string = VERSION, profile
   const duplicates = findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings])
   const situation = await daemonSituation(env)
   const blocker = autoUpdateBlocker(env, situation.loaded)
-  const lines = [
-    'hosts:',
-    ...(await hostStatusLines(env, profiles)),
-    ...daemonLines(env, situation),
-    ...(await databaseLines(env)),
-    ...observer.lines,
-    ...keyStoreLines(env, observer.refs),
+  const daemon = daemonLines(env, situation)
+  const database = await databaseLines(env)
+  const credentials = keyStoreLines(env, observer.refs)
+  const keys = [
+    ...credentials,
     ...hmacStatusLines(env),
     ...(await dataDirAccessFor(env).statusLines(env.dataDir)),
     ...[backupLine(env)].filter((line) => line !== null),
-    updateLine(env, running, blocker),
-    ...autoUpdateLines(env, running, blocker),
-    ...(duplicates.length === 0 ? ['duplicate wiring: none in this directory'] : duplicateWarning(duplicates)),
   ]
+  const update = updateLine(env, running, blocker)
+  const updates = [update, ...autoUpdateLines(env, running, blocker)]
+  const command = [commandStatusLine(env, readInstallRecord(env.dataDir)), ...(duplicates.length === 0 ? ['duplicate wiring: none in this directory'] : duplicateWarning(duplicates))]
+  if (env.ui !== undefined) {
+    const agents = await agentRows(env, profiles)
+    env.ui.section('Agents', [...agents.rows, ...rowsForPresent(mcpStatusLines(env), agents.present)])
+    env.ui.section('Daemon', rowsOf(daemon))
+    env.ui.section('Memory', [...rowsOf(database), ...credentialRows(credentials, neededRefs(observer.lines, agents.present)), ...rowsOf(keys.slice(credentials.length))])
+    env.ui.section('Observers', observerRows(observer.lines))
+    env.ui.section('Updates', rowsOf(updates))
+    env.ui.section('Command', rowsOf(command))
+    env.ui.next(!situation.health.up ? 'Start the daemon with: kinfold install' : statusMark(update) === 'warn' ? update.replace(/^update: /, '') : 'Open the dashboard with: kinfold dashboard')
+    return EXIT_OK
+  }
+  // The order scripts have always read: the observer lines sit between the database and the key entries.
+  const lines = ['hosts:', ...(await hostStatusLines(env, profiles)), ...daemon, ...database, ...observer.lines, ...keys, ...updates, ...command]
   for (const line of lines) env.out(line)
   return EXIT_OK
 }

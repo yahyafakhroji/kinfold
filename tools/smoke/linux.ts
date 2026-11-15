@@ -8,12 +8,16 @@
 // the first conversion, and then hands every conversion to the driver's own
 // pty run.
 
+import { existsSync } from 'node:fs'
 import { posix } from 'node:path'
 import { runPty } from '../smoke'
+import { capture, newShellArgv, posixLeftovers, versionInNewShell } from './command'
 import { SmokeError } from './platform'
 import type { SmokePlatform, SmokeResult, SmokeWorld } from './platform'
 
 const UNIT = 'kinfold.service'
+const BASH = '/bin/bash'
+const LOGIN_PROFILES = ['.bash_profile', '.bash_login', '.profile']
 const SERVICE_LABEL = 'systemd user service'
 const DEFAULT_PORT = 37_811
 const HEALTH_WAIT_MS = 60_000
@@ -185,6 +189,18 @@ export function createLinuxPlatform(deps: LinuxSmokeDeps = {}): SmokePlatform {
       if (mode === null) throw new SmokeError('setup', SERVICE_ERROR)
       return expectedStatusLines(platform.keyStoreLabel, mode)
     },
+    childEnv: (): Record<string, string> => ({ SHELL: BASH }),
+    async commandInNewShell(world: SmokeWorld): Promise<SmokeResult> {
+      const login = await versionInNewShell(world, BASH, '.bashrc')
+      // A login bash reads a profile file and never .bashrc itself. A home with no profile file (a bare
+      // container) has nothing to pass the block on, so the shell a terminal emulator opens is checked instead.
+      const profiles = LOGIN_PROFILES.filter((name) => existsSync(posix.join(world.home, name)))
+      if (login.code === 0) return login
+      // Which profile files the home has says why a login shell missed the block; names only.
+      if (profiles.length > 0) return { ...login, stderr: `${login.stderr}\nlogin profile files in the home: ${profiles.join(', ')}` }
+      return await capture(newShellArgv(BASH, world.home).map((arg) => (arg === '-lic' ? '-ic' : arg)), world.project, {})
+    },
+    commandLeftovers: (world: SmokeWorld): string[] => posixLeftovers(world.home),
     async runConversion(world: SmokeWorld, operation: Conversion): Promise<SmokeResult> {
       if (!checked.has(world)) {
         if (mode === null) throw new SmokeError('setup', SERVICE_ERROR)

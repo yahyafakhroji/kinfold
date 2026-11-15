@@ -57,3 +57,24 @@ test('update takes only --dry-run', () => {
   expect(parseArgs(['update', '--yes'])).toEqual({ ok: false, error: '--yes does not apply to update' })
   expect(parseArgs(['update', '--port', '40000'])).toEqual({ ok: false, error: '--port does not apply to update' })
 })
+
+test('--path and --no-path apply to install, and not together', () => {
+  expect(parseArgs(['install', '--path'])).toMatchObject({ ok: true, value: { path: 'path' } })
+  expect(parseArgs(['install', '--no-path'])).toMatchObject({ ok: true, value: { path: 'no-path' } })
+  expect(parseArgs(['install'])).toMatchObject({ ok: true, value: { path: null } })
+  expect(parseArgs(['install', '--path', '--no-path'])).toEqual({ ok: false, error: '--path and --no-path cannot be given together' })
+  expect(parseArgs(['uninstall', '--path'])).toEqual({ ok: false, error: '--path does not apply to uninstall' })
+  expect(parseArgs(['status', '--no-path'])).toEqual({ ok: false, error: '--no-path does not apply to status' })
+})
+
+test('--verbose applies to install and uninstall', () => {
+  expect(parseArgs(['install', '--verbose'])).toMatchObject({ ok: true, value: { verbose: true } })
+  expect(parseArgs(['uninstall', '--verbose'])).toMatchObject({ ok: true, value: { verbose: true } })
+  expect(parseArgs(['install'])).toMatchObject({ ok: true, value: { verbose: false } })
+  expect(parseArgs(['status', '--verbose'])).toEqual({ ok: false, error: '--verbose does not apply to status' })
+})
+
+test('USAGE lists the PATH flags and --verbose', () => {
+  for (const text of ['[--path | --no-path]', '[--verbose]']) expect(USAGE).toContain(text)
+  expect(USAGE).toMatch(/uninstall\s+\[--dry-run\] \[--verbose\]/)
+})
