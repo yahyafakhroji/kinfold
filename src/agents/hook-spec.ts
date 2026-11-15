@@ -18,6 +18,13 @@ export interface HookHostSpec {
   /** The stdout line that adds the prompt-time delta to a turn; absent for hosts not wired for it yet (Cursor). Codex documents the same UserPromptSubmit shape as Claude Code. */
   promptContext?: (text: string) => string
   /**
+   * For an agent that shows the user a message the model never sees: the
+   * stdout line carrying `message` beside the context line already built
+   * (`output`, or null when there is no context to hand over). Absent for an
+   * agent with no such channel; its output is then untouched.
+   */
+  userMessage?: (output: string | null, message: string) => string
+  /**
    * Another agent that runs this agent's hooks, named by a documented signal
    * in its payload or environment; null when nothing shows one. Payload and
    * env only: it runs on every hook call.

@@ -123,6 +123,39 @@ test('status probes no keychain ref for codex-cli and opencode-cli observers', a
   expect(out).toContain('keychain openrouter: present')
 })
 
+test('status says an observer is off, in the words the wizard used', async () => {
+  const w = make()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  const realFetch = w.env.fetch
+  w.env.fetch = async (url, init) => {
+    if (new URL(url).pathname !== '/observer/settings') return realFetch(url, init)
+    const effective = [
+      { host: 'claude-code', settings: { provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: false, source: 'host' } },
+      { host: 'opencode', settings: { provider: 'openrouter', model: 'openrouter/auto', credentialRef: 'openrouter', enabled: true, source: 'built-in' } },
+    ]
+    return new Response(JSON.stringify({ rows: [], effective }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  w.out.length = 0
+  await status(w.env)
+  expect(w.out).toContain('  claude-code: off (capture only); source host')
+  expect(w.out.join('\n')).not.toContain('(disabled)')
+  // An observer that is off needs no key, so status asks about none for it.
+  expect(w.out).toContain('  opencode: openrouter/openrouter/auto key openrouter; source built-in')
+})
+
+test('status says when the recall line is off and when the impact test is on, and nothing about either otherwise', async () => {
+  const w = make()
+  mkdirSync(w.dataDir, { recursive: true })
+  await status(w.env)
+  expect(w.out.some((line) => line.startsWith('recall line:') || line.startsWith('impact test:'))).toBe(false)
+
+  writeFileSync(join(w.dataDir, 'display.json'), JSON.stringify({ showRecall: false, holdout: true }))
+  w.out.length = 0
+  await status(w.env)
+  expect(w.out).toContain('recall line: off; agents show nothing about what Kinfold recalled (turn it on with kinfold install --show-recall or in the dashboard)')
+  expect(w.out).toContain('impact test: on for Claude Code; about 1 prompt in 10 goes without recalled memory, and says so (turn it off with kinfold install --no-holdout or in the dashboard)')
+})
+
 function programInstallWorld(): { w: FakeWorld; binPath: string; options: typeof YES & { programSource: string } } {
   // No opencode here: installing its plugin needs release-build assets.
   const w = make({ opencodeVersion: undefined, keychainRefs: [] })

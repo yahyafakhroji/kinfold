@@ -19,6 +19,7 @@ import { injectedIdsSince, mcpReadsSince } from '../store/mcp-read-store'
 import { type InjectionDuration, type InjectionTotals, type RunRow, type StateCount, captureLags, eventStates, injectionDurations, injectionTotals, recentRuns } from '../store/metrics-reads'
 import { relatedServedSince } from '../store/related-served-store'
 import { type HitRateSummary, summarizeHitRate } from './hit-rate'
+import { type ImpactSummary, impactSummary } from './impact'
 
 export interface Percentiles {
   samples: number
@@ -86,6 +87,8 @@ export interface MetricsSummary {
   injectionLatency: InjectionLatency[]
   /** Proxies only: fetch-after-inject and search-hit over the window. */
   hitRate: HitRateSummary & { window: MetricsWindow; since: number }
+  /** What memory costs over the window, and the opt-in holdout comparison (src/dashboard/impact.ts). */
+  impact: ImpactSummary
 }
 
 /** Nearest-rank percentile of unsorted values; null for none. */
@@ -183,6 +186,7 @@ export function metricsSummary(db: Database, window: MetricsWindow = DEFAULT_MET
     latency: summarizeLatency(eventStages(db, since), turnLags(db, since), window, since),
     injectionLatency: summarizeInjectionLatency(injectionDurations(db, since)),
     hitRate: { window, since, ...summarizeHitRate(injectedIdsSince(db, since), mcpReadsSince(db, since), relatedServedSince(db, since)) },
+    impact: impactSummary(db, since, window),
   }
 }
 

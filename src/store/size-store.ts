@@ -56,7 +56,7 @@ function dbstatBytes(db: Database): TableBytes[] {
 
 const TEXT_ESTIMATES: readonly (readonly [string, string])[] = [
   ['events', 'sum(length(coalesce(payload, \'\')) + length(redactions))'],
-  ['prompts', 'sum(length(text))'],
+  ['prompts', "sum(length(text) + length(coalesce(reply_text, '')))"],
   ['observations', 'sum(length(title) + length(narrative) + length(facts) + length(files))'],
   ['summaries', "sum(length(coalesce(request, '')) + length(coalesce(learned, '')) + length(coalesce(completed, '')) + length(coalesce(next_steps, '')))"],
   ['context_packs', 'sum(length(body))'],
@@ -82,7 +82,7 @@ export function projectBytes(db: Database, limit: number): ProjectBytes[] {
   return db.query<ProjectBytes, { limit: number }>(
     `SELECT p.key AS projectKey, p.display_name AS displayName,
        coalesce((SELECT sum(length(coalesce(e.payload, ''))) FROM events e JOIN sessions s ON s.id = e.session_id WHERE s.project_key = p.key), 0) AS eventBytes,
-       coalesce((SELECT sum(length(r.text)) FROM prompts r JOIN sessions s ON s.id = r.session_id WHERE s.project_key = p.key), 0) AS promptBytes,
+       coalesce((SELECT sum(length(r.text) + length(coalesce(r.reply_text, ''))) FROM prompts r JOIN sessions s ON s.id = r.session_id WHERE s.project_key = p.key), 0) AS promptBytes,
        coalesce((SELECT sum(length(o.title) + length(o.narrative) + length(o.facts) + length(o.files)) FROM observations o WHERE o.project_key = p.key), 0) AS observationBytes,
        (SELECT count(*) FROM events e JOIN sessions s ON s.id = e.session_id WHERE s.project_key = p.key) AS events,
        (SELECT count(*) FROM observations o WHERE o.project_key = p.key) AS observations

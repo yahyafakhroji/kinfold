@@ -145,7 +145,7 @@ function restoreBlock(deps) {
  */
 export async function renderBackup(_state, _ctx, deps = LIVE) {
   return h('section', { class: 'page', 'aria-labelledby': 'page-title' },
-    h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '05'), h('h1', { id: 'page-title' }, 'Backup'),
+    h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '06'), h('h1', { id: 'page-title' }, 'Backup'),
       h('p', { class: 'lede' }, 'Save the memory before reinstalling or moving machines, and bring it back afterwards.')),
     backupBlock(),
     restoreBlock(deps))

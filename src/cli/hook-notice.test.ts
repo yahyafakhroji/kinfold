@@ -18,6 +18,8 @@ beforeEach(() => {
   mkdirSync(dataDir, { recursive: true })
   writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 4 }))
   writeFileSync(join(dataDir, 'daemon.token'), 'a'.repeat(64))
+  // The recall line has its own tests (hook-recall.test.ts); with it off, these pin the notice alone.
+  writeFileSync(join(dataDir, 'display.json'), '{"showRecall":false}')
   asked = []
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
@@ -47,14 +49,16 @@ test('Claude Code still gets the systemMessage when the pack is empty', async ()
   expect(out).toEqual({ systemMessage: 'Kinfold 0.2.0 is available. Run `kinfold update`.' })
 })
 
-test('Codex and Cursor get the agent line in the block', async () => {
+test('Codex shows the notice to the user, like Claude Code; Cursor, with no user channel, gets the agent line in the block', async () => {
   const codex = JSON.parse((await run('codex', 'session-start', { text: '<kinfold>pack</kinfold>', tokens: 5, updateNotice: NOTICE })) ?? '') as Record<string, any>
-  expect(codex.systemMessage).toBeUndefined()
-  expect(codex.hookSpecificOutput.additionalContext).toBe(`<kinfold>pack</kinfold>\n${AGENT_LINE}`)
+  expect(codex.systemMessage).toBe('Kinfold 0.2.0 is available. Run `kinfold update`.')
+  expect(codex.hookSpecificOutput.additionalContext).toBe('<kinfold>pack</kinfold>')
   const cursor = JSON.parse((await run('cursor', 'session-start', { text: '<kinfold>pack</kinfold>', tokens: 5, updateNotice: NOTICE })) ?? '') as Record<string, string>
   expect(cursor.additional_context).toBe(`<kinfold>pack</kinfold>\n${AGENT_LINE}`)
-  const alone = JSON.parse((await run('codex', 'session-start', { updateNotice: NOTICE })) ?? '') as Record<string, any>
-  expect(alone.hookSpecificOutput.additionalContext).toBe(AGENT_LINE)
+  const alone = JSON.parse((await run('codex', 'session-start', { updateNotice: NOTICE })) ?? '') as Record<string, unknown>
+  expect(alone).toEqual({ systemMessage: 'Kinfold 0.2.0 is available. Run `kinfold update`.' })
+  const cursorAlone = JSON.parse((await run('cursor', 'session-start', { updateNotice: NOTICE })) ?? '') as Record<string, string>
+  expect(cursorAlone.additional_context).toBe(AGENT_LINE)
 })
 
 test('no notice on prompt deltas', async () => {
@@ -69,7 +73,9 @@ test('an update that installed itself reaches the user through Claude Code and t
   const claude = JSON.parse((await run('claude-code', 'session-start', { selfNotice: updated })) ?? '') as Record<string, any>
   expect(claude.systemMessage).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0).')
   const codex = JSON.parse((await run('codex', 'session-start', { selfNotice: updated })) ?? '') as Record<string, any>
-  expect(codex.hookSpecificOutput.additionalContext).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0); you may tell the user.')
+  expect(codex).toEqual({ systemMessage: 'Kinfold updated itself to 0.2.1 (was 0.2.0).' })
+  const cursor = JSON.parse((await run('cursor', 'session-start', { selfNotice: updated })) ?? '') as Record<string, string>
+  expect(cursor.additional_context).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0); you may tell the user.')
 })
 
 test('a notice of a kind this hook does not know is dropped, and the pack still arrives', async () => {

@@ -15,6 +15,11 @@
 //     prompt waits for the slower of the two rather than both in turn.
 //   tool.result and agent.end return nothing, keeping Amp's own result, and
 //     do not wait for the hook; agent.end's message list stays behind.
+//   What the hook says to show the user (its `notify` line: what Kinfold
+//     recalled, or the list at session start) goes to ctx.ui.notify, which Amp
+//     shows as a notification and never adds to the conversation. An Amp
+//     without that function, or one that throws from it, shows nothing and
+//     still gets its context.
 // A hook that fails, times out or prints nothing adds nothing.
 
 import type { EntryCommand } from '../../install/entry'
@@ -35,6 +40,7 @@ const HOOK = ${JSON.stringify([entry.command, ...entry.args])};
 const TIMEOUT_MS = ${HOOK_TIMEOUT_MS};
 const MAX_PENDING = ${MAX_PENDING_PACKS};
 const starts = new Map();
+const NOTHING = { content: null, notify: null };
 
 export const description = 'Kinfold: shared memory across coding agents';
 
@@ -60,12 +66,24 @@ async function send(payload) {
     await child.exited;
     clearTimeout(timer);
     const line = out.trim();
-    if (line === '') return null;
-    const content = JSON.parse(line)?.message?.content;
-    return typeof content === 'string' && content !== '' ? content : null;
+    if (line === '') return NOTHING;
+    const answer = JSON.parse(line);
+    const content = answer?.message?.content;
+    const notify = answer?.notify;
+    return {
+      content: typeof content === 'string' && content !== '' ? content : null,
+      notify: typeof notify === 'string' && notify !== '' ? notify : null,
+    };
   } catch {
-    return null;
+    return NOTHING;
   }
+}
+
+// For the user only: a notification, never part of the conversation.
+function tell(ctx, text) {
+  try {
+    if (text !== null && typeof ctx?.ui?.notify === 'function') ctx.ui.notify(text);
+  } catch {}
 }
 
 const threadOf = (event) => ({ id: event?.thread?.id });
@@ -74,7 +92,10 @@ export default function (amp) {
   amp.on('session.start', (event, ctx) => {
     const id = event?.thread?.id;
     starts.delete(id);
-    starts.set(id, send({ event: 'session.start', thread: threadOf(event), cwd: cwdOf(amp, ctx) }));
+    starts.set(id, send({ event: 'session.start', thread: threadOf(event), cwd: cwdOf(amp, ctx) }).then((answer) => {
+      tell(ctx, answer.notify);
+      return answer.content;
+    }));
     if (starts.size > MAX_PENDING) starts.delete(starts.keys().next().value);
   });
 
@@ -86,7 +107,8 @@ export default function (amp) {
       start ?? null,
       send({ event: 'agent.start', thread: threadOf(event), cwd: cwdOf(amp, ctx), message: event?.message, id: event?.id }),
     ]);
-    const content = [pack, delta].filter((text) => text !== null).join('\\n\\n');
+    tell(ctx, delta.notify);
+    const content = [pack, delta.content].filter((text) => text !== null).join('\\n\\n');
     return content === '' ? undefined : { message: { content, display: false } };
   });
 

@@ -3,6 +3,7 @@
 // pack served leaves an injections row (the audit log and hit-rate source).
 // Reads here are plain SELECTs, so the read-only fallback can share them.
 
+import type { FirstScreen } from '../context/recall-line'
 import type { ContextChannel, HostProfile, PackObservation } from '../context/types'
 import type { Database } from '../sqlite/types'
 import { confirmationsColumn, contradictionKindColumn, hasLinksTable } from './observation-links'
@@ -29,6 +30,12 @@ export interface InjectionRow {
   occurredAt: number
   /** Time to build or match what was served (v6); null or absent when not measured. */
   durationMs?: number | null
+  /** Prompt channel (v12): the session's latest prompt at this moment, or null when none is stored yet; ingest corrects it (stampInjectionPrompts). */
+  promptNumber?: number | null
+  /** Recall was skipped for the impact test (v12); such a row carries no ids. */
+  heldOut?: boolean
+  /** How many of the ids are related memory (v12); they are the last ones. */
+  relatedCount?: number
 }
 
 interface StoredPack {
@@ -119,11 +126,92 @@ export function sessionIdFor(db: Database, host: string, hostSessionId: string):
 
 export function recordInjection(db: Database, injection: InjectionRow): number {
   const row = db.query<{ id: number }, Record<string, string | number | null>>(
-    `INSERT INTO injections (session_id, host, host_session_id, project_key, observation_ids, channel, tokens, occurred_at, duration_ms)
-     VALUES ($sessionId, $host, $hostSessionId, $projectKey, $observationIds, $channel, $tokens, $occurredAt, $durationMs) RETURNING id`,
-  ).get({ ...injection, observationIds: JSON.stringify(injection.observationIds), durationMs: injection.durationMs ?? null })
+    `INSERT INTO injections (session_id, host, host_session_id, project_key, observation_ids, channel, tokens, occurred_at, duration_ms,
+       prompt_number, held_out, related_count)
+     VALUES ($sessionId, $host, $hostSessionId, $projectKey, $observationIds, $channel, $tokens, $occurredAt, $durationMs,
+       $promptNumber, $heldOut, $relatedCount) RETURNING id`,
+  ).get({
+    sessionId: injection.sessionId, host: injection.host, hostSessionId: injection.hostSessionId, projectKey: injection.projectKey,
+    observationIds: JSON.stringify(injection.observationIds), channel: injection.channel, tokens: injection.tokens, occurredAt: injection.occurredAt,
+    durationMs: injection.durationMs ?? null, promptNumber: injection.promptNumber ?? null, heldOut: injection.heldOut === true ? 1 : 0,
+    relatedCount: injection.relatedCount ?? 0,
+  })
   if (row === null) throw new Error('injection insert returned no row')
   return row.id
+}
+
+/** The session's newest prompt at or before `at`; null when none is stored (the hook asks before its prompt is ingested). */
+export function promptNumberAt(db: Database, host: string, hostSessionId: string, at: number): number | null {
+  const row = db.query<{ n: number | null }, { host: string; hostSessionId: string; at: number }>(
+    `SELECT max(p.prompt_number) AS n FROM prompts p JOIN sessions s ON s.id = p.session_id
+     WHERE s.host = $host AND s.host_session_id = $hostSessionId AND p.occurred_at <= $at`,
+  ).get({ host, hostSessionId, at })
+  return row?.n ?? null
+}
+
+export interface PromptStamp {
+  sessionId: number
+  host: string
+  hostSessionId: string
+  promptNumber: number
+  /** The prompt's own event time. */
+  occurredAt: number
+}
+
+/**
+ * Run when a prompt is ingested. The hook asks for recall right after it
+ * spools the prompt, so the injection is often written first, with no prompt
+ * to name or with the one before. Every prompt-time row of the session from
+ * this prompt's time on belongs to it, until a later prompt claims its own.
+ */
+export function stampInjectionPrompts(db: Database, stamp: PromptStamp): number {
+  return db.query(
+    `UPDATE injections SET prompt_number = $promptNumber, session_id = coalesce(session_id, $sessionId)
+     WHERE host = $host AND host_session_id = $hostSessionId AND channel = 'prompt' AND occurred_at >= $occurredAt
+       AND (prompt_number IS NULL OR prompt_number < $promptNumber)`,
+  ).run({ ...stamp }).changes
+}
+
+// --- What the user is shown about an answer: titles and a header for ids it already carries. ---
+
+/** Ids per statement; a pack holds about 80. */
+const TITLE_CHUNK = 200
+
+/** Title by id for the ids that still exist. */
+export function titlesFor(db: Database, ids: readonly number[]): Map<number, string> {
+  const titles = new Map<number, string>()
+  for (let start = 0; start < ids.length; start += TITLE_CHUNK) {
+    const chunk = ids.slice(start, start + TITLE_CHUNK)
+    const rows = db.query<{ id: number; title: string }, number[]>(`SELECT id, title FROM observations WHERE id IN (${chunk.map(() => '?').join(',')})`).all(...chunk)
+    for (const row of rows) titles.set(row.id, row.title)
+  }
+  return titles
+}
+
+export interface FirstScreenQuery {
+  projectKey: string
+  host: string
+  hostSessionId: string
+  /** The pack's ids: rows come from these alone. */
+  ids: readonly number[]
+  rows: number
+}
+
+/** The session-start list's header and the newest `rows` of the pack; null for a project the store has never seen. */
+export function firstScreenFor(db: Database, query: FirstScreenQuery): FirstScreen | null {
+  const project = projectDisplayName(db, query.projectKey)
+  if (project === null) return null
+  const total = db.query<{ n: number }, { projectKey: string }>('SELECT count(*) AS n FROM observations WHERE project_key = $projectKey').get({ projectKey: query.projectKey })?.n ?? 0
+  const last = db.query<{ at: number | null }, { projectKey: string; host: string; hostSessionId: string }>(
+    `SELECT max(last_event_at) AS at FROM sessions
+     WHERE project_key = $projectKey AND NOT (host = $host AND host_session_id = $hostSessionId)`,
+  ).get({ projectKey: query.projectKey, host: query.host, hostSessionId: query.hostSessionId })
+  const ids = query.ids.slice(0, TITLE_CHUNK)
+  const rows = ids.length === 0 ? [] : db.query<{ id: number; title: string; occurredAt: number }, number[]>(
+    `SELECT id, title, occurred_at AS occurredAt FROM observations WHERE id IN (${ids.map(() => '?').join(',')})
+     ORDER BY occurred_at DESC, id DESC LIMIT ${Math.max(0, Math.floor(query.rows))}`,
+  ).all(...ids)
+  return { project, total, lastSessionAt: last?.at ?? null, rows }
 }
 
 // --- Prompt-time deltas. Plain SELECTs, so the read-only fallback shares them. ---
@@ -137,8 +225,13 @@ export interface SessionDeliveries {
 }
 
 export function sessionDeliveries(db: Database, host: string, hostSessionId: string): SessionDeliveries {
+  // A held-out prompt leaves a prompt-channel row with no ids, the only row of that shape (any other
+  // empty answer records nothing). It delivered nothing, so it must not become the moment the session
+  // "first received memory": the delta would then skip what was written before it. Told apart by shape
+  // rather than by held_out, so the read-only fallback can run this on a store from before v12.
   const rows = db.query<{ ids: string; at: number }, { host: string; hostSessionId: string }>(
-    'SELECT observation_ids AS ids, occurred_at AS at FROM injections WHERE host = $host AND host_session_id = $hostSessionId',
+    `SELECT observation_ids AS ids, occurred_at AS at FROM injections
+     WHERE host = $host AND host_session_id = $hostSessionId AND NOT (channel = 'prompt' AND observation_ids = '[]')`,
   ).all({ host, hostSessionId })
   const sentIds = [...new Set(rows.flatMap((row) => parseIds(row.ids)))]
   const firstAt = rows.length === 0 ? null : Math.min(...rows.map((row) => row.at))

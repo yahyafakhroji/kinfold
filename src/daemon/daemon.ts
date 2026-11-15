@@ -53,7 +53,13 @@ import { DEFAULT_OBSERVER_TICK_MS, type ObserverScheduleConfig, type ObserverSch
 import { type DrainScheduler, createDrainScheduler } from './scheduler'
 import { createDashboardAuth } from '../dashboard/auth'
 import { metricsRoute } from '../dashboard/metrics'
-import { contextHandler } from './context-route'
+import { writeDisplayFile } from '../context/display-file'
+import { watchRoute } from '../watch/reads'
+import { freshTurnEnds, recordTurnUsage } from './transcript-usage'
+import { sessionRoute } from './session-routes'
+import { countEmbeddingCall } from '../store/impact-reads'
+import { type DisplaySettings, readDisplaySettings } from '../store/display-settings'
+import { HOLDOUT_HOSTS, contextHandler } from './context-route'
 import { dataHandlers } from './data-routes'
 import { mcpReadHandler } from './mcp-read-route'
 import { memoryHandlers } from './memory-routes'
@@ -147,6 +153,27 @@ interface Vectors {
 const VECTORS_OFF: Support = { ok: false, reason: 'semantic search is not configured in this daemon' }
 
 /**
+ * The same embedder, with each call it makes counted for the Metrics page.
+ * The indexer and the search share it, so one place counts both; a call is
+ * counted when it is made, since one that times out was still sent. A count
+ * that cannot be written never stops an embedding.
+ */
+export function countedEmbedder(db: Database, embedder: Embedder, log: (line: string) => void): Embedder {
+  return {
+    model: embedder.model,
+    dims: embedder.dims,
+    embed: (texts, signal) => {
+      try {
+        countEmbeddingCall(db, texts.length, Date.now())
+      } catch (error: unknown) {
+        log(`embedding call not counted: ${error instanceof Error ? error.name : 'error'}`)
+      }
+      return embedder.embed(texts, signal)
+    },
+  }
+}
+
+/**
  * Loads sqlite-vec, starts the indexer when there is an embedder, and builds the
  * search. Indexing works without the extension. The nearest-vector scan runs in
  * a worker on its own read-only connection, so a slow search never holds the
@@ -155,7 +182,7 @@ const VECTORS_OFF: Support = { ok: false, reason: 'semantic search is not config
 function startVectors(store: Store, dataDir: string, dbKeys: DbKeyStore, options: DaemonVectorOptions | undefined, log: (line: string) => void): Vectors {
   const db = store.db
   const support = options === undefined ? VECTORS_OFF : loadVec0(db, dataDir)
-  const embedder = options?.embedder ?? null
+  const embedder = options?.embedder === undefined || options.embedder === null ? null : countedEmbedder(db, options.embedder, log)
   log(`vectors search=${support.ok ? `on (${support.detail})` : `off (${support.reason})`} embedder=${embedder === null ? 'none' : embedder.model}`)
   const inline = inlineVectorQueries(db)
   // The worker loads the embedder's vectors into memory at start, so the first search after a restart is quick too.
@@ -208,7 +235,7 @@ export interface RunningDaemon {
 }
 
 /** The routes that read or write memory.db; a restore swaps them for the new store's. */
-type CoreRoutes = Pick<ServerDeps, 'schemaVersion' | 'vectorSearch' | 'semanticSearch' | 'onNudge' | 'listSessions' | 'context' | 'retryFailed' | 'observerSettings' | 'data' | 'exclusive' | 'memory' | 'metrics' | 'mcpRead' | 'reads'>
+type CoreRoutes = Pick<ServerDeps, 'schemaVersion' | 'vectorSearch' | 'semanticSearch' | 'onNudge' | 'listSessions' | 'context' | 'retryFailed' | 'observerSettings' | 'data' | 'exclusive' | 'memory' | 'metrics' | 'watch' | 'sessions' | 'mcpRead' | 'reads'>
 
 /** Everything that holds memory.db open. */
 interface Core {
@@ -403,6 +430,17 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       const line = describeDrain(result)
       if (line !== null) log(line)
       if (result.inserted > 0) observer?.tick()
+      // Transcripts are read only while the impact test is on, and after the drain, so a hook's nudge never waits on a file read.
+      if (result.turnEnds.length > 0 && readDisplaySettings(store.db).holdout) {
+        setTimeout(() => {
+          try {
+            const stored = recordTurnUsage(store.db, freshTurnEnds(result.turnEnds, Date.now()), log)
+            if (stored > 0) log(`turn usage stored=${stored}`)
+          } catch (error: unknown) {
+            log(`turn usage failed: ${errorMessage(error)}`)
+          }
+        }, 0)
+      }
     }
     const scheduler = createDrainScheduler(drain, (error) => log(`drain failed: ${errorMessage(error)}`), options.debounceMs)
     drain()
@@ -411,7 +449,20 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     observer = observing?.observer ?? null
     const dataTicks = startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, exclusive: vectors.queries.exclusive, ...options.dataControl })
 
-    const context = contextHandler({ db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, updates: { dataDir, version, envVars, canAutoUpdate } })
+    // The hooks cannot open the store, so they read the display switches from a file this daemon keeps in step.
+    const publishDisplay = (settings: DisplaySettings): void => {
+      try {
+        writeDisplayFile(dataDir, settings)
+      } catch (error: unknown) {
+        log(`display.json not written: ${errorMessage(error)}`)
+      }
+    }
+    publishDisplay(readDisplaySettings(store.db))
+    const context = contextHandler({
+      db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, updates: { dataDir, version, envVars, canAutoUpdate },
+      // Read per prompt, so a change from the dashboard or a restored store applies to the next one.
+      holdout: { on: () => readDisplaySettings(store.db).holdout },
+    })
     const routes: CoreRoutes = {
       schemaVersion: store.schemaVersion,
       vectorSearch: vectors.support.ok ? 'on' : 'off',
@@ -421,10 +472,12 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       context,
       retryFailed: (target) => retryFailed(store.db, target, observer, log),
       observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? []),
-      data: dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log }),
+      data: dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log, holdoutHosts: HOLDOUT_HOSTS, onDisplay: publishDisplay }),
       exclusive: vectors.queries.exclusive,
       memory: memoryHandlers(store.db, log),
       metrics: (window) => metricsRoute(store.db, window),
+      watch: (method, url) => watchRoute(store.db, method, url, Date.now()),
+      sessions: (method, url) => sessionRoute(method, url, store.db, log),
       mcpRead: mcpReadHandler(store.db, log),
       reads: reads.deps,
     }

@@ -12,6 +12,7 @@ import {
   packObservations,
   projectDisplayName,
   readPack,
+  promptNumberAt,
   recordInjection,
   sessionIdFor,
   upsertPack,
@@ -92,9 +93,17 @@ export function prepareContext(db: Database, request: ContextRequest, projectKey
   return request.channel === 'prompt' ? { ...computeDelta(db, request, projectKey, now), rebuilt: false } : preparePack(db, request, projectKey, now)
 }
 
-/** One injections row for a non-empty answer; null (nothing recorded) for an empty one. */
-export function recordServed(db: Database, request: ContextRequest, projectKey: string, served: ContextResult, now: number, durationMs: number | null): number | null {
-  if (served.text === '') return null
+export interface ServedExtras {
+  /** How many of the answer's ids are related memory. */
+  relatedCount?: number
+  /** Recall was held out for the impact test: the row is written though the answer is empty, so the turn can be told apart later. */
+  heldOut?: boolean
+}
+
+/** One injections row for a non-empty answer, or for a held-out prompt; null (nothing recorded) for any other empty one. */
+export function recordServed(db: Database, request: ContextRequest, projectKey: string, served: ContextResult, now: number, durationMs: number | null,
+  extras: ServedExtras = {}): number | null {
+  if (served.text === '' && extras.heldOut !== true) return null
   return recordInjection(db, {
     sessionId: sessionIdFor(db, request.host, request.hostSessionId),
     host: request.host,
@@ -105,6 +114,9 @@ export function recordServed(db: Database, request: ContextRequest, projectKey: 
     tokens: served.tokens,
     occurredAt: now,
     durationMs,
+    promptNumber: request.channel === 'prompt' ? promptNumberAt(db, request.host, request.hostSessionId, now) : null,
+    ...(extras.heldOut === true ? { heldOut: true } : {}),
+    ...(extras.relatedCount !== undefined ? { relatedCount: extras.relatedCount } : {}),
   })
 }
 

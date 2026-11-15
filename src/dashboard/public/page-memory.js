@@ -224,7 +224,7 @@ export async function renderMemory(state, ctx) {
   const rows = result.rows.map((row) => observationItem(row, ctx.now, formatHash(withParams(state, { id: String(row.id) }))))
   const detail = item === null ? null : 'error' in item ? notice(item.error, 'error') : detailView(item, ctx.now, state, ctx.navigate)
   return h('section', { class: 'page', 'aria-labelledby': 'page-title' },
-    h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '02'), h('h1', { id: 'page-title' }, 'Memory')),
+    h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '03'), h('h1', { id: 'page-title' }, 'Memory')),
     state.params.done ? notice(state.params.done, 'ok') : null,
     filterForm(state, facets, ctx.navigate),
     h('div', { class: detail === null ? 'memory-layout' : 'memory-layout has-detail' },

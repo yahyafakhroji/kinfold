@@ -9,6 +9,7 @@ import { isRecord } from '../contract/event'
 import { DEFAULT_PORT } from '../daemon/daemon'
 import { readDaemonEndpoint } from '../daemon/daemon-info'
 import type { ObserverSettingsView } from '../daemon/settings-route'
+import type { DisplayChange } from '../store/display-settings'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import { DAEMON_INFO_FILE } from '../store/data-dir'
 import type { InstallEnv } from './env'
@@ -117,6 +118,21 @@ function authorized(env: InstallEnv): { base: string; token: string } {
   const endpoint = readDaemonEndpoint(env.dataDir)
   if (endpoint === null) throw new Error('daemon.json or daemon.token is missing; the daemon is not running')
   return { base: `http://127.0.0.1:${endpoint.port}`, token: endpoint.token }
+}
+
+/** The display switches a flag named (the recall line, the impact test). Throws with the HTTP status and the daemon's message. */
+export async function putDisplaySettings(env: InstallEnv, change: DisplayChange): Promise<void> {
+  const { base, token } = authorized(env)
+  const response = await env.fetch(`${base}/data/display`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(change),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  })
+  if (response.status === 200) return
+  const body: unknown = await response.json().catch(() => null)
+  const detail = isRecord(body) && typeof body.error === 'string' ? `: ${body.error}` : ''
+  throw new Error(`PUT /data/display answered ${response.status}${detail}`)
 }
 
 /** Throws with the HTTP status (401, 403, 400 ...) and the daemon's field message, never the body we sent. */

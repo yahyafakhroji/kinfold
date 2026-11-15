@@ -7,7 +7,7 @@
 
 import { api } from './api.js'
 import { h, table } from './dom.js'
-import { formatDuration, formatPercent } from './format.js'
+import { formatDuration, formatPercent, formatTime } from './format.js'
 import { formatHash, withParams } from './hash.js'
 
 /** @param {Record<string, number>} classes */
@@ -150,11 +150,88 @@ export function usageBlock(summary) {
     h('p', { class: 'hint' }, 'Related lines served at prompt time, by the distance that let them through the gate, and the share an MCP get_observations call in the project returned within 24 h. The same proxy as above, kept per band so the cutoffs can be checked against use.'))
 }
 
+/** @param {number} n */
+const count = (n) => n.toLocaleString('en-US')
+
+/** @param {number | null} n */
+const countOrDash = (n) => (n === null ? '—' : count(n))
+
+const HOLDOUT_LABELS = { tokens: 'Tokens', outputTokens: 'Output tokens', toolCalls: 'Tool calls', durationMs: 'Time' }
+
+/**
+ * A group's median with the middle half of its turns, and how many turns it is from.
+ * @param {import('../impact').Spread} spread
+ * @param {(value: number) => string} show
+ */
+function spreadCell(spread, show) {
+  const turns = `${count(spread.n)} turns`
+  if (spread.median === null || spread.low === null || spread.high === null) return `—, ${turns}`
+  return `${show(spread.median)} (${show(spread.low)} to ${show(spread.high)}), ${turns}`
+}
+
+/** @param {number} value */
+const plainNumber = (value) => (Number.isInteger(value) ? count(value) : value.toLocaleString('en-US', { maximumFractionDigits: 1 }))
+
+/** @param {import('../impact').ImpactSummary['holdout']} holdout */
+function holdoutPart(holdout) {
+  const agents = holdout.hosts.join(', ')
+  const { comparison } = holdout
+  if (!holdout.on && comparison.recorded.heldOut === 0) {
+    return [h('p', { class: 'hint' }, `Impact test: off. It is opt-in: when on, about 1 prompt in 10 on ${agents} goes without recalled memory, and the agent says so each time, so turns with and without memory can be compared. Turn it on here in Data, or with kinfold install --holdout.`)]
+  }
+  const state = holdout.on
+    ? `Impact test: on for ${agents}. About 1 prompt in 10 goes without recalled memory, and the agent says so each time.`
+    : `Impact test: off. The turns below were recorded while it was on, for ${agents}.`
+  const recorded = `Recorded so far: ${count(comparison.recorded.heldOut)} held out, ${count(comparison.recorded.normal)} with memory.`
+  if (!comparison.enough) {
+    return [
+      h('p', { class: 'hint' }, state),
+      h('p', { class: 'empty' }, `Not enough turns yet: ${count(comparison.heldOut)} held out and ${count(comparison.normal)} with memory, and ${comparison.minSample} of each are needed before the two are compared.`),
+      h('p', { class: 'hint' }, `${recorded} Only projects with turns of both kinds are compared.`),
+    ]
+  }
+  return [
+    h('p', { class: 'hint' }, state),
+    table('Turns with and without memory', ['Per turn', 'Without memory (held out)', 'With memory'], comparison.metrics.map((metric) => {
+      const show = metric.name === 'durationMs' ? formatDuration : plainNumber
+      return [HOLDOUT_LABELS[metric.name] ?? metric.name, spreadCell(metric.heldOut, show), spreadCell(metric.normal, show)]
+    })),
+    h('p', { class: 'hint' }, `Median, with the middle half of turns in brackets. ${recorded} Only projects with turns of both kinds are compared. Tokens are everything the turn's model calls processed, cache reads included, as the agent's own transcript reports them.`),
+    h('p', { class: 'hint' }, 'This is a measurement, not a verdict: turns differ in what was asked, and a gap inside the brackets may be chance.'),
+  ]
+}
+
+/**
+ * What memory costs, measured, and the opt-in comparison of turns with and without it.
+ * @param {import('../metrics').MetricsSummary} summary
+ */
+export function impactBlock(summary) {
+  const impact = summary.impact
+  const since = impact.countingSince === null ? '' : ` Counting since ${formatTime(impact.countingSince).slice(0, 10)}, when this store started recording these numbers.`
+  return h('section', { class: 'block', 'aria-label': 'Impact' },
+    h('h2', { class: 'block-title' }, h('span', { class: 'kicker' }, 'G'), ' Impact'),
+    h('p', { class: 'hint' }, `Last ${impact.window}.${since}`),
+    h('h3', { class: 'block-title' }, 'Added to context'),
+    table('Tokens added to context', ['Agent', 'Sessions', 'Prompts', 'Tokens added', 'Per session', 'Per prompt'], impact.context.map((row) => [
+      h('span', { class: 'host' }, row.host), count(row.sessions), count(row.prompts), count(row.tokens), countOrDash(row.tokensPerSession), countOrDash(row.tokensPerPrompt)]), 'Nothing added to any agent in this window.'),
+    h('p', { class: 'hint' }, 'Tokens Kinfold put in front of the model: the pack at session start and what each prompt recalled. Per prompt counts every prompt, including the ones that recalled nothing. Sizes are the estimate the packs are budgeted with (characters / 4).'),
+    h('h3', { class: 'block-title' }, 'Spent on summaries'),
+    table('Observer tokens', ['Agent', 'Runs', 'Reported usage', 'Input tokens', 'Output tokens'], impact.observer.map((row) => [
+      h('span', { class: 'host' }, row.host), count(row.runs), `${count(row.reported)} of ${count(row.runs)}`,
+      row.reported === 0 ? '—' : count(row.inputTokens), row.reported === 0 ? '—' : count(row.outputTokens)]), 'No observer runs in this window.'),
+    h('p', { class: 'hint' }, 'What the observer model used to write memories, where its provider reports usage. A run that reported none is left out of the sums, not counted as zero.'),
+    h('div', { class: 'figures' },
+      h('p', { class: 'figure' }, h('span', { class: 'figure-label' }, 'embedding calls'), h('span', { class: 'figure-value' }, count(impact.embedding.calls)),
+        h('span', { class: 'hint' }, `${count(impact.embedding.texts)} texts, for the whole store`))),
+    h('h3', { class: 'block-title' }, 'Does memory change a turn?'),
+    ...holdoutPart(impact.holdout))
+}
+
 /** @param {import('./hash.js').HashState} [state] */
 export async function renderMetrics(state = { page: 'metrics', params: {} }) {
   const summary = await api('GET', `/metrics/summary?window=${encodeURIComponent(windowOf(state))}`)
   return h('section', { class: 'page', 'aria-labelledby': 'page-title' },
-    h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '04'), h('h1', { id: 'page-title' }, 'Metrics'),
+    h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '05'), h('h1', { id: 'page-title' }, 'Metrics'),
       h('p', { class: 'lede' }, 'Measured from what the store already records.')),
-    runsBlock(summary), injectionsBlock(summary), lagBlock(summary), latencyBlock(summary, state), usageBlock(summary), queueBlock(summary))
+    runsBlock(summary), injectionsBlock(summary), lagBlock(summary), latencyBlock(summary, state), usageBlock(summary), impactBlock(summary), queueBlock(summary))
 }

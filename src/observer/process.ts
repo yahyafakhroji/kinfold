@@ -13,9 +13,11 @@ import {
   markDone,
   markFailed,
   markProcessing,
+  markSkipped,
   retryableEvents,
   startRun,
 } from '../store/observer-store'
+import { setRunUsage } from '../store/impact-reads'
 import { repeatedPromptNumbers } from '../store/summary-share'
 import { dropEchoes, injectedObservations, linkableIds } from './injected'
 import { parseObserverOutput } from './parse'
@@ -24,7 +26,7 @@ import type { RunnerFactory } from './runners'
 import type { SafetyGate } from './safety-gate'
 import { resolveObserverSettings, settingsFingerprint } from './settings'
 import { toSourceEvent } from './sources'
-import { ObserverError, type ObserverEvent, type ObserverSettings, toObserverError } from './types'
+import { ObserverError, type ObserverEvent, type ObserverSettings, type RunnerUsage, toObserverError } from './types'
 import { type WriteCounts, writeBatchResult } from './write'
 
 export const MAX_BATCH_EVENTS = 50
@@ -79,10 +81,10 @@ function recordFailure(db: Database, runId: number, batch: readonly ObserverEven
   })()
 }
 
-async function observe(deps: ProcessDeps, choice: SettingsChoice, prompt: ReturnType<typeof buildObserverPrompt>): Promise<{ text: string; model: string }> {
+async function observe(deps: ProcessDeps, choice: SettingsChoice, prompt: ReturnType<typeof buildObserverPrompt>): Promise<{ text: string; model: string; usage: RunnerUsage | undefined }> {
   if (!choice.ok) throw choice.error
   const result = await deps.runnerFor(choice.settings).run(prompt)
-  return { text: result.text, model: result.model }
+  return { text: result.text, model: result.model, usage: result.usage }
 }
 
 function describe(session: ObserverSession, choice: SettingsChoice, outcome: BatchOutcome, ms: number): string {
@@ -127,7 +129,11 @@ async function gated(deps: ProcessDeps, sessionId: number, first: PendingBatch, 
   let pending = first
   let choice = chooseSettings(deps.db, pending.session.host)
   for (let pass = 0; pass < MAX_GATE_PASSES; pass += 1) {
-    if (choice.ok && !choice.settings.enabled) return { status: 'disabled' }
+    if (choice.ok && !choice.settings.enabled) {
+      // Off means capture only. What waited is closed here, so switching the observer back on never starts with a batch of old turns.
+      markSkipped(deps.db, sessionId)
+      return { status: 'disabled' }
+    }
     if (!choice.ok || deps.safety === undefined) return { pending, choice }
     const gate = await deps.safety.check(choice.settings)
     if (!gate.ok) return { status: 'blocked', errorClass: gate.errorClass }
@@ -162,6 +168,8 @@ export async function processSessionBatch(deps: ProcessDeps, sessionId: number):
   let outcome: BatchOutcome
   try {
     const reply = await observe(deps, choice, prompt)
+    // Recorded as soon as the model answered: the tokens were spent whether or not its output then parses.
+    setRunUsage(deps.db, runId, reply.usage)
     const parsed = parseObserverOutput(reply.text, prompt.eventIds, linkableIds(known, session.projectKey))
     if (!parsed.ok) throw new ObserverError('bad_output', parsed.error)
     const echo = dropEchoes(parsed.output.observations, known, batch, session.projectKey)

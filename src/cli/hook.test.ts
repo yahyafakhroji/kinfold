@@ -8,7 +8,7 @@ import { listRecentSessions } from '../store/reads'
 import { openStore } from '../store/db'
 import { CONTEXT_BUDGET_MS, fetchContext } from '../context/client'
 import { rebuildProjectPacks } from '../context/packs'
-import { seedObservation } from '../context/test-support'
+import { hideRecallLine, seedObservation } from '../context/test-support'
 import { upsertProject, upsertSession } from '../store/writes'
 import { runHook as runHookInProcess } from './hook'
 import { NUDGE_BUDGET_MS } from './record'
@@ -23,6 +23,8 @@ let daemon: RunningDaemon | null
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'sam-hook-'))
   dataDir = join(root, 'data')
+  // The recall line has its own tests (hook-recall.test.ts); with it off, these pin the context output alone.
+  hideRecallLine(dataDir)
   daemon = null
 })
 afterEach(async () => {

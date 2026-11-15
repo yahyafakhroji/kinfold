@@ -5,6 +5,7 @@
 
 import type { Database } from '../sqlite/types'
 import { backfillSummarySharing } from './summary-migration'
+import { backfillReplies } from './visible-migration'
 
 const V1_CORE = `
 CREATE TABLE projects (
@@ -386,10 +387,65 @@ CREATE INDEX observation_vectors_by_space ON observation_vectors(model, dims, ob
 DROP INDEX IF EXISTS observation_vectors_by_model;
 `
 
+// v12: what the user can see, and what memory costs.
+//   prompts.reply_text: the agent's final reply (turn_end's assistantText,
+//     already redacted), kept with its prompt and under prompts retention.
+//     Replies still in live event payloads are copied by MIGRATION_STEPS[12].
+//   injections: which prompt a prompt-time row belongs to (stamped when the
+//     prompt is ingested, since the hook asks before the drain), whether recall
+//     was held out for the impact test (such a row carries no ids), and how
+//     many of its ids were related memory; the rest are new from other sessions.
+//   turn_usage: one row per turn whose token usage Kinfold could read (Claude
+//     Code's transcript), with held_out, so held-out turns can be compared.
+//   observer_runs tokens: what the runner reported, null when it reported none.
+//   embedding_calls: calls and texts embedded per UTC day, for the whole
+//     store, because the indexer embeds observations of every agent in one batch.
+//   data_settings: the two display switches and the date these numbers start.
+const V12_VISIBLE = `
+ALTER TABLE prompts ADD COLUMN reply_text TEXT;
+
+ALTER TABLE injections ADD COLUMN prompt_number INTEGER;
+ALTER TABLE injections ADD COLUMN held_out INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE injections ADD COLUMN related_count INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX injections_by_session_prompt ON injections(session_id, prompt_number);
+
+ALTER TABLE observer_runs ADD COLUMN input_tokens INTEGER;
+ALTER TABLE observer_runs ADD COLUMN output_tokens INTEGER;
+CREATE INDEX observer_runs_by_time ON observer_runs(started_at);
+
+CREATE TABLE turn_usage (
+  session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  prompt_number INTEGER NOT NULL,
+  host TEXT NOT NULL,
+  project_key TEXT NOT NULL,
+  held_out INTEGER NOT NULL DEFAULT 0,
+  input_tokens INTEGER NOT NULL,
+  output_tokens INTEGER NOT NULL,
+  cache_read_tokens INTEGER NOT NULL,
+  cache_creation_tokens INTEGER NOT NULL,
+  tool_calls INTEGER NOT NULL,
+  duration_ms INTEGER,
+  occurred_at INTEGER NOT NULL,
+  PRIMARY KEY (session_id, prompt_number)
+) WITHOUT ROWID;
+CREATE INDEX turn_usage_by_time ON turn_usage(occurred_at);
+
+CREATE TABLE embedding_calls (
+  day INTEGER PRIMARY KEY,
+  calls INTEGER NOT NULL,
+  texts INTEGER NOT NULL
+);
+
+INSERT INTO data_settings (key, value, updated_at) VALUES
+  ('display.show_recall', 1, 0),
+  ('impact.holdout', 0, 0),
+  ('impact.since', NULL, 0);
+`
+
 /** Index i holds the migration that takes user_version from i to i + 1. */
 export const MIGRATIONS: readonly string[] = [
   V1_CORE + V1_MEMORY + V1_DELIVERY, V2_OBSERVER, V3_CONTEXT, V4_DATA_CONTROL, V5_LINKS, V6_USAGE, V7_SHARED_SUMMARIES, V8_VECTORS, V9_RELATED_SERVED,
-  V10_OBSERVER_SAFETY, V11_VECTOR_SPACE_INDEX,
+  V10_OBSERVER_SAFETY, V11_VECTOR_SPACE_INDEX, V12_VISIBLE,
 ]
 
 /**
@@ -399,6 +455,9 @@ export const MIGRATIONS: readonly string[] = [
 export const MIGRATION_STEPS: Readonly<Record<number, (db: Database) => void>> = {
   7: (db) => {
     backfillSummarySharing(db)
+  },
+  12: (db) => {
+    backfillReplies(db)
   },
 }
 

@@ -5,6 +5,7 @@
 
 import { isAbsolute } from 'node:path'
 import type { EvidenceStrength } from '../evidence'
+import type { FirstScreen, Recalled } from './recall-line'
 
 export const HOST_PROFILES = ['claude-code', 'opencode', 'default'] as const
 export type HostProfile = (typeof HOST_PROFILES)[number]
@@ -29,6 +30,25 @@ export interface ContextRequest {
   channel: ContextChannel
   /** The user's prompt, on the prompt channel only: matched to earlier memory, never stored or logged. */
   prompt?: string
+  /**
+   * Session start only, from an agent whose model takes no pack then: the
+   * answer carries the first-screen header and the update notice, no memory,
+   * and no injection is recorded.
+   */
+  displayOnly?: true
+}
+
+/**
+ * What a hook or plugin shows the user about an answer. None of it reaches the
+ * model: `recalled` and `firstScreen` only name ids the answer already carries.
+ */
+export interface ContextDisplay {
+  /** Prompt channel: a title and part for each id sent. */
+  recalled?: Recalled[]
+  /** Session start and OpenCode's first request: the list's header and newest rows. */
+  firstScreen?: FirstScreen
+  /** Prompt channel: recall was skipped for the impact test, so `text` is empty. */
+  heldOut?: true
 }
 
 /** A newer release than the running one; the channel picks the command the user is told to run. */
@@ -61,6 +81,8 @@ export interface ContextResult {
   tokens: number
   /** Prompt channel: the related-memory block alone, the end of `text`; absent when there is none. */
   relatedText?: string
+  /** For the user's screen only; absent from a daemon that predates it. */
+  display?: ContextDisplay
   /** Session start and OpenCode's first request only: a release this host has not been told about yet. */
   updateNotice?: UpdateNotice
   /**
@@ -123,13 +145,46 @@ export function parseContextRequest(body: unknown): Parsed<ContextRequest> {
     return { ok: false, error: 'hostSessionId must be a non-empty string' }
   }
   if (!CONTEXT_CHANNELS.includes(channel as ContextChannel)) return { ok: false, error: 'channel must be session_start, request or prompt' }
-  const { prompt } = body
-  if (prompt === undefined) return { ok: true, value: { host, cwd, hostSessionId, channel: channel as ContextChannel } }
+  const { prompt, displayOnly } = body
+  if (displayOnly !== undefined && (displayOnly !== true || channel !== 'session_start')) return { ok: false, error: 'displayOnly must be true, on session_start' }
+  const extras: Pick<ContextRequest, 'displayOnly'> = displayOnly === true ? { displayOnly: true } : {}
+  if (prompt === undefined) return { ok: true, value: { host, cwd, hostSessionId, channel: channel as ContextChannel, ...extras } }
   if (channel !== 'prompt') return { ok: false, error: 'prompt is only for the prompt channel' }
   if (typeof prompt !== 'string' || prompt.length > MAX_CONTEXT_PROMPT_CHARS) {
     return { ok: false, error: `prompt must be a string of at most ${MAX_CONTEXT_PROMPT_CHARS} chars` }
   }
-  return { ok: true, value: { host, cwd, hostSessionId, channel: 'prompt', prompt } }
+  return { ok: true, value: { host, cwd, hostSessionId, channel: 'prompt', prompt, ...extras } }
+}
+
+const MAX_DISPLAY_TITLE_CHARS = 2_000
+
+function parseRecalled(value: unknown): Recalled[] | null {
+  if (!Array.isArray(value)) return null
+  const entries: Recalled[] = []
+  for (const entry of value) {
+    if (!isRecord(entry) || !Number.isSafeInteger(entry.id) || typeof entry.title !== 'string' || (entry.part !== 'related' && entry.part !== 'new')) return null
+    entries.push({ id: entry.id as number, title: entry.title.slice(0, MAX_DISPLAY_TITLE_CHARS), part: entry.part })
+  }
+  return entries
+}
+
+function parseFirstScreen(value: unknown): FirstScreen | null {
+  if (!isRecord(value) || typeof value.project !== 'string' || !Number.isSafeInteger(value.total) || !Array.isArray(value.rows)) return null
+  if (value.lastSessionAt !== null && !Number.isSafeInteger(value.lastSessionAt)) return null
+  const rows: FirstScreen['rows'] = []
+  for (const row of value.rows) {
+    if (!isRecord(row) || !Number.isSafeInteger(row.id) || typeof row.title !== 'string' || !Number.isSafeInteger(row.occurredAt)) return null
+    rows.push({ id: row.id as number, title: row.title.slice(0, MAX_DISPLAY_TITLE_CHARS), occurredAt: row.occurredAt as number })
+  }
+  return { project: value.project.slice(0, MAX_DISPLAY_TITLE_CHARS), total: value.total as number, lastSessionAt: value.lastSessionAt as number | null, rows }
+}
+
+/** A malformed part is dropped, never an error: the memory in the answer is still good, and the line falls back to bare ids. */
+function parseDisplay(value: unknown): ContextDisplay | null {
+  if (!isRecord(value)) return null
+  const recalled = value.recalled === undefined ? null : parseRecalled(value.recalled)
+  const firstScreen = value.firstScreen === undefined ? null : parseFirstScreen(value.firstScreen)
+  return { ...(recalled !== null ? { recalled } : {}), ...(firstScreen !== null ? { firstScreen } : {}), ...(value.heldOut === true ? { heldOut: true as const } : {}) }
 }
 
 /** Checks a daemon reply before the hook or plugin trusts it. */
@@ -139,7 +194,8 @@ export function parseContextResult(body: unknown): ContextResult | null {
   if (typeof text !== 'string' || typeof tokens !== 'number' || !Array.isArray(observationIds)) return null
   if (!observationIds.every((id) => Number.isSafeInteger(id))) return null
   const notice = parseAvailableNotice(updateNotice) ?? parseSelfNotice(selfNotice)
-  const result = { text, observationIds: observationIds as number[], tokens, ...(notice !== null ? { updateNotice: notice } : {}) }
+  const display = parseDisplay(body.display)
+  const result = { text, observationIds: observationIds as number[], tokens, ...(display !== null ? { display } : {}), ...(notice !== null ? { updateNotice: notice } : {}) }
   if (relatedText === undefined) return result
   if (typeof relatedText !== 'string' || relatedText === '' || !text.endsWith(relatedText)) return null
   return { ...result, relatedText }

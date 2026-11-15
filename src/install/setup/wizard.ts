@@ -23,15 +23,18 @@ import {
   type ChoiceOptions,
   ChoiceError,
   MAX_CHOICE_ATTEMPTS,
+  OFF_LABEL,
   type ObserverChoice,
   type ObserverFlag,
   chooseObserverWith,
   chooseObservers,
   defaultInput,
   describeInput,
+  flagInput,
   isCliLoginProvider,
   listModelsFor,
   newCredentialSession,
+  offInput,
   pickAnother,
   settingsInputFor,
   showModels,
@@ -242,7 +245,7 @@ async function pickAgents(env: InstallEnv, ask: Prompts | null, state: SetupStat
 
 // ---- observers --------------------------------------------------------------
 
-type ProviderPick = 'current' | ObserverProvider
+type ProviderPick = 'current' | 'off' | ObserverProvider
 
 async function askModel(env: InstallEnv, ask: Prompts, host: InstallHost, provider: ObserverProvider, current: Candidate): Promise<string> {
   if (isCliLoginProvider(provider)) showModels(env, provider, await listModelsFor(env, provider))
@@ -270,13 +273,16 @@ function observerChoices(current: Candidate, missing: MissingClis): { choices: C
     ...(stale === undefined ? {} : { warn: pickAnother(stale) }),
   }
   const pickable = providers.find((choice) => choice.disabled === undefined)
-  return { choices: [first, ...providers], initial: stale === undefined || pickable === undefined ? 'current' : pickable.value }
+  // Last, and only when the agent is not off already: then the first row is that choice.
+  const off: Choice<ProviderPick>[] = current.input.enabled ? [{ value: 'off', label: OFF_LABEL }] : []
+  return { choices: [first, ...providers, ...off], initial: stale === undefined || pickable === undefined ? 'current' : pickable.value }
 }
 
 async function askCandidate(env: InstallEnv, ask: Prompts, host: InstallHost, current: Candidate, missing: MissingClis): Promise<Candidate> {
   const { choices, initial } = observerChoices(current, missing)
   const picked = await ask.select(`Observer for ${host}:`, choices, initial)
   if (picked === 'current') return current
+  if (picked === 'off') return { input: offInput(current.input), origin: 'prompt' }
   return { input: settingsInputFor(host, picked, await askModel(env, ask, host, picked, current)), origin: 'prompt' }
 }
 
@@ -286,7 +292,7 @@ async function observerFor(env: InstallEnv, ask: Prompts, host: InstallHost, fla
   const flag = flags.observers.find((entry) => entry.host === host)
   const session = newCredentialSession()
   for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
-    const candidate: Candidate = attempt === 0 && flag !== undefined ? { input: settingsInputFor(host, flag.provider, flag.model), origin: 'flag' } : await askCandidate(env, ask, host, current, await clis())
+    const candidate: Candidate = attempt === 0 && flag !== undefined ? { input: flagInput(host, flag, row), origin: 'flag' } : await askCandidate(env, ask, host, current, await clis())
     const result = await chooseObserverWith(env, host, candidate, choice, session)
     if (!('failed' in result)) return result
   }

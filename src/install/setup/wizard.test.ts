@@ -611,6 +611,21 @@ posixOnly('POSIX paths')('a block already in the startup file does not stop the 
   expect(term.output()).toContain('Add kinfold to your PATH?')
 })
 
+// ---- off: capture only --------------------------------------------------------
+
+test('the observer question ends with off, and picking it saves the agent as capture only with no key and no check', async () => {
+  // Agents, then down from the current row past the two providers this machine can run (the cursor skips the others) to "off".
+  const { w, term } = setup([ENTER, ENTER, DOWN, DOWN, DOWN, ENTER, ENTER, ENTER, ENTER, ENTER], { claudeVersion: '2.0.0' })
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)
+  const plain = term.output().replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '')
+  expect(plain).toContain('off (capture only, no summaries)')
+  expect(answers.observers.map((choice) => choice.input)).toEqual([{ host: 'claude-code', provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: false }])
+  expect(answers.observers[0]).toMatchObject({ origin: 'prompt', check: 'not run (observer off)', credential: null })
+  // No model was called to test a choice that runs none.
+  expect(w.commands.filter((command) => command.argv[0] === 'claude' && command.argv[1] !== '--version')).toEqual([])
+})
+
 // ---- the observer question follows what is installed -------------------------
 
 /** The rows of the last observer question drawn, without colour. */

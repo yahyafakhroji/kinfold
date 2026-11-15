@@ -25,7 +25,7 @@ interface TableSpec {
 
 export const SCAN_SPECS: Readonly<Record<ScanTable, TableSpec>> = {
   events: { id: 'event_id', key: 'event_id', columns: ['payload'] },
-  prompts: { id: 'CAST(id AS TEXT)', key: 'id', columns: ['text'] },
+  prompts: { id: 'CAST(id AS TEXT)', key: 'id', columns: ['text', 'reply_text'] },
   observations: { id: 'CAST(id AS TEXT)', key: 'id', columns: ['title', 'narrative', 'facts', 'files'] },
   summaries: { id: 'CAST(id AS TEXT)', key: 'id', columns: ['request', 'learned', 'completed', 'next_steps'] },
 }

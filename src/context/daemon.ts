@@ -21,6 +21,8 @@ export type FetchFn = (url: string, init: RequestInit) => Promise<Response>
 export interface DaemonMiss {
   reason: string
   answered: boolean
+  /** No daemon is listening (no endpoint file, or the connection was refused), as opposed to one that was too slow or refused the request. */
+  down: boolean
 }
 
 export interface DaemonContextOptions {
@@ -32,7 +34,7 @@ export interface DaemonContextOptions {
 
 export async function askDaemon(dataDir: string, request: ContextRequest, timeoutMs: number, fetchFn: FetchFn): Promise<ContextResult | DaemonMiss> {
   const endpoint = readDaemonEndpoint(dataDir)
-  if (endpoint === null) return { reason: 'daemon not running', answered: false }
+  if (endpoint === null) return { reason: 'daemon not running', answered: false, down: true }
   try {
     const response = await fetchFn(`http://127.0.0.1:${endpoint.port}/context`, {
       method: 'POST',
@@ -40,10 +42,12 @@ export async function askDaemon(dataDir: string, request: ContextRequest, timeou
       body: JSON.stringify(request),
       signal: AbortSignal.timeout(timeoutMs),
     })
-    if (response.status !== 200) return { reason: `daemon answered ${response.status}`, answered: true }
-    return parseContextResult(await response.json()) ?? { reason: 'daemon reply malformed', answered: true }
+    if (response.status !== 200) return { reason: `daemon answered ${response.status}`, answered: true, down: false }
+    return parseContextResult(await response.json()) ?? { reason: 'daemon reply malformed', answered: true, down: false }
   } catch (error: unknown) {
-    return { reason: `daemon unreachable: ${error instanceof Error ? error.name : 'unknown error'}`, answered: false }
+    const name = error instanceof Error ? error.name : 'unknown error'
+    // A timeout means something is listening and was slow; any other failure to connect means nothing is.
+    return { reason: `daemon unreachable: ${name}`, answered: false, down: name !== 'TimeoutError' && name !== 'AbortError' }
   }
 }
 

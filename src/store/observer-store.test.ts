@@ -35,7 +35,7 @@ test('migrations from an existing v1 database keep its rows and add the observer
     ])
     expect(store.db.query('SELECT host FROM sessions').all()).toEqual([{ host: 'claude-code' }])
     const columns = store.db.query("SELECT name FROM pragma_table_info('observer_runs')").all().map((row) => (row as { name: string }).name)
-    expect(columns).toEqual(['id', 'session_id', 'host', 'provider', 'model', 'status', 'error', 'event_count', 'started_at', 'finished_at'])
+    expect(columns).toEqual(['id', 'session_id', 'host', 'provider', 'model', 'status', 'error', 'event_count', 'started_at', 'finished_at', 'input_tokens', 'output_tokens'])
   } finally {
     store.db.close()
   }
