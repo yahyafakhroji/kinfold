@@ -6,7 +6,7 @@ import { type RunnerDeps, createCliRunner, runnerFactory } from '../observer/run
 import { createSafetyGate } from '../observer/safety-gate'
 import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
 import type { CredentialProvider } from '../secrets/credentials'
-import { type KeyStoreDeps, credentialProviderOf } from '../secrets/key-store'
+import { type KeyStore, type KeyStoreDeps, credentialProviderOf } from '../secrets/key-store'
 import { processKeyStoreDeps, resolveKeyStore } from '../secrets/key-store-record'
 import { type DbKeyStore, dbKeyStoreOf } from '../sqlite/keys'
 import { resolveDataDir } from '../store/data-dir'
@@ -43,9 +43,9 @@ function embedderFrom(credentials: CredentialProvider): Embedder | null {
  * names. Throws the record's fixed message when the record cannot be trusted,
  * so the daemon stops before it opens memory.db or makes any key.
  */
-export function daemonSecrets(dataDir: string, deps: KeyStoreDeps): { credentials: CredentialProvider; dbKeys: DbKeyStore } {
+export function daemonSecrets(dataDir: string, deps: KeyStoreDeps): { credentials: CredentialProvider; dbKeys: DbKeyStore; keyStore: KeyStore | null } {
   const store = resolveKeyStore(dataDir, deps)
-  return { credentials: credentialProviderOf(store), dbKeys: dbKeyStoreOf(store) }
+  return { credentials: credentialProviderOf(store), dbKeys: dbKeyStoreOf(store), keyStore: store }
 }
 
 const LOG_FILE_MODE = 0o600
@@ -142,7 +142,7 @@ export async function runDaemon(argv: readonly string[]): Promise<void> {
     const dataDir = resolveDataDir()
     // Before anything spawns an observer: the scheduled task gave this process the registry PATH only.
     applyServicePath(dataDir, process.env, currentPlatform().os)
-    const { credentials, dbKeys } = daemonSecrets(dataDir, processKeyStoreDeps(dataDir))
+    const { credentials, dbKeys, keyStore } = daemonSecrets(dataDir, processKeyStoreDeps(dataDir))
     const runnerDeps: RunnerDeps = { dataDir, credentials }
     daemon = startDaemon({
       dataDir,
@@ -151,6 +151,7 @@ export async function runDaemon(argv: readonly string[]): Promise<void> {
       log: (line) => sink(logLine(line)),
       keychain: credentials,
       dbKeys,
+      keyStore,
       vectors: { embedder: embedderFrom(credentials) },
       observer: {
         runnerFor: runnerFactory(runnerDeps),

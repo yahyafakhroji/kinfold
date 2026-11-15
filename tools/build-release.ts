@@ -69,7 +69,7 @@ export function releasePaths(root: string): ReleasePaths {
   return {
     root,
     entry: join(root, 'src', 'cli', 'kinfold.ts'),
-    workers: [join(root, 'src', 'vectors', 'search-worker.ts')],
+    workers: [join(root, 'src', 'vectors', 'search-worker.ts'), join(root, 'src', 'backup', 'snapshot-worker.ts')],
     generator: join(root, 'tools', 'gen-embedded.ts'),
     generated: join(root, 'src', 'runtime', 'embedded.generated.ts'),
     versionFile: join(root, 'src', 'version.ts'),

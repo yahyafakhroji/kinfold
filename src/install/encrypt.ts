@@ -1,4 +1,5 @@
 // `kinfold encrypt | decrypt | rekey | key show-recovery | key recover | key resume`
+// (`key resume` also finishes or undoes a `kinfold restore`: src/backup/restore.ts).
 // The database part is src/sqlite/convert.ts; this file
 // orders the rest so no step can strand the store without its key:
 //   - a new key goes into the key store, and is read back, before the store
@@ -19,6 +20,9 @@
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { BackupError } from '../backup/archive'
+import { type RestoreJournal, readRestoreJournal } from '../backup/journal'
+import { resumeRestore } from '../backup/restore'
 import { DB_KEY_NEXT_REF, DB_KEY_REF } from '../secrets/credentials'
 import type { KeyStore } from '../secrets/key-store'
 import { createKeychainStore } from '../secrets/stores/keychain'
@@ -99,7 +103,7 @@ interface Daemon {
   restart: boolean
 }
 
-async function startDaemon(ctx: Context, daemon: Daemon): Promise<void> {
+async function startDaemon(ctx: Pick<Context, 'env' | 'log'>, daemon: Daemon): Promise<void> {
   const service = managedServiceOf(ctx.env)
   if (!daemon.restart || service === null) {
     ctx.log('daemon: it was not running as a service; start it when you are ready')
@@ -257,8 +261,17 @@ async function converting(ctx: Context, op: Op, from: string | null, to: string 
   }
 }
 
+/** A restore's journal names a live run unless that run gave up and left the marker for resume. */
+function restoreRunning(journal: RestoreJournal): boolean {
+  return journal.abandoned !== true && journal.pid !== process.pid && isProcessAlive(journal.pid)
+}
+
 function requireNoRun(ctx: Context): void {
   if (!existsSync(maintenancePath(ctx.path))) return
+  const restore = readRestoreJournal(ctx.path)
+  if (restore !== null) {
+    throw new Refusal(restoreRunning(restore) ? `a kinfold restore is running (pid ${restore.pid}); wait for it` : 'a kinfold restore was cut short; run kinfold key resume first')
+  }
   const journal = readJournal(ctx.path)
   if (journal !== null && isProcessAlive(journal.pid) && journal.pid !== process.pid) throw new Refusal(`a kinfold ${journal.op} is running (pid ${journal.pid}); wait for it`)
   throw new Refusal(`a kinfold ${journal?.op ?? 'encrypt, decrypt or rekey'} was cut short; run kinfold key resume first`)
@@ -411,7 +424,7 @@ async function resume(ctx: Context): Promise<void> {
   const marker = maintenancePath(ctx.path)
   const backup = foundBackupPath(ctx.path)
   if (!existsSync(marker) && !existsSync(backup)) {
-    ctx.log('nothing to resume: no kinfold encrypt, decrypt or rekey was cut short')
+    ctx.log('nothing to resume: no kinfold encrypt, decrypt, rekey or restore was cut short')
     return
   }
   const journal = readJournal(ctx.path)
@@ -449,6 +462,17 @@ async function resume(ctx: Context): Promise<void> {
   if (service !== null && service.isConfigured() && !(await service.isRunning())) await startDaemon(ctx, { restart: true })
 }
 
+/**
+ * `kinfold key resume` when the marker is a restore's. It needs no key store
+ * of its own: a plaintext backup restores where there is none.
+ */
+async function resumeRestoreRun(env: InstallEnv, journal: RestoreJournal): Promise<void> {
+  if (restoreRunning(journal)) throw new Refusal(`a kinfold restore is still running (pid ${journal.pid}); wait for it`)
+  resumeRestore({ dataDir: env.dataDir, keyStore: keyStoreOf(env), log: env.out })
+  const service = managedServiceOf(env)
+  if (service !== null && service.isConfigured() && !(await service.isRunning())) await startDaemon({ env, log: env.out }, { restart: true })
+}
+
 const RUN: Record<KeyCommand, (ctx: Context) => Promise<void>> = {
   encrypt,
   decrypt,
@@ -460,10 +484,12 @@ const RUN: Record<KeyCommand, (ctx: Context) => Promise<void>> = {
 
 export async function runKeyCommand(env: InstallEnv, command: KeyCommand): Promise<number> {
   try {
-    await RUN[command](context(env))
+    const restore = command === 'resume' ? readRestoreJournal(join(env.dataDir, DB_FILE)) : null
+    if (restore !== null) await resumeRestoreRun(env, restore)
+    else await RUN[command](context(env))
     return EXIT_OK
   } catch (error: unknown) {
-    env.out(error instanceof Refusal || error instanceof ConvertError ? `kinfold ${command}: ${error.message}` : `kinfold ${command}: failed (${errorMessage(error)})`)
+    env.out(error instanceof Refusal || error instanceof ConvertError || error instanceof BackupError ? `kinfold ${command}: ${error.message}` : `kinfold ${command}: failed (${errorMessage(error)})`)
     return EXIT_FAILED
   }
 }
