@@ -1,3 +1,5 @@
+import { fakeTerminal } from '../install/prompt/fake-terminal'
+import { runFramed } from '../install/prompt/frame'
 import { afterEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, fstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -12,7 +14,7 @@ import { LATEST_RELEASE_URL } from './check'
 import { UPDATE_LOCK_FILE, acquireUpdateLock, updateLockHolder } from './lock'
 import { writeUpdateState } from './state'
 import { QUIET_MS } from './auto'
-import { AUTO_INSTALL_TIMEOUT_MS, AUTO_LOG_KEEP_BYTES, AUTO_LOG_MAX_BYTES, QUIET_WAIT_CAP_MS, programUrl, runUpdate } from './update'
+import { AUTO_INSTALL_TIMEOUT_MS, AUTO_LOG_KEEP_BYTES, AUTO_LOG_MAX_BYTES, QUIET_WAIT_CAP_MS, programUrl, runUpdate , captureProgram } from './update'
 import { posixOnly } from '../../test/platform-guards'
 
 const ARCH = 'arm64'
@@ -643,4 +645,55 @@ test('a manual update never waits for quiet: the user asked for it now', async (
     throw new Error('a manual update must not ask')
   }
   expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: ok, quietForMs })).toBe(0)
+})
+
+// ---- on a terminal -------------------------------------------------------------
+
+const drawnLines = (term: ReturnType<typeof fakeTerminal>): string[] =>
+  term.output().split('\n').map((line) => line.slice(line.lastIndexOf('\r') + 1).replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').trimEnd()).filter((line) => line !== '')
+
+test('on a terminal update shows a spinner through the check, the download and the install, and ends on the result', async () => {
+  const { w } = updateWorld()
+  const term = fakeTerminal([])
+  const code = await runFramed({ ...w.env, terminal: term }, 'update', (env) => runUpdate(env, { dryRun: false }, { version: '0.1.0', runProgram: async () => 0 }))
+  expect(code).toBe(0)
+  expect(w.out).toEqual([])
+  expect(term.output()).toContain('looking for a newer release')
+  expect(term.output()).toContain('downloading Kinfold 0.2.0')
+  expect(term.output()).toContain('installing Kinfold 0.2.0')
+  expect(drawnLines(term).slice(-2)).toEqual(['o  kinfold updated to 0.2.0', 'Done.'])
+})
+
+test('on a terminal an up-to-date program says so as the result', async () => {
+  const { w } = updateWorld({ tag: 'v0.1.0' })
+  const term = fakeTerminal([])
+  expect(await runFramed({ ...w.env, terminal: term }, 'update', (env) => runUpdate(env, { dryRun: false }, { version: '0.1.0', runProgram: noRun }))).toBe(0)
+  expect(drawnLines(term).slice(-2)).toEqual(['o  kinfold is up to date (0.1.0)', 'Done.'])
+})
+
+test('on a terminal a failed install of the new program ends the spinner as a failure', async () => {
+  const { w, binPath } = updateWorld()
+  const term = fakeTerminal([])
+  expect(await runFramed({ ...w.env, terminal: term }, 'update', (env) => runUpdate(env, { dryRun: false }, { version: '0.1.0', runProgram: async () => 3 }))).toBe(1)
+  expect(drawnLines(term).slice(-2)).toEqual([`x  kinfold update: the new program's install stopped (exit 3); ${binPath.replace(w.home, '~')} is still 0.1.0; the service is running`, 'kinfold update did not finish.'])
+})
+
+posixOnly('sh scripts')('on a terminal the default runner hides the new install\'s output and shows it above the failure when it fails', async () => {
+  // The "new program" is a script that prints an install's lines and fails, as a broken install --yes would.
+  const program = "#!/bin/sh\necho 'applying 2 actions'\necho '  2. start  [failed]'\nexit 3\n"
+  const { w, binPath } = updateWorld({ program: () => new Response(program), sums: `${sha(program)}  ${ASSET}\n` })
+  const term = fakeTerminal([])
+  const code = await runFramed({ ...w.env, terminal: term }, 'update', (framed) => runUpdate(framed, { dryRun: false }, { version: '0.1.0' }))
+  expect(code).toBe(1)
+  const lines = drawnLines(term)
+  expect(lines).toContain('|  applying 2 actions')
+  expect(lines).toContain('|    2. start  [failed]')
+  expect(lines.at(-2)).toBe(`x  kinfold update: the new program's install stopped (exit 3); ${binPath.replace(w.home, '~')} is still 0.1.0; the service is running`)
+})
+
+test("the new program's own output is kept off a terminal run and handed back for a failure", async () => {
+  const script = join(world?.root ?? updateWorld().w.root, 'child.ts')
+  writeFileSync(script, "console.log('applying 2 actions'); console.error('step 2 failed'); process.exit(3)\n")
+  const result = await captureProgram(process.execPath, [script], { PATH: process.env.PATH ?? '' })
+  expect(result).toEqual({ code: 3, lines: ['applying 2 actions', 'step 2 failed'] })
 })

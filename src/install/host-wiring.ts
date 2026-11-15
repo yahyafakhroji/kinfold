@@ -16,7 +16,7 @@ import { normalizeVersion, parseHostVersions, serializeHostVersions, statMtime, 
 import { type EmbeddedAssets, embeddedAssets } from '../runtime/embedded'
 import { DATA_FILE_MODE } from '../store/data-dir'
 import type { HostDetection } from './detect'
-import { type InstallEnv, codexHomeProblem, errorMessage, installPaths } from './env'
+import { type InstallEnv, codexHomeProblem, errorMessage, installPaths , noticeOf } from './env'
 import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import type { WiringState } from './claude-hooks'
 import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, type CommandHookHost, type CommandHookSpec, inspectHostHooks, mergeHostHooks, removeHostHooks } from './host-hooks'
@@ -54,7 +54,7 @@ export const opencodeWiringLine = (env: InstallEnv): string => pluginFileLine(en
 export function hostHookInstallActions(env: InstallEnv, host: CommandHookHost): Action[] {
   const problem = host === 'codex' ? codexHomeProblem(env) : null
   if (problem !== null) {
-    env.out(`codex: ${problem}; Codex will not start with it either, so its hooks were not wired. Fix or unset CODEX_HOME and rerun`)
+    noticeOf(env)(`codex: ${problem}; Codex will not start with it either, so its hooks were not wired. Fix or unset CODEX_HOME and rerun`)
     return []
   }
   const { dir, file: path } = hostFiles(env, host)
@@ -71,7 +71,8 @@ export function hostHookInstallActions(env: InstallEnv, host: CommandHookHost): 
     merge.replaced.length > 0 ? `replace Kinfold hooks for ${merge.replaced.join(', ')}` : '',
     'every other key and hook kept',
   ].filter((part) => part !== '')
-  if (host === 'codex') env.out(CODEX_TRUST_NOTE)
+  // The person has to do this in Codex, or it skips the hooks: it must not sit behind the progress bar.
+  if (host === 'codex') noticeOf(env)(CODEX_TRUST_NOTE)
   return [
     ...(existsSync(dir) ? [] : [{ kind: 'mkdir', path: dir, mode: DIR_MODE } as const]),
     ...(backup !== null ? [{ kind: 'backup', from: path, to: backup } as const] : []),

@@ -58,6 +58,8 @@ export interface GlobalArgs {
   /** Set by `--data-dir`; wins over KINFOLD_DATA_DIR and SAM_DATA_DIR. */
   dataDir: string | null
   version: boolean
+  /** Set by `--plain`: print lines, as a script reads them, even on a terminal. */
+  plain: boolean
   /** The command and its arguments, with the global flags removed. */
   argv: string[]
 }
@@ -70,11 +72,16 @@ export interface GlobalArgs {
 export function parseGlobalArgs(argv: readonly string[]): Parsed<GlobalArgs> {
   let dataDir: string | null = null
   let version = false
+  let plain = false
   const rest: string[] = []
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] ?? ''
     if (arg === '--version') {
       version = true
+      continue
+    }
+    if (arg === '--plain') {
+      plain = true
       continue
     }
     if (arg === '--data-dir' || arg.startsWith('--data-dir=')) {
@@ -89,7 +96,7 @@ export function parseGlobalArgs(argv: readonly string[]): Parsed<GlobalArgs> {
     }
     rest.push(arg)
   }
-  return { ok: true, value: { dataDir, version, argv: rest } }
+  return { ok: true, value: { dataDir, version, plain, argv: rest } }
 }
 
 /**
@@ -123,7 +130,10 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     return 0
   }
   const base = env ?? (await systemEnv(args, global.value.dataDir))
-  const effective = global.value.dataDir === null ? base : envForDataDir(base, global.value.dataDir)
+  const located = global.value.dataDir === null ? base : envForDataDir(base, global.value.dataDir)
+  // --plain is the terminal taken away: every command then prints what it prints into a pipe.
+  const effective = global.value.plain ? { ...located, terminal: null } : located
+  const { runFramed } = await import('../install/prompt/frame')
   const { parseArgs, parseBackupArgs, parseDashboardArgs, parseDataArgs, parseKeyArgs } = await import('../install/args')
   const dashboard = parseDashboardArgs(args)
   if (dashboard !== null) {
@@ -132,7 +142,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       return EXIT_USAGE
     }
     const { runDashboard } = await import('../dashboard/cli')
-    return runDashboard(effective, dashboard.value)
+    return runFramed(effective, 'dashboard', (env) => runDashboard(env, dashboard.value))
   }
   const key = parseKeyArgs(args)
   if (key !== null) {
@@ -141,7 +151,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       return EXIT_USAGE
     }
     const { runKeyCommand } = await import('../install/encrypt')
-    return runKeyCommand(effective, key.value.command)
+    return runFramed(effective, key.value.command === 'encrypt' || key.value.command === 'decrypt' || key.value.command === 'rekey' ? key.value.command : `key ${key.value.command}`, (env) => runKeyCommand(env, key.value.command))
   }
   const backup = parseBackupArgs(args)
   if (backup !== null) {
@@ -150,7 +160,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       return EXIT_USAGE
     }
     const { runBackupCommand } = await import('../install/backup-cli')
-    return runBackupCommand(effective, backup.value)
+    return runFramed(effective, backup.value.command, (env) => runBackupCommand(env, backup.value))
   }
   const data = parseDataArgs(args)
   if (data !== null) {
@@ -159,7 +169,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       return EXIT_USAGE
     }
     const { runDataCommand } = await import('../data-control/cli')
-    return runDataCommand(effective, data.value)
+    return runFramed(effective, data.value.command, (env) => runDataCommand(env, data.value))
   }
   const parsed = parseArgs(args)
   if (!parsed.ok) {
@@ -169,15 +179,15 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
   const installArgs = parsed.value
   if (installArgs.command === 'status') {
     const { status } = await import('../install/status')
-    return status(effective)
+    return runFramed(effective, 'status', (env) => status(env))
   }
   if (installArgs.command === 'update') {
     const { runUpdate } = await import('../update/update')
-    return runUpdate(effective, { dryRun: installArgs.dryRun, auto: installArgs.auto })
+    return runFramed(effective, 'update', (env) => runUpdate(env, { dryRun: installArgs.dryRun, auto: installArgs.auto }))
   }
   if (installArgs.command === 'uninstall') {
     const { uninstall } = await import('../install/uninstall')
-    return uninstall(effective, { dryRun: installArgs.dryRun, removeCredentials: installArgs.removeCredentials, removeHmacKeys: installArgs.removeHmacKeys })
+    return uninstall(effective, { dryRun: installArgs.dryRun, removeCredentials: installArgs.removeCredentials, removeHmacKeys: installArgs.removeHmacKeys, verbose: installArgs.verbose })
   }
   const { install } = await import('../install/install')
   try {
@@ -196,6 +206,8 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       noUpdateCheck: installArgs.noUpdateCheck,
       noAutoUpdate: installArgs.noAutoUpdate,
       autoUpdate: installArgs.autoUpdate,
+      path: installArgs.path,
+      verbose: installArgs.verbose,
     })
   } catch (error: unknown) {
     // Ctrl-C or a closed stdin at a question; install has said so and written nothing.

@@ -45,6 +45,12 @@ export interface UpdateNotice {
   version: string
   /** `updated` only: the version that was running before. */
   previous?: string
+  /**
+   * `updated` only, on an install from before `kinfold` was put on PATH: the
+   * installed program to run with `install`, which is where that is offered.
+   * An update never adds it on its own.
+   */
+  addCommand?: string
   channel: (typeof NOTICE_CHANNELS)[number]
 }
 
@@ -154,8 +160,13 @@ function parseSelfNotice(value: unknown): UpdateNotice | null {
   const known = NOTICE_CHANNELS.find((name) => name === channel)
   if (!isPrintableVersion(version) || known === undefined) return null
   if (kind === 'auto-on') return { kind, version, channel: known }
-  if (kind === 'updated' && isPrintableVersion(previous)) return { kind, version, previous, channel: known }
+  if (kind === 'updated' && isPrintableVersion(previous)) return { kind, version, previous, channel: known, ...(isPlainPath(value.addCommand) ? { addCommand: value.addCommand } : {}) }
   return null
+}
+
+/** A path and nothing else: the text is shown to a person and handed to an agent, so no quote, backtick, `$` or line break passes. */
+function isPlainPath(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9 _.~%:\\/-]{1,300}$/.test(value)
 }
 
 function isPrintableVersion(value: unknown): value is string {

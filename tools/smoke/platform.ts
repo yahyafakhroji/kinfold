@@ -53,6 +53,10 @@ export interface SmokePlatform {
   writeObserverShim?(world: SmokeWorld, realClaude: string | null): Promise<void>
   /** Lines status must print after install, beyond the checks every OS shares, as text or a pattern; omit for none. */
   statusLines?(world: SmokeWorld): (string | RegExp)[]
+  /** After install: `kinfold --version` as a terminal opened from now on runs it. The driver checks it prints this build's version. Omit: not checked. */
+  commandInNewShell?(world: SmokeWorld): Promise<SmokeResult>
+  /** After uninstall: what is left of the kinfold command (the link, a PATH block, a PATH entry), one line each. Omit: not checked. */
+  commandLeftovers?(world: SmokeWorld): Promise<string[]> | string[]
 }
 
 const PLATFORM_NAME = /^[a-z0-9]+$/

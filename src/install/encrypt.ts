@@ -38,6 +38,7 @@ import type { OsName } from '../platform/platform'
 import { EXIT_FAILED, EXIT_OK } from './install'
 import { capitalized, keyStoreOf } from './key-store-choice'
 import { HEALTH_WAIT_MS } from './plan'
+import { PromptCancelled } from './prompt/prompts'
 import { confirmRecoveryCode, recoverySinkFromEnv } from './recovery-confirm'
 import { managedServiceOf } from './service/control'
 
@@ -323,9 +324,23 @@ async function encrypt(ctx: Context): Promise<void> {
   await encryptingWith(ctx, key)
 }
 
+/** On a terminal a conversion runs under a spinner, which ends on the line that says how it went. */
+async function underSpinner(ctx: Context, label: string, run: () => Promise<void>): Promise<void> {
+  const busy = ctx.env.ui?.busy(label)
+  try {
+    await run()
+    busy?.done()
+  } catch (error: unknown) {
+    busy?.fail()
+    throw error
+  }
+}
+
 async function encryptingWith(ctx: Context, key: string): Promise<void> {
-  await converting(ctx, 'encrypt', null, key, () => storeKey(ctx, DB_KEY_REF, key))
-  ctx.log('memory.db is encrypted.')
+  await underSpinner(ctx, 'encrypting memory.db', async () => {
+    await converting(ctx, 'encrypt', null, key, () => storeKey(ctx, DB_KEY_REF, key))
+    ctx.log('memory.db is encrypted.')
+  })
 }
 
 export function encryptKeyExists(store: Pick<KeyStore, 'place'>): string {
@@ -363,8 +378,10 @@ export async function decryptConfirmed(env: InstallEnv): Promise<void> {
 }
 
 async function decryptingWith(ctx: Context, key: string): Promise<void> {
-  await converting(ctx, 'decrypt', key, null, () => {})
-  ctx.log('memory.db is plaintext.')
+  await underSpinner(ctx, 'decrypting memory.db', async () => {
+    await converting(ctx, 'decrypt', key, null, () => {})
+    ctx.log('memory.db is plaintext.')
+  })
 }
 
 async function rekey(ctx: Context): Promise<void> {
@@ -374,8 +391,10 @@ async function rekey(ctx: Context): Promise<void> {
   const key = newDbKey()
   ctx.log('kinfold rekey gives memory.db a new key. The old key and the old recovery code stop working.')
   if (!(await confirmCode(ctx, encodeRecoveryCode(key)))) throw new Refusal('those were not the last two groups; nothing changed')
-  await converting(ctx, 'rekey', old, key, () => storeKey(ctx, DB_KEY_NEXT_REF, key))
-  ctx.log('memory.db has a new key.')
+  await underSpinner(ctx, 'giving memory.db a new key', async () => {
+    await converting(ctx, 'rekey', old, key, () => storeKey(ctx, DB_KEY_NEXT_REF, key))
+    ctx.log('memory.db has a new key.')
+  })
 }
 
 async function decrypt(ctx: Context): Promise<void> {
@@ -489,7 +508,9 @@ export async function runKeyCommand(env: InstallEnv, command: KeyCommand): Promi
     else await RUN[command](context(env))
     return EXIT_OK
   } catch (error: unknown) {
-    env.out(error instanceof Refusal || error instanceof ConvertError || error instanceof BackupError ? `kinfold ${command}: ${error.message}` : `kinfold ${command}: failed (${errorMessage(error)})`)
+    // Ctrl-C at a question is the person stopping, not a failure: the frame ends the run with 130.
+    if (error instanceof PromptCancelled) throw error
+    ;(env.ui?.error ?? env.out)(error instanceof Refusal || error instanceof ConvertError || error instanceof BackupError ? `kinfold ${command}: ${error.message}` : `kinfold ${command}: failed (${errorMessage(error)})`)
     return EXIT_FAILED
   }
 }

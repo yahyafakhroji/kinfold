@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { fakeTerminal } from '../install/prompt/fake-terminal'
 import { runKinfold } from '../cli/kinfold'
 import { startDaemon } from '../daemon/daemon'
 import { parseArgs, parseDataArgs } from '../install/args'
@@ -105,4 +106,246 @@ test('kinfold retention previews a change and saves only with --yes', async () =
   world.out.length = 0
   expect(await runKinfold(['retention'], world.env)).toBe(0)
   expect(world.out[0]).toContain('prompts 3 days (text)')
+})
+
+// ---- on a terminal -------------------------------------------------------------
+
+const drawnLines = (term: ReturnType<typeof fakeTerminal>): string[] =>
+  term.output().split('\n').map((line) => line.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').trimEnd()).filter((line) => line !== '')
+
+test('on a terminal each data command is one titled section, with the next command where there is one', async () => {
+  startWorldDaemon()
+  const term = fakeTerminal([])
+  world.env = { ...world.env, terminal: term }
+  expect(await runKinfold(['size'], world.env)).toBe(0)
+  expect(await runKinfold(['findings'], world.env)).toBe(0)
+  expect(await runKinfold(['retention', '--set', 'events=30'], world.env)).toBe(0)
+  expect(await runKinfold(['purge', '--host', 'opencode', '--dry-run'], world.env)).toBe(0)
+  expect(world.out).toEqual([])
+  const lines = drawnLines(term)
+  for (const title of ['Database size', 'Findings', 'Retention', 'Purge']) expect(lines).toContain(title)
+  expect(lines.some((line) => /^ {2}database \S+ \S+ \(db /.test(line))).toBe(true)
+  expect(lines).toContain('  + no findings')
+  expect(lines).toContain('Save and apply it with: kinfold retention --set ... --yes')
+  // Nothing would be removed here, so there is no next step to name; and the preview's own "run again" line is the outro, not a row too.
+  expect(lines).not.toContain('Remove them with the same command without --dry-run')
+  expect(lines.filter((line) => line.includes('run again with --yes'))).toEqual([])
+  // Rows under a heading keep their indent, so the tables read as a list.
+  expect(lines.some((line) => /^ {4}events \S+ \S+$/.test(line))).toBe(true)
+})
+
+test('only a finding that is still pending is flagged in the list', async () => {
+  const { rowOf } = await import('./cli')
+  expect(rowOf('  #4 events 12 payload aws-key v2 x1 pending')).toEqual({ mark: 'warn', text: '#4 events 12 payload aws-key v2 x1 pending' })
+  expect(rowOf('  #5 events 13 payload aws-key v2 x1 redacted').mark).toBe('none')
+  expect(rowOf('  #6 prompts 2 - github-token v1 x3 purged').mark).toBe('none')
+})
+
+test('a purge dry run that would remove something ends on how to go ahead', () => {
+  const plan = planFor(parsed(['purge', '--host', 'opencode', '--dry-run']))
+  expect(plan.next?.({ dryRun: true, counts: { events: 3 }, packsRebuilt: 0, scrub: null })).toBe('Remove them with the same command without --dry-run')
+  expect(plan.next?.({ dryRun: true, counts: { events: 0 }, packsRebuilt: 0, scrub: null })).toBeNull()
+  expect(plan.next?.({ dryRun: false, counts: { events: 3 }, packsRebuilt: 1, scrub: null })).toBeNull()
+})
+
+test('on a terminal a data command that cannot reach the daemon draws the reason as an error', async () => {
+  const term = fakeTerminal([])
+  world.env = { ...world.env, terminal: term }
+  expect(await runKinfold(['size'], world.env)).toBe(1)
+  expect(drawnLines(term).slice(-2)).toEqual(['x kinfold size failed: the daemon is not running (no daemon.json or daemon.token)', 'kinfold size did not finish.'])
+  expect(world.out).toEqual([])
+})
+
+test('--plain on a terminal prints the lines a script reads', async () => {
+  startWorldDaemon()
+  const term = fakeTerminal([])
+  world.env = { ...world.env, terminal: term }
+  expect(await runKinfold(['size', '--plain'], world.env)).toBe(0)
+  expect(term.output()).toBe('')
+  expect(world.out[0]).toMatch(/^database /)
+})
+
+// ---- purge asks before it deletes ------------------------------------------------
+
+/** The world's daemon, with /data/purge answered here so a test can say what would go and see what was asked. */
+function purgeWorld(counts: Record<string, number>): { sent: Record<string, unknown>[] } {
+  startWorldDaemon()
+  const sent: Record<string, unknown>[] = []
+  const real = world.env.fetch
+  world.env = {
+    ...world.env,
+    fetch: async (url, init) => {
+      if (!url.endsWith('/data/purge')) return real(url, init)
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>
+      sent.push(body)
+      return new Response(JSON.stringify({ dryRun: body.dryRun === true, counts, packsRebuilt: 2, scrub: null }))
+    },
+  }
+  return { sent }
+}
+
+const onTerminal = (keys: readonly string[]): ReturnType<typeof fakeTerminal> => {
+  const term = fakeTerminal(keys)
+  world.env = { ...world.env, terminal: term }
+  return term
+}
+
+test('--yes is a purge flag and never part of what is sent', () => {
+  expect(parsed(['purge', '--host', 'opencode', '--yes'])).toEqual({ command: 'purge', body: { host: 'opencode' }, yes: true })
+  expect(parsed(['purge', '--host', 'opencode'])).toEqual({ command: 'purge', body: { host: 'opencode' }, yes: false })
+  expect(parsed(['purge', '--host', 'opencode', '--dry-run'])).toEqual({ command: 'purge', body: { host: 'opencode', dryRun: true }, yes: false })
+})
+
+test('with no terminal and no --yes purge refuses, names --yes, and sends nothing', async () => {
+  const { sent } = purgeWorld({ events: 3 })
+  expect(await runKinfold(['purge', '--host', 'opencode'], world.env)).toBe(1)
+  expect(world.out).toEqual(['kinfold purge: nothing was deleted. Purge asks before it deletes, and there is no terminal to ask on; pass --yes to delete, or --dry-run to see what would go'])
+  expect(sent).toEqual([])
+})
+
+test('--plain on a terminal is a run that cannot ask, so it refuses the same way', async () => {
+  const { sent } = purgeWorld({ events: 3 })
+  onTerminal(['y'])
+  expect(await runKinfold(['purge', '--host', 'opencode', '--plain'], world.env)).toBe(1)
+  expect(sent).toEqual([])
+})
+
+test('--yes deletes without asking, with or without a terminal', async () => {
+  const { sent } = purgeWorld({ events: 3 })
+  expect(await runKinfold(['purge', '--host', 'opencode', '--yes'], world.env)).toBe(0)
+  expect(world.out).toEqual(['removed: events 3', 'packs rebuilt 2'])
+  const term = onTerminal([])
+  expect(await runKinfold(['purge', '--host', 'opencode', '--yes'], world.env)).toBe(0)
+  expect(term.output()).not.toContain('Delete')
+  expect(sent).toEqual([{ host: 'opencode' }, { host: 'opencode' }])
+})
+
+test('on a terminal purge shows what it would delete, asks with no as the default, and deletes only on yes', async () => {
+  const { sent } = purgeWorld({ events: 3, observations: 1, prompts: 0 })
+  const term = onTerminal(['y'])
+  expect(await runKinfold(['purge', '--host', 'opencode'], world.env)).toBe(0)
+  const lines = drawnLines(term)
+  expect(lines).toContain('Purge')
+  expect(lines).toContain('  would remove: events 3, observations 1')
+  expect(drawnLines(term).some((line) => line.startsWith('Delete them? This cannot be undone. (y/N)'))).toBe(true)
+  expect(lines).toContain('removed: events 3, observations 1')
+  // The counts were asked for first, and the delete was sent only after the yes.
+  expect(sent).toEqual([{ host: 'opencode', dryRun: true }, { host: 'opencode' }])
+})
+
+test('Enter, n, Ctrl-C or a closed terminal at the question deletes nothing', async () => {
+  for (const [keys, code] of [[['\r'], 0], [['n'], 0], [['\u0003'], 130], [[], 130]] as const) {
+    const { sent } = purgeWorld({ events: 3 })
+    const term = onTerminal(keys)
+    expect(await runKinfold(['purge', '--host', 'opencode'], world.env)).toBe(code)
+    expect(sent).toEqual([{ host: 'opencode', dryRun: true }])
+    if (code === 0) expect(drawnLines(term)).toContain('nothing was deleted')
+    await world.cleanup()
+    world = createWorld()
+  }
+})
+
+test('with nothing to delete purge says so and asks nothing', async () => {
+  const { sent } = purgeWorld({ events: 0 })
+  const term = onTerminal([])
+  expect(await runKinfold(['purge', '--host', 'opencode'], world.env)).toBe(0)
+  expect(term.output()).not.toContain('Delete them?')
+  expect(drawnLines(term)).toContain('  nothing matches, so nothing was deleted')
+  expect(sent).toEqual([{ host: 'opencode', dryRun: true }])
+})
+
+test('--dry-run asks nothing on a terminal and deletes nothing', async () => {
+  const { sent } = purgeWorld({ events: 3 })
+  const term = onTerminal([])
+  expect(await runKinfold(['purge', '--host', 'opencode', '--dry-run'], world.env)).toBe(0)
+  expect(term.output()).not.toContain('Delete them?')
+  expect(sent).toEqual([{ host: 'opencode', dryRun: true }])
+})
+
+// ---- findings --purge asks before it deletes -------------------------------------
+
+const FINDING = { id: 4, table: 'events', rowId: 12, field: 'payload', rule: 'aws-key', ruleVersion: 2, matches: 1, foundAt: 1, action: 'pending', resolvedAt: null }
+
+/** The world's daemon, with the findings routes answered here: one pending finding, and a record of what was asked. */
+function findingsWorld(findings: unknown[] = [FINDING]): { asked: string[] } {
+  startWorldDaemon()
+  const asked: string[] = []
+  const real = world.env.fetch
+  world.env = {
+    ...world.env,
+    fetch: async (url, init) => {
+      const path = new URL(url).pathname + new URL(url).search
+      if (!path.startsWith('/data/findings')) return real(url, init)
+      asked.push(`${init.method ?? 'GET'} ${path}${init.body === undefined ? '' : ` ${String(init.body)}`}`)
+      if (init.method === 'POST') return new Response(JSON.stringify({ resolved: { ...FINDING, action: 'purged' } }))
+      return new Response(JSON.stringify({ pendingByRule: { 'aws-key': findings.length }, findings }))
+    },
+  }
+  return { asked }
+}
+
+const RESOLVE = 'POST /data/findings/4/resolve {"action":"purge"}'
+const LIST = 'GET /data/findings?action=pending'
+
+test('--yes is a findings flag for --purge', () => {
+  expect(parsed(['findings', '--purge', '4', '--yes'])).toEqual({ command: 'findings', all: false, resolve: { id: 4, action: 'purge' }, yes: true })
+  expect(parsed(['findings', '--purge', '4'])).toEqual({ command: 'findings', all: false, resolve: { id: 4, action: 'purge' }, yes: false })
+})
+
+test('with no terminal and no --yes, findings --purge refuses, names --yes, and sends nothing', async () => {
+  const { asked } = findingsWorld()
+  expect(await runKinfold(['findings', '--purge', '4'], world.env)).toBe(1)
+  expect(world.out).toEqual(['kinfold findings: nothing was deleted. --purge asks before it deletes, and there is no terminal to ask on; pass --yes to delete'])
+  expect(asked).toEqual([])
+  onTerminal(['y'])
+  expect(await runKinfold(['findings', '--purge', '4', '--plain'], world.env)).toBe(1)
+  expect(asked).toEqual([])
+})
+
+test('findings --purge --yes deletes without asking', async () => {
+  const { asked } = findingsWorld()
+  expect(await runKinfold(['findings', '--purge', '4', '--yes'], world.env)).toBe(0)
+  expect(world.out).toEqual(['finding resolved: #4 events 12 payload aws-key v2 x1 purged'])
+  expect(asked).toEqual([RESOLVE])
+})
+
+test('on a terminal findings --purge shows the finding, never its secret, asks with no as the default, and deletes only on yes', async () => {
+  const { asked } = findingsWorld()
+  const term = onTerminal(['y'])
+  expect(await runKinfold(['findings', '--purge', '4'], world.env)).toBe(0)
+  const lines = drawnLines(term)
+  expect(lines).toContain('Finding')
+  // Where it is and which rule found it: the id, the table and row, the field, the rule. The matched text is never stored in a finding.
+  expect(lines).toContain('  ! #4 events 12 payload aws-key v2 x1 pending')
+  expect(lines.some((line) => line.startsWith('Delete the events row this finding is in? This cannot be undone. (y/N)'))).toBe(true)
+  expect(lines).toContain('finding resolved: #4 events 12 payload aws-key v2 x1 purged')
+  expect(asked).toEqual([LIST, RESOLVE])
+})
+
+test('Enter, n, Ctrl-C or a closed terminal at the findings question deletes nothing', async () => {
+  for (const [keys, code] of [[['\r'], 0], [['n'], 0], [['\u0003'], 130], [[], 130]] as const) {
+    const { asked } = findingsWorld()
+    const term = onTerminal(keys)
+    expect(await runKinfold(['findings', '--purge', '4'], world.env)).toBe(code)
+    expect(asked).toEqual([LIST])
+    if (code === 0) expect(drawnLines(term)).toContain('nothing was deleted')
+    await world.cleanup()
+    world = createWorld()
+  }
+})
+
+test('a finding that is not pending is named as such and nothing is asked or deleted', async () => {
+  const { asked } = findingsWorld([])
+  const term = onTerminal(['y'])
+  expect(await runKinfold(['findings', '--purge', '4'], world.env)).toBe(1)
+  expect(drawnLines(term)).toContain('x kinfold findings: no pending finding #4; nothing was deleted')
+  expect(asked).toEqual([LIST])
+})
+
+test('--redact deletes no row, so it asks nothing', async () => {
+  const { asked } = findingsWorld()
+  const term = onTerminal([])
+  expect(await runKinfold(['findings', '--redact', '4'], world.env)).toBe(0)
+  expect(term.output()).not.toContain('Delete')
+  expect(asked).toEqual(['POST /data/findings/4/resolve {"action":"redact"}'])
 })

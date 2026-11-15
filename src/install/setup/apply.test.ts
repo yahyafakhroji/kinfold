@@ -280,12 +280,13 @@ test('a newer program from npx replaces bin/kinfold after the summary', async ()
   // agents, observer, keep encryption, port, update check, summary
   const { log, terminal } = logged(w, Array(6).fill(ENTER))
   w.env = { ...w.env, terminal, io: { ...w.env.io, interactive: true } }
-  expect(await install(w.env, { ...YES, yes: false, programSource: source })).toBe(EXIT_OK)
+  // --verbose puts each numbered step on the terminal as it ends, so the order shows there.
+  expect(await install(w.env, { ...YES, yes: false, verbose: true, programSource: source })).toBe(EXIT_OK)
   expect(readFileSync(binPath, 'utf8')).toBe('kinfold program v2\n')
   const summary = log.findIndex((line) => line.includes('Install with these choices?'))
-  const copy = log.findIndex((line) => line.includes(`install program ${binPath}`))
+  const copy = log.findIndex((line) => line.includes(`install program ${binPath.replace(w.home, '~')}`))
   // The wiring is unchanged on this re-run, so the service start that follows it marks the end of the plan.
-  const start = log.findIndex((line) => /^ {2}\d+\. .*launchctl bootstrap/.test(line))
+  const start = log.findIndex((line) => /\d+\. .*launchctl bootstrap/.test(line))
   expect(summary).toBeGreaterThanOrEqual(0)
   expect(copy).toBeGreaterThan(summary)
   expect(start).toBeGreaterThan(copy)
@@ -364,12 +365,16 @@ posixOnly('POSIX paths')('a first install on a typed folder plans against that f
   const term = fakeTerminal([other, ENTER, ENTER, ENTER, 'n', ENTER, ENTER, ENTER])
   w.env = { ...w.env, terminal: term }
   expect(await install(w.env, { ...YES, yes: false, dryRun: true })).toBe(EXIT_OK)
-  const plan = planLines(w).join('\n')
+  // A dry run on a terminal still lists the whole plan, on the terminal.
+  expect(w.out).toEqual([])
+  const plan = term.output()
+  expect(plan).toContain('plan (dry run, nothing is changed)')
   expect(plan).toContain(`${other}/logs`)
   expect(plan).not.toContain(w.dataDir)
   // Read for the default folder, the store would have been new and 'n' would plan a new plaintext store.
   expect(plan).not.toContain('as a plaintext store')
-  expect(w.out).toContain(`database: ${join(other, DB_FILE)} is plaintext; it stays that way until kinfold encrypt`)
+  expect(plan).toContain(`database: ${join(other, DB_FILE)} is plaintext; it stays that way until kinfold encrypt`)
+  expect(plan.trimEnd().endsWith('Dry run: nothing was changed.')).toBe(true)
   expect(term.output()).toContain('Encrypt memory.db?')
   expect(term.output()).toContain('(y/N)')
 })

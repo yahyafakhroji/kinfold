@@ -10,6 +10,8 @@ import { HOST_VERSIONS_FILE } from '../adapters/host-version'
 import { LAUNCH_AGENT_LABEL, LEGACY_DATA_DIR_NAME, LEGACY_LAUNCH_AGENT_LABEL, LEGACY_PLUGIN_FILE_NAME, PLUGIN_FILE_NAME } from '../names'
 import { resolveCodexHome } from './codex-home'
 import type { InstallMode } from './entry'
+import type { CommandUi } from './prompt/frame'
+import type { Prompts } from './prompt/prompts'
 import type { TerminalIO } from './prompt/terminal'
 import type { CredentialProvider } from '../secrets/credentials'
 import type { KeyStore } from '../secrets/key-store'
@@ -79,7 +81,16 @@ export interface InstallEnv {
   io: PromptIO
   /** Raw-key terminal for the setup wizard; null unless stdin and stdout are both TTYs. */
   terminal: TerminalIO | null
+  /** The questions for that terminal; default the clack renderer on stdin and stdout. Tests pass the key-driven one. */
+  promptsFor?: (terminal: TerminalIO) => Prompts
   out: (line: string) => void
+  /**
+   * A line the person has to see or act on. On a terminal `out` goes to the
+   * install log while the bar runs, and this prints above the bar; default `out`.
+   */
+  notice?: (line: string) => void
+  /** What a command can draw beyond lines; set only on a terminal run (prompt/frame.ts), so undefined is the plain path. */
+  ui?: CommandUi
   runnerFor: RunnerBuilder
   /** The only way the installer builds a codex-cli or opencode-cli runner (createCliRunner). */
   cliRunnerFor: (settings: ObserverSettings) => CliObserverRunner
@@ -191,6 +202,11 @@ export function installPaths(env: Pick<InstallEnv, 'homeDir' | 'dataDir' | 'proj
 export function platformOf(env: Pick<InstallEnv, 'platform' | 'wsl'>): PlatformInfo {
   const os = requireOs(env.platform)
   return { os, wsl: os === 'linux' && env.wsl === true, node: env.platform }
+}
+
+/** Where a line the person must act on goes: above the bar on a terminal run, else the output like any other. */
+export function noticeOf(env: Pick<InstallEnv, 'out' | 'notice'>): (line: string) => void {
+  return env.notice ?? env.out
 }
 
 export function errorMessage(error: unknown): string {

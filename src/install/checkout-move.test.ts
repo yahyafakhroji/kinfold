@@ -263,7 +263,8 @@ posixOnly('file modes')('the move plans no key, data folder or database action, 
   // keeps its bytes and mode, none appears or disappears, and the store file
   // itself is the same file rather than a new one.
   const dataAfter = snapshotTree(w.dataDir)
-  const runtime = new Set([DAEMON_INFO_FILE, DB_FILE, `${DB_FILE}-shm`, `${DB_FILE}-wal`, 'install.json'])
+  // The install log gains this run's lines.
+  const runtime = new Set([DAEMON_INFO_FILE, DB_FILE, `${DB_FILE}-shm`, `${DB_FILE}-wal`, 'install.json', join('logs', 'install.log')])
   const outsideBin = Object.keys({ ...dataBefore, ...dataAfter }).filter((path) => path !== '.' && path !== 'bin' && !path.startsWith('bin/'))
   expect(outsideBin.filter((path) => dataAfter[path] === undefined)).toEqual([])
   for (const path of outsideBin) {

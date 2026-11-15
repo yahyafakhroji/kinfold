@@ -23,7 +23,9 @@ import type { TerminalIO } from '../prompt/terminal'
 import { type FakeWorld, createWorld, profilesWithDocsAgent, snapshotTree, startWorldDaemon } from '../test-support'
 import { LOCKED_FOLDER_NOTE, type SetupState, readSetupState } from './prefill'
 import { installRecordAction } from './record'
-import { DRY_RUN_NO_CODE, NO_AGENTS_NOTE, NO_TTY_ENCRYPTION_CHANGE, STALE_DB_KEY, type SetupFlags, freePortFrom, runWizard } from './wizard'
+import { INSTALL_HOSTS } from '../detect'
+import { withBlock } from '../path-setup'
+import { DOCS_HINT, DRY_RUN_NO_CODE, NOT_INSTALLED_HINT, NO_AGENTS_NOTE, NO_TTY_ENCRYPTION_CHANGE, STALE_DB_KEY, type SetupFlags, UNDETECTABLE_HINT, freePortFrom, runWizard } from './wizard'
 import { posixOnly } from '../../../test/platform-guards'
 
 let world: FakeWorld | null = null
@@ -364,12 +366,13 @@ test('a wired host whose agent is gone can still be kept or unticked', async () 
   expect(answers.hosts).toEqual(['claude-code'])
 })
 
-test('no detected agent on a first install skips the agent question', async () => {
-  const { w, term } = setup([ENTER, ENTER, ENTER, ENTER])
+test('with no agent found the list is still shown, and Enter wires none', async () => {
+  const { w, term } = setup([ENTER, ENTER, ENTER, ENTER, ENTER])
   const state = await readSetupState(w.env)
   const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)
   expect(answers.hosts).toEqual([])
-  expect(term.output()).toContain('No supported agent was found')
+  expect(term.output()).toContain('Which agents should share memory?')
+  expect(term.output()).toContain('Claude Code (not installed)')
 })
 
 test('a headless no-agent run says so', async () => {
@@ -422,7 +425,7 @@ test('a dry run shows no recovery code, and says a real run would show one at th
   expect(plain.term.output()).toContain(DRY_RUN_NO_CODE)
 })
 
-const DOCS_NOTE = 'built from the docs, not yet checked against a real run'
+const DOCS_NOTE = DOCS_HINT
 
 test('a detected docs-level agent is listed but starts unticked', async () => {
   const { w, term } = setup(Array(7).fill(ENTER), { claudeVersion: '2.0.0' })
@@ -430,7 +433,7 @@ test('a detected docs-level agent is listed but starts unticked', async () => {
   const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE, undefined, profilesWithDocsAgent())
   expect(answers.hosts).toEqual(['claude-code'])
   expect(term.output()).toContain(`Gemini CLI`)
-  expect(term.output()).toContain(`gemini answered --version · captures, context at start, search · ${DOCS_NOTE}`)
+  expect(term.output()).toContain(`gemini answered --version · capture, context, search · ${DOCS_NOTE}`)
 })
 
 test('a detected live agent starts ticked', async () => {
@@ -439,7 +442,7 @@ test('a detected live agent starts ticked', async () => {
   const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE, undefined, profilesWithDocsAgent(false))
   expect(answers.hosts).toEqual(['claude-code'])
   expect(term.output()).toContain('Claude Code')
-  expect(term.output()).toContain('captures, context at start and on each prompt, search')
+  expect(term.output()).toContain('2.0.0 · capture, context, search')
   expect(term.output()).not.toContain(DOCS_NOTE)
 })
 
@@ -454,38 +457,51 @@ test('--yes installs detected live agents and leaves detected docs agents out un
   expect(named.hosts).toEqual(['claude-code', 'gemini-cli'])
 })
 
-const ABSENT_BESIDE_CLAUDE = 'OpenCode, Codex, Cursor, Gemini CLI, Qwen Code, Factory Droid, Devin, Kilo Code, Cline, GitHub Copilot, Antigravity, Junie, Kiro, Amp, Kimi Code, Auggie, Goose, Crush, Zed, Warp'
-const CONTINUE_HINT = 'Continue: no safe signal for an IDE extension; name it with --hosts continue'
+const ABSENT_BESIDE_CLAUDE = ['OpenCode', 'Codex', 'Cursor', 'Gemini CLI', 'Qwen Code', 'Factory Droid', 'Devin', 'Kilo Code', 'Cline', 'GitHub Copilot', 'Antigravity', 'Junie', 'Kiro', 'Amp', 'Kimi Code', 'Auggie', 'Goose', 'Crush', 'Zed', 'Warp']
 
-test('with no agent to list, the left-off lines are still said before the note that none will be wired', async () => {
-  const { w, term } = setup(Array(6).fill(ENTER))
-  const state = await readSetupState(w.env)
-  const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)
-  expect(answers.hosts).toEqual([])
-  const lines = term.output().split(/\r?\n/).map((line) => line.trim())
-  const notFound = lines.findIndex((line) => line.endsWith(`not found: Claude Code, ${ABSENT_BESIDE_CLAUDE}`))
-  const hint = lines.findIndex((line) => line.endsWith(CONTINUE_HINT))
-  const none = lines.findIndex((line) => line.endsWith(NO_AGENTS_NOTE))
-  expect(notFound).toBeGreaterThan(-1)
-  expect(hint).toBeGreaterThan(notFound)
-  expect(none).toBeGreaterThan(hint)
-  expect(term.output()).not.toContain('Which agents should share memory?')
-})
+/** The rows of the agent question as last drawn, without colour. */
+function agentRows(output: string): string[] {
+  const drawn = output.slice(output.lastIndexOf('Which agents should share memory?', output.lastIndexOf('[ ] ')))
+  return drawn.split(/\r?\n/).map((line) => line.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').trim()).filter((line) => /^(> )?\[[ x]\] /.test(line))
+}
 
-test('agents neither detected nor wired are named on one not-found line, not offered as choices', async () => {
-  const { w, term } = setup(Array(7).fill(ENTER), { claudeVersion: '2.0.0' })
+test('every supported agent is a row: found ones can be ticked, the rest are shown as not installed', async () => {
+  const { w, term } = setup(Array(7).fill(ENTER), { claudeVersion: '2.1.311 (Claude Code)' })
   const state = await readSetupState(w.env)
   const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)
   expect(answers.hosts).toEqual(['claude-code'])
-  const lines = term.output().split(/\r?\n/)
-  const notFound = lines.filter((line) => line.includes('not found: '))
-  expect(notFound).toHaveLength(1)
-  // The whole line, after the cursor escape the terminal writes before it.
-  expect(notFound[0]?.slice(notFound[0].indexOf('not found: ')).trimEnd()).toBe(`not found: ${ABSENT_BESIDE_CLAUDE}`)
-  expect(lines.filter((line) => line.includes('Continue: no safe signal for an IDE extension; name it with --hosts continue'))).toHaveLength(1)
-  // The one choice is Claude Code; no other agent is drawn as a row.
-  expect(term.output()).not.toContain('no claude on PATH')
-  expect(term.output().split('Gemini CLI').length - 1).toBe(1)
+  const rows = agentRows(term.output())
+  expect(rows).toHaveLength(INSTALL_HOSTS.length)
+  expect(rows).toHaveLength(22)
+  expect(rows[0]).toBe('> [x] Claude Code  2.1.311 · capture, context, search')
+  for (const name of ABSENT_BESIDE_CLAUDE) expect(rows).toContain(`[ ] ${name} (${NOT_INSTALLED_HINT})`)
+  expect(rows).toContain(`[ ] Continue  ${UNDETECTABLE_HINT}`)
+  // No folded line any more: the rows say it.
+  expect(term.output()).not.toContain('not found: ')
+})
+
+test('Continue cannot be detected, so it starts unticked and can be picked', async () => {
+  // Down moves from Claude Code over every disabled row to Continue, the only other open one.
+  const { w, term } = setup([ENTER, DOWN, ' ', ENTER, ENTER, ENTER, ENTER, ENTER, ENTER], { claudeVersion: '2.0.0', keychainRefs: ['openrouter'] })
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)
+  expect(answers.hosts).toEqual(['claude-code', 'continue'])
+  expect(agentRows(term.output())).toContain(`> [x] Continue  ${UNDETECTABLE_HINT}`)
+})
+
+test('an agent whose version is not supported is shown, disabled, with the reason', async () => {
+  const { w, term } = setup(Array(7).fill(ENTER), { claudeVersion: '2.0.0', opencodeVersion: '1.4.0' })
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)
+  expect(answers.hosts).toEqual(['claude-code'])
+  expect(agentRows(term.output())).toContain('[ ] OpenCode (OpenCode 1.4.0 is not supported: the plugin needs OpenCode 2.0 or later)')
+})
+
+test('a disabled row cannot be ticked: Space on the list never adds an agent that is not installed', async () => {
+  const { w } = setup([ENTER, ' ', DOWN, DOWN, ' ', ' ', ENTER, ENTER, ENTER, ENTER, ENTER, ENTER], { keychainRefs: ['openrouter'] })
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)
+  for (const host of answers.hosts) expect(host).toBe('continue')
 })
 
 test('auto-update is on by default, and a flag or a saved choice turns it off', async () => {
@@ -536,4 +552,61 @@ test('--auto-update turns a saved off back on, with or without a terminal', asyn
   const typed = setup([ENTER, ENTER, ENTER, ENTER])
   const state = { ...(await readSetupState(typed.w.env)), autoUpdate: false }
   expect(await runWizard(typed.w.env, ask(typed.w), state, flagsOf({ hosts: [], noEncrypt: true, autoUpdate: true }), NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: true })
+})
+
+// ---- the kinfold command ------------------------------------------------------
+
+/** A world installed as a program in ~/.kinfold with zsh as the shell, where the PATH step applies. */
+function programSetup(keys: readonly string[], pathEnv = '/usr/bin:/bin'): Setup {
+  const made = setup(keys, { claudeVersion: '2.0.0', platform: 'linux' })
+  made.w.env = { ...made.w.env, mode: { kind: 'program', binPath: join(made.w.dataDir, 'bin', 'kinfold') }, pathEnv, envVars: { SHELL: '/bin/zsh' } }
+  return made
+}
+
+posixOnly('POSIX paths')('the PATH question comes after the updates, defaults to yes, and its answer is in the summary', async () => {
+  // folder, agents, observer, port, updates, PATH, summary
+  const { w, term } = programSetup(Array(7).fill(ENTER))
+  const answers = await runWizard(w.env, ask(w), await readSetupState(w.env), flagsOf({ noEncrypt: true }), NO_CHOICE)
+  expect(answers.path).toBe('add')
+  const output = term.output()
+  expect(output.indexOf('Add kinfold to your PATH?')).toBeGreaterThan(output.indexOf('Updates:'))
+  expect(output.indexOf('Add kinfold to your PATH?')).toBeLessThan(output.indexOf('Install with these choices?'))
+  expect(output).toContain('kinfold command ~/.local/bin/kinfold, with ~/.local/bin on PATH through ~/.zshrc')
+})
+
+posixOnly('POSIX paths')('answering no is recorded as a decline, and the summary says PATH is left alone', async () => {
+  const { w, term } = programSetup([ENTER, ENTER, ENTER, ENTER, ENTER, 'n', ENTER])
+  const answers = await runWizard(w.env, ask(w), await readSetupState(w.env), flagsOf({ noEncrypt: true }), NO_CHOICE)
+  expect(answers.path).toBe('decline')
+  expect(term.output()).toContain('kinfold command ~/.local/bin/kinfold; PATH left alone')
+})
+
+posixOnly('POSIX paths')('the PATH question is not asked when ~/.local/bin is on PATH, a flag answered it, or the run is a checkout', async () => {
+  const onPath = programSetup(Array(6).fill(ENTER), '/usr/bin')
+  onPath.w.env = { ...onPath.w.env, pathEnv: `/usr/bin:${join(onPath.w.home, '.local', 'bin')}` }
+  expect((await runWizard(onPath.w.env, ask(onPath.w), await readSetupState(onPath.w.env), flagsOf({ noEncrypt: true }), NO_CHOICE)).path).toBeNull()
+  expect(onPath.term.output()).not.toContain('Add kinfold to your PATH?')
+  await world?.cleanup()
+  const flagged = programSetup(Array(6).fill(ENTER))
+  expect((await runWizard(flagged.w.env, ask(flagged.w), await readSetupState(flagged.w.env), flagsOf({ noEncrypt: true, path: 'no-path' }), NO_CHOICE)).path).toBeNull()
+  expect(flagged.term.output()).not.toContain('Add kinfold to your PATH?')
+  expect(flagged.term.output()).toContain('kinfold command not set up (--no-path)')
+  await world?.cleanup()
+  const checkout = setup(Array(6).fill(ENTER), { claudeVersion: '2.0.0' })
+  expect((await runWizard(checkout.w.env, ask(checkout.w), await readSetupState(checkout.w.env), flagsOf({ noEncrypt: true }), NO_CHOICE)).path).toBeNull()
+  expect(checkout.term.output()).not.toContain('kinfold command')
+})
+
+test('--yes and a run with no terminal never reach the PATH question', async () => {
+  const { w, term } = programSetup([])
+  const answers = await runWizard(w.env, ask(w), await readSetupState(w.env), flagsOf({ noEncrypt: true, yes: true }), { ...NO_CHOICE, yes: true })
+  expect(answers.path).toBeNull()
+  expect(term.output()).toBe('')
+})
+
+posixOnly('POSIX paths')('a block already in the startup file does not stop the question on an install that was never asked', async () => {
+  const { w, term } = programSetup(Array(7).fill(ENTER))
+  writeFileSync(join(w.home, '.zshrc'), withBlock('x\n', 'posix'))
+  await runWizard(w.env, ask(w), await readSetupState(w.env), flagsOf({ noEncrypt: true }), NO_CHOICE)
+  expect(term.output()).toContain('Add kinfold to your PATH?')
 })

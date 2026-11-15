@@ -22,7 +22,7 @@ import { setupDbKeyActions } from './db-encryption'
 import { type HostDetection, type InstallHost, detectHosts, selectedHosts } from './detect'
 import { isFoldedAbsent } from './detectors'
 import { duplicateWarning, findDuplicateWiring } from './duplicates'
-import { type InstallEnv, errorMessage, installPaths, platformOf } from './env'
+import { type InstallEnv, errorMessage, installPaths, noticeOf, platformOf } from './env'
 import { entryCommand } from './entry'
 import { type InstallKeyStore, chooseInstallKeyStore, keyStoreOf, keyStoreRecordActions, refusalLines, secretSetAction } from './key-store-choice'
 import { describeTextChange, readTextOrNull } from './files'
@@ -31,13 +31,17 @@ import { ChoiceError, type ChoiceOptions, type ObserverChoice } from './observer
 import { hmacMigrationActions } from './hmac-migration'
 import { hostVersionActions } from './host-wiring'
 import { type ServiceControl, type ServiceStep, managedServiceOf, serviceOf } from './service/control'
-import { type Action, runPlan, stopCommand } from './plan'
-import { askHidden, createPrompts, PromptCancelled } from './prompt/prompts'
+import { type PathFlag, type PathPlan, planPathSetup } from './path-setup'
+import { type Action, type PlanListener, linesListener, runPlan, shortLabel, stopCommand } from './plan'
+import { PromptCancelled, type Prompts } from './prompt/prompts'
+import { uiFor } from './prompt/ui'
+import type { FramedView } from './setup/framed-view'
+import { openSession } from './setup/session'
 import { type ProgramCheck, checkProgram, programInstallActions } from './self-install'
 import { migrationFailureNote, renameMigrationActions } from './rename-migration'
 import { applySetup } from './setup/apply'
 import { type SetupState, readSetupState } from './setup/prefill'
-import { type InstallRecord, agentHomesOf, installRecordAction, readInstallRecord } from './setup/record'
+import { INSTALL_RECORD_FILE, type InstallRecord, agentHomesOf, installRecordAction, readInstallRecord } from './setup/record'
 import { type UpdateLockDeps, acquireUpdateLock, updateLockHolder } from '../update/lock'
 import { type FolderTarget, type SetupAnswers, type SetupFlags, runWizard } from './setup/wizard'
 import { sqlite3mcInstallActions } from './sqlite3mc-install'
@@ -45,6 +49,7 @@ import { hostUnwireActions } from './uninstall'
 import { vec0InstallActions } from './vec0-install'
 import { envForDataDir } from '../cli/data-dir-env'
 import { builtProfiles, hasWiring, overlapPlan, overlapState, overlapWiring, profileOf } from '../agents/install-profiles'
+import { VERSION } from '../version'
 import { wslInstall } from '../wsl/entry'
 
 export const EXIT_OK = 0
@@ -77,7 +82,21 @@ export interface InstallOptions extends ChoiceOptions {
   autoUpdate?: boolean
   /** Test seam for the update lock: its pid and liveness check, and the pid of the process that started this install. */
   lock?: UpdateLockDeps & { parentPid?: number }
+  /** --path or --no-path: the answer to the PATH question, given up front. */
+  path?: PathFlag
+  /** On a terminal, show each numbered step above the progress bar. */
+  verbose?: boolean
+  /** The plan's extra listeners for this run: the progress bar and the install log. Default none, so the numbered lines are all there is. */
+  planListeners?: readonly PlanListener[]
+  /** The terminal run's bar and summary; absent on a plain run. */
+  view?: FramedView
+  /** How this run says a failure; default env.out, which is all a plain run has. */
+  fail?: (line: string) => void
+  /** Listeners for a plan that runs before the questions (the rename migration): the log, and no bar, since its lines are on screen. */
+  earlyPlanListeners?: readonly PlanListener[]
 }
+
+export { noticeOf }
 
 export interface DaemonSituation {
   health: Health
@@ -180,9 +199,9 @@ export function serviceActions(env: InstallEnv, service: ServiceControl | null, 
   const reason = manualStartReason(service)
   if (service === null || reason !== null) {
     const label = service?.label ?? 'service'
-    env.out(manualStartLine(env, label, reason ?? '', port))
+    noticeOf(env)(manualStartLine(env, label, reason ?? '', port))
     // A daemon someone started by hand keeps the old key or library until they restart it.
-    if (restart && situation.health.up) env.out(`${label}: restart the daemon you started so it picks up the new key or library`)
+    if (restart && situation.health.up) noticeOf(env)(`${label}: restart the daemon you started so it picks up the new key or library`)
     return []
   }
   const path = service.configPath()
@@ -222,6 +241,11 @@ export function serviceActions(env: InstallEnv, service: ServiceControl | null, 
  * Reads host config files only, never the data dir or the Keychain.
  */
 export async function agentWiringActions(env: InstallEnv, hosts: readonly InstallHost[], opencodeAssets?: EmbeddedAssets | null): Promise<Action[]> {
+  return (await agentWiringPlan(env, hosts, opencodeAssets)).flatMap((agent) => agent.actions)
+}
+
+/** The same actions, kept apart by agent, so the progress bar can say whose wiring is being written. */
+export async function agentWiringPlan(env: InstallEnv, hosts: readonly InstallHost[], opencodeAssets?: EmbeddedAssets | null): Promise<{ host: InstallHost; name: string; actions: Action[] }[]> {
   const chosen = builtProfiles().filter((profile) => hosts.includes(profile.id))
   // An agent that runs another chosen agent's hooks gets its MCP entry only, and loses hooks of its own from an earlier run.
   const overlap = overlapPlan(hosts, env)
@@ -234,7 +258,7 @@ export async function agentWiringActions(env: InstallEnv, hosts: readonly Instal
     if (note !== undefined) env.out(`${profile.id}: ${note}`)
     planned.set(profile.id, await overlapWiring(profile, overlap).install(env, { opencodeAssets }))
   }
-  return chosen.flatMap((profile) => planned.get(profile.id) ?? [])
+  return chosen.map((profile) => ({ host: profile.id, name: profile.name, actions: planned.get(profile.id) ?? [] }))
 }
 
 function stateOf(env: InstallEnv, host: InstallHost): ReturnType<typeof overlapState> {
@@ -317,19 +341,22 @@ export const SETTINGS_NOT_SENT_LINE = 'observer settings: not sent, since no dae
 /** Where the user starts the daemon, settings go only to one that answered while the plan was built. */
 async function plannedSettingsActions(env: InstallEnv, choices: readonly ObserverChoice[], stored: Pick<SetupState, 'failedProviders'>, noDaemon: boolean): Promise<Action[]> {
   if (!noDaemon) return settingsActions(env, choices, stored)
-  env.out(SETTINGS_NOT_SENT_LINE)
+  noticeOf(env)(SETTINGS_NOT_SENT_LINE)
   return []
 }
 
 export interface InstallPlan {
   actions: Action[]
+  /** A progress-bar label for each action, by index. */
+  labels: string[]
   /** The plan stops the loaded service to replace the running program. */
   stopsService: boolean
+  /** What the PATH step planned and will say when it is done. */
+  path: PathPlan
 }
 
 /** install.json, written only when what it holds would change; the first install's time is kept. */
-function recordActions(env: InstallEnv, state: SetupState, answers: SetupAnswers): Action[] {
-  const saved = readInstallRecord(env.dataDir)
+function recordActions(env: InstallEnv, state: SetupState, answers: SetupAnswers, saved: InstallRecord | null, path: PathPlan): Action[] {
   // A choice made in this run is stamped now; one only carried over keeps its old stamp, so a dashboard switch
   // flipped while this install ran is the newer one and survives the write.
   const chosenAt = answers.autoUpdate !== state.autoUpdate ? env.now() : saved?.autoUpdateAt
@@ -341,9 +368,11 @@ function recordActions(env: InstallEnv, state: SetupState, answers: SetupAnswers
     agentHomes: agentHomesOf(env),
     ...(chosenAt !== undefined ? { autoUpdateAt: chosenAt } : {}),
     firstInstalledAt: state.firstInstalledAt ?? env.now(),
+    ...path.record,
   }
+  const pathOf = (from: InstallRecord): string => JSON.stringify([from.pathSetup ?? null, from.pathLink ?? null, from.pathFiles ?? []])
   const same = saved !== null && saved.channel === record.channel && saved.updateCheck === record.updateCheck && saved.autoUpdate === record.autoUpdate
-    && saved.firstInstalledAt === record.firstInstalledAt && JSON.stringify(saved.agentHomes) === JSON.stringify(record.agentHomes)
+    && saved.firstInstalledAt === record.firstInstalledAt && JSON.stringify(saved.agentHomes) === JSON.stringify(record.agentHomes) && pathOf(saved) === pathOf(record)
   return same ? [] : [installRecordAction(env.dataDir, record)]
 }
 
@@ -378,27 +407,37 @@ export async function buildPlan(
   // the copy and the service step below starts it again from the new file.
   const stopped = program.actions.length > 0 && service !== null && !manual && situation.loaded
   const plannedSituation = stopped ? { ...situation, loaded: false } : situation
+  const saved = readInstallRecord(env.dataDir)
+  // With no terminal nothing was asked, exactly as under --yes, so the same rule holds: a record from before the PATH step gets nothing added.
+  const recordUnreadable = saved === null && existsSync(join(env.dataDir, INSTALL_RECORD_FILE))
+  const path = planPathSetup(env, saved, { answer: answers.path ?? null, yes: options.yes || env.terminal === null, flag: options.path ?? null, recordUnreadable })
+  // Each part with the bar's words for it; null leaves every action its own short label.
+  const parts: [string | null, Action[]][] = [
+    [null, dataDirActions(env)],
+    // Before any key is written, so every later process opens the store that holds them.
+    [null, prepared.keyStore === undefined ? [] : keyStoreRecordActions(env, prepared.keyStore, options.keyStoreModules)],
+    [null, hmac.actions],
+    [null, sqlite3mc.actions],
+    [null, setupDbKeyActions(env, answers.encryption)],
+    [null, vec0.actions],
+    [null, stopped && service !== null ? [serviceStep(service, 'stop')] : []],
+    [null, program.actions],
+    // After the program is in place, since the link points at it; before install.json, which records what was written.
+    ['setting up the kinfold command', path.actions],
+    ['recording agent versions', hostVersionActions(env, detections)],
+    [null, credentialActions(env, choices)],
+    ...(await agentWiringPlan(env, hosts, options.opencodeAssets)).map((agent): [string, Action[]] => [`wiring ${agent.name}`, agent.actions]),
+    ...dropped.map((host): [string, Action[]] => [`unwiring ${profileOf(host).name}`, hostUnwireActions(env, host)]),
+    [null, serviceActions(env, service, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon, answers.port)],
+    [null, await plannedSettingsActions(env, choices, state, manual && !situation.health.up)],
+    [null, hmac.cleanup],
+    [null, recordActions(env, state, answers, saved, path)],
+  ]
   return {
-    actions: [
-      ...dataDirActions(env),
-      // Before any key is written, so every later process opens the store that holds them.
-      ...(prepared.keyStore === undefined ? [] : keyStoreRecordActions(env, prepared.keyStore, options.keyStoreModules)),
-      ...hmac.actions,
-      ...sqlite3mc.actions,
-      ...setupDbKeyActions(env, answers.encryption),
-      ...vec0.actions,
-      ...(stopped && service !== null ? [serviceStep(service, 'stop')] : []),
-      ...program.actions,
-      ...hostVersionActions(env, detections),
-      ...credentialActions(env, choices),
-      ...(await agentWiringActions(env, hosts, options.opencodeAssets)),
-      ...dropped.flatMap((host) => hostUnwireActions(env, host)),
-      ...serviceActions(env, service, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon, answers.port),
-      ...(await plannedSettingsActions(env, choices, state, manual && !situation.health.up)),
-      ...hmac.cleanup,
-      ...recordActions(env, state, answers),
-    ],
+    actions: parts.flatMap(([, actions]) => actions),
+    labels: parts.flatMap(([label, actions]) => actions.map((action) => label ?? shortLabel(action))),
     stopsService: stopped,
+    path,
   }
 }
 
@@ -430,11 +469,11 @@ function legacyEnvProblem(env: InstallEnv): string | null {
 }
 
 async function prepare(env: InstallEnv, options: InstallOptions): Promise<DaemonSituation | number> {
-  for (const line of duplicateWarning(findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings]))) env.out(line)
+  for (const line of duplicateWarning(findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings]))) noticeOf(env)(line)
   const situation = await daemonSituation(env)
   env.out(`daemon: ${situation.health.up ? `answers on port ${situation.port}` : 'not running'}; ${agentState(env, situation)}`)
   if (situation.foreign && !options.takeover && !options.dryRun) {
-    for (const line of foreignDaemonMessage(situation)) env.out(line)
+    for (const line of foreignDaemonMessage(situation)) noticeOf(env)(line)
     return EXIT_BLOCKED
   }
   return situation
@@ -452,7 +491,7 @@ async function migrate(env: InstallEnv, situation: DaemonSituation, options: Ins
   const actions = renameMigrationActions(env, { takeover: options.takeover })
   if (actions.length === 0) return { situation, migrated: false }
   env.out('migration: an install under the old name Shared Agent Memory was found; it moves to the Kinfold names first')
-  await runPlan(env, actions, options.dryRun, (index) => migrationFailureNote(actions, index))
+  await runPlan(env, actions, options.dryRun, (index) => migrationFailureNote(actions, index), { listeners: [linesListener(env.out), ...(options.earlyPlanListeners ?? [])] })
   if (options.dryRun) {
     // The program copy and the wiring read the running program and host config
     // files only, which the migration leaves alone, so this part is exact now.
@@ -494,13 +533,13 @@ export async function restartService(env: InstallEnv): Promise<void> {
   }
   const result = await waitForStart(env, service)
   if (result.ok) {
-    if (started) env.out('the daemon was started again from the program in place')
+    if (started) noticeOf(env)('the daemon was started again from the program in place')
     return
   }
   const reason = startError === null ? '' : ` (${errorMessage(startError)})`
   const logFile = installPaths(env).logFile
-  if (result.reason === 'not-running') env.out(`the ${service?.label ?? 'service'} is not running after restarting${reason}, so nothing will answer /health; see ${logFile}`)
-  else env.out(`the daemon did not answer /health after restarting${reason}; it may still be opening a large store. Run kinfold status in a minute; see ${logFile}`)
+  if (result.reason === 'not-running') noticeOf(env)(`the ${service?.label ?? 'service'} is not running after restarting${reason}, so nothing will answer /health; see ${logFile}`)
+  else noticeOf(env)(`the daemon did not answer /health after restarting${reason}; it may still be opening a large store. Run kinfold status in a minute; see ${logFile}`)
 }
 
 function setupFlags(options: InstallOptions, envVars: Readonly<Record<string, string | undefined>> = {}): SetupFlags {
@@ -516,17 +555,18 @@ function setupFlags(options: InstallOptions, envVars: Readonly<Record<string, st
     noAutoUpdate: (options.noAutoUpdate ?? false) || readEnv(envVars, 'NO_AUTO_UPDATE') === '1',
     autoUpdate: options.autoUpdate ?? false,
     yes: options.yes,
+    path: options.path ?? null,
   }
 }
 
 /**
- * With a terminal, a key is typed through the same raw session as the
- * questions around it, so two readers never take turns on stdin.
+ * With a terminal, a key is typed through the same prompts as the questions
+ * around it, so two readers never take turns on stdin and the typed key is
+ * masked like any other secret.
  */
-function withTerminalSecrets(env: InstallEnv): InstallEnv {
-  const terminal = env.terminal
-  if (terminal === null) return env
-  return { ...env, io: { ...env.io, askSecret: (question) => askHidden(terminal, question) } }
+function withPromptSecrets(env: InstallEnv, prompts: Prompts | null): InstallEnv {
+  if (prompts === null) return env
+  return { ...env, io: { ...env.io, askSecret: (question) => prompts.password(question) } }
 }
 
 /** The folder the run ends on, with the store chosen for that folder, so its record lands there. */
@@ -548,12 +588,6 @@ async function folderTarget(env: InstallEnv, dataDir: string, options: InstallOp
 }
 
 /**
- * A Ctrl-C or a closed stdin during the questions is said once and thrown on
- * as PromptCancelled, so the caller exits 130; nothing has been written by
- * then (only the rename migration of an install under the old name runs
- * before the questions).
- */
-/**
  * An install and an update both stop the service and replace the program, so
  * only one of them runs at a time. The install an update starts is its child
  * and works under the update's own lock. A dry run changes nothing and takes
@@ -570,24 +604,42 @@ export function takeInstallLock(env: InstallEnv, options: InstallOptions): { rel
   const lock = holder === null ? acquireUpdateLock(env.dataDir, options.lock) : null
   if (lock !== null) return lock
   const running = holder ?? updateLockHolder(env.dataDir, options.lock?.alive)
-  env.out(`install: an update is running${running === null ? '' : ` (pid ${running})`}; run install again when it has finished. Nothing was changed.`)
+  noticeOf(env)(`install: an update is running${running === null ? '' : ` (pid ${running})`}; run install again when it has finished. Nothing was changed.`)
   return 'blocked'
 }
 
-export async function install(env: InstallEnv, options: InstallOptions): Promise<number> {
+/**
+ * A Ctrl-C or a closed stdin during the questions is said once and thrown on
+ * as PromptCancelled, so the caller exits 130; nothing has been written by
+ * then (only the rename migration of an install under the old name runs
+ * before the questions).
+ *
+ * The run as its renderer shows it. On a terminal without --yes it is framed:
+ * an intro, the questions, one progress bar, a summary. Everywhere else it is
+ * the plain lines it always was. Either way every line also reaches
+ * logs/install.log.
+ */
+export async function install(base: InstallEnv, given: InstallOptions): Promise<number> {
+  const ui = await uiFor(base, { yes: given.yes })
+  const session = openSession(base, ui, 'install', { dryRun: given.dryRun, verbose: given.verbose ?? false })
+  const env = session.env
+  const options: InstallOptions = { ...given, planListeners: session.planListeners, earlyPlanListeners: session.logListeners, fail: session.fail, ...(session.view !== null ? { view: session.view } : {}) }
   let migrated = false
+  ui.output.intro(`Kinfold ${options.releaseVersion ?? VERSION} setup`)
   try {
     if (platformOf(env).wsl) {
       const code = await wslInstall(env, options)
-      if (code !== null) return code
+      if (code !== null) return closeRun(session, code)
     }
     const envProblem = legacyEnvProblem(env)
     if (envProblem !== null) {
-      env.out(`install failed: ${envProblem}`)
+      session.fail(`install failed: ${envProblem}`)
       return EXIT_FAILED
     }
+    // What the daemon is doing right now is for the log; the screen starts at the questions.
+    session.hideLines()
     const situation = await prepare(env, options)
-    if (typeof situation === 'number') return situation
+    if (typeof situation === 'number') return closeRun(session, situation)
     // A release build is checked before the migration or any plan can change the
     // machine, so a bad or unreachable SHA256SUMS stops with nothing changed.
     const check = await checkProgram(env, {
@@ -595,29 +647,41 @@ export async function install(env: InstallEnv, options: InstallOptions): Promise
       dryRun: options.dryRun,
       version: options.releaseVersion,
     })
+    session.showLines()
     const moved = await migrate(env, situation, options, check)
     if (moved === null) {
-      if (!situation.foreign || options.takeover) return EXIT_OK
-      for (const line of foreignDaemonMessage(situation)) env.out(line)
+      if (!situation.foreign || options.takeover) return closeRun(session, EXIT_OK)
+      for (const line of foreignDaemonMessage(situation)) noticeOf(env)(line)
       env.out('a real install would stop here, before step 1.')
-      return EXIT_BLOCKED
+      return closeRun(session, EXIT_BLOCKED)
     }
     migrated = moved.migrated
     // One store for the whole run, picked before the questions so every step reads and writes the same one.
-    const chosen = withChosenStore(withTerminalSecrets(env), options)
+    const chosen = withChosenStore(withPromptSecrets(env, ui.prompts), options)
     const asking = chosen.env
     const state = await readSetupState(asking, { migrated })
     let target: InstallTarget = { env: asking, state, keyStore: chosen.keyStore }
-    const prompts = env.terminal === null ? null : createPrompts(env.terminal)
-    const answers = await runWizard(asking, prompts, state, setupFlags(options, env.envVars), options, async (dataDir) => (target = await folderTarget(asking, dataDir, options)))
+    const answers = await runWizard(asking, ui.prompts, state, setupFlags(options, env.envVars), options, async (dataDir) => (target = await folderTarget(asking, dataDir, options)))
+    session.target(target.env.dataDir)
     const planned = target.env === asking ? moved.situation : await daemonSituation(target.env)
-    return await applySetup(target.env, target.state, answers, options, { check, situation: planned, keyStore: target.keyStore })
+    // From here the bar draws; what each step says goes to the log.
+    session.hideLines()
+    return closeRun(session, await applySetup(target.env, target.state, answers, options, { check, situation: planned, keyStore: target.keyStore }))
   } catch (error: unknown) {
     if (error instanceof PromptCancelled) {
-      env.out(`install cancelled; ${migrated ? 'only the move to the Kinfold names had run' : 'nothing was changed'}`)
+      session.cancel(`install cancelled; ${migrated ? 'only the move to the Kinfold names had run' : 'nothing was changed'}`)
       throw error
     }
-    env.out(`install failed: ${error instanceof ChoiceError ? error.message : errorMessage(error)}`)
+    session.fail(`install failed: ${error instanceof ChoiceError ? error.message : errorMessage(error)}`)
     return EXIT_FAILED
+  } finally {
+    session.flush()
   }
+}
+
+/** Ends a terminal run that has not ended itself: a dry run, a WSL hand-off, or a stop that already said why. */
+function closeRun(session: ReturnType<typeof openSession>, code: number): number {
+  if (code === EXIT_OK) session.view?.finish('', [], session.dryRun ? 'Dry run: nothing was changed.' : 'Done.')
+  else session.view?.fail('install did not finish')
+  return code
 }

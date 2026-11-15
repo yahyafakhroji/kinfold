@@ -77,6 +77,10 @@ function savedHomes(value: unknown): AgentHomes {
   return homes
 }
 
+const PATH_SETUPS = ['added', 'declined', 'not-needed'] as const
+/** What the PATH step ended as: Kinfold changed PATH, left it alone, or found nothing to change. */
+export type PathSetup = (typeof PATH_SETUPS)[number]
+
 export interface InstallRecord {
   channel: InstallChannel
   updateCheck: boolean
@@ -89,6 +93,22 @@ export interface InstallRecord {
   /** When autoUpdate was last chosen, by the dashboard or by an install; the later choice wins a write. Absent: never chosen. */
   autoUpdateAt?: number
   firstInstalledAt: number
+  /**
+   * How the `kinfold` command was set up (path-setup.ts). Absent: this install was never asked, which is
+   * every record written before the step existed; an install under --yes then adds nothing.
+   */
+  pathSetup?: PathSetup
+  /** The link that was made, ~/.local/bin/kinfold. */
+  pathLink?: string
+  /** The shell startup files that were given the marked PATH block. */
+  pathFiles?: readonly string[]
+}
+
+function savedPath(value: Record<string, unknown>): Pick<InstallRecord, 'pathSetup' | 'pathLink' | 'pathFiles'> {
+  const setup = PATH_SETUPS.find((known) => known === value.pathSetup)
+  if (setup === undefined) return {}
+  const files = Array.isArray(value.pathFiles) ? value.pathFiles.filter(isHomeValue) : []
+  return { pathSetup: setup, ...(isHomeValue(value.pathLink) ? { pathLink: value.pathLink } : {}), ...(files.length > 0 ? { pathFiles: files } : {}) }
 }
 
 function isChannel(value: unknown): value is InstallChannel {
@@ -105,7 +125,7 @@ export function readInstallRecord(dataDir: string): InstallRecord | null {
     const { channel, updateCheck, autoUpdate, autoUpdateIntro, autoUpdateAt, agentHomes, firstInstalledAt } = value as Record<string, unknown>
     if (!isChannel(channel) || typeof updateCheck !== 'boolean') return null
     if (typeof firstInstalledAt !== 'number' || !Number.isFinite(firstInstalledAt)) return null
-    const rest = { agentHomes: savedHomes(agentHomes), ...(typeof autoUpdateAt === 'number' && Number.isFinite(autoUpdateAt) ? { autoUpdateAt } : {}), firstInstalledAt }
+    const rest = { agentHomes: savedHomes(agentHomes), ...(typeof autoUpdateAt === 'number' && Number.isFinite(autoUpdateAt) ? { autoUpdateAt } : {}), firstInstalledAt, ...savedPath(value as Record<string, unknown>) }
     // No autoUpdate key: written before the field existed, so it is on and its user has not been told yet.
     if (autoUpdate === undefined) return { channel, updateCheck, autoUpdate: true, autoUpdateIntro: true, ...rest }
     if (typeof autoUpdate !== 'boolean') return null
@@ -125,6 +145,9 @@ function recordContent(record: InstallRecord): string {
     ...(Object.keys(record.agentHomes).length > 0 ? { agentHomes: record.agentHomes } : {}),
     ...(record.autoUpdateAt !== undefined ? { autoUpdateAt: record.autoUpdateAt } : {}),
     ...(record.autoUpdateIntro ? { autoUpdateIntro: true } : {}),
+    ...(record.pathSetup !== undefined ? { pathSetup: record.pathSetup } : {}),
+    ...(record.pathSetup !== undefined && record.pathLink !== undefined ? { pathLink: record.pathLink } : {}),
+    ...(record.pathSetup !== undefined && record.pathFiles !== undefined && record.pathFiles.length > 0 ? { pathFiles: record.pathFiles } : {}),
   }
   return `${JSON.stringify(fields, null, 2)}\n`
 }

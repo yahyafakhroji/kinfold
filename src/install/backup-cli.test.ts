@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
+import { fakeTerminal } from './prompt/fake-terminal'
+import { runFramed } from './prompt/frame'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readArchive } from '../backup/archive'
@@ -348,4 +350,54 @@ test('the file being downloaded is owner-only from its first byte', async () => 
   expect(modes).toEqual([0o600])
   expect(statSync(dest).mode & 0o777).toBe(0o600)
   expect(readFileSync(dest).equals(archive)).toBe(true)
+})
+
+// ---- on a terminal -------------------------------------------------------------
+
+const drawnLines = (term: ReturnType<typeof fakeTerminal>): string[] =>
+  term.output().split('\n').map((line) => line.slice(line.lastIndexOf('\r') + 1).replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').trimEnd()).filter((line) => line !== '')
+
+test('on a terminal backup shows a spinner and ends on where the backup went', async () => {
+  const m = machine({ titles: ['kept'] })
+  const term = fakeTerminal([])
+  const dest = join(m.w.root, 'memory.kinfold')
+  expect(await runFramed({ ...m.env, terminal: term }, 'backup', (env) => runBackupCommand(env, { command: 'backup', file: dest }))).toBe(EXIT_OK)
+  expect(existsSync(dest)).toBe(true)
+  expect(m.w.out).toEqual([])
+  expect(term.output()).toContain('writing the backup')
+  const lines = drawnLines(term)
+  expect(lines).toContain(`o  backup written: ${dest}`)
+  expect(lines.at(-1)).toBe('Done.')
+})
+
+test('on a terminal restore takes the recovery code masked, and never draws it', async () => {
+  const from = machine({ titles: ['carried over'] })
+  const file = join(from.w.root, 'memory.kinfold')
+  expect(await runBackupCommand(from.env, { command: 'backup', file })).toBe(EXIT_OK)
+  const code = encodeRecoveryCode(from.key as string)
+  const to = machine({ titles: [] })
+  const term = fakeTerminal([...code, '\r'])
+  expect(await runFramed({ ...to.env, terminal: term }, 'restore', (env) => runBackupCommand(env, { command: 'restore', file }))).toBe(EXIT_OK)
+  expect(titles(to)).toEqual(['carried over'])
+  expect(term.output()).toContain('Recovery code:')
+  expect(term.output()).not.toContain(code)
+  expect(term.output()).not.toContain(code.split('-')[0] as string)
+  expect(term.output()).toContain('restoring the memory')
+  // The result line is the one that says it was restored; the notes follow.
+  expect(drawnLines(term).some((line) => /^o {2}restored the backup made /.test(line))).toBe(true)
+  expect(drawnLines(term).at(-1)).toBe('Done.')
+})
+
+test('on a terminal Ctrl-C at the recovery code exits 130 with the store untouched, and a wrong file is an error', async () => {
+  const from = machine({ titles: ['a'] })
+  const file = join(from.w.root, 'memory.kinfold')
+  expect(await runBackupCommand(from.env, { command: 'backup', file })).toBe(EXIT_OK)
+  const to = machine({ titles: ['mine'] })
+  const term = fakeTerminal(['\u0003'])
+  expect(await runFramed({ ...to.env, terminal: term }, 'restore', (env) => runBackupCommand(env, { command: 'restore', file }))).toBe(130)
+  expect(titles(to)).toEqual(['mine'])
+  expect(drawnLines(term).at(-1)).toBe('restore cancelled; nothing was changed')
+  const missing = fakeTerminal([])
+  expect(await runFramed({ ...to.env, terminal: missing }, 'restore', (env) => runBackupCommand(env, { command: 'restore', file: join(to.w.root, 'none.kinfold') }))).toBe(EXIT_FAILED)
+  expect(drawnLines(missing).slice(-2)).toEqual([`x kinfold restore: ${join(to.w.root, 'none.kinfold')} does not exist`, 'kinfold restore did not finish.'])
 })

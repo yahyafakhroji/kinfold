@@ -66,6 +66,8 @@ interface Run {
   kinfold: (world: SmokeWorld, args: readonly string[], stdin?: string, timeoutMs?: number) => Promise<SmokeResult>
   runConversion: (world: SmokeWorld, operation: 'encrypt' | 'decrypt') => Promise<SmokeResult>
   daemon: ForegroundDaemon
+  /** What `--version` printed before install; '' until then. */
+  version: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -85,16 +87,20 @@ function describe(result: SmokeResult): string {
   return parts.join('\n')
 }
 
-export function childEnvironment(home: string, fakeBin: string, platform: SmokePlatform): Record<string, string> {
+export function childEnvironment(home: string, fakeBin: string, platform: SmokePlatform, source: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const env: Record<string, string> = {}
-  for (const [key, value] of Object.entries(process.env)) {
+  for (const [key, value] of Object.entries(source)) {
     if (value !== undefined) env[key] = value
   }
   env.HOME = home
   // Windows spells the key Path; a second PATH entry beside it would leave
   // which one the child sees to chance, so the inherited spelling is reused.
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'
-  env[pathKey] = `${fakeBin}${delimiter}${env[pathKey] ?? '/usr/bin:/bin'}`.trim()
+  // Some runner images put ~/.local/bin on PATH. Install would then have nothing
+  // to add, and the PATH block it writes for everyone else would go untested.
+  const localBin = join(home, '.local', 'bin')
+  const inherited = (env[pathKey] ?? '/usr/bin:/bin').split(delimiter).filter((entry) => entry.replace(/[\\/]+$/, '') !== localBin)
+  env[pathKey] = [fakeBin, ...inherited].join(delimiter).trim()
   // The data folder and the port are fixed by the smoke, so a caller's
   // environment must not move the run to another store or another daemon.
   delete env.KINFOLD_DATA_DIR
@@ -420,7 +426,8 @@ const ENCRYPT_EXPECT = [
   '    set groups [split $code "-"]',
   '    set tail "[lindex $groups end-1][lindex $groups end]"',
   '    expect {',
-  '      "to confirm you saved it: " {}',
+  // Without the trailing space: on a terminal the question is drawn on a line of its own.
+  '      "to confirm you saved it:" {}',
   '      timeout { exit 2 }',
   '      eof { exit 3 }',
   '    }',
@@ -444,7 +451,14 @@ const DECRYPT_EXPECT = [
   'set program [lindex $argv 0]',
   'spawn $program decrypt',
   'expect {',
-  '  "Type decrypt to go on: " { send "decrypt\\r"; exp_continue }',
+  // Answered once: the frame draws the question again as it records the answer.
+  '  "Type decrypt to go on:" {',
+  '    send "decrypt\\r"',
+  '    expect {',
+  '      eof {}',
+  '      timeout { exit 6 }',
+  '    }',
+  '  }',
   '  eof {}',
   '  timeout { exit 2 }',
   '}',
@@ -578,6 +592,17 @@ async function steps(ctx: Run): Promise<void> {
   expectContains('status', status.stdout, encryptedLine(platform))
   for (const line of platform.statusLines?.(world) ?? []) expectContains('status', status.stdout, line)
 
+  if (platform.commandInNewShell !== undefined) {
+    process.stdout.write('smoke: kinfold command in a new shell\n')
+    expectContains('kinfold command', status.stdout, /^kinfold command: /m)
+    const answered = await platform.commandInNewShell(world)
+    expectOk('kinfold command', answered)
+    // The version this build printed at the start: the command must be this program, not another kinfold on the machine.
+    if (!answered.stdout.split(/\r?\n/).some((line) => line.trim() === ctx.version)) {
+      throw new SmokeError('kinfold command', `a new shell ran kinfold --version and did not get ${ctx.version}\n${describe(answered)}`)
+    }
+  }
+
   if (platform.name === 'windows') {
     process.stdout.write('smoke: install from a detached process with no console\n')
     await detachedReinstall(ctx)
@@ -678,6 +703,7 @@ export async function smoke(programPath: string, platform: SmokePlatform, deps: 
     kinfold: deps.kinfold ?? kinfold,
     runConversion: deps.runConversion ?? platform.runConversion?.bind(platform) ?? runPty,
     daemon: foregroundDaemon(platform, world),
+    version: '',
   }
 
   let installStarted = false
@@ -687,6 +713,7 @@ export async function smoke(programPath: string, platform: SmokePlatform, deps: 
     const version = await ctx.kinfold(world, ['--version'])
     expectOk('version', version)
     const release = version.stdout.trim()
+    ctx.version = release
     if (release !== '0.0.0-dev' && (env.KINFOLD_RELEASE_SUMS_URL ?? '') === '') {
       throw new SmokeError('setup', `${release} needs KINFOLD_RELEASE_SUMS_URL; the self-check must read the release SHA256SUMS`)
     }
@@ -715,6 +742,8 @@ export async function smoke(programPath: string, platform: SmokePlatform, deps: 
       if (existsSync(file)) throw new SmokeError('uninstall', `${file} is still there`)
     }
     if (platform.serviceLoaded(world.env)) throw new SmokeError('uninstall', `the ${platform.name} service is still loaded`)
+    const leftovers = (await platform.commandLeftovers?.(world)) ?? []
+    if (leftovers.length > 0) throw new SmokeError('uninstall', `uninstall left the kinfold command behind: ${leftovers.join('; ')}`)
   } catch (error: unknown) {
     failure = error
   } finally {

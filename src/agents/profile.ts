@@ -88,6 +88,21 @@ export function capabilitySummary(caps: Capabilities): string {
   return parts.join(', ')
 }
 
+/**
+ * The same in three words at most, for a row that also carries a name and a
+ * version: "capture, context, search". Status has the full line and the limit.
+ */
+export function capabilityBrief(profile: AgentProfile, os: OsName): string {
+  const caps = profile.capabilities(os)
+  const parts = [
+    ...(caps.capture === 'full' ? ['capture'] : caps.capture === 'partial' ? ['partial capture'] : []),
+    ...(contextPart(caps.context) ? ['context'] : []),
+    ...(caps.search ? ['search'] : []),
+  ]
+  // The limit is a sentence for status; a row has room for a few words.
+  return parts.length === 0 ? 'no automatic wiring' : parts.join(', ')
+}
+
 export function capabilityLine(profile: AgentProfile, os: OsName): string {
   const line = capabilitySummary(profile.capabilities(os))
   const limit = profile.limit(os)

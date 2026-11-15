@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { fakeTerminal } from './prompt/fake-terminal'
-import { NOT_A_TERMINAL, type RecoverySink, confirmRecoveryCode, recoverySinkFromEnv, recoverySinkFromTerminal } from './recovery-confirm'
+import { createPrompts } from './prompt/prompts'
+import { NOT_A_TERMINAL, type RecoverySink, confirmRecoveryCode, recoverySinkFromEnv, recoverySinkFromPrompts } from './recovery-confirm'
 
 const CODE = 'ABCDE-FGH23-45678-JKMNP-QRSTV'
 
@@ -32,7 +33,7 @@ test('the code appears only in say lines, never in the question', async () => {
 })
 
 test('no sink is minted without a terminal', () => {
-  expect(() => recoverySinkFromTerminal(null)).toThrow(NOT_A_TERMINAL)
+  expect(() => recoverySinkFromPrompts(null)).toThrow(NOT_A_TERMINAL)
   expect(() => envSink('', { interactive: false }).sink()).toThrow(NOT_A_TERMINAL)
   expect(() => envSink('', { printsToTerminal: false }).sink()).toThrow(NOT_A_TERMINAL)
 })
@@ -54,7 +55,7 @@ test('the refusal message never holds the code', async () => {
 
 test('a terminal sink shows the code on the terminal and reads the tail there', async () => {
   const term = fakeTerminal(['jkmnp-qrstv\r'])
-  expect(await confirmRecoveryCode(recoverySinkFromTerminal(term), CODE)).toBe(true)
+  expect(await confirmRecoveryCode(recoverySinkFromPrompts(createPrompts(term)), CODE)).toBe(true)
   expect(term.output()).toContain(CODE)
   expect(term.rawStates().at(-1)).toBe(false)
 })

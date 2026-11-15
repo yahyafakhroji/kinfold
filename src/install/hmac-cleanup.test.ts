@@ -172,7 +172,7 @@ test('--remove-hmac-keys is an uninstall flag without a value; the usage line an
   expect(parseArgs(['uninstall', '--remove-hmac-keys'])).toMatchObject({ ok: true, value: { removeHmacKeys: true, removeCredentials: false } })
   expect(parseArgs(['uninstall', '--remove-hmac-keys=yes'])).toEqual({ ok: false, error: `unknown argument "--remove-hmac-keys=yes"\n${USAGE}` })
   expect(parseArgs(['install', '--remove-hmac-keys'])).toEqual({ ok: false, error: '--remove-hmac-keys does not apply to install' })
-  expect(USAGE).toContain('uninstall  [--dry-run] [--remove-credentials] [--remove-hmac-keys]')
+  expect(USAGE).toContain('uninstall  [--dry-run] [--verbose] [--remove-credentials] [--remove-hmac-keys]')
   expect(USAGE).toContain('stored refs can no longer')
   expect(USAGE).toContain('a later install starts a new master')
 })

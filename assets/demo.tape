@@ -1,67 +1,83 @@
-# The README's terminal recording: `vhs assets/demo.tape` writes assets/demo.gif.
+# The README's terminal recording: `vhs assets/demo.tape`, run from the
+# repository root, writes assets/demo.gif.
 #
-# It needs a release build of the program and the SHA256SUMS it was released
-# with, named by two variables, so this file holds no local paths:
-#   KINFOLD_DEMO_BIN=/path/to/kinfold-darwin-arm64
-#   KINFOLD_DEMO_SUMS=/path/to/SHA256SUMS
-# The program honours a local SHA256SUMS only for an -rc build; a final build
-# fetches the sums of its own GitHub Release, so KINFOLD_DEMO_SUMS is unused.
+# It shows a real install on a terminal (the wizard, the progress bar, the
+# summary) and then `kinfold status`. A real install loads a LaunchAgent,
+# writes Keychain entries and takes the daemon's port, and a throwaway HOME
+# isolates none of those. So nothing here runs the installed program. The tape
+# starts tools/demo.ts, a small shell that runs `kinfold install` and
+# `kinfold status` in one process over the installer's test world:
+#   - HOME and the memory folder are temp folders under a mktemp directory
+#   - launchctl is scripted, and "loading" the service starts a daemon in the
+#     same process on a free loopback port, never 37811
+#   - the Keychain is an in-memory map
+#   - `claude` and `opencode` are scripted commands that answer --version
+#   - sqlite-vec is the pinned build, copied from .cache/vec0, so the install
+#     downloads nothing; fetch it once with `bun tools/fetch-vec0.ts`
+# tools/demo.ts refuses to start unless its world is under that mktemp
+# directory, and it turns the daemon's update check off, so the recording
+# reaches no network. Its header lists the three things it does for the camera.
 #
-# Everything runs under a throwaway HOME in the per-user temp folder, and the
-# install is a dry run, so nothing is written. The dry run still reads state
-# that is per user rather than per HOME: whether the LaunchAgent is loaded,
-# whether a daemon answers on the port, and whether Keychain entries exist
-# (never their values). Stub `claude` and `opencode` commands stand in for the
-# agents.
+# Two variables, so this file holds no local paths:
+#   KINFOLD_DEMO_BUN=/path/to/bun        the pinned Bun (default: bun on PATH)
+#   KINFOLD_DEMO_VERSION=0.4.0           the version the frames show
 
 Output assets/demo.gif
 
 Set Shell "bash"
-Set FontSize 15
+Set FontSize 14
 Set Width 1280
-Set Height 760
+Set Height 1040
 Set Padding 24
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 45ms
+Set Framerate 20
 Set PlaybackSpeed 1.0
 
 Hide
-Type `export HOME="$(mktemp -d "$(getconf DARWIN_USER_TEMP_DIR)kinfold-demo.XXXX")" && cd "$HOME" && mkdir bin`
+Type `export KINFOLD_DEMO_ROOT="$(mktemp -d /tmp/kinfold-demo.XXXXXX)" KINFOLD_DEMO_VERSION="${KINFOLD_DEMO_VERSION:-0.4.0}" && clear && exec "${KINFOLD_DEMO_BUN:-bun}" tools/demo.ts`
 Enter
-Type `cp "$KINFOLD_DEMO_BIN" bin/kinfold && printf '#!/bin/sh\necho 2.1.0\n' > bin/claude && printf '#!/bin/sh\necho 2.1.4\n' > bin/opencode && chmod +x bin/claude bin/opencode`
-Enter
-Type `export PATH="$HOME/bin:/usr/bin:/bin" KINFOLD_NO_UPDATE_CHECK=1 KINFOLD_RELEASE_SUMS_URL="file://$KINFOLD_DEMO_SUMS" PS1='$ '`
-Enter
-Type "clear"
-Enter
+Sleep 2.5s
 Show
 
-Sleep 500ms
-Type "kinfold --version"
+Sleep 400ms
+Type "kinfold install"
 Sleep 300ms
 Enter
+Sleep 1.6s
+
+# Memory folder, then the agent list: Claude Code and OpenCode found and
+# ticked, the rest shown as not installed.
+Enter
+Sleep 2.8s
+Enter
+Sleep 1.3s
+
+# An observer for each picked agent.
+Enter
+Sleep 1.3s
+Enter
 Sleep 1.5s
 
-Type "kinfold install --dry-run"
-Sleep 400ms
+# Encrypt memory.db: the recovery code is shown, and its last two groups are
+# typed by tools/demo.ts, since a tape cannot read the code off the screen.
 Enter
-Sleep 2.5s
+Sleep 4.4s
 
-# Memory folder, agents, an observer per agent, encryption, port, update check,
-# then the summary's confirmation, after which the dry run prints its plan.
+# Updates, the PATH question, then the summary and its confirm.
 Enter
-Sleep 1.2s
+Sleep 1.4s
 Enter
-Sleep 1.5s
+Sleep 3.4s
 Enter
-Sleep 1.5s
+
+# The bar runs to the end and the Installed box follows.
+Sleep 7.5s
+
+Type "clear"
 Enter
-Sleep 1.5s
+Sleep 300ms
+Type "kinfold status"
+Sleep 300ms
 Enter
-Sleep 1.5s
-Enter
-Sleep 1.2s
-Enter
-Sleep 2.5s
-Enter
-Sleep 7s
+Sleep 6.5s

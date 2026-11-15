@@ -22,14 +22,18 @@ import {
   buildPlan,
   daemonSituation,
   foreignDaemonMessage,
+  noticeOf,
   reportDetections,
   restartService,
   takeInstallLock,
 } from '../install'
+import { INSTALL_PROFILES } from '../../agents/install-profiles'
 import { type InstallKeyStore, keyStoreOf, readKeyStore } from '../key-store-choice'
 import { ChoiceError, describeInput } from '../observer-choice'
-import { runPlan } from '../plan'
-import { PromptCancelled } from '../prompt/prompts'
+import type { PathPlan } from '../path-setup'
+import { linesListener, runPlan } from '../plan'
+import { PromptCancelled, type Row } from '../prompt/prompts'
+import { managedServiceOf } from '../service/control'
 import { type ProgramCheck, checkProgram } from '../self-install'
 import type { SetupState } from './prefill'
 import type { EncryptionAnswer, SetupAnswers } from './wizard'
@@ -103,10 +107,16 @@ async function contextFor(env: InstallEnv, options: InstallOptions, given: Apply
  * just started; its recovery code was confirmed in the questions already.
  */
 export async function applySetup(env: InstallEnv, state: SetupState, answers: SetupAnswers, options: InstallOptions, given?: ApplyContext): Promise<number> {
+  const view = options.view
+  // One channel for a failure, so it is said once: the run's own on a terminal (the log, and the frame with the step it stopped at), else the output.
+  const failed = (line: string): number => {
+    ;(options.fail ?? env.out)(line)
+    return EXIT_FAILED
+  }
   try {
     const { check, situation } = await contextFor(env, options, given)
     if (situation.foreign && !options.takeover && !options.dryRun) {
-      for (const line of foreignDaemonMessage(situation)) env.out(line)
+      for (const line of foreignDaemonMessage(situation)) noticeOf(env)(line)
       return EXIT_BLOCKED
     }
     const conversion = conversionOf(answers.encryption)
@@ -121,10 +131,15 @@ export async function applySetup(env: InstallEnv, state: SetupState, answers: Se
     const plan = await buildPlan(env, { hosts: answers.hosts, detections: found, situation, keyStore: given?.keyStore }, answers, state, options, check)
     const lock = takeInstallLock(env, options)
     if (lock === 'blocked') return EXIT_BLOCKED
+    // The conversion runs after the plan and is one more step on the same bar.
+    view?.extraStages(conversion === null ? 0 : 1)
     try {
-      await runPlan(env, plan.actions, options.dryRun)
+      await runPlan(env, plan.actions, options.dryRun, undefined, { listeners: [linesListener(env.out), ...(options.planListeners ?? [])], labels: plan.labels })
     } catch (error: unknown) {
-      if (!options.dryRun && plan.stopsService) await restartService(env)
+      if (!options.dryRun && plan.stopsService) {
+        view?.stage('starting the daemon again')
+        await restartService(env)
+      }
       throw error
     } finally {
       lock.release()
@@ -137,19 +152,22 @@ export async function applySetup(env: InstallEnv, state: SetupState, answers: Se
       return EXIT_BLOCKED
     }
     if (conversion !== null) {
+      view?.stage(conversion === 'encrypt' ? 'encrypting memory.db' : 'decrypting memory.db')
       try {
         await convert(env, answers.encryption)
       } catch (error: unknown) {
-        env.out(`install: everything else is in place, but kinfold ${conversion} failed: ${errorMessage(error)}${unusedCodeNote(env, answers.encryption)}`)
-        return EXIT_FAILED
+        return failed(`install: everything else is in place, but kinfold ${conversion} failed: ${errorMessage(error)}${unusedCodeNote(env, answers.encryption)}`)
       }
     }
-    for (const line of doneLines(env, answers, state)) env.out(line)
+    for (const line of doneLines(env, answers, state, plan.path)) env.out(line)
+    if (view !== undefined) {
+      const summary = doneSummary(env, answers, state, plan.path)
+      view.finish('Installed', summary.rows, summary.next)
+    }
     return EXIT_OK
   } catch (error: unknown) {
     if (error instanceof PromptCancelled) throw error
-    env.out(`install failed: ${errorMessage(error)}`)
-    return EXIT_FAILED
+    return failed(`install failed: ${errorMessage(error)}`)
   }
 }
 
@@ -166,15 +184,49 @@ function commandPrefix(env: InstallEnv): string {
 export const SHOW_RECOVERY_LINE = 'Encryption is on: run kinfold key show-recovery in a terminal to see your recovery code.'
 
 /** The done screen: how to check the install and open the dashboard, and what was not shown during it. */
-export function doneLines(env: InstallEnv, answers: SetupAnswers, state: SetupState): string[] {
+export function doneLines(env: InstallEnv, answers: SetupAnswers, state: SetupState, path?: PathPlan): string[] {
   const run = commandPrefix(env)
   const dropped = state.wiredHosts.filter((host) => !answers.hosts.includes(host))
   const lines = [`installed. Check it with: ${run} status`, `Open the dashboard with: ${run} dashboard`]
   if (dropped.length > 0) lines.push(`No longer wired: ${dropped.join(', ')}.`)
   if (answers.hosts.length === 0) lines.push('No agent is wired; run install again to add one.')
-  // Under --yes the key was made, or kept, without its code on screen.
+  if (recoveryCodeUnseen(env, answers)) lines.push(SHOW_RECOVERY_LINE)
+  if (path !== undefined && path.summary !== null) lines.push(path.summary)
+  // A PATH change reaches terminals opened from now on; this one needs the line, or the full path.
+  if (path !== undefined && path.activate !== null) lines.push(`kinfold command: new terminals have it; in this one run ${path.activate.startsWith('source ') ? `"${path.activate}" first` : `it as ${path.activate}`}`)
+  return lines
+}
+
+/** Under --yes the key was made, or kept, without its code on screen. */
+function recoveryCodeUnseen(env: InstallEnv, answers: SetupAnswers): boolean {
   const unseen = answers.encryption.kind === 'new-encrypted' && answers.encryption.key === null
   const read = readKeyStore(env)
-  if (unseen && read.ok && read.store !== null) lines.push(SHOW_RECOVERY_LINE)
-  return lines
+  return unseen && read.ok && read.store !== null
+}
+
+/** Whether typing `kinfold` will find this install: PATH was changed, or the place the command sits was on PATH already. */
+function commandByName(path: PathPlan): boolean {
+  const setup = path.record.pathSetup
+  return setup === 'added' || (setup === 'not-needed' && path.actions.length + (path.record.pathLink === undefined ? 0 : 1) > 0)
+}
+
+/** The terminal run's last screen: what was set up, each row with its mark, and the one command to run next. */
+export function doneSummary(env: InstallEnv, answers: SetupAnswers, state: SetupState, path: PathPlan): { rows: Row[]; next: string } {
+  const names = answers.hosts.map((host) => INSTALL_PROFILES[host].name)
+  const dropped = state.wiredHosts.filter((host) => !answers.hosts.includes(host))
+  const encrypted = answers.encryption.kind === 'new-encrypted' || answers.encryption.kind === 'encrypt-existing' || (answers.encryption.kind === 'keep' && state.encryption === 'on')
+  const rows: Row[] = [
+    names.length > 0 ? { mark: 'ok', text: `Agents wired: ${names.join(', ')}` } : { mark: 'warn', text: 'No agent is wired; run install again to add one.' },
+    ...(dropped.length > 0 ? [{ mark: 'none', text: `No longer wired: ${dropped.map((host) => INSTALL_PROFILES[host].name).join(', ')}` } as const] : []),
+    managedServiceOf(env) === null
+      ? { mark: 'warn', text: `Daemon: not started by a service here; start it yourself on port ${answers.port} (the command is in the log)` }
+      : { mark: 'ok', text: `Daemon: running on 127.0.0.1:${answers.port}` },
+    encrypted ? { mark: 'ok', text: 'Encryption: memory.db is encrypted' } : { mark: 'none', text: 'Encryption: off' },
+    ...(recoveryCodeUnseen(env, answers) ? [{ mark: 'warn', text: SHOW_RECOVERY_LINE } as const] : []),
+    ...(path.summary === null ? [] : [{ mark: commandByName(path) ? 'ok' : 'none', text: path.summary } as const]),
+  ]
+  const run = commandPrefix(env)
+  if (!commandByName(path) && path.record.pathSetup !== 'added') return { rows, next: `Check it with: ${run} status` }
+  // A PATH change reaches terminals opened from now on; this one needs the line, or the full path.
+  return { rows, next: path.activate === null ? 'Check it with: kinfold status' : `Check it in a new terminal with: kinfold status (in this one: ${path.activate.startsWith('source ') ? `${path.activate}, then kinfold status` : `${path.activate} status`})` }
 }

@@ -11,7 +11,9 @@ import { EXIT_OK, install, reportDetections } from './install'
 import { claudeMcpEntry } from './mcp-config'
 import { mcpPaths, mcpTarget } from './mcp-wiring'
 import { VERSION } from '../version'
-import { autoUpdateBlocker, status } from './status'
+import { fakeTerminal } from './prompt/fake-terminal'
+import { runFramed } from './prompt/frame'
+import { autoUpdateBlocker, status, statusMark } from './status'
 import { mergeAutoState } from '../update/auto-state'
 import { fakeService } from './test-support'
 import { writeUpdateState } from '../update/state'
@@ -57,6 +59,7 @@ test('before install: hosts detected but not wired, daemon down, nothing created
     `data dir ${w.dataDir}: missing`,
     'update check: off',
     'auto-update: off (no install record)',
+    'kinfold command: not on PATH; a checkout has no installed program',
     'duplicate wiring: none in this directory',
   ])
   expect(w.securityCalls.every((call) => !call.args.includes('-w'))).toBe(true)
@@ -395,4 +398,130 @@ test('status says a blocker is tried again on a change, not daily', async () => 
   writeUpdateState(w.dataDir, { lastAttemptAt: 1, latestVersion: '0.2.1', checkedAt: ON_DATE, notified: {} })
   mergeAutoState(w.dataDir, { failure: { version: '0.2.1', at: ON_DATE, reason: 'the daemon is not run by a background service here; run kinfold update', blocked: true, running: '0.2.0' } })
   expect(await linesOf(w)).toContain('  last error: 0.2.1 on 2027-01-15T08:00:00.000Z: the daemon is not run by a background service here; run kinfold update. It is tried again when the daemon restarts or the install changes.')
+})
+
+test('status says whether typing kinfold finds a program, and reads only', async () => {
+  world = createWorld()
+  const w = world
+  const bin = join(w.dataDir, 'bin', 'kinfold')
+  w.env = { ...w.env, mode: { kind: 'program', binPath: bin } }
+  const before = snapshotTree(w.home)
+  expect(await linesOf(w)).toContain(`kinfold command: not on PATH; run ${bin} install in a terminal to add it`)
+  expect(snapshotTree(w.home)).toEqual(before)
+})
+
+// ---- on a terminal -------------------------------------------------------------
+
+const drawn = (term: ReturnType<typeof fakeTerminal>): string[] =>
+  term.output().split('\n').map((line) => line.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').trimEnd()).filter((line) => line !== '')
+
+test('on a terminal status is sections of marked rows, and ends on the command to run next', async () => {
+  const term = fakeTerminal([])
+  const w = make({ withLibrary: false, terminal: term })
+  const before = snapshotTree(w.home)
+  expect(await runFramed(w.env, 'status', (env) => status(env))).toBe(EXIT_OK)
+  expect(snapshotTree(w.home)).toEqual(before)
+  expect(w.out).toEqual([])
+  const lines = drawn(term)
+  expect(lines[0]).toMatch(/^Kinfold \S+ status$/)
+  expect(lines.filter((line) => !line.startsWith(' ')).slice(1, -1)).toEqual(['Agents', 'Daemon', 'Memory', 'Observers', 'Updates', 'Command'])
+  // Found and not wired is worth a look; not installed is only stated.
+  expect(lines).toContain('  ! Claude Code: 2.1.310, not wired · capture, context, search')
+  expect(lines).toContain('  ! OpenCode: 2.1.4, not wired · capture, search')
+  expect(lines).toContain('  Not installed: 19 other supported agents')
+  expect(lines).toContain('  x daemon /health: down (nothing answers on 127.0.0.1:37811 (TypeError))')
+  expect(lines).toContain('  + keychain openrouter: present')
+  expect(lines).toContain('  + duplicate wiring: none in this directory')
+  expect(lines).toContain('  ! kinfold command: not on PATH; a checkout has no installed program')
+  expect(lines.at(-1)).toBe('Start the daemon with: kinfold install')
+})
+
+test('a wired agent and a running daemon get the ok mark, and the outro points at the dashboard', async () => {
+  const term = fakeTerminal([])
+  const w = make({ opencodeVersion: null })
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  w.env = { ...w.env, terminal: term }
+  expect(await runFramed(w.env, 'status', (env) => status(env))).toBe(EXIT_OK)
+  const lines = drawn(term)
+  expect(lines.some((line) => /^ {2}\+ Claude Code: .*, wired/.test(line))).toBe(true)
+  expect(lines.some((line) => /^ {2}\+ daemon \/health: up on 127\.0\.0\.1:/.test(line))).toBe(true)
+  expect(lines.at(-1)).toBe('Open the dashboard with: kinfold dashboard')
+  // Only the observers that were chosen: a built-in default for an agent that is not wired says nothing.
+  const observers = lines.slice(lines.indexOf('Observers') + 1, lines.indexOf('Updates'))
+  expect(observers).toEqual(['  claude-code: claude-cli/haiku; source host'])
+})
+
+test('the marks are right for the lines status really prints', () => {
+  const marks = (line: string): string => statusMark(line)
+  // A store that is encrypted with its key gone is the worst row on the screen, never a green one.
+  expect(marks('database: encrypted (keychain db-key present)')).toBe('ok')
+  expect(marks('database: encrypted (keychain db-key missing)')).toBe('fail')
+  expect(marks('database: encrypted (key store unknown)')).toBe('warn')
+  expect(marks('database: plaintext; kinfold encrypt converts it (keychain db-key missing)')).toBe('warn')
+  expect(marks('database: not created yet (keychain db-key missing)')).toBe('none')
+  // Every line that calls itself a warning is one, wherever it is indented.
+  expect(marks('warning: memory.db is encrypted and the Keychain has no db-key under kinfold; restore it with kinfold key recover')).toBe('warn')
+  expect(marks('  warning: /home/u/.kinfold/hmac.key still exists; run kinfold install to finish the migration')).toBe('warn')
+  expect(marks('warning: this directory also wires Kinfold, so its events would be captured twice:')).toBe('warn')
+  expect(marks('data dir /home/u/.kinfold: 2 of 19 need fixing (install fixes them):')).toBe('warn')
+  expect(marks('  codex: invalid setting (unknown provider)')).toBe('warn')
+  expect(marks('data dir /home/u/.kinfold: modes ok (19 checked, dirs 0700, files 0600, program 0755)')).toBe('none')
+})
+
+test('an agent whose wiring is stale or partial is a row to look at, and says which', async () => {
+  const term = fakeTerminal([])
+  const w = make({ opencodeVersion: null, terminal: term })
+  // Hooks from an older install: an entry that runs another program path.
+  const paths = installPaths(w.env)
+  mkdirSync(paths.claudeDir, { recursive: true })
+  const stale = mergeSamHooks({}, { entry: entryCommand({ kind: 'program', binPath: '/old/place/bin/kinfold' }, 'hook', w.dataDir) }).settings
+  writeFileSync(paths.claudeSettings, JSON.stringify(stale))
+  expect(await runFramed(w.env, 'status', (env) => status(env))).toBe(EXIT_OK)
+  const row = drawn(term).find((line) => line.includes('Claude Code:')) ?? ''
+  expect(row).toMatch(/^ {2}! Claude Code: 2\.1\.310, wiring (stale|partial) · /)
+})
+
+test('an agent that is not installed and a key no observer uses are stated, not flagged', async () => {
+  const term = fakeTerminal([])
+  // Claude Code only, on its CLI observer: nothing uses OpenCode's MCP entry or the OpenRouter key.
+  const w = make({ opencodeVersion: null, keychainRefs: [] })
+  expect(await install(w.env, { ...YES, flags: [{ host: 'claude-code', provider: 'claude-cli', model: 'haiku' }] })).toBe(EXIT_OK)
+  w.env = { ...w.env, terminal: term }
+  expect(await runFramed(w.env, 'status', (env) => status(env))).toBe(EXIT_OK)
+  const lines = drawn(term)
+  expect(lines.some((line) => /^ {4}opencode: no in /.test(line))).toBe(true)
+  expect(lines.some((line) => /^ {2}! opencode: no in /.test(line))).toBe(false)
+  expect(lines).toContain('  keychain openrouter: missing')
+  expect(lines).not.toContain('  ! keychain openrouter: missing')
+})
+
+test('with no observer chosen the section says so in one row', async () => {
+  const term = fakeTerminal([])
+  const w = make({ claudeVersion: null, opencodeVersion: null })
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  w.env = { ...w.env, terminal: term }
+  expect(await runFramed(w.env, 'status', (env) => status(env))).toBe(EXIT_OK)
+  const lines = drawn(term)
+  expect(lines.slice(lines.indexOf('Observers') + 1, lines.indexOf('Updates'))).toEqual(['  every agent is on its built-in default'])
+})
+
+test('each kind of status line gets the mark its words call for', () => {
+  const marks = (line: string): string => statusMark(line)
+  expect(marks('daemon /health: up on 127.0.0.1:37811 version 0.3.0')).toBe('ok')
+  expect(marks('daemon /health: down (nothing answers)')).toBe('fail')
+  expect(marks('service (LaunchAgent): config present; running: yes')).toBe('ok')
+  expect(marks('service (LaunchAgent): config missing; running: no')).toBe('warn')
+  expect(marks('database: encrypted (keychain db-key present)')).toBe('ok')
+  expect(marks('keychain openrouter: missing')).toBe('warn')
+  expect(marks('update: Kinfold 0.3.1 is available. Run `kinfold update`.')).toBe('warn')
+  expect(marks('update: none known (never checked)')).toBe('ok')
+  expect(marks('auto-update: on (patch releases install themselves)')).toBe('ok')
+  expect(marks('  last error: 0.3.1 on 2026-11-15: no network')).toBe('warn')
+  expect(marks('kinfold command: on PATH at /home/u/.local/bin/kinfold (this install)')).toBe('ok')
+  expect(marks("kinfold command: on PATH at /usr/bin/kinfold, which is not this install's program")).toBe('warn')
+  expect(marks('  claude-code: yes in /home/u/.claude.json')).toBe('ok')
+  expect(marks('semantic search: off (no pinned sqlite-vec build)')).toBe('none')
+  expect(marks('semantic search: on')).toBe('ok')
+  expect(marks('semantic search: off in the running daemon; restart it (kinfold install restarts it)')).toBe('warn')
+  expect(marks('update check: off')).toBe('none')
 })

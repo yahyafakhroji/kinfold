@@ -32,9 +32,15 @@ export interface CliArgs {
   /** `update --auto`: the run the daemon starts for a patch release. Not in USAGE, since no one types it. */
   auto: boolean
   port: number | null
+  /** --path or --no-path: the answer to the PATH question, given up front. null: neither. */
+  path: 'path' | 'no-path' | null
+  addPath: boolean
+  noPath: boolean
+  /** On a terminal, the numbered action list is shown beside the progress bar. */
+  verbose: boolean
 }
 
-type BooleanFlag = 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck' | 'noAutoUpdate' | 'autoUpdate' | 'auto'
+type BooleanFlag = 'addPath' | 'noPath' | 'verbose' | 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck' | 'noAutoUpdate' | 'autoUpdate' | 'auto'
 
 const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: readonly Command[] }>> = {
   '--dry-run': { key: 'dryRun', commands: ['install', 'uninstall', 'update'] },
@@ -48,6 +54,9 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
   '--no-auto-update': { key: 'noAutoUpdate', commands: ['install'] },
   '--auto-update': { key: 'autoUpdate', commands: ['install'] },
   '--auto': { key: 'auto', commands: ['update'] },
+  '--path': { key: 'addPath', commands: ['install'] },
+  '--no-path': { key: 'noPath', commands: ['install'] },
+  '--verbose': { key: 'verbose', commands: ['install', 'uninstall'] },
   '--remove-credentials': { key: 'removeCredentials', commands: ['uninstall'] },
   '--remove-hmac-keys': { key: 'removeHmacKeys', commands: ['uninstall'] },
 }
@@ -57,8 +66,11 @@ export const USAGE = [
   '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>]...',
   '             [--skip-check] [--replace-credential] [--credential-stdin] [--takeover]',
   '             [--no-encrypt] [--port <1024-65535>] [--no-update-check] [--auto-update | --no-auto-update]',
+  '             [--path | --no-path] [--verbose]',
+  '             --path puts the kinfold command on your PATH without asking; --no-path adds nothing and takes out what an earlier install added;',
+  '             --verbose shows every step on a terminal (the full list is always in <data-dir>/logs/install.log)',
   '  update     [--dry-run]',
-  '  uninstall  [--dry-run] [--remove-credentials] [--remove-hmac-keys]',
+  '  uninstall  [--dry-run] [--verbose] [--remove-credentials] [--remove-hmac-keys]',
   '             --remove-hmac-keys deletes the stored hmac-master and hmac-legacy keys and hmac.d/: stored refs can no longer',
   '             be checked, and a later install starts a new master (hmac.key is written back from hmac-legacy first)',
   '  status',
@@ -66,8 +78,10 @@ export const USAGE = [
   '  size',
   '  retention  [--set <events|prompts|observations|summaries>=<days|keep>]... [--set warn_bytes=<n>] [--yes]',
   '  scan',
-  '  findings   [--all] [--redact <id> | --purge <id>]',
-  '  purge      --session <id> | --project <key> | --host <host> | --observation <id> | --before <iso> [--after <iso>] [--dry-run]',
+  '  findings   [--all] [--redact <id> | --purge <id> [--yes]]',
+  '             --purge shows the finding and asks before it deletes the row; --yes skips the question, and is needed where there is no terminal',
+  '  purge      --session <id> | --project <key> | --host <host> | --observation <id> | --before <iso> [--after <iso>] [--dry-run] [--yes]',
+  '             shows what it would delete and asks before deleting; --yes skips the question, and is needed where there is no terminal',
   '  backup     <file>   write the memory to one file, still encrypted; capture keeps running',
   '  restore    <file>   replace the memory with a backup; asks for its recovery code (typed, or on stdin)',
   '  encrypt    convert memory.db to an encrypted file; shows a recovery code to keep',
@@ -80,6 +94,7 @@ export const USAGE = [
   '  daemon     run the local daemon on loopback',
   '  observe    <session-id>   run the observer once for one session',
   '  --data-dir <path>   the data folder for this process; wins over KINFOLD_DATA_DIR; may come before or after the command',
+  '  --plain    print plain lines even on a terminal, as into a pipe; may come before or after the command',
   '  --help     print this usage; a bare kinfold runs install',
   '  --version  print the version of this build',
 ].join('\n')
@@ -97,8 +112,10 @@ export type DataArgs =
   | { command: 'scan' }
   /** apply: --yes; without it a change is only previewed. */
   | { command: 'retention'; change: DataSettingsChange | null; apply: boolean }
-  | { command: 'findings'; all: boolean; resolve: { id: number; action: ResolveAction } | null }
-  | { command: 'purge'; body: Record<string, string | number | boolean> }
+  /** yes: --yes, which lets --purge delete without the confirm. */
+  | { command: 'findings'; all: boolean; resolve: { id: number; action: ResolveAction } | null; yes: boolean }
+  /** yes: --yes, which deletes without the confirm; a script has no one to answer it. */
+  | { command: 'purge'; body: Record<string, string | number | boolean>; yes: boolean }
 
 interface DataFlag {
   name: string
@@ -147,10 +164,15 @@ function retentionArgs(flags: readonly DataFlag[]): Parsed<DataArgs> {
 
 function findingsArgs(flags: readonly DataFlag[]): Parsed<DataArgs> {
   let all = false
+  let yes = false
   let resolve: { id: number; action: ResolveAction } | null = null
   for (const flag of flags) {
     if (flag.name === '--all') {
       all = true
+      continue
+    }
+    if (flag.name === '--yes' && flag.value === null) {
+      yes = true
       continue
     }
     const action = flag.name === '--redact' ? 'redact' : flag.name === '--purge' ? 'purge' : null
@@ -160,7 +182,8 @@ function findingsArgs(flags: readonly DataFlag[]): Parsed<DataArgs> {
     if (resolve !== null) return { ok: false, error: 'resolve one finding at a time' }
     resolve = { id, action }
   }
-  return { ok: true, value: { command: 'findings', all, resolve } }
+  if (yes && resolve?.action !== 'purge') return { ok: false, error: 'findings --yes goes with --purge <id>' }
+  return { ok: true, value: { command: 'findings', all, resolve, yes } }
 }
 
 const PURGE_FLAGS: Readonly<Record<string, string>> = {
@@ -169,9 +192,14 @@ const PURGE_FLAGS: Readonly<Record<string, string>> = {
 
 function purgeArgs(flags: readonly DataFlag[]): Parsed<DataArgs> {
   const body: Record<string, string | number | boolean> = {}
+  let yes = false
   for (const flag of flags) {
     if (flag.name === '--dry-run') {
       body.dryRun = true
+      continue
+    }
+    if (flag.name === '--yes' && flag.value === null) {
+      yes = true
       continue
     }
     const key = PURGE_FLAGS[flag.name]
@@ -180,7 +208,7 @@ function purgeArgs(flags: readonly DataFlag[]): Parsed<DataArgs> {
     body[key] = key === 'session' || key === 'observation' ? Number(flag.value) : flag.value
   }
   const parsed = parsePurgeBody(body)
-  return parsed.ok ? { ok: true, value: { command: 'purge', body } } : { ok: false, error: `purge: ${parsed.error}` }
+  return parsed.ok ? { ok: true, value: { command: 'purge', body, yes } } : { ok: false, error: `purge: ${parsed.error}` }
 }
 
 // ---- Dashboard: `kinfold dashboard [--print]` -------------------------------------
@@ -232,7 +260,7 @@ export function parseDataArgs(argv: readonly string[]): Parsed<DataArgs> | null 
   const command = argv[0]
   if (!DATA_COMMANDS.includes(command as DataCommand)) return null
   if ((command === 'size' || command === 'scan') && argv.length > 1) return { ok: false, error: `${command} takes no flags` }
-  const booleans = command === 'findings' ? ['--all'] : command === 'purge' ? ['--dry-run'] : command === 'retention' ? ['--yes'] : []
+  const booleans = command === 'findings' ? ['--all', '--yes'] : command === 'purge' ? ['--dry-run', '--yes'] : command === 'retention' ? ['--yes'] : []
   const flags = dataFlags(argv, booleans)
   if (!flags.ok) return flags
   if (command === 'retention') return retentionArgs(flags.value)
@@ -280,7 +308,7 @@ export function parseObserverFlag(value: string): Parsed<ObserverFlag> {
 }
 
 function initial(command: Command): CliArgs {
-  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null }
+  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false }
 }
 
 /** `--flag value` or `--flag=value`; returns the value and how many argv slots it used. */
@@ -339,5 +367,6 @@ export function parseArgs(argv: readonly string[]): Parsed<CliArgs> {
     index += found.used
   }
   if (args.autoUpdate && args.noAutoUpdate) return { ok: false, error: '--auto-update and --no-auto-update cannot be given together' }
-  return { ok: true, value: args }
+  if (args.addPath && args.noPath) return { ok: false, error: '--path and --no-path cannot be given together' }
+  return { ok: true, value: { ...args, path: args.addPath ? 'path' : args.noPath ? 'no-path' : null } }
 }

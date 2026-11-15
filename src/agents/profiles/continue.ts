@@ -53,7 +53,7 @@ export const CONTINUE_PROFILE: AgentProfile = {
   detection: async (_env, forced) =>
     forced
       ? { host: HOST, selected: true, version: null, note: 'wired because --hosts names it' }
-      : { host: HOST, selected: false, version: null, note: 'no safe signal for an IDE extension; name it with --hosts continue' },
+      : { host: HOST, selected: false, version: null, note: 'no safe signal for an IDE extension; name it with --hosts continue', undetectable: true },
   wiring: {
     install: async (env) => {
       env.out(`${HOST}: its MCP servers live in YAML, which Kinfold doesn't edit, so nothing was written. ${addBlockStep(env)}`)

@@ -14,7 +14,7 @@ import { mergeSamHooks } from '../install/claude-hooks'
 import { installPaths } from '../install/env'
 import { entryCommand } from '../install/entry'
 import { envForDataDir } from './data-dir-env'
-import { EXIT_CANCELLED, type SubcommandRunners, dataDirFor, runKinfold } from './kinfold'
+import { EXIT_CANCELLED, type SubcommandRunners, dataDirFor, parseGlobalArgs, runKinfold } from './kinfold'
 import { posixOnly } from '../../test/platform-guards'
 
 let world: FakeWorld | null = null
@@ -28,7 +28,7 @@ test('--yes, --hosts and repeated --observer parse into one value', () => {
   expect(parsed).toEqual({
     ok: true,
     value: {
-      command: 'install', dryRun: false, yes: true, skipCheck: true, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null,
+      command: 'install', dryRun: false, yes: true, skipCheck: true, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false,
       hosts: ['claude-code', 'opencode'],
       observers: [
         { host: 'claude-code', provider: 'claude-cli', model: 'sonnet' },
@@ -249,7 +249,8 @@ test('the hook subcommand loads no installer module', async () => {
     writeFileSync(probe, [
       "import { writeFileSync } from 'node:fs'",
       "process.on('exit', () => {",
-      `  const loaded = Object.keys(require.cache).filter((path) => path.startsWith(${JSON.stringify(installerDir)}))`,
+      // The wizard's renderer is the program's one runtime dependency; a hook must never pay for it either.
+      `  const loaded = Object.keys(require.cache).filter((path) => path.startsWith(${JSON.stringify(installerDir)}) || path.includes('@clack'))`,
       `  writeFileSync(${JSON.stringify(loadedFile)}, JSON.stringify(loaded))`,
       '})',
     ].join('\n'))
@@ -299,8 +300,10 @@ test('Ctrl-C at a setup question exits 130 with the terminal cooked and nothing 
   const before = snapshotTree(world.home)
   expect(await runKinfold(['install'], world.env)).toBe(EXIT_CANCELLED)
   expect(term.rawStates()).toEqual([true, false])
-  expect(world.out.some((line) => line.startsWith('applying') || /^ {2}\d+\. /.test(line))).toBe(false)
-  expect(world.out.at(-1)).toBe('install cancelled; nothing was changed')
+  // A terminal run draws on the terminal; nothing goes to the plain output.
+  expect(world.out).toEqual([])
+  expect(term.output()).not.toMatch(/applying|\d+\. /)
+  expect(term.output().trimEnd().endsWith('install cancelled; nothing was changed')).toBe(true)
   expect(snapshotTree(world.home)).toEqual(before)
 })
 
@@ -443,4 +446,38 @@ test('`kinfold update` dispatches to the updater, which refuses a checkout', asy
   expect(await runKinfold(['update', '--dry-run'], world.env)).toBe(1)
   expect(world.out.at(-1)).toBe('kinfold update: this is a checkout install; update it with git pull and bun src/cli/kinfold.ts install')
   expect(fetched).toEqual([])
+})
+
+test('--plain is a global flag: it is read anywhere in argv and removed', () => {
+  expect(parseGlobalArgs(['status', '--plain'])).toEqual({ ok: true, value: { dataDir: null, version: false, plain: true, argv: ['status'] } })
+  expect(parseGlobalArgs(['--plain', 'size'])).toMatchObject({ ok: true, value: { plain: true, argv: ['size'] } })
+  expect(parseGlobalArgs(['status'])).toMatchObject({ ok: true, value: { plain: false } })
+})
+
+test('on a terminal a report command draws a frame, and --plain prints the lines a script reads', async () => {
+  const term = fakeTerminal([])
+  world = createWorld({ interactive: true, terminal: term })
+  expect(await runKinfold(['status'], world.env)).toBe(0)
+  expect(world.out).toEqual([])
+  expect(term.output()).toMatch(/Kinfold \S+ status/)
+  const framed = term.output().length
+  expect(await runKinfold(['status', '--plain'], world.env)).toBe(0)
+  expect(term.output().length).toBe(framed)
+  expect(world.out[0]).toBe('hosts:')
+  for (const line of world.out) expect(line).not.toContain('\u001b')
+})
+
+test('without a terminal a report command prints exactly what it printed before the frame existed', async () => {
+  world = createWorld()
+  expect(await runKinfold(['status'], world.env)).toBe(0)
+  expect(world.out[0]).toBe('hosts:')
+  expect(world.out.at(-1)).toBe('duplicate wiring: none in this directory')
+})
+
+test('Ctrl-C at a question of any framed command exits 130', async () => {
+  // decrypt asks to type "decrypt"; the store must be encrypted for it to reach the question, so restore is used: it asks for the code.
+  const term = fakeTerminal(['\u0003'])
+  world = createWorld({ interactive: true, terminal: term })
+  const { runFramed } = await import('../install/prompt/frame')
+  expect(await runFramed(world.env, 'restore', async (env) => ((await env.io.askSecret('Recovery code: ')), 0))).toBe(EXIT_CANCELLED)
 })

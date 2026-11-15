@@ -5,7 +5,11 @@
 // command to run; an agent, which has no user channel, is told it may pass
 // the news on.
 
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import type { UpdateNotice } from '../context/types'
+import { DATA_DIR_NAME } from '../names'
+import { currentPlatform, osOf } from '../platform/platform'
 import { type InstallChannel, type InstallRecord, readInstallRecord } from '../install/setup/record'
 import { type AutoUpdateState, STALE_ATTEMPT_MS, lostAttempt, readAutoState } from './auto-state'
 import { autoUpdateSetting, updatesEnabled } from './enabled'
@@ -64,10 +68,27 @@ interface Owed {
   mark: string
 }
 
+/**
+ * The installed program to run with `install`, for an install that was never
+ * asked about the `kinfold` command: its record has no pathSetup. An automatic
+ * update leaves PATH and the shell files alone for such an install, so this
+ * line is how its user learns the command can be added. Only where install
+ * would offer it: a program, in the default folder.
+ */
+function addCommandFor(dataDir: string, record: InstallRecord | null, env: Env, platform: NodeJS.Platform): string | undefined {
+  if (record === null || record.pathSetup !== undefined || record.channel === 'checkout') return undefined
+  const windows = osOf(platform) === 'windows'
+  const home = (windows ? env.USERPROFILE : env.HOME) ?? homedir()
+  if (resolve(dataDir) !== resolve(join(home, DATA_DIR_NAME))) return undefined
+  // By the variable, as POSIX goes by ~: the line then reads the same for a home with any name in it, and crosses the wire as a plain path.
+  return windows ? `%USERPROFILE%\\${DATA_DIR_NAME}\\bin\\kinfold.exe` : `~/${DATA_DIR_NAME}/bin/kinfold`
+}
+
 /** The update Kinfold installed itself, while that version is still the one running. */
-function updatedNotice(auto: AutoUpdateState, record: InstallRecord | null, running: string, env: Env): UpdateNotice | null {
+function updatedNotice(dataDir: string, auto: AutoUpdateState, record: InstallRecord | null, running: string, env: Env, platform: NodeJS.Platform = currentPlatform().node): UpdateNotice | null {
   if (!updatesEnabled(running, record, env) || auto.updated === null || auto.updated.version !== running) return null
-  return { kind: 'updated', version: running, previous: auto.updated.previous, channel: noticeChannel(record) }
+  const addCommand = addCommandFor(dataDir, record, env, platform)
+  return { kind: 'updated', version: running, previous: auto.updated.previous, channel: noticeChannel(record), ...(addCommand !== undefined ? { addCommand } : {}) }
 }
 
 /**
@@ -76,13 +97,13 @@ function updatedNotice(auto: AutoUpdateState, record: InstallRecord | null, runn
  * to install by hand. One is shown per session start; the next waits for the
  * next session.
  */
-function owedNotice(dataDir: string, host: string, running: string, env: Env, context?: NoticeContext): Owed | null {
+function owedNotice(dataDir: string, host: string, running: string, env: Env, context?: NoticeContext, platform?: NodeJS.Platform): Owed | null {
   const state = readUpdateState(dataDir)
   const record = readInstallRecord(dataDir)
   const auto = readAutoState(dataDir)
   const introOwed = record?.autoUpdateIntro === true && autoUpdateSetting(running, record, env).on
   if (introOwed && state.notified[`auto-on:${host}`] === undefined) return { notice: { kind: 'auto-on', version: running, channel: noticeChannel(record) }, key: `auto-on:${host}`, mark: '1' }
-  const updated = updatedNotice(auto, record, running, env)
+  const updated = updatedNotice(dataDir, auto, record, running, env, platform)
   if (updated !== null && state.notified[`updated:${host}`] !== running) return { notice: updated, key: `updated:${host}`, mark: running }
   const available = pendingNotice(state, record, running, env, holdOf(auto, context))
   if (available !== null && state.notified[host] !== available.version) return { notice: available, key: host, mark: available.version }
@@ -90,8 +111,8 @@ function owedNotice(dataDir: string, host: string, running: string, env: Env, co
 }
 
 /** The notice `host` has not seen yet, without marking it. */
-export function peekNotice(dataDir: string, host: string, running: string, env: Env, context?: NoticeContext): UpdateNotice | null {
-  return owedNotice(dataDir, host, running, env, context)?.notice ?? null
+export function peekNotice(dataDir: string, host: string, running: string, env: Env, context?: NoticeContext, platform?: NodeJS.Platform): UpdateNotice | null {
+  return owedNotice(dataDir, host, running, env, context, platform)?.notice ?? null
 }
 
 /** The notice for `host` if it has not seen it, marking it seen. Each host sees each notice once. */
@@ -112,7 +133,7 @@ export function bannerNotice(dataDir: string, running: string, env: Env, context
   const state = readUpdateState(dataDir)
   const record = readInstallRecord(dataDir)
   const auto = readAutoState(dataDir)
-  const updated = updatedNotice(auto, record, running, env)
+  const updated = updatedNotice(dataDir, auto, record, running, env)
   if (updated !== null && state.notified[`updated:${DASHBOARD}`] !== running) {
     if (markShown) markNotified(dataDir, `updated:${DASHBOARD}`, running)
     return updated

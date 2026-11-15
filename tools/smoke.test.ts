@@ -144,10 +144,9 @@ describe('macOS smoke platform', () => {
     expect(macos.serviceFiles('/h')).toEqual(['/h/Library/LaunchAgents/dev.kinfold.daemon.plist'])
   })
 
-  test('macOS defines none of the optional hooks', () => {
+  test('macOS needs no conversion, daemon or shim hook of its own', () => {
     expect(macos.runConversion).toBeUndefined()
     expect(macos.foregroundDaemon).toBeUndefined()
-    expect(macos.childEnv).toBeUndefined()
     expect(macos.writeObserverShim).toBeUndefined()
   })
 })
@@ -179,6 +178,12 @@ describe('childEnvironment', () => {
     expected.PATH = `/fake/bin${delimiter}${process.env.PATH ?? '/usr/bin:/bin'}`.trim()
     for (const key of ['KINFOLD_DATA_DIR', 'SAM_DATA_DIR', 'KINFOLD_PORT', 'SAM_PORT', 'KINFOLD_DB_KEYSTORE', 'SAM_DB_KEYSTORE']) delete expected[key]
     expect(childEnvironment('/home/smoke', '/fake/bin', fakePlatform())).toEqual(expected)
+  })
+
+  test('~/.local/bin is taken off PATH, so install has to put the kinfold command there itself', () => {
+    const local = join('/home/smoke', '.local', 'bin')
+    const env = childEnvironment('/home/smoke', '/fake/bin', fakePlatform(), { PATH: ['/usr/bin', local, `${local}/`, '/bin'].join(delimiter) })
+    expect(env.PATH).toBe(['/fake/bin', '/usr/bin', '/bin'].join(delimiter))
   })
 })
 
@@ -212,6 +217,7 @@ function statusText(encrypted: boolean): string {
     '  claude-code: version 2, wired: yes',
     '  opencode: version 2, wired: yes',
     encrypted ? 'database: encrypted (keychain db-key present)' : 'database: plaintext',
+    'kinfold command: on PATH at /home/smoke/.local/bin/kinfold (this install)',
     '',
   ].join('\n')
 }
@@ -287,6 +293,45 @@ const SERVICE_ORDER = ['--version', 'probe:status', 'install', 'status', 'hook',
 function withoutSearches(calls: readonly string[]): string[] {
   return calls.filter((call) => call !== 'mcp')
 }
+
+describe('the kinfold command', () => {
+  test('after status the driver runs kinfold --version as a new terminal would, and after uninstall asks what is left', async () => {
+    const recorder = newRecorder()
+    const platform = fakePlatform({
+      commandInNewShell: async () => (recorder.calls.push('new-shell'), ok('0.0.0-dev\n')),
+      commandLeftovers: () => (recorder.calls.push('leftovers'), []),
+    })
+    await runSmoke(platform, recordingDeps(recorder))
+    const calls = withoutSearches(recorder.calls)
+    expect(calls.slice(calls.indexOf('install'), calls.indexOf('hook'))).toEqual(['install', 'status', 'new-shell'])
+    expect(calls.slice(-2)).toEqual(['uninstall', 'leftovers'])
+  })
+
+  test('a new shell that does not find kinfold, or finds another version, fails the smoke at that step', async () => {
+    for (const result of [{ code: 127, stdout: '', stderr: 'kinfold: command not found' }, ok('9.9.9\n')]) {
+      const recorder = newRecorder()
+      const error = await rejection(runSmoke(fakePlatform({ commandInNewShell: async () => result }), recordingDeps(recorder)))
+      expect(error).toBeInstanceOf(SmokeError)
+      expect((error as SmokeError).step).toBe('kinfold command')
+      // The failure path still uninstalls.
+      expect(recorder.calls).toContain('uninstall')
+    }
+  })
+
+  test('anything of the command left after uninstall fails the smoke, naming it', async () => {
+    const recorder = newRecorder()
+    const error = await rejection(runSmoke(fakePlatform({ commandLeftovers: () => ['~/.local/bin/kinfold is still there'] }), recordingDeps(recorder)))
+    expect(error).toBeInstanceOf(SmokeError)
+    expect((error as SmokeError).step).toBe('uninstall')
+    expect((error as SmokeError).message).toContain('~/.local/bin/kinfold is still there')
+  })
+
+  test('the macOS steps use zsh, the shell a new Mac opens', () => {
+    expect(macos.childEnv?.('/Users/smoke')).toEqual({ SHELL: '/bin/zsh' })
+    expect(typeof macos.commandInNewShell).toBe('function')
+    expect(typeof macos.commandLeftovers).toBe('function')
+  })
+})
 
 describe('smoke order', () => {
   test('a foreground daemon is stopped around each conversion', async () => {

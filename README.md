@@ -2,7 +2,7 @@
 
 Kinfold gives 22 coding agents one memory. The [Supported agents](#supported-agents) table lists them and shows which were checked against a real run. What each agent can do depends on its hooks, and `kinfold status` shows it per agent. It records what each agent did, condenses it into short observations, and hands the relevant ones to the next session in whichever agent you open. The memory is a SQLite file on your machine, encrypted at rest. Kinfold ships as a single program with no runtime to install, and it's open source under Apache-2.0.
 
-![Kinfold's setup wizard in a terminal: version, a dry-run install that walks each step, then status](assets/demo.gif)
+![Kinfold's setup wizard in a terminal: the list of agents, the setup questions, a progress bar and the summary of what was installed, then kinfold status in sections](assets/demo.gif)
 
 ## Install
 
@@ -24,9 +24,29 @@ On Windows, in PowerShell:
 irm https://github.com/yahyafakhroji/kinfold/releases/latest/download/install.ps1 | iex
 ```
 
-To install a specific release, run `npx kinfold@<version> install`, or set `KINFOLD_VERSION` for the script: `curl … | KINFOLD_VERSION=<version> sh`, or `$env:KINFOLD_VERSION = '<version>'` before `irm`. The curl and PowerShell installers download the program for your machine and check it against the release's `SHA256SUMS` before they run it. A program installed through npm checks its own bytes against the same list before `install` changes anything. The setup wizard asks where to keep the memory, which agents to wire, which model observes each one, whether to encrypt the store, which port the daemon uses, and whether to check for updates and install patch releases on its own. Add `--dry-run` to see every change first, or `--yes` to take the defaults.
+To install a specific release, run `npx kinfold@<version> install`, or set `KINFOLD_VERSION` for the script: `curl … | KINFOLD_VERSION=<version> sh`, or `$env:KINFOLD_VERSION = '<version>'` before `irm`. The curl and PowerShell installers download the program for your machine and check it against the release's `SHA256SUMS` before they run it. A program installed through npm checks its own bytes against the same list before `install` changes anything. The setup wizard asks where to keep the memory, which agents to wire, which model observes each one, whether to encrypt the store, which port the daemon uses, whether to check for updates and install patch releases on its own, and whether to put `kinfold` on your `PATH`. The agent list shows all 22 supported agents: you can tick the ones it found, and it shows the rest as not installed. Add `--dry-run` to see every change first, or `--yes` to take the defaults.
 
-Install copies the program to the `bin` folder of the memory folder (`~/.kinfold/bin` by default) and starts the daemon as a user service: a LaunchAgent on macOS, a systemd user unit on Linux, a scheduled task on Windows. It doesn't change your `PATH`, so run `~/.kinfold/bin/kinfold` or add that folder yourself. The examples below say `kinfold`.
+On a terminal the install runs behind one progress bar and ends with a short summary. The full list of steps, with paths and backups, is in `~/.kinfold/logs/install.log`, and `--verbose` shows it on screen as it runs. When the output is not a terminal (a pipe, a script, CI) or under `--yes`, install prints that list as plain text and asks nothing.
+
+Install copies the program to the `bin` folder of the memory folder (`~/.kinfold/bin` by default) and starts the daemon as a user service: a LaunchAgent on macOS, a systemd user unit on Linux, a scheduled task on Windows.
+
+**The `kinfold` command.** On macOS and Linux, install links `~/.local/bin/kinfold` to the installed program. If `~/.local/bin` is not on your `PATH`, the wizard asks before it adds one marked block to your shell's startup file, after backing the file up:
+
+| Shell | File |
+| --- | --- |
+| zsh | `~/.zshrc`, or `$ZDOTDIR/.zshrc` |
+| bash | `~/.bashrc`, and also `~/.bash_profile` when that file exists, since a login shell reads it instead |
+| fish | `~/.config/fish/conf.d/kinfold.fish`, a file of its own |
+
+For any other shell, install prints the line to add. On Windows it adds `~\.kinfold\bin` to your user `PATH`, with no admin rights. The command works in terminals you open afterwards, and the summary gives the one line that makes it work in the current one.
+
+- `--path` adds it without asking. `--no-path` adds nothing, and removes the link and the block if an earlier install added them.
+- Install records your answer and follows it on later runs. It does not repeat a change you declined or restore a block you deleted.
+- Install leaves an existing `~/.local/bin/kinfold` alone unless it is Kinfold's own link.
+- An install in a folder other than `~/.kinfold` gets no link. Run it as `<folder>/bin/kinfold --data-dir <folder>`.
+- If you installed before this step existed, an automatic update does not add the command. Run `~/.kinfold/bin/kinfold install` in a terminal and the wizard asks.
+
+`kinfold status` shows whether `kinfold` resolves on your `PATH` and to which program. The examples below say `kinfold`.
 
 | Platform | Program |
 | --- | --- |
@@ -44,7 +64,7 @@ Kinfold needs at least one supported coding agent. `kinfold status` lists them a
 - **Context.** Where an agent's hooks allow it, Kinfold adds a small block of related memory to the agent's context at session start, on each prompt, or both. `kinfold status` shows which.
 - **Search.** An MCP server gives agents `search`, `timeline` and `get_observations`. Goose and Continue need the server added by hand; Warp may need a setting turned on. Search is full-text, plus semantic search when you give Kinfold an OpenRouter key for embeddings.
 - **Dashboard.** `kinfold dashboard` opens a local page with sessions, observations, stats and the observer settings.
-- **Data control.** `kinfold retention` sets how long each kind of data is kept, `kinfold purge` removes a session, project or agent, and `kinfold scan` checks the store for secrets that slipped through.
+- **Data control.** `kinfold retention` sets how long each kind of data is kept, `kinfold purge` removes a session, project or agent, and `kinfold scan` checks the store for secrets that slipped through. Purge shows what it would delete and asks first, and so does `kinfold findings --purge <id>`, which shows the finding and never the secret. A script passes `--yes`. Without a terminal or `--yes`, neither deletes anything.
 - **Backup and restore.** `kinfold backup <file>` writes the whole memory to one file while capture keeps running, and `kinfold restore <file>` brings it back on a fresh system. The dashboard's Backup page does both in the browser. See [Backup and restore](#backup-and-restore).
 - **Updates.** `kinfold update` fetches the latest release and checks it against `SHA256SUMS` before it replaces the program. Patch releases (0.2.0 to 0.2.1) install themselves: the daemon checks once a day, waits until nothing has reached it for ten minutes (a hook event, a context request, an MCP read, the dashboard or a restore), then runs the same update. The updater checks for quiet again after the download and waits up to 30 minutes for it. Minor and major releases wait for you to run `kinfold update`. A failed update leaves the running version in place and is tried again after the next daily check. The next session, `kinfold status` and the dashboard tell you when an update happened. To turn it off, pick another option at the wizard's Updates question, run `kinfold install --no-auto-update`, use the switch on the dashboard's Data page, or run install with `KINFOLD_NO_AUTO_UPDATE=1` set. `kinfold install --auto-update` turns it back on. An automatic update runs its install with the agent home variables (`CODEX_HOME`, `XDG_CONFIG_HOME` and the like) that your last install ran with; `kinfold status` lists them.
 
@@ -133,6 +153,7 @@ Ranking runs in a worker thread over a 16-bit copy of the vectors, so searches d
 - **Redaction before storage.** API keys, tokens, private keys and similar secrets become typed markers before an event is written. Each marker carries a short reference derived from an HMAC of the value, so two mentions of one secret match without the secret being stored. Redacting an observation later also drops the vector embedded from its old text.
 - **Loopback only.** The daemon listens on 127.0.0.1. Every route except `/health` needs its token, and a Host check blocks DNS rebinding.
 - **No elevation.** Install, update and uninstall run as you.
+- **One runtime dependency.** The program bundles [`@clack/prompts`](https://github.com/bombshell-dev/clack), pinned to an exact version, to draw the CLI's output on a terminal. The hook, the MCP server and the daemon do not load it, and a test enforces that.
 - **Checked downloads.** The curl and PowerShell installers, `kinfold install` and `kinfold update` refuse a program whose SHA-256 doesn't match the release's `SHA256SUMS`. The npm packages carry the same programs, published from CI with [npm provenance](https://docs.npmjs.com/generating-provenance-statements).
 
 What leaves your machine: session text goes to the observer model you chose, and observation text goes to OpenRouter for embeddings if you gave Kinfold an OpenRouter key.
@@ -177,6 +198,12 @@ networkingMode=mirrored
 
 `kinfold encrypt` and `decrypt` run from Windows only. A checkout under WSL is a different project from the same repository checked out on Windows.
 
+## Output
+
+On a terminal, each command draws a short frame: `status` groups its lines into sections with a mark on each row, the commands that ask (`encrypt`, `decrypt`, `rekey`, `restore`, `key recover`, `purge`) ask inside it and mask a recovery code as you type, and the ones that take a while (`backup`, `restore`, `rekey`, `update`) show a spinner and end on one result line. Ctrl+C at a question stops the command with nothing changed. Paths under your home folder are shown as `~/...`.
+
+When the output is not a terminal, every command prints the same plain lines as before, with full paths, so scripts and logs keep working. Add `--plain` to get those lines on a terminal too, for example `kinfold status --plain`.
+
 ## Configuration
 
 | Variable | Effect |
@@ -196,7 +223,7 @@ kinfold uninstall --dry-run
 kinfold uninstall
 ```
 
-Uninstall removes the hooks, MCP entries, plugin, service and program. Your memory stays in `~/.kinfold` until you delete it, and the stored credentials and HMAC keys stay unless you pass `--remove-credentials` or `--remove-hmac-keys`.
+Uninstall removes the hooks, MCP entries, plugin, service and program. It also removes the `~/.local/bin/kinfold` link if it still points at Kinfold, the marked block from your shell's startup file, and the Windows `PATH` entry. Your memory stays in `~/.kinfold` until you delete it, and the stored credentials and HMAC keys stay unless you pass `--remove-credentials` or `--remove-hmac-keys`.
 
 ## Build from source
 
