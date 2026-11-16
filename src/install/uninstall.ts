@@ -24,7 +24,7 @@ import type { KeyStore } from '../secrets/key-store'
 import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
 import { getObserverSettings } from './daemon-client'
 import { type InstallEnv, errorMessage, platformOf } from './env'
-import { EXIT_FAILED, EXIT_OK } from './install'
+import { EXIT_BLOCKED, EXIT_FAILED, EXIT_OK, type InstallOptions, takeInstallLock } from './install'
 import { pathRemovalActions } from './path-setup'
 import { uiFor } from './prompt/ui'
 import { INSTALL_RECORD_FILE, type InstallRecord, readInstallRecord } from './setup/record'
@@ -46,6 +46,8 @@ export interface UninstallOptions {
   removeHmacKeys?: boolean
   /** On a terminal, show each numbered step above the progress bar. */
   verbose?: boolean
+  /** Test seams for the update lock. */
+  lock?: InstallOptions['lock']
 }
 
 /** Stops the service and removes its config; a service install cannot set up here has neither. */
@@ -152,8 +154,14 @@ export async function uninstall(base: InstallEnv, options: UninstallOptions): Pr
     const actions = parts.flatMap(([, part]) => part)
     const labels = parts.flatMap(([label, part]) => part.map((action) => label ?? shortLabel(action)))
     // From here the bar draws; what each step says goes to the log.
+    const lock = takeInstallLock(env, options, 'uninstall')
+    if (lock === 'blocked') return end(EXIT_BLOCKED)
     session.hideLines()
-    await runPlan(env, actions, options.dryRun, undefined, { listeners: [linesListener(env.out), ...session.planListeners], labels })
+    try {
+      await runPlan(env, actions, options.dryRun, undefined, { listeners: [linesListener(env.out), ...session.planListeners], labels })
+    } finally {
+      lock.release()
+    }
     const keyNotes = read.ok ? (hmac?.notes ?? hmacKeptNotes(env)) : unknownStoreNote(read.reason, options)
     const notes = [...keptNotes(env, store, refs, options.removeCredentials), ...keyNotes]
     for (const note of notes) env.out(note)

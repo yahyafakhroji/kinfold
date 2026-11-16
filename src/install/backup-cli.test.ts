@@ -487,3 +487,25 @@ test('a restore --undo whose process is still alive is left alone by resume', as
   expect(m.w.out.join('\n')).toContain('restore --undo is still running')
   expect(existsSync(marker)).toBe(true)
 })
+
+test('with the daemon down, a second restore refuses while another holds the restore lock, and the store is untouched', async () => {
+  const old = machine({ titles: ['from backup'] })
+  const file = await backupOf(old)
+  const fresh = machine({ titles: ['mine'], code: encodeRecoveryCode(old.key!) })
+  // A live process other than this one: the parent that runs the tests.
+  writeFileSync(join(fresh.w.dataDir, 'restore.lock'), `${process.ppid}\n${Date.now()}\n`)
+  expect(await runBackupCommand(fresh.env, { command: 'restore', file })).toBe(EXIT_FAILED)
+  expect(fresh.w.out.join('\n')).toContain(`another kinfold restore is running (pid ${process.ppid})`)
+  expect(titles(fresh)).toEqual(['mine'])
+  expect(existsSync(join(fresh.w.dataDir, 'restore-staging'))).toBe(false)
+  expect(fresh.asked).toEqual([])
+})
+
+test('with the daemon down, the restore lock is released when the restore ends', async () => {
+  const old = machine({ titles: ['from backup'] })
+  const file = await backupOf(old)
+  const fresh = machine({ code: encodeRecoveryCode(old.key!) })
+  expect(await runBackupCommand(fresh.env, { command: 'restore', file })).toBe(EXIT_OK)
+  expect(existsSync(join(fresh.w.dataDir, 'restore.lock'))).toBe(false)
+  expect(titles(fresh)).toEqual(['from backup'])
+})

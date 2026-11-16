@@ -78,14 +78,14 @@ test("a session's turns come in order, each with its prompt, what was recalled, 
   expect(detail.nextAfter).toBeNull()
   expect(detail.turns).toHaveLength(2)
   expect(detail.turns[0]).toEqual({
-    promptNumber: 1, at: T0 + MINUTE, prompt: 'how do we pin bun in CI?', reply: 'We pin Bun through .bun-version, and CI reads it.', expired: false, heldOut: false, recallKnown: true,
+    promptNumber: 1, at: T0 + MINUTE, prompt: 'how do we pin bun in CI?', reply: 'We pin Bun through .bun-version, and CI reads it.', expired: false, heldOut: false, late: false, recallKnown: true,
     recalled: [{ id: fresh, title: 'Schema version from MIGRATIONS', part: 'new' }, { id: related, title: 'Bun 1.4.4 is pinned', part: 'related' }],
     saved: [{ id: expect.any(Number), title: 'CI pins Bun with .bun-version', type: 'decision' }],
     summary: { request: 'pin bun', learned: 'uses .bun-version', completed: 'explained', nextSteps: 'none' },
   })
   // A secret shows as its marker, never its value; a held-out turn says so; no reply is null, not empty text.
   expect(detail.turns[1]).toEqual({
-    promptNumber: 2, at: T0 + 2 * MINUTE, prompt: 'and the token is <redacted type="github_token" ref="ab12"/>?', reply: null, expired: false, heldOut: true, recallKnown: true,
+    promptNumber: 2, at: T0 + 2 * MINUTE, prompt: 'and the token is <redacted type="github_token" ref="ab12"/>?', reply: null, expired: false, heldOut: true, late: false, recallKnown: true,
     recalled: [], saved: [], summary: null,
   })
 

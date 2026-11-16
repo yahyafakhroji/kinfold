@@ -253,3 +253,34 @@ test('select shows a warning on its row even when another row is focused, and a 
   expect(s.text()).toContain('claude-cli/haiku (claude not installed; pick another)')
   expect(s.text()).toContain('claude-cli (claude not installed)')
 })
+
+test('a row too long for the box wraps under its own text, past the mark, and no line runs past the box', () => {
+  const input = new PassThrough()
+  const output = Object.assign(new PassThrough(), { columns: 44, rows: 24 })
+  let written = ''
+  output.on('data', (chunk: Buffer) => (written += chunk.toString()))
+  const ask = createClackPrompts({ input, output })
+  const long = 'kinfold command: ~/.local/bin/kinfold, with ~/.local/bin on PATH through ~/.bashrc and ~/.bash_profile'
+  ask.section('Installed', [{ mark: 'ok', text: long }, { mark: 'none', text: 'Encryption: off' }])
+  const lines = stripVTControlCharacters(written).split('\n')
+  const first = lines.findIndex((line) => line.includes('kinfold command:'))
+  const last = lines.findIndex((line) => line.includes('Encryption: off'))
+  expect(first).toBeGreaterThan(-1)
+  const continued = lines.slice(first + 1, last)
+  expect(continued.length).toBeGreaterThan(0)
+  // The bar, two spaces of the box, then two more where the mark and its space stand on the first line.
+  for (const line of continued) expect(line).toMatch(/^│ {4}\S/)
+  for (const line of lines) expect(line.length).toBeLessThanOrEqual(44)
+  // Nothing of the row is lost to the wrapping.
+  const words = [lines[first]!, ...continued].map((line) => line.replace(/^│\s+(✓|\+)?\s*/, '').replace(/\s*│$/, '')).join(' ')
+  expect(words.replace(/\s+/g, ' ')).toBe(long)
+})
+
+test('a row that fits keeps its own spacing: only a row too long for the box is wrapped', () => {
+  const input = new PassThrough()
+  const output = Object.assign(new PassThrough(), { columns: 80, rows: 24 })
+  let written = ''
+  output.on('data', (chunk: Buffer) => (written += chunk.toString()))
+  createClackPrompts({ input, output }).section('Agents', [{ mark: 'none', text: '  codex:   wired' }])
+  expect(stripVTControlCharacters(written)).toContain('    codex:   wired')
+})

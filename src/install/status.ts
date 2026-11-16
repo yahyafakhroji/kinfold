@@ -23,7 +23,7 @@ import { managedServiceOf, serviceOf } from './service/control'
 import { hmacStatusLines } from './hmac-migration'
 import { mcpStatusLines } from './mcp-wiring'
 import type { Mark, Row } from './prompt/prompts'
-import { commandStatusLine } from './path-setup'
+import { commandStatusLine, loginShellNote } from './path-setup'
 import { dataDirAccessFor } from './access/check'
 import { vectorStatusLine } from './vec0-install'
 import { QUIET_MS, autoUpdateView } from '../update/auto'
@@ -352,7 +352,9 @@ export async function status(env: InstallEnv, running: string = VERSION, profile
   ]
   const update = updateLine(env, running, blocker)
   const updates = [update, ...autoUpdateLines(env, running, blocker)]
-  const command = [commandStatusLine(env, readInstallRecord(env.dataDir)), ...(duplicates.length === 0 ? ['duplicate wiring: none in this directory'] : duplicateWarning(duplicates))]
+  const record = readInstallRecord(env.dataDir)
+  const login = loginShellNote(env, record)
+  const command = [commandStatusLine(env, record), ...(login === null ? [] : [login]), ...(duplicates.length === 0 ? ['duplicate wiring: none in this directory'] : duplicateWarning(duplicates))]
   if (env.ui !== undefined) {
     const agents = await agentRows(env, profiles)
     env.ui.section('Agents', [...agents.rows, ...rowsForPresent(mcpStatusLines(env), agents.present)])

@@ -69,7 +69,8 @@ interface Recorded {
 function daemon(options: { manifest?: Record<string, unknown>; start?: () => unknown; statuses?: unknown[] } = {}): Recorded {
   const calls: Recorded['calls'] = []
   const uploads: Recorded['uploads'] = []
-  const statuses = [...(options.statuses ?? [{ state: 'running', step: 'swap', lines: [], error: null }, { state: 'done', step: null, lines: ['restored the backup made 2026-11-14', HOSTILE], error: null }])]
+  // The first answer is the one the page reads as it opens: idle, unless a test says otherwise.
+  const statuses = [...(options.statuses ?? [{ state: 'idle', step: null, lines: [], error: null }, { state: 'running', step: 'swap', lines: [], error: null }, { state: 'done', step: null, lines: ['restored the backup made 2026-11-14', HOSTILE], error: null }])]
   const deps: Deps = {
     send: async (method, path, body) => {
       calls.push([method, path, body])
@@ -376,4 +377,30 @@ test('the page still opens when the first status read fails', async () => {
   const page = await keptPage(recorded)
   expect(named(page, 'undo-block').getAttribute('hidden')).not.toBeNull()
   expect(named(page, 'restore').getAttribute('disabled')).not.toBeNull()
+})
+
+test('a page opened while a restore runs picks up its progress, keeps the controls off, and shows how it ended', async () => {
+  const flow = await load<FlowModule>('restore-flow.js')
+  const recorded = daemon({ statuses: [
+    { state: 'running', step: 'swap', lines: [], error: null, kept: null },
+    { state: 'running', step: 'swap', lines: [], error: null, kept: null },
+    { state: 'done', step: null, lines: ['restored the backup made 2026-11-14'], error: null, kept: null },
+  ] })
+  let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  recorded.deps.wait = () => gate
+  const page = await (await load<PageModule>('page-backup.js')).renderBackup({ page: 'backup', params: {} }, {}, recorded.deps)
+  await settle()
+  expect(textOf(page)).toContain(flow.stepText('swap'))
+  const file = named(page, 'file') as FakeElement & { files?: unknown[] }
+  file.files = [{ name: 'memory.kfb', size: 10 }]
+  fire(file, 'change')
+  expect(named(page, 'upload').getAttribute('disabled')).not.toBeNull()
+  release()
+  await settle()
+  expect(textOf(page)).toContain('The backup is restored.')
+  expect(textOf(page)).toContain('restored the backup made 2026-11-14')
+  expect(named(page, 'upload').getAttribute('disabled')).toBeNull()
 })

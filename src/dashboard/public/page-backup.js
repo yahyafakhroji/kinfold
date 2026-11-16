@@ -191,7 +191,18 @@ function restoreBlock(deps, showKept) {
     })
   })
 
-  return section('B', 'Restore',
+  /** A run that was going when the page opened (a reload, a second tab): follow it, with the controls off until it ends. */
+  const resume = () => {
+    if (running) return
+    running = true
+    draw()
+    follow().catch(fail).finally(() => {
+      running = false
+      draw()
+    })
+  }
+
+  const block = section('B', 'Restore',
     h('p', { class: 'lede' }, 'Replace the memory on this machine with a backup file.'),
     h('p', { class: 'hint' }, 'If this machine already holds memory, that store is kept beside the restored one and the result says where. An empty store is removed. The OpenRouter key is not part of a backup.'),
     h('div', { class: 'form-grid' },
@@ -203,6 +214,7 @@ function restoreBlock(deps, showKept) {
       h('label', { class: 'check field-wide' }, confirm, 'Replace the memory on this machine with this backup'),
       h('div', { class: 'actions' }, restore)),
     status)
+  return { block, resume }
 }
 
 /**
@@ -212,12 +224,16 @@ function restoreBlock(deps, showKept) {
  */
 export async function renderBackup(_state, _ctx, deps = LIVE) {
   const undo = undoBlock(deps)
-  // Whether a kept store is here. A daemon that cannot say leaves the block hidden; the rest of the page does not depend on it.
-  deps.send('GET', '/restore/status').then((answer) => undo.show(keptAt(answer)), () => {})
+  const restore = restoreBlock(deps, undo.show)
+  // Whether a kept store is here, and whether a run is going. A daemon that cannot say leaves the block hidden; the rest of the page does not depend on it.
+  deps.send('GET', '/restore/status').then((answer) => {
+    if (answer !== null && typeof answer === 'object' && answer.state === 'running') restore.resume()
+    else undo.show(keptAt(answer))
+  }, () => {})
   return h('section', { class: 'page', 'aria-labelledby': 'page-title' },
     h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '06'), h('h1', { id: 'page-title' }, 'Backup'),
       h('p', { class: 'lede' }, 'Save the memory before reinstalling or moving machines, and bring it back afterwards.')),
     backupBlock(),
-    restoreBlock(deps, undo.show),
+    restore.block,
     undo.block)
 }

@@ -41,7 +41,7 @@ export function recentRuns(db: Database, limit: number = METRICS_SAMPLE_LIMIT): 
 export function injectionTotals(db: Database): InjectionTotals[] {
   return db.query<InjectionTotals, []>(
     `SELECT host, channel, count(*) AS count, coalesce(sum(tokens), 0) AS tokens
-     FROM injections WHERE held_out = 0 GROUP BY host, channel ORDER BY host, channel`,
+     FROM injections WHERE held_out = 0 AND late = 0 GROUP BY host, channel ORDER BY host, channel`,
   ).all()
 }
 

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { CLAUDE_HOOK_EVENTS, samHookGroup } from './claude-hooks'
 import { getObserverSettings } from './daemon-client'
 import { installPaths } from './env'
-import { type DaemonSituation, EXIT_BLOCKED, EXIT_OK, SETTINGS_NOT_SENT_LINE, install, serviceActions } from './install'
+import { type DaemonSituation, EXIT_BLOCKED, EXIT_OK, SETTINGS_NOT_SENT_LINE, install, serviceActions, takeInstallLock } from './install'
 import { UPDATE_LOCK_FILE, acquireUpdateLock, updateLockHolder } from '../update/lock'
 import { LAUNCHCTL, bootoutArgv, bootstrapArgv, launchdPath } from './launch-agent'
 import { LaunchAgentService } from './service/launch-agent-service'
@@ -515,6 +515,18 @@ test('install holds the lock while it runs and lets it go after, and a dry run t
   expect(existsSync(join(w.dataDir, UPDATE_LOCK_FILE))).toBe(false)
   acquireUpdateLock(w.dataDir, { pid: 4242, alive: () => true })
   expect(await install(w.env, { ...YES, dryRun: true, lock: { alive: () => true, parentPid: 1 } })).toBe(EXIT_OK)
+})
+
+test('a first install takes the lock once its folder exists, and the folder is owner-only', () => {
+  const w = both()
+  const dataDir = join(w.root, 'fresh-install')
+  expect(existsSync(dataDir)).toBe(false)
+  const lock = takeInstallLock({ ...w.env, dataDir }, YES)
+  expect(lock).not.toBe('blocked')
+  expect(updateLockHolder(dataDir)).toBe(process.pid)
+  if (process.platform !== 'win32') expect(statSync(dataDir).mode & 0o777).toBe(0o700)
+  if (lock !== 'blocked') lock.release()
+  expect(existsSync(join(dataDir, UPDATE_LOCK_FILE))).toBe(false)
 })
 
 test('an update refuses to start while an install holds the lock', async () => {

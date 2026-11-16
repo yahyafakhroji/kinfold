@@ -4,9 +4,11 @@
 // timer covers project resolution and the build or match, and stops before
 // the injection write, so the number is what a host waits on, not our audit.
 // A prompt that carries its text also gets related memory (prompt-context.ts), so
-// the timer includes its wait on the embedding. Such an answer that took longer than the hook waits (PROMPT_SERVE_BUDGET_MS) is
-// not recorded: the hook gave up, and a row marked sent but never shown would
-// be lost to the session. Showing it again later is the cheaper mistake.
+// the timer includes its wait on the embedding. Such an answer that took longer
+// than its host waits (shownBudgetMs) is recorded with late = 1: watch and
+// Sessions show it, marked, and nothing else counts it as delivered, so the
+// delta offers its new ids again with the next prompt. Showing a memory twice
+// is the cheaper mistake than losing it to the session.
 // Logs carry ids, counts and durations; never the text, the prompt or the cwd.
 
 import { DAEMON_SHARE_MS } from '../context/client'
@@ -124,11 +126,11 @@ export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest
       && (deps.holdout.pick ?? (() => Math.random() < HOLDOUT_RATE))()
     const prepared = heldOut || request.displayOnly === true ? NOTHING : await prepare(request, projectKey, at, startedAt)
     const durationMs = Math.round(clock() - startedAt)
-    const overBudget = request.prompt !== undefined && durationMs > PROMPT_SERVE_BUDGET_MS && prepared.observationIds.length > 0
-    const injectionId = overBudget ? 'skipped_late' : recordServed(deps.db, request, projectKey, prepared, at, durationMs, { relatedCount: prepared.relatedServed.length, heldOut })
-    // Labels only for lines the hook got: an answer past the budget was never shown.
-    if (typeof injectionId === 'number') recordRelatedServed(deps.db, prepared.relatedServed, { projectKey, host: request.host, occurredAt: at })
-    deps.log(`context host=${request.host} channel=${request.channel} injection=${injectionId ?? 'none'} ids=${prepared.observationIds.length}`
+    const late = request.prompt !== undefined && durationMs > shownBudgetMs(request.host) && prepared.observationIds.length > 0
+    const injectionId = recordServed(deps.db, request, projectKey, prepared, at, durationMs, { relatedCount: prepared.relatedServed.length, heldOut, late })
+    // Labels only for lines the host got: an answer past its wait was never shown.
+    if (injectionId !== null && !late) recordRelatedServed(deps.db, prepared.relatedServed, { projectKey, host: request.host, occurredAt: at })
+    deps.log(`context host=${request.host} channel=${request.channel} injection=${injectionId ?? 'none'}${late ? ' late=1' : ''} ids=${prepared.observationIds.length}`
       + ` tokens=${prepared.tokens} rebuilt=${prepared.rebuilt}${prepared.promptDetail}${heldOut ? ' held_out=1' : ''} key_ms=${keyMs} ms=${durationMs}`)
     const notice = updateNoticeFor(deps.updates, request, durationMs, at)
     return {

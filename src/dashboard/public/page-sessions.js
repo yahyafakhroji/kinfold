@@ -8,7 +8,6 @@
 
 import { api, errorText } from './api.js'
 import { h, notice, replaceContent, table } from './dom.js'
-import { formatTime } from './format.js'
 import { formatHash } from './hash.js'
 
 /** A reply longer than this is cut, with "show all". */
@@ -21,6 +20,25 @@ export const REPLY_PREVIEW_CHARS = 600
 export function clockTime(at) {
   const date = new Date(at)
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+/**
+ * YYYY-MM-DD HH:MM in the reader's time zone, like the turn times.
+ * @param {number} at
+ */
+export function localTime(at) {
+  const date = new Date(at)
+  const two = (/** @type {number} */ n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${clockTime(at)}`
+}
+
+/** The reader's zone as the browser names it (Europe/Berlin), said once per view so every time on it reads as local. */
+export function timeZoneName() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time'
+  } catch {
+    return 'local time'
+  }
 }
 
 /** @param {number} n @param {string} one @param {string} many */
@@ -74,7 +92,9 @@ export function turnItem(turn) {
   const gone = h('p', { class: 'empty' }, 'removed by retention')
   const recalled = turn.heldOut
     ? h('p', { class: 'hint' }, 'recall held out for this prompt (impact test)')
-    : turn.recalled.length > 0 ? memoryLinks(turn.recalled)
+    : turn.recalled.length > 0 ? (turn.late === true
+      ? [memoryLinks(turn.recalled), h('p', { class: 'hint' }, 'found too late for the agent to show; not counted as sent, so new memory comes again with the next prompt')]
+      : memoryLinks(turn.recalled))
       : h('p', { class: 'hint' }, turn.recallKnown === false ? 'not recorded for turns from before this version' : 'nothing recalled')
   const reply = turn.expired ? [gone] : turn.reply === null ? [h('p', { class: 'hint' }, 'no reply captured')] : foldable(turn.reply)
   return h('li', { class: 'turn' },
@@ -96,8 +116,8 @@ export function sessionsList(answer, state) {
   const older = answer.nextBefore === null ? null : h('p', { class: 'actions' },
     h('a', { class: 'badge quiet', href: formatHash({ page: 'sessions', params: { before: String(answer.nextBefore), host } }) }, 'Older sessions'))
   return h('section', { class: 'block', 'aria-label': 'Sessions' },
-    table('Sessions', ['Started', 'Agent', 'Project', 'Prompts', ''], answer.sessions.map((row) => [
-      h('span', { class: 'mono' }, formatTime(row.startedAt)), h('span', { class: 'host' }, row.host), row.project, String(row.prompts),
+    table('Sessions', [`Started (${timeZoneName()})`, 'Agent', 'Project', 'Prompts', ''], answer.sessions.map((row) => [
+      h('span', { class: 'mono' }, localTime(row.startedAt)), h('span', { class: 'host' }, row.host), row.project, String(row.prompts),
       h('a', { href: formatHash({ page: 'sessions', params: { id: String(row.id) } }) }, 'open')]), 'No sessions recorded yet.'),
     older)
 }
@@ -136,7 +156,7 @@ export function sessionView(detail, _state) {
   return h('section', { class: 'block', 'aria-label': 'Session' },
     h('p', {}, h('a', { href: formatHash({ page: 'sessions', params: {} }) }, 'All sessions')),
     h('h2', { class: 'block-title' }, h('span', { class: 'host' }, session.host), ' ', session.project),
-    h('p', { class: 'hint' }, `Started ${formatTime(session.startedAt)} UTC · ${counted(session.prompts, 'prompt', 'prompts')} · ${start}.`),
+    h('p', { class: 'hint' }, `Started ${localTime(session.startedAt)} (${timeZoneName()}) · ${counted(session.prompts, 'prompt', 'prompts')} · ${start}.`),
     detail.turns.length === 0 ? h('p', { class: 'empty' }, 'No prompts in this session.') : turns,
     more, status)
 }

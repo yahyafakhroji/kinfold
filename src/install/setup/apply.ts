@@ -12,7 +12,7 @@ import { DB_FILE } from '../../store/data-dir'
 import { storedDbKey } from '../db-encryption'
 import { detectHosts } from '../detect'
 import { decryptConfirmed, encryptKeyExists, encryptWithKey, noKeyStoreRefusal } from '../encrypt'
-import { type InstallEnv, errorMessage } from '../env'
+import { type InstallEnv, codexHomeProblem, errorMessage } from '../env'
 import {
   type DaemonSituation,
   EXIT_BLOCKED,
@@ -212,11 +212,15 @@ function commandByName(path: PathPlan): boolean {
 
 /** The terminal run's last screen: what was set up, each row with its mark, and the one command to run next. */
 export function doneSummary(env: InstallEnv, answers: SetupAnswers, state: SetupState, path: PathPlan): { rows: Row[]; next: string } {
-  const names = answers.hosts.map((host) => INSTALL_PROFILES[host].name)
+  // Codex under an unusable CODEX_HOME was skipped by the wiring step; it is named with the reason, not as wired.
+  const codexProblem = answers.hosts.includes('codex') ? codexHomeProblem(env) : null
+  const wired = answers.hosts.filter((host) => !(host === 'codex' && codexProblem !== null))
+  const names = wired.map((host) => INSTALL_PROFILES[host].name)
   const dropped = state.wiredHosts.filter((host) => !answers.hosts.includes(host))
   const encrypted = answers.encryption.kind === 'new-encrypted' || answers.encryption.kind === 'encrypt-existing' || (answers.encryption.kind === 'keep' && state.encryption === 'on')
   const rows: Row[] = [
     names.length > 0 ? { mark: 'ok', text: `Agents wired: ${names.join(', ')}` } : { mark: 'warn', text: 'No agent is wired; run install again to add one.' },
+    ...(codexProblem !== null ? [{ mark: 'warn', text: `${INSTALL_PROFILES.codex.name}: not wired; ${codexProblem}` } as const] : []),
     ...(dropped.length > 0 ? [{ mark: 'none', text: `No longer wired: ${dropped.map((host) => INSTALL_PROFILES[host].name).join(', ')}` } as const] : []),
     managedServiceOf(env) === null
       ? { mark: 'warn', text: `Daemon: not started by a service here; start it yourself on port ${answers.port} (the command is in the log)` }

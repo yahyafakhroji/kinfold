@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { seedObservation } from '../context/test-support'
 import { type TempStore, T0, fakeRunner, openTempStore, seedEvent } from '../observer/test-support'
+import { sessionDeliveries } from '../store/context-store'
 import { MAX_OBSERVER_ATTEMPTS } from '../store/observer-store'
 import { upsertProject, upsertSession } from '../store/writes'
 import { DAEMON_ONLY_TIMEOUT_MS } from '../context/daemon'
@@ -146,18 +147,38 @@ test('a prompt with text gets related memory and a log line with counts and outc
   expect(logs.join('\n')).not.toContain('PROMPT-WORDS')
 })
 
-test('a prompt answer that took longer than the hook waits is returned but not recorded, so its rows are not lost', async () => {
-  const other = upsertSession(temp.store.db, { host: 'opencode', hostSessionId: 'oc-old', projectKey, cwd: projectKey, occurredAt: T0 - 10_000 })
-  seedObservation(temp.store, { sessionId: other, projectKey, host: 'opencode', title: 'CSV parser drops quotes on export', at: T0 - 5_000 })
-  const ticks = [0, PROMPT_SERVE_BUDGET_MS + 1]
-  const handler = contextHandler({
+function slowHandler(late: number) {
+  const ticks = [0, late]
+  return contextHandler({
     db: temp.store.db, projectKeyFor: () => ({ key: projectKey, kind: 'path', displayName: 'route-repo' }), log: (line) => logs.push(line),
-    gate: () => true, now: () => T0, clock: () => ticks.shift() ?? PROMPT_SERVE_BUDGET_MS + 1,
+    gate: () => true, now: () => T0, clock: () => ticks.shift() ?? late,
   })
+}
+
+function seedOtherSessionMemory(): number {
+  const other = upsertSession(temp.store.db, { host: 'opencode', hostSessionId: 'oc-old', projectKey, cwd: projectKey, occurredAt: T0 - 10_000 })
+  return seedObservation(temp.store, { sessionId: other, projectKey, host: 'opencode', title: 'CSV parser drops quotes on export', at: T0 - 5_000 })
+}
+
+test('a prompt answer that came after the hook stopped waiting is recorded as late, and the next prompt carries it again', async () => {
+  seedOtherSessionMemory()
+  const handler = slowHandler(PROMPT_SERVE_BUDGET_MS + 1)
   const answer = await handler({ host: 'claude-code', cwd: projectKey, hostSessionId: 'cc-1', channel: 'prompt', prompt: 'csv parser quotes' })
   expect(answer.observationIds.length).toBeGreaterThan(0)
-  expect(rows("SELECT id FROM injections WHERE channel = 'prompt'")).toEqual([])
-  expect(logs.some((line) => line.includes('injection=skipped_late'))).toBe(true)
+  expect(rows("SELECT observation_ids AS ids, late FROM injections WHERE channel = 'prompt'")).toEqual([{ ids: JSON.stringify(answer.observationIds), late: 1 }])
+  expect(logs.some((line) => line.includes(' late=1 '))).toBe(true)
+  // Not counted as sent: the same memory is offered again.
+  expect(sessionDeliveries(temp.store.db, 'claude-code', 'cc-1').sentIds).toEqual([])
+  expect(rows('SELECT count(*) AS n FROM related_served')).toEqual([{ n: 0 }])
+})
+
+test('OpenCode waits longer than the hooks: an answer inside its wait is an ordinary row', async () => {
+  seedOtherSessionMemory()
+  const handler = slowHandler(PROMPT_SERVE_BUDGET_MS + 1)
+  const answer = await handler({ host: 'opencode', cwd: projectKey, hostSessionId: 'oc-1', channel: 'prompt', prompt: 'csv parser quotes' })
+  expect(answer.observationIds.length).toBeGreaterThan(0)
+  expect(rows("SELECT late FROM injections WHERE channel = 'prompt'")).toEqual([{ late: 0 }])
+  expect(sessionDeliveries(temp.store.db, 'opencode', 'oc-1').sentIds).toEqual(answer.observationIds)
 })
 
 describe('update notices', () => {

@@ -34,6 +34,8 @@ export interface InjectionRow {
   promptNumber?: number | null
   /** Recall was skipped for the impact test (v12); such a row carries no ids. */
   heldOut?: boolean
+  /** The answer came after the host stopped waiting (v13): recorded so it can be shown, but not as delivered. */
+  late?: boolean
   /** How many of the ids are related memory (v12); they are the last ones. */
   relatedCount?: number
 }
@@ -127,14 +129,14 @@ export function sessionIdFor(db: Database, host: string, hostSessionId: string):
 export function recordInjection(db: Database, injection: InjectionRow): number {
   const row = db.query<{ id: number }, Record<string, string | number | null>>(
     `INSERT INTO injections (session_id, host, host_session_id, project_key, observation_ids, channel, tokens, occurred_at, duration_ms,
-       prompt_number, held_out, related_count)
+       prompt_number, held_out, related_count, late)
      VALUES ($sessionId, $host, $hostSessionId, $projectKey, $observationIds, $channel, $tokens, $occurredAt, $durationMs,
-       $promptNumber, $heldOut, $relatedCount) RETURNING id`,
+       $promptNumber, $heldOut, $relatedCount, $late) RETURNING id`,
   ).get({
     sessionId: injection.sessionId, host: injection.host, hostSessionId: injection.hostSessionId, projectKey: injection.projectKey,
     observationIds: JSON.stringify(injection.observationIds), channel: injection.channel, tokens: injection.tokens, occurredAt: injection.occurredAt,
     durationMs: injection.durationMs ?? null, promptNumber: injection.promptNumber ?? null, heldOut: injection.heldOut === true ? 1 : 0,
-    relatedCount: injection.relatedCount ?? 0,
+    relatedCount: injection.relatedCount ?? 0, late: injection.late === true ? 1 : 0,
   })
   if (row === null) throw new Error('injection insert returned no row')
   return row.id
@@ -224,14 +226,29 @@ export interface SessionDeliveries {
   firstAt: number | null
 }
 
+/** Per connection: a schema does not lose a column while it is open, and this runs on every prompt. */
+const lateColumn = new WeakMap<Database, boolean>()
+
+function hasLateColumn(db: Database): boolean {
+  const known = lateColumn.get(db)
+  if (known !== undefined) return known
+  const found = db.query<{ name: string }, []>('PRAGMA table_info(injections)').all().some((row) => row.name === 'late')
+  // Only a yes is kept: a store from before v13 can be migrated under the same connection.
+  if (found) lateColumn.set(db, true)
+  return found
+}
+
 export function sessionDeliveries(db: Database, host: string, hostSessionId: string): SessionDeliveries {
   // A held-out prompt leaves a prompt-channel row with no ids, the only row of that shape (any other
   // empty answer records nothing). It delivered nothing, so it must not become the moment the session
   // "first received memory": the delta would then skip what was written before it. Told apart by shape
   // rather than by held_out, so the read-only fallback can run this on a store from before v12.
+  // A late answer was probably never shown, so its ids are not counted as sent: the next prompt carries them again.
+  // The read-only fallback can meet a store from before v13, which has no late column.
+  const notLate = hasLateColumn(db) ? ' AND late = 0' : ''
   const rows = db.query<{ ids: string; at: number }, { host: string; hostSessionId: string }>(
     `SELECT observation_ids AS ids, occurred_at AS at FROM injections
-     WHERE host = $host AND host_session_id = $hostSessionId AND NOT (channel = 'prompt' AND observation_ids = '[]')`,
+     WHERE host = $host AND host_session_id = $hostSessionId AND NOT (channel = 'prompt' AND observation_ids = '[]')${notLate}`,
   ).all({ host, hostSessionId })
   const sentIds = [...new Set(rows.flatMap((row) => parseIds(row.ids)))]
   const firstAt = rows.length === 0 ? null : Math.min(...rows.map((row) => row.at))

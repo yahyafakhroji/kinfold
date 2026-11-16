@@ -26,6 +26,7 @@ import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { type ArchiveHeader, BACKUP_FILE_EXTENSION, BackupError } from '../backup/archive'
 import { BACKUP_TMP_DIR, createBackup, privateTmpDir } from '../backup/create'
+import { writeBackupRecord } from '../backup/record'
 import { type RestoreStep, type Staged, applyRestore, checkRestore, discardStaged, inspectBackup, stageSnapshot } from '../backup/restore'
 import { applyUndo, checkUndo, keptStore } from '../backup/undo'
 import type { Parsed } from '../context/types'
@@ -94,8 +95,12 @@ export function parseRestoreBody(body: unknown): Parsed<{ upload: string; code: 
   return { ok: true, value: { upload: body.upload, code: body.code ?? null } }
 }
 
-/** The file's bytes as a stream; the file is removed once the last byte went or the reader gave up. */
-function streamThenRemove(path: string): ReadableStream<Uint8Array> {
+/**
+ * The file's bytes as a stream; the file is removed once the last byte went or
+ * the reader gave up. `onComplete` runs only after the last byte: a browser
+ * that cancels the download did not get a backup.
+ */
+export function streamThenRemove(path: string, onComplete: () => void = () => {}): ReadableStream<Uint8Array> {
   const reader = Bun.file(path).stream().getReader()
   const remove = (): void => {
     try {
@@ -111,6 +116,7 @@ function streamThenRemove(path: string): ReadableStream<Uint8Array> {
         if (done) {
           controller.close()
           remove()
+          onComplete()
         } else {
           controller.enqueue(value)
         }
@@ -155,10 +161,17 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
     try {
       const at = deps.now()
       const dest = join(privateTmpDir(deps.dataDir, BACKUP_TMP_DIR, at), `download-${randomBytes(8).toString('hex')}${BACKUP_FILE_EXTENSION}`)
-      const manifest = await createBackup({ dataDir: deps.dataDir, dest, snapshot: deps.snapshot, version: deps.version, now: () => at })
+      const manifest = await createBackup({ dataDir: deps.dataDir, dest, snapshot: deps.snapshot, version: deps.version, now: () => at, record: false })
       const bytes = statSync(dest).size
       deps.log(`backup written bytes=${bytes} schema=${manifest.schemaVersion} encrypted=${manifest.encrypted}`)
-      return new Response(streamThenRemove(dest), {
+      const delivered = (): void => {
+        try {
+          writeBackupRecord(deps.dataDir, at)
+        } catch (error: unknown) {
+          deps.log(`backup.json not written: ${errorName(error)}`)
+        }
+      }
+      return new Response(streamThenRemove(dest, delivered), {
         status: 200,
         headers: {
           'content-type': 'application/octet-stream',
@@ -212,8 +225,10 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
     if (Number.isFinite(declared) && declared > limit) return tooLarge
     busy = true
     const id = randomBytes(16).toString('hex')
-    const path = join(incomingDir(), `upload-${id}${BACKUP_FILE_EXTENSION}`)
+    let path: string | null = null
     try {
+      // Inside the try: a folder that cannot be made must still clear busy below.
+      path = join(incomingDir(), `upload-${id}${BACKUP_FILE_EXTENSION}`)
       dropPending()
       if (!(await receive(request, path, limit))) return tooLarge
       const header = inspectBackup(path)
@@ -225,7 +240,7 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
         body: { upload: id, manifest: { createdAt: manifest.createdAt, kinfoldVersion: manifest.kinfoldVersion, schemaVersion: manifest.schemaVersion, encrypted: manifest.encrypted, bytes: manifest.snapshot.bytes } },
       }
     } catch (error: unknown) {
-      rmSync(path, { force: true })
+      if (path !== null) rmSync(path, { force: true })
       deps.log(`restore upload refused: ${error instanceof BackupError ? error.kind : errorName(error)}`)
       return error instanceof BackupError ? { status: 400, body: { error: error.message } } : { status: 500, body: { error: `the upload could not be stored (${errorName(error)})` } }
     } finally {

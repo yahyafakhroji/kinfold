@@ -29,6 +29,8 @@ export interface CreateBackupInput {
   snapshot: (dest: string) => number | Promise<number>
   version: string
   now: () => number
+  /** Default true. The dashboard's download records the time itself, once the browser has every byte. */
+  record?: boolean
 }
 
 /** A private (0700) folder under the data folder, with files a dead run left behind removed. */
@@ -74,7 +76,7 @@ export async function createBackup(input: CreateBackupInput): Promise<BackupMani
     // A file that appeared meanwhile is someone else's: the rename would replace it.
     if (existsSync(input.dest)) throw new BackupError('state', `${input.dest} exists already; choose another name or remove it`)
     renameSync(partial, input.dest)
-    writeBackupRecord(input.dataDir, createdAt)
+    if (input.record !== false) writeBackupRecord(input.dataDir, createdAt)
     return manifest
   } finally {
     rmSync(partial, { force: true })

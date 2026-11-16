@@ -105,3 +105,29 @@ test('a target that matches nothing removes nothing and skips the scrub', () => 
   expect(report.scrub).toBeNull()
   expect(report.packsRebuilt).toBe(0)
 })
+
+/** One turn_usage row per prompt in the fixture, at the prompt's own time. */
+function seedTurnUsage(): void {
+  fx.temp.store.db.run(`INSERT INTO turn_usage (session_id, prompt_number, host, project_key, held_out, input_tokens, output_tokens, cache_read_tokens,
+      cache_creation_tokens, tool_calls, duration_ms, occurred_at)
+    SELECT p.session_id, p.prompt_number, s.host, s.project_key, 0, 1, 1, 0, 0, 0, NULL, p.occurred_at FROM prompts p JOIN sessions s ON s.id = p.session_id`)
+}
+const turnUsage = (): { sessionId: number; promptNumber: number }[] =>
+  fx.temp.store.db.query<{ sessionId: number; promptNumber: number }, []>('SELECT session_id AS sessionId, prompt_number AS promptNumber FROM turn_usage ORDER BY 1, 2').all()
+
+test('turn usage goes with the prompt it measured: by prompt, by session and by range, and the dry run counts it', () => {
+  seedTurnUsage()
+  const prompts = fx.temp.store.db.query<{ id: number; sessionId: number; promptNumber: number }, []>(
+    'SELECT id, session_id AS sessionId, prompt_number AS promptNumber FROM prompts ORDER BY id').all()
+  expect(turnUsage()).toHaveLength(prompts.length)
+  const [first] = prompts
+  expect(run({ kind: 'prompt', id: first!.id }, true).counts.turn_usage).toBe(1)
+  expect(run({ kind: 'prompt', id: first!.id }).counts.turn_usage).toBe(1)
+  expect(turnUsage()).not.toContainEqual({ sessionId: first!.sessionId, promptNumber: first!.promptNumber })
+  const ofA2 = turnUsage().filter((row) => row.sessionId === fx.sessions.a2).length
+  expect(ofA2).toBeGreaterThan(0)
+  expect(run({ kind: 'session', id: fx.sessions.a2 }).counts.turn_usage).toBe(ofA2)
+  expect(turnUsage().some((row) => row.sessionId === fx.sessions.a2)).toBe(false)
+  run({ kind: 'range', after: null, before: T0 + 100 * DAY })
+  expect(turnUsage()).toEqual([])
+})

@@ -6,7 +6,7 @@
 // with exit 0. Lines go through `env.out`, so a terminal gets the CLI's framed
 // look and a pipe gets plain lines.
 
-import { HELD_OUT_LINE, type Recalled, cleanTitle, recallLine } from '../context/recall-line'
+import { HELD_OUT_LINE, type Recalled, cleanTitle, lateLine, recallLine } from '../context/recall-line'
 import { isRecord } from '../contract/event'
 import { readDaemonEndpoint } from '../daemon/daemon-info'
 import type { WatchArgs } from '../install/args'
@@ -33,24 +33,25 @@ function clock(at: number): string {
 }
 
 /** What this command reads of a row. Its line is built here from the ids and titles, so the daemon's ready-made `line` is not used. */
-export type ShownRow = Pick<WatchRow, 'id' | 'at' | 'host' | 'project' | 'ids' | 'recalled' | 'heldOut'>
+export type ShownRow = Pick<WatchRow, 'id' | 'at' | 'host' | 'project' | 'ids' | 'recalled' | 'heldOut'> & Partial<Pick<WatchRow, 'late'>>
 
 /** `HH:MM  agent · project · what was recalled`, in the reader's own time zone. */
 export function formatWatchLine(row: ShownRow): string {
-  const line = row.heldOut ? HELD_OUT_LINE : recallLine(row.ids, row.recalled)
+  const recall = recallLine(row.ids, row.recalled)
+  const line = row.heldOut ? HELD_OUT_LINE : row.late === true ? lateLine(recall) : recall
   return `${clock(row.at)}  ${cleanTitle(row.host)} · ${cleanTitle(row.project)} · ${line.startsWith(PREFIX) ? line.slice(PREFIX.length) : line}`
 }
 
 function parseRow(value: unknown): ShownRow | null {
   if (!isRecord(value)) return null
-  const { id, at, host, project, ids, recalled, heldOut } = value
+  const { id, at, host, project, ids, recalled, heldOut, late } = value
   if (!Number.isSafeInteger(id) || !Number.isSafeInteger(at) || typeof host !== 'string' || typeof project !== 'string' || !Array.isArray(ids)) return null
   if (!ids.every((entry) => Number.isSafeInteger(entry))) return null
   const titles = Array.isArray(recalled)
     ? recalled.flatMap((entry) => (isRecord(entry) && Number.isSafeInteger(entry.id) && typeof entry.title === 'string' && (entry.part === 'new' || entry.part === 'related')
         ? [{ id: entry.id as number, title: entry.title, part: entry.part as Recalled['part'] }] : []))
     : []
-  return { id: id as number, at: at as number, host, project, ids: ids as number[], recalled: titles, heldOut: heldOut === true }
+  return { id: id as number, at: at as number, host, project, ids: ids as number[], recalled: titles, heldOut: heldOut === true, late: late === true }
 }
 
 type Poll = { kind: 'rows'; cursor: number; rows: ShownRow[] } | { kind: 'old' } | { kind: 'down' }

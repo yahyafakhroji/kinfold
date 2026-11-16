@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSy
 import { dirname, join } from 'node:path'
 import { posixOnly } from '../../test/platform-guards'
 import type { InstallEnv } from './env'
-import { BLOCK_END, BLOCK_START, commandStatusLine, pathQuestionNeeded, pathRemovalActions, planPathSetup, shellFiles, withBlock, withoutBlock } from './path-setup'
+import { BLOCK_END, BLOCK_START, commandStatusLine, loginShellNote, pathQuestionNeeded, pathRemovalActions, planPathSetup, shellFiles, withBlock, withoutBlock } from './path-setup'
 import { type Action, describeAction, runPlan } from './plan'
 import type { InstallRecord } from './setup/record'
 import { type FakeWorld, createWorld } from './test-support'
@@ -428,5 +428,45 @@ describe('the status line', () => {
     const elsewhere = join(w.root, 'elsewhere')
     const env: InstallEnv = { ...w.env, dataDir: elsewhere, mode: { kind: 'program', binPath: join(elsewhere, 'bin', 'kinfold') } }
     expect(commandStatusLine(env, null)).toBe(`kinfold command: not on PATH; it is linked only for an install in ~/.kinfold (run ${join(elsewhere, 'bin', 'kinfold')} --data-dir ${elsewhere})`)
+  })
+})
+
+describe('bash on macOS with no ~/.bash_profile', () => {
+  const LINE = '[ -r ~/.bashrc ] && . ~/.bashrc'
+  const WITH_PROFILE = '[ -r ~/.profile ] && . ~/.profile; [ -r ~/.bashrc ] && . ~/.bashrc'
+  const noteFor = (line: string): string => `macOS opens bash as a login shell, which reads ~/.bash_profile and skips ~/.bashrc: add this line to ~/.bash_profile: ${line}`
+
+  posixOnly('POSIX paths')('the install summary gives the one line to add, and leaves ~/.bash_profile alone', () => {
+    const w = programWorld({ shell: '/bin/bash', platform: 'darwin' })
+    const plan = planPathSetup(w.env, null, FIRST)
+    expect(plan.summary).toContain(noteFor(LINE))
+    expect(plan.actions.some((action) => 'path' in action && String(action.path).endsWith('.bash_profile'))).toBe(false)
+    expect(loginShellNote(w.env, { ...record(), pathSetup: 'added', pathFiles: [join(w.home, '.bashrc')] })).toBe(`kinfold command: ${noteFor(LINE)}`)
+  })
+
+  posixOnly('POSIX paths')('with a ~/.profile, the line reads it first, since bash stops reading it once ~/.bash_profile exists', () => {
+    const w = programWorld({ shell: '/bin/bash', platform: 'darwin' })
+    writeFileSync(join(w.home, '.profile'), 'export P=1\n')
+    expect(planPathSetup(w.env, null, FIRST).summary).toContain(noteFor(WITH_PROFILE))
+  })
+
+  posixOnly('POSIX paths')('with a ~/.bash_login and no ~/.bash_profile, the line goes in ~/.bash_login, the file bash reads', () => {
+    const w = programWorld({ shell: '/bin/bash', platform: 'darwin' })
+    writeFileSync(join(w.home, '.bash_login'), 'export L=1\n')
+    expect(planPathSetup(w.env, null, FIRST).summary).toContain(
+      `macOS opens bash as a login shell, which reads ~/.bash_login and skips ~/.bashrc: add this line to ~/.bash_login: ${LINE}`)
+  })
+
+  posixOnly('POSIX paths')('no note with a ~/.bash_profile, on Linux, for zsh, or when PATH was not added', () => {
+    const mac = programWorld({ shell: '/bin/bash', platform: 'darwin' })
+    writeFileSync(join(mac.home, '.bash_profile'), '')
+    expect(planPathSetup(mac.env, null, FIRST).summary).not.toContain('login shell')
+    expect(loginShellNote(mac.env, { ...record(), pathSetup: 'added' })).toBeNull()
+    const linux = programWorld({ shell: '/bin/bash', platform: 'linux' })
+    expect(planPathSetup(linux.env, null, FIRST).summary).not.toContain('login shell')
+    const zsh = programWorld({ shell: '/bin/zsh', platform: 'darwin' })
+    expect(loginShellNote(zsh.env, { ...record(), pathSetup: 'added' })).toBeNull()
+    const declined = programWorld({ shell: '/bin/bash', platform: 'darwin' })
+    expect(loginShellNote(declined.env, { ...record(), pathSetup: 'declined' })).toBeNull()
   })
 })

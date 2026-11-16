@@ -85,6 +85,7 @@ import type { Embedder } from '../vectors/embedder'
 import { type Support, loadVec0 } from '../vectors/extension'
 import { DEFAULT_INDEX_TICK_MS, type VectorIndexer, createVectorIndexer } from '../vectors/indexer'
 import { type SemanticAnswer, type SemanticRequest, createSemanticSearch } from '../vectors/search'
+import { createRestarter } from './restart'
 import { type VectorQueries, inlineVectorQueries, startVectorWorker, workerOrInline } from '../vectors/vector-worker'
 
 export const DEFAULT_PORT = 37_811
@@ -504,43 +505,20 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   }
 
   let core = startCore()
-  // True from the moment a restore starts closing the store until a new core has it open.
-  let down = false
   const onFatal = options.backup?.onFatal ?? ((reason: string): void => {
     log(`fatal: ${reason}; stopping so the service starts a fresh daemon`)
     setTimeout(() => process.exit(1), FATAL_EXIT_MS)
   })
-
-  // The restart in flight, if any, so a stop can let it finish.
-  let restarting: Promise<void> | null = null
-
-  /** Closes the store, runs `between`, and opens the store again. A store that will not reopen is fatal: this process has nothing left to serve. */
-  const restartNow = async (between: () => Promise<void>): Promise<void> => {
-    down = true
-    await core.stop()
-    let failure: unknown = null
-    try {
-      await between()
-    } catch (error: unknown) {
-      failure = error
-    }
-    try {
-      core = startCore()
+  const restarter = createRestarter({
+    current: () => core,
+    start: startCore,
+    adopt: (next) => {
+      core = next
       Object.assign(deps, core.routes)
-      down = false
-    } catch (error: unknown) {
-      onFatal(`memory.db could not be opened again (${error instanceof Error ? error.name : 'error'})`)
-      throw failure ?? error
-    }
-    if (failure !== null) throw failure
-  }
-  const restart = (between: () => Promise<void>): Promise<void> => {
-    const run = restartNow(between).finally(() => {
-      restarting = null
-    })
-    restarting = run
-    return run
-  }
+    },
+    onFatal,
+  })
+  const restart = (between: () => Promise<void>): Promise<void> => restarter.restart(between)
 
   const backup: BackupRoutes = backupRoutes({
     dataDir,
@@ -556,7 +534,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   })
 
   // A restore in progress is the user at work on the store: it counts as activity until it ends.
-  const quietSince = (): number => (down || restarting !== null ? updateNow() : lastEventAt)
+  const quietSince = (): number => (restarter.down() || restarter.inFlight() !== null ? updateNow() : lastEventAt)
 
   const deps: ServerDeps = {
     onActivity: agentEvent,
@@ -581,7 +559,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log)),
     auth: createDashboardAuth(),
     backup,
-    unavailable: () => (down ? RESTORING : null),
+    unavailable: () => (restarter.down() ? RESTORING : null),
     log,
     ...core.routes,
   }
@@ -620,10 +598,10 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     // A restore between its journal and its last step would leave the marker, and the next daemon
     // could not open the store until someone ran kinfold key resume. It ends on its own: the wait
     // for the store is bounded, and then it finishes or puts the old store back.
-    await restarting?.catch(() => {})
+    await restarter.inFlight()?.catch(() => {})
     await server.stop()
     // A core a restore already closed, and could not replace, has nothing left to stop.
-    if (!down) await core.stop()
+    if (!restarter.down()) await core.stop()
     removeOwnInfoFile(infoPath)
   }
   return {
