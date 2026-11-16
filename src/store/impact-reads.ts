@@ -32,7 +32,7 @@ export function contextCosts(db: Database, since: number): ContextCost[] {
        coalesce(sum(CASE WHEN channel = 'prompt' THEN 0 ELSE tokens END), 0) AS startTokens,
        coalesce(sum(CASE WHEN channel = 'prompt' THEN tokens ELSE 0 END), 0) AS promptTokens,
        coalesce(sum(tokens), 0) AS tokens, coalesce(sum(held_out), 0) AS heldOut
-     FROM injections WHERE occurred_at >= $since AND channel <> 'mcp' GROUP BY host`,
+     FROM injections WHERE occurred_at >= $since AND channel <> 'mcp' AND late = 0 GROUP BY host`,
   ).all({ since })
   const prompts = new Map(db.query<{ host: string; n: number }, { since: number }>(
     'SELECT s.host, count(*) AS n FROM prompts p JOIN sessions s ON s.id = p.session_id WHERE p.occurred_at >= $since GROUP BY s.host',

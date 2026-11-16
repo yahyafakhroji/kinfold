@@ -141,6 +141,7 @@ test('a line names the time, the agent, the project and what was recalled', () =
   const row = { id: 1, at, host: 'claude-code', project: 'repo', ids: [7, 9], heldOut: false, recalled: [{ id: 7, title: 'Bun is pinned', part: 'new' as const }, { id: 9, title: 'Service selection', part: 'related' as const }] }
   expect(formatWatchLine(row)).toBe(`${hhmm(at)}  claude-code · repo · recalled 2 (1 related, 1 new from other sessions) · #7 Bun is pinned · #9 Service selection`)
   expect(formatWatchLine({ ...row, ids: [], recalled: [] })).toBe(`${hhmm(at)}  claude-code · repo · nothing recalled`)
+  expect(formatWatchLine({ ...row, late: true })).toBe(`${hhmm(at)}  claude-code · repo · too late to show, not counted as sent · recalled 2 (1 related, 1 new from other sessions) · #7 Bun is pinned · #9 Service selection`)
   expect(formatWatchLine({ ...row, ids: [], recalled: [], heldOut: true })).toBe(`${hhmm(at)}  claude-code · repo · recall held out for this prompt (impact test)`)
   // A project name is another machine's text too.
   expect(formatWatchLine({ ...row, project: 'evil\u001b[31m\nname', ids: [], recalled: [] })).toBe(`${hhmm(at)}  claude-code · evil [31m name · nothing recalled`)

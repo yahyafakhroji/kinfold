@@ -84,6 +84,22 @@ test('asking about updates, or for health, is not activity: the updater and the 
   expect(spawned).toHaveLength(1)
 })
 
+test('kinfold status and install reading the observer settings with the token is not activity', async () => {
+  pending()
+  const r = start()
+  clock = T0 + QUIET_MS - 1000
+  expect((await r.bearer('GET', '/observer/settings')).status).toBe(200)
+  clock = T0 + QUIET_MS + 5000
+  await Bun.sleep(40)
+  expect(spawned).toHaveLength(1)
+})
+
+test('the dashboard reading the observer settings is still activity, and so is a change through the token', async () => {
+  expect(await stillHeldAfter(async (r) => r.page('GET', '/observer/settings', { cookie: await r.login() }))).toBe(true)
+  await rig?.stop()
+  expect(await stillHeldAfter((r) => r.bearer('PUT', '/observer/settings', { host: 'claude-code', provider: 'off' }))).toBe(true)
+})
+
 test('the quiet query needs the daemon token', async () => {
   const r = start()
   expect((await fetch(r.url('/update/quiet'))).status).toBe(401)

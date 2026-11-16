@@ -13,6 +13,8 @@ type Hash = { page: string; params: Record<string, string> }
 interface SessionsPage {
   REPLY_PREVIEW_CHARS: number
   clockTime(at: number): string
+  localTime(at: number): string
+  timeZoneName(): string
   sessionsList(answer: SessionList, state: Hash): FakeElement
   turnItem(turn: SessionTurn): FakeElement
   sessionView(detail: SessionDetail, state: Hash): FakeElement
@@ -24,7 +26,7 @@ const text = (root: FakeNode): string => textNodes(root).map((node) => node.text
 const AT = Date.UTC(2026, 10, 15, 9, 12)
 
 const TURN: SessionTurn = {
-  promptNumber: 1, at: AT, prompt: 'how do we pin bun in CI?', reply: 'We pin Bun through .bun-version, and CI reads it.', expired: false, heldOut: false, recallKnown: true,
+  promptNumber: 1, at: AT, prompt: 'how do we pin bun in CI?', reply: 'We pin Bun through .bun-version, and CI reads it.', expired: false, heldOut: false, late: false, recallKnown: true,
   recalled: [{ id: 28771, title: 'Bun 1.4.4 is pinned', part: 'related' }, { id: 94451, title: 'Schema version from MIGRATIONS', part: 'new' }],
   saved: [{ id: 95012, title: 'CI pins Bun with .bun-version', type: 'decision' }],
   summary: { request: 'pin bun in CI', learned: 'the version file drives CI', completed: 'explained it', nextSteps: 'none' },
@@ -54,6 +56,24 @@ const click = (element: FakeElement): void => {
   for (const listener of element.listeners.get('click') ?? []) listener({ preventDefault: () => {} })
 }
 const buttons = (root: FakeNode, label: string): FakeElement[] => elements(root).filter((element) => element.tagName === 'BUTTON' && element.textContent === label)
+/** The reader's own clock, worked out here without the page's code. */
+const local = (at: number): string => {
+  const d = new Date(at)
+  const two = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`
+}
+
+test('times are the reader\'s local time, with the zone named once and no UTC label', async () => {
+  const page = await load()
+  expect(page.localTime(SESSION.startedAt)).toBe(local(SESSION.startedAt))
+  expect(page.timeZoneName()).not.toBe('')
+  const shown = text(page.sessionView(DETAIL, { page: 'sessions', params: { id: '7' } }))
+  expect(shown).toContain(`Started ${local(SESSION.startedAt)} (${page.timeZoneName()})`)
+  // On a machine whose zone is UTC (most CI runners) the zone's own name is that.
+  if (page.timeZoneName() !== 'UTC') expect(shown).not.toContain('UTC')
+  expect(shown.split(page.timeZoneName()).length - 1).toBe(1)
+})
+
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
 test('the list shows each session with its agent, project, start and prompt count, and links to it', async () => {
@@ -61,8 +81,8 @@ test('the list shows each session with its agent, project, start and prompt coun
   const list: SessionList = { sessions: [SESSION, { ...SESSION, id: 6, host: 'codex', project: 'other', prompts: 0 }], nextBefore: 6 }
   const view = page.sessionsList(list, { page: 'sessions', params: {} })
   const rows = elements(view).filter((element) => element.tagName === 'TR').map((row) => text(row))
-  expect(rows[0]).toBe('Started|Agent|Project|Prompts|')
-  expect(rows[1]).toBe(`2026-11-15 09:11|claude-code|repo|2|open`)
+  expect(rows[0]).toBe(`Started (${page.timeZoneName()})|Agent|Project|Prompts|`)
+  expect(rows[1]).toBe(`${local(SESSION.startedAt)}|claude-code|repo|2|open`)
   expect(rows[2]).toContain('codex|other|0|open')
   const links = elements(view).filter((element) => element.tagName === 'A').map((link) => link.getAttribute('href'))
   expect(links).toContain('#sessions?id=7')
@@ -99,6 +119,8 @@ test('a turn with nothing recalled, a held-out turn, a turn with no reply and an
   expect(text(page.turnItem({ ...bare, recallKnown: false }))).toContain('not recorded for turns from before this version')
   expect(text(page.turnItem({ ...bare, recallKnown: false }))).not.toContain('nothing recalled')
   expect(text(page.turnItem({ ...bare, heldOut: true }))).toContain('recall held out for this prompt (impact test)')
+  expect(text(page.turnItem({ ...TURN, late: true }))).toContain('found too late for the agent to show; not counted as sent, so new memory comes again with the next prompt')
+  expect(text(page.turnItem(TURN))).not.toContain('too late')
   expect(text(page.turnItem({ ...bare, reply: null }))).toContain('no reply captured')
   const expired = text(page.turnItem({ ...bare, expired: true, prompt: '<expired reason="retention"/>', reply: '<expired reason="retention"/>' }))
   expect(expired).toContain('removed by retention')

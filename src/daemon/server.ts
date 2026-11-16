@@ -65,8 +65,8 @@ export interface ServerDeps {
   /** GET /update, GET /update/quiet and GET or PUT /update/auto; absent means no banner and no switch. */
   update?: UpdateHandlers
   /**
-   * Called for every request that passed its access check, except /health and
-   * the update questions: an agent, an MCP client or the dashboard is at work,
+   * Called for every request that passed its access check, except /health,
+   * the update questions and the CLI's settings read: an agent, an MCP client or the dashboard is at work,
    * and an update must not restart the daemon under it.
    */
   onActivity?: () => void
@@ -265,9 +265,26 @@ async function backupRoute(request: Request, path: string, deps: ServerDeps): Pr
   return answered(path === UPLOAD_PATH ? await routes.upload(request) : await routes.start(() => readJson(request)))
 }
 
+/** Seconds a client should wait before asking again while the store is closed: a restore reopens it within moments. */
+const RETRY_AFTER_SECONDS = '1'
+
+function storeClosed(message: string): Response {
+  const response = json(503, { error: message })
+  response.headers.set('retry-after', RETRY_AFTER_SECONDS)
+  return response
+}
+
 async function storeRoute(request: Request, url: URL, deps: ServerDeps, via: Credential): Promise<Response> {
   const down = deps.unavailable?.() ?? null
-  return down === null ? route(request, url, deps, via) : json(503, { error: down })
+  if (down !== null) return storeClosed(down)
+  try {
+    return await route(request, url, deps, via)
+  } catch (error: unknown) {
+    // Started before a restore closed the store, then met the closed connection: the same answer as arriving a moment later.
+    const closed = deps.unavailable?.() ?? null
+    if (closed !== null) return storeClosed(closed)
+    throw error
+  }
 }
 
 export interface UpdateHandlers {
@@ -335,6 +352,15 @@ function isUpdateQuestion(path: string): boolean {
   return path === '/update' || path.startsWith('/update/') || path === '/watch'
 }
 
+/**
+ * `kinfold status` and `kinfold install` read the observer settings with the
+ * token; a person running them is not an agent at work. The dashboard reads
+ * the same route with its cookie, and a change through either still counts.
+ */
+function isQuietRead(request: Request, path: string, via: Credential): boolean {
+  return isUpdateQuestion(path) || (path === '/observer/settings' && request.method === 'GET' && via === 'token')
+}
+
 async function answer(request: Request, port: number, deps: ServerDeps): Promise<Response> {
   if (!isAllowedHost(request.headers.get('host'), port)) return json(403, { error: 'forbidden host' })
   const url = new URL(request.url)
@@ -348,7 +374,7 @@ async function answer(request: Request, port: number, deps: ServerDeps): Promise
   const access = accessFor(url.pathname)
   const checked = checkAccess(request, access, { port, hasToken: (header) => hasToken(header, deps.token), auth: deps.auth })
   if (!checked.ok) return refused(request, url.pathname, access, checked, deps)
-  if (!isUpdateQuestion(url.pathname)) deps.onActivity?.()
+  if (!isQuietRead(request, url.pathname, checked.via)) deps.onActivity?.()
   // Every route but the upload keeps the 16 KB limit Bun's cap used to give it, body-reading or not.
   if (url.pathname !== UPLOAD_PATH && declaredLength(request) > MAX_BODY_BYTES) return json(413, { error: 'body too large' })
   const startedAt = performance.now()

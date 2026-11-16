@@ -18,7 +18,7 @@ import { encodeRecoveryCode } from '../sqlite/recovery'
 import { DB_FILE } from '../store/data-dir'
 import { openStore } from '../store/db'
 import { LATEST_SCHEMA_VERSION } from '../store/schema'
-import { RESTORE_INCOMING_DIR } from './backup-routes'
+import { RESTORE_INCOMING_DIR, streamThenRemove } from './backup-routes'
 import { PUBLIC_DIR } from '../dashboard/routes'
 import { STATUS_POLL_MS } from '../install/backup-cli'
 import { type DaemonOptions, FATAL_EXIT_MS } from './daemon'
@@ -499,4 +499,42 @@ test('POST /restore/undo is refused while a backup or restore runs, and nothing 
   holder.close()
   expect(await titlesOver(rig)).toContain('from the backup')
   expect(existsSync(maintenancePath(join(dataDir, DB_FILE)))).toBe(false)
+})
+
+test('an upload that cannot make restore-incoming/ answers 500 and leaves the routes free for the next one', async () => {
+  const { rig, dataDir } = box()
+  const { file } = await backupFile()
+  const incoming = join(dataDir, RESTORE_INCOMING_DIR)
+  rmSync(incoming, { recursive: true, force: true })
+  // A file where the folder should be: making the folder fails.
+  writeFileSync(incoming, 'in the way')
+  const refused = await upload(rig, readFileSync(file))
+  expect(refused.status).toBe(500)
+  rmSync(incoming, { force: true })
+  await uploaded(rig, file)
+  expect((await fetch(rig.url('/backup'), { headers: bearer(rig) })).status).toBe(200)
+})
+
+test('a dashboard backup is recorded only when its last byte went: a cancelled download leaves no record', async () => {
+  const path = join(root, 'stream-me.kfb')
+  writeFileSync(path, 'backup bytes')
+  let completed = 0
+  const cancelled = streamThenRemove(path, () => (completed += 1))
+  await cancelled.getReader().cancel()
+  expect(completed).toBe(0)
+  expect(existsSync(path)).toBe(false)
+
+  writeFileSync(path, 'backup bytes')
+  const read = streamThenRemove(path, () => (completed += 1))
+  expect(await new Response(read).text()).toBe('backup bytes')
+  expect(completed).toBe(1)
+})
+
+test('the download route records the backup after the body is read, not before', async () => {
+  const { rig, dataDir } = box({ titles: ['one'] })
+  const response = await fetch(rig.url('/backup'), { headers: bearer(rig) })
+  expect(response.status).toBe(200)
+  await response.arrayBuffer()
+  for (let tries = 0; readBackupRecord(dataDir) === null && tries < 100; tries += 1) await Bun.sleep(5)
+  expect(readBackupRecord(dataDir)).not.toBeNull()
 })

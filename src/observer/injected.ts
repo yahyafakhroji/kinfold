@@ -44,11 +44,11 @@ export function linkableIds(known: readonly KnownObservation[], projectKey: stri
   return known.filter((item) => item.projectKey === projectKey).map((item) => item.id)
 }
 
-/** SessionStart injections carry no session_id, so they match on (host, host_session_id). */
+/** SessionStart injections carry no session_id, so they match on (host, host_session_id). A late answer was not seen and is left out. */
 export function injectedObservations(db: Database, sessionId: number): KnownObservation[] {
   const rows = db.query<{ ids: string }, { sessionId: number }>(
     `SELECT i.observation_ids AS ids FROM injections i JOIN sessions s ON s.id = $sessionId
-     WHERE i.session_id = s.id OR (i.session_id IS NULL AND i.host = s.host AND i.host_session_id = s.host_session_id)
+     WHERE (i.session_id = s.id OR (i.session_id IS NULL AND i.host = s.host AND i.host_session_id = s.host_session_id)) AND i.late = 0
      ORDER BY i.id`,
   ).all({ sessionId })
   const ids = [...new Set(rows.flatMap((row) => parseIds(row.ids)))].slice(0, MAX_KNOWN_OBSERVATIONS)

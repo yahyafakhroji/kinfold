@@ -60,7 +60,12 @@ function written(dataDir: string, file: string = UPDATE_LOCK_FILE): Written | nu
 
 /** The live run that owns the lock; null when there is none, including a lock left by a run that is gone or one too old to be an update. */
 export function updateLockHolder(dataDir: string, alive: (pid: number) => boolean = pidAlive, now: number = Date.now()): number | null {
-  const lock = written(dataDir)
+  return lockHolder(dataDir, UPDATE_LOCK_FILE, alive, now)
+}
+
+/** The same rule for any lock file in the data folder that this module wrote. */
+export function lockHolder(dataDir: string, file: string, alive: (pid: number) => boolean = pidAlive, now: number = Date.now()): number | null {
+  const lock = written(dataDir, file)
   if (lock === null || now - lock.takenAt > LOCK_MAX_AGE_MS) return null
   return alive(lock.pid) ? lock.pid : null
 }
@@ -107,6 +112,7 @@ function createExclusive(path: string, content: string): boolean {
 }
 
 export const TAKEOVER_CLAIM_FILE = `${UPDATE_LOCK_FILE}.takeover`
+const takeoverFile = (file: string): string => `${file}.takeover`
 /** A takeover lasts milliseconds; a claim this old was left by a run that died in the middle of one. */
 export const TAKEOVER_CLAIM_MAX_AGE_MS = 30_000
 
@@ -117,40 +123,45 @@ export const TAKEOVER_CLAIM_MAX_AGE_MS = 30_000
  * a run that died is cleared here, but this call still steps back: two runs
  * that both cleared it must not both go on, and the next attempt finds it gone.
  */
-function claimTakeover(dataDir: string, content: string, pid: number, now: number, link: (from: string, to: string) => void): boolean {
-  const path = join(dataDir, TAKEOVER_CLAIM_FILE)
+function claimTakeover(dataDir: string, file: string, content: string, pid: number, now: number, link: (from: string, to: string) => void): boolean {
+  const path = join(dataDir, takeoverFile(file))
   if (tryCreate(path, content, pid, link)) return true
-  const claim = written(dataDir, TAKEOVER_CLAIM_FILE)
+  const claim = written(dataDir, takeoverFile(file))
   if (claim === null || now - claim.takenAt > TAKEOVER_CLAIM_MAX_AGE_MS) rmSync(path, { force: true })
   return false
 }
 
 /** The lock, or null while another live run holds it or is taking a dead one over. */
 export function acquireUpdateLock(dataDir: string, deps: UpdateLockDeps = {}): UpdateLock | null {
+  return acquireLock(dataDir, UPDATE_LOCK_FILE, deps)
+}
+
+/** acquireUpdateLock for another lock file in the data folder, with the same takeover rules. */
+export function acquireLock(dataDir: string, file: string, deps: UpdateLockDeps = {}): UpdateLock | null {
   const pid = deps.pid ?? process.pid
   const alive = deps.alive ?? pidAlive
   const now = (deps.now ?? Date.now)()
   const link = deps.link ?? linkSync
-  const path = join(dataDir, UPDATE_LOCK_FILE)
+  const path = join(dataDir, file)
   const content = `${pid}\n${now}\n`
   const heldByAnother = (): boolean => {
-    const holder = updateLockHolder(dataDir, alive, now)
+    const holder = lockHolder(dataDir, file, alive, now)
     return holder !== null && holder !== pid
   }
   if (!tryCreate(path, content, pid, link)) {
-    if (heldByAnother() || !claimTakeover(dataDir, content, pid, now, link)) return null
+    if (heldByAnother() || !claimTakeover(dataDir, file, content, pid, now, link)) return null
     try {
       // Looked at again under the claim: a run that held the claim a moment ago may have just made this lock.
       if (heldByAnother()) return null
       rmSync(path, { force: true })
       if (!tryCreate(path, content, pid, link)) return null
     } finally {
-      rmSync(join(dataDir, TAKEOVER_CLAIM_FILE), { force: true })
+      rmSync(join(dataDir, takeoverFile(file)), { force: true })
     }
   }
   return {
     release(): void {
-      if (written(dataDir)?.pid === pid) rmSync(path, { force: true })
+      if (written(dataDir, file)?.pid === pid) rmSync(path, { force: true })
     },
   }
 }

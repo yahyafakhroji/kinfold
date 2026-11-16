@@ -138,3 +138,9 @@ test('the list for a toast keeps every row short enough for a narrow box', () =>
   expect(lines.length).toBe(1 + 8 + 1)
   expect(lines.some((line) => line.includes('#3 '))).toBe(false)
 })
+
+test('memories stored but an empty pack: the header says none of them was sent, in the list and in the toast', () => {
+  const list = firstScreenList(screen([]), [], NOW).split('\n')
+  expect(list).toEqual(['kinfold · shared-agent-memory · 1,284 memories · last session 2h ago', "  none was sent to this session's context · kinfold dashboard"])
+  expect(firstScreenToast(screen([]), [], NOW).split('\n')).toEqual(list)
+})

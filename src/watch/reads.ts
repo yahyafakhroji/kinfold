@@ -7,7 +7,7 @@
 // was sent, as the list a hook shows at session start. An agent whose plugin
 // cannot print at session start (OpenCode, Kilo Code) toasts it from here.
 
-import { FIRST_SCREEN_ROWS, HELD_OUT_LINE, type Recalled, firstScreenToast, recallLine } from '../context/recall-line'
+import { FIRST_SCREEN_ROWS, HELD_OUT_LINE, type Recalled, firstScreenToast, lateLine, recallLine } from '../context/recall-line'
 import type { RouteAnswer } from '../daemon/data-routes'
 import type { Database } from '../sqlite/types'
 import { firstScreenFor, titlesFor } from '../store/context-store'
@@ -30,6 +30,8 @@ export interface WatchRow {
   ids: number[]
   recalled: Recalled[]
   heldOut: boolean
+  /** The answer came after the agent stopped waiting, so it was probably not shown. */
+  late: boolean
   /** The agent's own id for the session, and the prompt's number in it: what a plugin needs to show the line in the right place. */
   hostSessionId: string
   promptNumber: number
@@ -60,6 +62,7 @@ interface InjectionRow {
   ids: string
   heldOut: number
   relatedCount: number
+  late: number
 }
 
 function parseIds(json: string): number[] {
@@ -87,7 +90,7 @@ export function watchRows(db: Database, query: WatchQuery): WatchRow[] {
   const tooFresh = prompts.findIndex((row) => row.at > query.before)
   const settled = tooFresh === -1 ? prompts : prompts.slice(0, tooFresh)
   const sent = db.query<InjectionRow, { host: string; hostSessionId: string; promptNumber: number }>(
-    `SELECT observation_ids AS ids, held_out AS heldOut, related_count AS relatedCount FROM injections
+    `SELECT observation_ids AS ids, held_out AS heldOut, related_count AS relatedCount, late FROM injections
      WHERE host = $host AND host_session_id = $hostSessionId AND channel = 'prompt' AND prompt_number = $promptNumber ORDER BY id`,
   )
   return settled.map((prompt) => {
@@ -101,10 +104,11 @@ export function watchRows(db: Database, query: WatchQuery): WatchRow[] {
     const ids = parts.map((entry) => entry.id)
     const recalled = parts.map((entry) => ({ id: entry.id, title: titles.get(entry.id) ?? '', part: entry.part }))
     const heldOut = injections.some((row) => row.heldOut !== 0)
+    const late = injections.length > 0 && injections.every((row) => row.late !== 0)
     return {
-      id: prompt.id, at: prompt.at, host: prompt.host, project: prompt.project, ids, recalled, heldOut,
+      id: prompt.id, at: prompt.at, host: prompt.host, project: prompt.project, ids, recalled, heldOut, late,
       hostSessionId: prompt.hostSessionId, promptNumber: prompt.promptNumber,
-      line: heldOut ? HELD_OUT_LINE : recallLine(ids, recalled),
+      line: heldOut ? HELD_OUT_LINE : late ? lateLine(recallLine(ids, recalled)) : recallLine(ids, recalled),
     }
   })
 }

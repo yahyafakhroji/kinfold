@@ -7,7 +7,7 @@
 // install before anything changes, so there are never two writers; under
 // --takeover the install waits for the user to stop it and never kills it.
 
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { deprecationLines, envName, legacyName, readEnv } from '../env-names'
 import { DEFAULT_PORT } from '../daemon/daemon'
@@ -611,23 +611,28 @@ async function folderTarget(env: InstallEnv, dataDir: string, options: InstallOp
 }
 
 /**
- * An install and an update both stop the service and replace the program, so
- * only one of them runs at a time. The install an update starts is its child
- * and works under the update's own lock. A dry run changes nothing and takes
- * none, and neither does a first install, whose folder does not exist yet:
- * there is no daemon there to have started an update. It is taken as the plan
- * starts to run and not before, so a run that stops at a check leaves the
- * data folder exactly as it found it.
+ * An install, an uninstall and an update all stop the service and replace or
+ * remove the program, so only one of them runs at a time. The install an
+ * update starts is its child and works under the update's own lock. A dry run
+ * changes nothing and takes none. A first install makes its data folder here,
+ * owner-only as the plan would make it, so the lock has a place to live. It is
+ * taken as the plan starts to run and not before, so a run that stops at a
+ * check leaves the data folder exactly as it found it.
  */
-export function takeInstallLock(env: InstallEnv, options: InstallOptions): { release(): void } | 'blocked' {
+export function takeInstallLock(env: InstallEnv, options: Pick<InstallOptions, 'dryRun' | 'lock'>, command: 'install' | 'uninstall' = 'install'): { release(): void } | 'blocked' {
   const none = { release: (): void => undefined }
-  if (options.dryRun || !existsSync(env.dataDir)) return none
+  if (options.dryRun) return none
+  if (!existsSync(env.dataDir)) {
+    // Nothing to lock against for an uninstall of a folder that is not there.
+    if (command === 'uninstall') return none
+    mkdirSync(env.dataDir, { recursive: true, mode: DATA_DIR_MODE })
+  }
   const holder = updateLockHolder(env.dataDir, options.lock?.alive)
   if (holder !== null && holder === (options.lock?.parentPid ?? process.ppid)) return none
   const lock = holder === null ? acquireUpdateLock(env.dataDir, options.lock) : null
   if (lock !== null) return lock
   const running = holder ?? updateLockHolder(env.dataDir, options.lock?.alive)
-  noticeOf(env)(`install: an update is running${running === null ? '' : ` (pid ${running})`}; run install again when it has finished. Nothing was changed.`)
+  noticeOf(env)(`${command}: an update is running${running === null ? '' : ` (pid ${running})`}; run ${command} again when it has finished. Nothing was changed.`)
   return 'blocked'
 }
 

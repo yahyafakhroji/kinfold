@@ -32,7 +32,7 @@ export type PurgeTarget =
   | { kind: 'expire'; table: 'observations' | 'summaries'; before: number }
 
 /** Delete order: every table after the ones that point at it. */
-export const PURGE_TABLES = ['injections', 'mcp_reads', 'observer_runs', 'summaries', 'events', 'prompts', 'observations', 'sessions', 'context_packs', 'projects'] as const
+export const PURGE_TABLES = ['injections', 'mcp_reads', 'observer_runs', 'summaries', 'events', 'turn_usage', 'prompts', 'observations', 'sessions', 'context_packs', 'projects'] as const
 export type PurgeTable = (typeof PURGE_TABLES)[number]
 
 export type PurgeCounts = Record<PurgeTable | 'findings' | 'injectionsTrimmed' | 'links', number>
@@ -58,6 +58,7 @@ function bySessions(sessions: string, extra: Partial<Record<PurgeTable, string>>
     observer_runs: owned,
     summaries: owned,
     events: owned,
+    turn_usage: owned,
     prompts: owned,
     observations: owned,
     sessions: `id IN (${sessions})`,
@@ -75,6 +76,7 @@ function rangeScope(): Record<PurgeTable, string> {
     observer_runs: within('started_at'),
     summaries: within('occurred_at'),
     events: within('occurred_at'),
+    turn_usage: within('occurred_at'),
     prompts: within('occurred_at'),
     observations: within('occurred_at'),
     mcp_reads: within('occurred_at'),
@@ -92,9 +94,16 @@ function shareSummaries(where: Record<PurgeTable, string>): Record<PurgeTable, s
   return { ...where, summaries: `((${where.summaries}) OR ${pointer(where.prompts, false)}) AND NOT ${pointer(where.prompts, true)}` }
 }
 
+/** A turn's usage goes with the prompt it measured, whatever scope names that prompt. */
+function withTurnUsage(where: Record<PurgeTable, string>): Record<PurgeTable, string> {
+  if (where.prompts === NONE) return where
+  const measured = `(session_id, prompt_number) IN (SELECT session_id, prompt_number FROM prompts WHERE ${where.prompts})`
+  return { ...where, turn_usage: where.turn_usage === NONE ? measured : `(${where.turn_usage}) OR ${measured}` }
+}
+
 export function scopeFor(target: PurgeTarget): PurgeScope {
   const scope = baseScope(target)
-  return { ...scope, where: shareSummaries(scope.where) }
+  return { ...scope, where: withTurnUsage(shareSummaries(scope.where)) }
 }
 
 function baseScope(target: PurgeTarget): { where: Record<PurgeTable, string>; params: Record<string, string | number> } {

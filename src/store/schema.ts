@@ -442,10 +442,24 @@ INSERT INTO data_settings (key, value, updated_at) VALUES
   ('impact.since', NULL, 0);
 `
 
+// v13: an answer that came after the host stopped waiting is recorded too, so
+// watch and Sessions can show it. injections.late marks it: those ids were
+// probably never shown, so the delta sends them again and the hit-rate and
+// cost numbers leave the row out. observations_by_session_prompt serves the
+// Sessions turns page (what was saved from each prompt), and prompts_by_time
+// the Metrics count of prompts per agent. injections_by_session_prompt stays:
+// the observer's injected list and the session purge find rows by session_id
+// through it.
+const V13_LATE_AND_INDEXES = `
+ALTER TABLE injections ADD COLUMN late INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX observations_by_session_prompt ON observations(session_id, prompt_number);
+CREATE INDEX prompts_by_time ON prompts(occurred_at, session_id);
+`
+
 /** Index i holds the migration that takes user_version from i to i + 1. */
 export const MIGRATIONS: readonly string[] = [
   V1_CORE + V1_MEMORY + V1_DELIVERY, V2_OBSERVER, V3_CONTEXT, V4_DATA_CONTROL, V5_LINKS, V6_USAGE, V7_SHARED_SUMMARIES, V8_VECTORS, V9_RELATED_SERVED,
-  V10_OBSERVER_SAFETY, V11_VECTOR_SPACE_INDEX, V12_VISIBLE,
+  V10_OBSERVER_SAFETY, V11_VECTOR_SPACE_INDEX, V12_VISIBLE, V13_LATE_AND_INDEXES,
 ]
 
 /**

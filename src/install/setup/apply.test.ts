@@ -21,7 +21,7 @@ import type { TerminalIO } from '../prompt/terminal'
 import type { ServiceControl } from '../service/control'
 import { LaunchAgentService } from '../service/launch-agent-service'
 import { type FakeWorld, UID, YES, createWorld, fakeService, snapshotTree } from '../test-support'
-import { SHOW_RECOVERY_LINE, applySetup, doneLines } from './apply'
+import { SHOW_RECOVERY_LINE, applySetup, doneLines, doneSummary } from './apply'
 import { type SetupState, readSetupState } from './prefill'
 import { INSTALL_RECORD_FILE } from './record'
 import type { EncryptionAnswer, SetupAnswers } from './wizard'
@@ -415,4 +415,18 @@ test('a failing note check keeps the encrypt failure line', async () => {
   expect(code).toBe(EXIT_FAILED)
   expect(w.out.some((line) => line.startsWith('install: everything else is in place, but kinfold encrypt failed:'))).toBe(true)
   expect(w.out.some((line) => line.startsWith('install failed:'))).toBe(false)
+})
+
+test('the summary lists only the agents that were wired; Codex skipped for an unusable CODEX_HOME shows with its reason', async () => {
+  const w = make()
+  const env: InstallEnv = { ...w.env, codexHomeEnv: '/nonexistent/codex-home' }
+  const state = await readSetupState(env)
+  const path = { actions: [], record: {}, summary: null, activate: null }
+  const { rows } = doneSummary(env, keeping(state, { hosts: ['claude-code', 'codex'] }), state, path)
+  const texts = rows.map((row) => `${row.mark} ${row.text}`)
+  expect(texts).toContain('ok Agents wired: Claude Code')
+  expect(texts).toContain('warn Codex: not wired; CODEX_HOME points to "/nonexistent/codex-home", but that path does not exist')
+  // With only Codex chosen, nothing is wired.
+  const only = doneSummary(env, keeping(state, { hosts: ['codex'] }), state, path).rows.map((row) => row.text)
+  expect(only).toContain('No agent is wired; run install again to add one.')
 })

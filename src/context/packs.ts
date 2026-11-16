@@ -98,6 +98,8 @@ export interface ServedExtras {
   relatedCount?: number
   /** Recall was held out for the impact test: the row is written though the answer is empty, so the turn can be told apart later. */
   heldOut?: boolean
+  /** The answer came after the host stopped waiting. */
+  late?: boolean
 }
 
 /** One injections row for a non-empty answer, or for a held-out prompt; null (nothing recorded) for any other empty one. */
@@ -117,6 +119,7 @@ export function recordServed(db: Database, request: ContextRequest, projectKey: 
     promptNumber: request.channel === 'prompt' ? promptNumberAt(db, request.host, request.hostSessionId, now) : null,
     ...(extras.heldOut === true ? { heldOut: true } : {}),
     ...(extras.relatedCount !== undefined ? { relatedCount: extras.relatedCount } : {}),
+    ...(extras.late === true ? { late: true } : {}),
   })
 }
 

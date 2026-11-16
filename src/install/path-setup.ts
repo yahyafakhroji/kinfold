@@ -14,6 +14,7 @@
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { DATA_DIR_NAME } from '../names'
+import { osOf } from '../platform/platform'
 import { type InstallEnv, platformOf } from './env'
 import { installedProgramPath } from './entry'
 import { plannedBackup, readTextOrNull } from './files'
@@ -120,6 +121,32 @@ export function shellFiles(env: ShellEnv): ShellFiles {
   }
   if (name === 'fish') return { shell: 'fish', kind: 'fish', files: [fishFile(env)] }
   return { shell: 'other', kind: 'posix', files: [] }
+}
+
+/**
+ * macOS Terminal starts bash as a login shell: it reads ~/.bash_profile (or
+ * ~/.bash_login, or ~/.profile) and never ~/.bashrc, so the PATH block there
+ * is not seen. Kinfold does not create ~/.bash_profile, since its presence
+ * would stop bash reading ~/.profile; it names the line to add instead, one
+ * that reads ~/.profile first when there is one so nothing is lost.
+ */
+function loginBashNote(env: ShellEnv): string | null {
+  if (osOf(env.platform) !== 'macos' || basename(env.envVars?.SHELL ?? '') !== 'bash') return null
+  if (existsSync(join(env.homeDir, '.bash_profile'))) return null
+  const bashrc = '[ -r ~/.bashrc ] && . ~/.bashrc'
+  // Bash reads the first of ~/.bash_profile, ~/.bash_login and ~/.profile; with a ~/.bash_login the line goes there.
+  if (existsSync(join(env.homeDir, '.bash_login'))) {
+    return `macOS opens bash as a login shell, which reads ~/.bash_login and skips ~/.bashrc: add this line to ~/.bash_login: ${bashrc}`
+  }
+  const line = existsSync(join(env.homeDir, '.profile')) ? `[ -r ~/.profile ] && . ~/.profile; ${bashrc}` : bashrc
+  return `macOS opens bash as a login shell, which reads ~/.bash_profile and skips ~/.bashrc: add this line to ~/.bash_profile: ${line}`
+}
+
+/** Status: the same note, once PATH was added through ~/.bashrc and the login files still miss it. Reads only. */
+export function loginShellNote(env: ShellEnv, saved: InstallRecord | null): string | null {
+  if (saved?.pathSetup !== 'added') return null
+  const note = loginBashNote(env)
+  return note === null ? null : `kinfold command: ${note}`
 }
 
 type LinkState = 'missing' | 'ours' | 'foreign'
@@ -342,10 +369,11 @@ function posixPlan(env: InstallEnv, at: Situation, add: boolean): PathPlan {
   }
   if (!add) return { actions: linking, record: { pathSetup: 'declined', pathLink: at.link }, summary: `kinfold command: ${link}; PATH left alone, so run it by that path`, activate: null }
   const first = tilde(env, shell.files[0] as string)
+  const login = loginBashNote(env)
   return {
     actions: [...linking, ...shell.files.flatMap((path) => blockActions(env, path, shell.kind))],
     record: { pathSetup: 'added', pathLink: at.link, pathFiles: shell.files },
-    summary: `kinfold command: ${link}, with ~/.local/bin on PATH through ${shell.files.map((path) => tilde(env, path)).join(' and ')}`,
+    summary: `kinfold command: ${link}, with ~/.local/bin on PATH through ${shell.files.map((path) => tilde(env, path)).join(' and ')}${login === null ? '' : `; ${login}`}`,
     activate: `source ${first}`,
   }
 }

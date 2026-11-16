@@ -2,7 +2,8 @@ import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { installPaths } from './env'
-import { EXIT_OK, install } from './install'
+import { EXIT_BLOCKED, EXIT_OK, install } from './install'
+import { UPDATE_LOCK_FILE, acquireUpdateLock, updateLockHolder } from '../update/lock'
 import { LAUNCHCTL, bootoutArgv } from './launch-agent'
 import { MCP_SERVER_NAME, claudeMcpEntry } from './mcp-config'
 import { mcpPaths, mcpTarget } from './mcp-wiring'
@@ -159,4 +160,28 @@ test('uninstall names what it had to leave behind and still exits 0', async () =
   expect(removed).toEqual([bin])
   expect(w.out).toContain(leftBehindLine('/d/bin/.kinfold-old-1'))
   expect(w.out.find((line) => line.includes(`remove ${bin}/`))).toEndWith('[done]')
+})
+
+test('uninstall waits its turn: it refuses while an update runs, and changes nothing', async () => {
+  const w = await installed()
+  const paths = installPaths(w.env)
+  acquireUpdateLock(w.dataDir, { pid: 4242, alive: () => true })
+  expect(await uninstall(w.env, { dryRun: false, removeCredentials: false, lock: { alive: () => true } })).toBe(EXIT_BLOCKED)
+  expect(w.out).toContain('uninstall: an update is running (pid 4242); run uninstall again when it has finished. Nothing was changed.')
+  expect(existsSync(paths.launchAgentPlist)).toBe(true)
+  expect(w.commands.filter((c) => c.argv[0] === LAUNCHCTL && c.argv[1] !== 'print')).toEqual([])
+  expect(updateLockHolder(w.dataDir, () => true)).toBe(4242)
+})
+
+test('uninstall holds the update lock while it runs and lets it go after', async () => {
+  const w = await installed()
+  let during = null as number | null
+  const real = w.env.run
+  w.env = { ...w.env, run: async (request) => {
+    if (request.argv[1] === 'bootout') during = updateLockHolder(w.dataDir)
+    return real(request)
+  } }
+  expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
+  expect(during).toBe(process.pid)
+  expect(existsSync(join(w.dataDir, UPDATE_LOCK_FILE))).toBe(false)
 })

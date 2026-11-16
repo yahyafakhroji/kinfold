@@ -85,6 +85,8 @@ export interface SessionTurn {
   recallKnown: boolean
   /** The impact test held recall back for this prompt. */
   heldOut: boolean
+  /** What was recalled came after the agent stopped waiting, so it was probably not shown; the next prompt carried it again. */
+  late: boolean
   saved: SavedObservation[]
   summary: TurnSummary | null
 }
@@ -130,8 +132,8 @@ export function sessionTurns(db: Database, sessionId: number, after: number, lim
   ).all({ sessionId, after, limit: limit + 1 })
   const page = prompts.slice(0, limit)
 
-  const sent = db.query<{ ids: string; heldOut: number; relatedCount: number }, { host: string; hostSessionId: string; promptNumber: number }>(
-    `SELECT observation_ids AS ids, held_out AS heldOut, related_count AS relatedCount FROM injections
+  const sent = db.query<{ ids: string; heldOut: number; relatedCount: number; late: number }, { host: string; hostSessionId: string; promptNumber: number }>(
+    `SELECT observation_ids AS ids, held_out AS heldOut, related_count AS relatedCount, late FROM injections
      WHERE host = $host AND host_session_id = $hostSessionId AND channel = 'prompt' AND prompt_number = $promptNumber ORDER BY id`,
   )
   const saved = db.query<SavedObservation, { sessionId: number; promptNumber: number }>(
@@ -155,6 +157,7 @@ export function sessionTurns(db: Database, sessionId: number, after: number, lim
     return {
       promptNumber: prompt.promptNumber, at: prompt.at, prompt: prompt.prompt, reply: prompt.reply, expired: prompt.expiredAt !== null,
       heldOut: injections.some((injection) => injection.heldOut !== 0),
+      late: injections.length > 0 && injections.every((injection) => injection.late !== 0),
       recallKnown: injections.length > 0 || since === null || prompt.at >= since,
       recalled: parts.map((entry) => ({ id: entry.id, title: titles.get(entry.id) ?? '', part: entry.part })),
       saved: saved.all({ sessionId, promptNumber: prompt.promptNumber }),

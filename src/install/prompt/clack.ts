@@ -53,6 +53,42 @@ const MARK_TEXT: Readonly<Record<Mark, string>> = {
   none: ' ',
 }
 
+/** clack's note box takes this many columns for its bars and padding; it wraps what is left. */
+const NOTE_FRAME_COLUMNS = 6
+/** A row's mark and the space after it: wrapped lines are indented by as much. */
+const MARK_COLUMNS = 2
+
+/** Words onto lines of at most `width` columns; a word longer than that is cut. */
+function wrapWords(text: string, width: number): string[] {
+  const lines: string[] = []
+  let line = ''
+  for (const word of text.split(' ').filter((part) => part !== '')) {
+    let rest = word
+    while (rest.length > width) {
+      if (line !== '') lines.push(line)
+      lines.push(rest.slice(0, width))
+      rest = rest.slice(width)
+      line = ''
+    }
+    if (line === '') line = rest
+    else if (line.length + 1 + rest.length <= width) line = `${line} ${rest}`
+    else {
+      lines.push(line)
+      line = rest
+    }
+  }
+  if (line !== '' || lines.length === 0) lines.push(line)
+  return lines
+}
+
+/** One row of a section, wrapped here so its later lines sit under its text, not under its mark. */
+function rowLines(mark: string, text: string, columns: number): string {
+  const width = Math.max(1, columns - NOTE_FRAME_COLUMNS - MARK_COLUMNS)
+  // A row that fits is drawn as written, its own spacing and alignment included.
+  if (text.length <= width) return `${mark} ${text}`
+  return wrapWords(text, width).map((line, index) => `${index === 0 ? mark : ' '} ${line}`).join('\n')
+}
+
 export function createClackPrompts(streams: PromptStreams = { input: process.stdin, output: process.stdout }): Prompts {
   const { input, output } = streams
   withUsableSize(output)
@@ -83,7 +119,7 @@ export function createClackPrompts(streams: PromptStreams = { input: process.std
     say: (line) => clack.log.message(clean(line), { output, spacing: 0 }),
     warn: (line) => clack.log.warn(clean(line), { output }),
     error: (line) => clack.log.error(clean(line), { output }),
-    section: (title, rows) => clack.note(rows.map((row) => `${MARK_TEXT[row.mark]} ${clean(row.text)}`).join('\n'), clean(title), { output, format: (line) => line }),
+    section: (title, rows) => clack.note(rows.map((row) => rowLines(MARK_TEXT[row.mark], clean(row.text), columns())).join('\n'), clean(title), { output, format: (line) => line }),
     progress(total) {
       write(`${styleText('gray', clack.S_BAR)}\n`)
       return bar(total)

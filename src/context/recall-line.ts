@@ -25,6 +25,7 @@ export interface FirstScreen {
 }
 
 export const FIRST_SCREEN_ROWS = 8
+const NONE_SENT_ROW = "  none was sent to this session's context · kinfold dashboard"
 /** Memories named on the line before it counts the rest. */
 export const LINE_TITLES = 5
 const LINE_TITLE_CHARS = 40
@@ -75,6 +76,15 @@ export function recallLine(ids: readonly number[], recalled: readonly Recalled[]
   })
   const rest = ids.length - named.length
   return [`kinfold · recalled ${ids.length}${parts(ids, byId)}`, ...named, ...(rest > 0 ? [`+${rest} more`] : [])].join(' · ')
+}
+
+/**
+ * The answer came after the agent stopped waiting: it names what was found, and
+ * says it was not counted as shown. New memory then comes with the next prompt;
+ * related memory only if that prompt matches it too, so the line promises neither.
+ */
+export function lateLine(line: string): string {
+  return line.replace(/^kinfold · /, 'kinfold · too late to show, not counted as sent · ')
 }
 
 /** Memory read straight from the store because no daemon was listening: say both, so the line still means what was sent. */
@@ -130,6 +140,8 @@ export function firstScreenList(screen: FirstScreen | null, ids: readonly number
   const last = screen.lastSessionAt === null ? '' : ` · last session ${shortAge(screen.lastSessionAt, now)} ago`
   const header = `kinfold · ${project} · ${count(screen.total, 'memory', 'memories')}${last}`
   if (options.takesPack === false) return `${header}\n  no memory is sent at session start on this agent · kinfold dashboard`
+  // A count with nothing under it would read as if those memories were in the context.
+  if (ids.length === 0) return `${header}\n${NONE_SENT_ROW}`
   const sent = new Set(ids)
   const rows = screen.rows.filter((row) => sent.has(row.id)).slice(0, FIRST_SCREEN_ROWS)
     .map((row) => ({ id: `#${row.id}`, title: cut(row.title, LIST_TITLE_CHARS), age: `(${shortAge(row.occurredAt, now)})` }))
@@ -146,7 +158,7 @@ export function firstScreenList(screen: FirstScreen | null, ids: readonly number
  * on one line.
  */
 export function firstScreenToast(screen: FirstScreen | null, ids: readonly number[], now: number): string {
-  if (screen === null || screen.total === 0) return firstScreenList(screen, ids, now)
+  if (screen === null || screen.total === 0 || ids.length === 0) return firstScreenList(screen, ids, now)
   const [header = ''] = firstScreenList({ ...screen, rows: [] }, [], now).split('\n')
   const sent = new Set(ids)
   const rows = screen.rows.filter((row) => sent.has(row.id)).slice(0, FIRST_SCREEN_ROWS)

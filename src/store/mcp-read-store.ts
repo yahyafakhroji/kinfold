@@ -78,10 +78,10 @@ export function mcpReadsSince(db: Database, since: number): StoredMcpRead[] {
   ).all({ since }).map((row) => ({ ...row, returnedIds: parseIds(row.returnedIds) }))
 }
 
-/** Injections in the window with a known project (rows from before v3 have none). */
+/** Injections in the window with a known project (rows from before v3 have none); a late answer was not seen, so it is not one. */
 export function injectedIdsSince(db: Database, since: number): InjectedIds[] {
   return db.query<Omit<InjectedIds, 'observationIds'> & { observationIds: string }, { since: number }>(
     `SELECT project_key AS projectKey, host, channel, occurred_at AS occurredAt, observation_ids AS observationIds
-     FROM injections WHERE occurred_at >= $since AND project_key IS NOT NULL ORDER BY occurred_at, id`,
+     FROM injections WHERE occurred_at >= $since AND project_key IS NOT NULL AND late = 0 ORDER BY occurred_at, id`,
   ).all({ since }).map((row) => ({ ...row, observationIds: parseIds(row.observationIds) }))
 }

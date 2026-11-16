@@ -11,7 +11,7 @@
 // in the body of the one restore request. It is never printed, logged or put
 // in a URL.
 
-import { chmodSync, closeSync, existsSync, openSync, renameSync, rmSync, writeSync } from 'node:fs'
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, renameSync, rmSync, writeSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { type BackupManifest, BackupError, readArchive } from '../backup/archive'
 import { createBackup } from '../backup/create'
@@ -24,7 +24,8 @@ import { DB_KEY_REF } from '../secrets/credentials'
 import { dbKeyStoreOf } from '../sqlite/keys'
 import { fileState, maintenancePath } from '../sqlite/open'
 import { RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../sqlite/recovery'
-import { DATA_FILE_MODE, DB_FILE } from '../store/data-dir'
+import { DATA_DIR_MODE, DATA_FILE_MODE, DB_FILE } from '../store/data-dir'
+import { type UpdateLock, acquireLock, lockHolder } from '../update/lock'
 import { VERSION } from '../version'
 import type { BackupArgs } from './args'
 import { checkHealth, readDaemonInfo } from './daemon-client'
@@ -35,6 +36,8 @@ import type { CommandBusy } from './prompt/frame'
 import { PromptCancelled } from './prompt/prompts'
 
 class Refusal extends Error {}
+
+export const RESTORE_LOCK_FILE = 'restore.lock'
 
 export const STATUS_POLL_MS = 500
 /** A restore waits up to 36 s for agent sessions and then copies; past this the command stops watching, the daemon does not stop working. */
@@ -202,6 +205,15 @@ async function followDaemon(env: InstallEnv, daemon: Endpoint, busy: CommandBusy
   }
 }
 
+/** Two restores with the daemon down would share restore-staging/: one at a time. */
+function takeRestoreLock(env: InstallEnv): UpdateLock {
+  mkdirSync(env.dataDir, { recursive: true, mode: DATA_DIR_MODE })
+  const lock = acquireLock(env.dataDir, RESTORE_LOCK_FILE)
+  if (lock !== null) return lock
+  const holder = lockHolder(env.dataDir, RESTORE_LOCK_FILE)
+  throw new Refusal(`another kinfold restore is running${holder === null ? '' : ` (pid ${holder})`}; wait for it to finish, then restore again. Nothing was changed`)
+}
+
 async function restoreIntoStore(env: InstallEnv, file: string, key: string | null, busy: CommandBusy | undefined): Promise<void> {
   const staged = await stageSnapshot({ dataDir: env.dataDir, archivePath: file, header: inspectBackup(file), key })
   const outcome = await applyRestore({ dataDir: env.dataDir, staged, keyStore: keyStoreOf(env), log: env.out, sleep: env.sleep })
@@ -218,15 +230,21 @@ async function restore(env: InstallEnv, file: string): Promise<void> {
   if (existsSync(maintenancePath(join(env.dataDir, DB_FILE)))) throw new Refusal(CUT_SHORT)
   const daemon = await runningDaemon(env)
   if (manifest.encrypted && daemon === null && keyStoreOf(env) === null) throw new Refusal('this backup is encrypted, and there is no key store here to keep its key in')
-  const key = manifest.encrypted ? await readKey(env) : null
-  const busy = env.ui?.busy('restoring the memory')
+  // Taken before the code is asked for, so a second restore is refused at once; the daemon serialises its own.
+  const lock = daemon === null ? takeRestoreLock(env) : null
   try {
-    if (daemon === null) await restoreIntoStore(env, source, key, busy)
-    else await restoreThroughDaemon(env, daemon, source, key, busy)
-    busy?.done()
-  } catch (error: unknown) {
-    busy?.fail()
-    throw error
+    const key = manifest.encrypted ? await readKey(env) : null
+    const busy = env.ui?.busy('restoring the memory')
+    try {
+      if (daemon === null) await restoreIntoStore(env, source, key, busy)
+      else await restoreThroughDaemon(env, daemon, source, key, busy)
+      busy?.done()
+    } catch (error: unknown) {
+      busy?.fail()
+      throw error
+    }
+  } finally {
+    lock?.release()
   }
 }
 
