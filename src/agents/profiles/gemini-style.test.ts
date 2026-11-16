@@ -178,7 +178,7 @@ describe('antigravity', () => {
     expect(mcp.path(w.env)).toBe(join(w.env.homeDir, '.gemini', 'config', 'mcp_config.json'))
     expect(installed.mcpServers[MCP_SERVER_NAME].env).toEqual({ [MCP_HOST_ENV]: 'antigravity' })
     expect(profile('antigravity').capabilities('macos').context).toEqual({ sessionStart: true, prompt: false })
-    expect(capabilityLine(profile('antigravity'), 'macos')).toBe('captures, context at start, search (prompts after the first in a conversation may not be recorded until checked on a live run; Antigravity\'s hooks carry no tool output, so tool calls are recorded without it)')
+    expect(capabilityLine(profile('antigravity'), 'macos')).toBe('captures, context at start, search (prompts after the first in a conversation may not be recorded until checked on a live run; Antigravity\'s hooks carry no tool output, so tool calls are recorded without it; update news shows in kinfold status, the dashboard and kinfold watch, not in the agent)')
   })
 
   test('antigravity: a hook named kinfold that is not ours is left alone, and a disabled one of ours stays disabled', () => {

@@ -34,6 +34,9 @@ import { type ObserverSettingsHandlers, parseRecheck, parseSettingsPut } from '.
 import { type SemanticAnswer, type SemanticRequest, parseSemanticRequest } from '../vectors/search'
 import type { Exclusive } from '../vectors/vector-worker'
 import type { AutoUpdateView } from '../update/auto'
+import type { InstallRun } from '../update/install-run'
+import { parseVersion } from '../update/version-order'
+import { type UpdateLevel, isUpdateLevel } from '../install/setup/record'
 
 export interface ServerDeps {
   /** 0 picks a free port. */
@@ -251,7 +254,9 @@ async function panelRoute(request: Request, url: URL, deps: ServerDeps, via: Cre
   if (path.startsWith('/memory/')) return deps.sessions?.(request.method, url) ?? memoryRoute(request.method, url, deps.memory)
   if (path === '/observer/models') return deps.observerModels(request.method, url)
   if (path === '/observer/test') return deps.observerTest(request.method, () => readJson(request))
-  if (path === '/update') return request.method === 'GET' ? { status: 200, body: { notice: deps.update?.banner(via === 'cookie') ?? null, auto: deps.update?.auto() ?? null } } : { status: 405, body: { error: 'method not allowed' } }
+  if (path === '/update') return request.method === 'GET' ? { status: 200, body: { notice: deps.update?.banner(via === 'cookie') ?? null, auto: deps.update?.auto() ?? null, ...(deps.update?.view() ?? {}) } } : { status: 405, body: { error: 'method not allowed' } }
+  if (path === '/update/settings') return updateSettingsRoute(request, deps.update)
+  if (path === '/update/install') return installRoute(request, deps.update)
   if (path === '/update/auto') return autoUpdateRoute(request, deps.update)
   if (path === '/update/quiet' && deps.update !== undefined) return request.method === 'GET' ? { status: 200, body: { quietForMs: deps.update.quietForMs() } } : { status: 405, body: { error: 'method not allowed' } }
   if (path === '/metrics/summary') return request.method === 'GET' ? deps.metrics(url.searchParams.get('window')) : { status: 405, body: { error: 'method not allowed' } }
@@ -308,6 +313,57 @@ export interface UpdateHandlers {
   auto(): AutoUpdateView
   /** Saves the switch in install.json; false when this data folder has no install record to hold it. */
   setAuto(enabled: boolean): boolean
+  /** The release on offer with its change lines, the updates settings and the dashboard install's progress. */
+  view(): { release: UpdateRelease | null; settings: UpdateSettings; install: InstallRun | null }
+  /** Saves the level and beta in install.json; false when there is no install record. */
+  setSettings(settings: UpdateSettings): boolean
+  /** Starts the staged install of `version` detached; a refusal names why. */
+  install(version: string): RouteAnswer
+  /** The dashboard install's progress and the version this daemon runs, which the page watches change. */
+  installState(): { running: string; install: InstallRun | null }
+}
+
+export interface UpdateSettings {
+  level: UpdateLevel
+  beta: boolean
+}
+
+export interface UpdateRelease {
+  version: string
+  changes: string[]
+  breaking: string[]
+  /** Its program is downloaded and checked. */
+  staged: boolean
+  /** The Install button can install it here. */
+  installable: boolean
+}
+
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** GET /update/settings reads the level and beta; PUT {"level": "off"|"notify"|"patch", "beta": boolean} sets both. */
+async function updateSettingsRoute(request: Request, handlers: UpdateHandlers | undefined): Promise<RouteAnswer | null> {
+  if (handlers === undefined) return null
+  if (request.method === 'GET') return { status: 200, body: { settings: handlers.view().settings } }
+  if (request.method !== 'PUT') return { status: 405, body: { error: 'method not allowed' } }
+  const body = await readJson(request)
+  if (!body.ok) return { status: 400, body: { error: body.error } }
+  const value = isObject(body.value) ? body.value : {}
+  if (!isUpdateLevel(value.level) || typeof value.beta !== 'boolean') return { status: 400, body: { error: 'body must be {"level": "off"|"notify"|"patch", "beta": true|false}' } }
+  if (!handlers.setSettings({ level: value.level, beta: value.beta })) return { status: 409, body: { error: 'this data folder has no install record; run kinfold install first' } }
+  return { status: 200, body: { settings: handlers.view().settings } }
+}
+
+/** GET /update/install reads how the dashboard install is going; POST {"version": "<x.y.z>"} starts it. */
+async function installRoute(request: Request, handlers: UpdateHandlers | undefined): Promise<RouteAnswer | null> {
+  if (handlers === undefined) return null
+  if (request.method === 'GET') return { status: 200, body: handlers.installState() }
+  if (request.method !== 'POST') return { status: 405, body: { error: 'method not allowed' } }
+  const body = await readJson(request)
+  if (!body.ok) return { status: 400, body: { error: body.error } }
+  const version = isObject(body.value) ? body.value.version : undefined
+  // It becomes an argument of the updater's command line, so only a version passes.
+  if (typeof version !== 'string' || parseVersion(version) === null) return { status: 400, body: { error: 'body must be {"version": "<the release on offer>"}' } }
+  return handlers.install(version)
 }
 
 /** GET /update/auto reads the switch; PUT {"enabled": boolean} sets it. */

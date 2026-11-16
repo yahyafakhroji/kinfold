@@ -152,10 +152,13 @@ async function contextOutput(event: NormalizedEvent, dataDir: string, host: Hook
   // The notice rides on session start only; the route never attaches it to a prompt delta.
   const notice = wanted.channel === 'session_start' ? result?.updateNotice : undefined
   if (!hasUserChannel) {
-    const normal = result === null ? null : notice !== undefined ? spec.sessionContextWithNotice(result.text, notice) : result.text === '' ? null : wanted.render(result.text)
-    if (progress === null) return normal
+    // No update notice goes into a model's context. Where the host has a progress line it is shown there; elsewhere status, the dashboard and kinfold watch carry it.
+    const normal = result === null || result.text === '' ? null : wanted.render(result.text)
+    const progressLine = spec.progressLine !== undefined && event.host === host ? spec.progressLine : null
+    const parts = [...(notice !== undefined && progressLine !== null ? [noticeMessage(notice)] : []), ...(progress !== null ? [recallMessage(wanted.channel, fetched, true, true)] : [])]
+    if (progressLine === null || parts.length === 0) return normal
     // cleanTitle again, on the whole line: it must stay one line of stdout whatever a title or project name holds.
-    const line = progress(cleanTitle(recallMessage(wanted.channel, fetched, true, true)))
+    const line = progressLine(cleanTitle(parts.join(' · ')))
     return normal === null ? line : `${line}\n${normal}`
   }
   const context = result === null || result.text === '' ? null : wanted.render(result.text)

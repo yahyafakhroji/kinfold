@@ -25,7 +25,7 @@ test('the new flags apply to install only', () => {
 })
 
 test('USAGE lists the new flags and the update command', () => {
-  for (const text of ['--no-encrypt', '--port <1024-65535>', '--no-update-check']) expect(USAGE).toContain(text)
+  for (const text of ['--no-encrypt', '--port <1024-65535>', '--updates off|notify|patch']) expect(USAGE).toContain(text)
   expect(USAGE).toMatch(/update\s+\[--dry-run\]/)
 })
 
@@ -48,7 +48,7 @@ test('install --auto-update turns automatic patch updates back on, and cannot be
   expect(parseArgs(['install'])).toMatchObject({ ok: true, value: { autoUpdate: false } })
   expect(parseArgs(['install', '--auto-update', '--no-auto-update'])).toEqual({ ok: false, error: '--auto-update and --no-auto-update cannot be given together' })
   expect(parseArgs(['update', '--auto-update'])).toEqual({ ok: false, error: '--auto-update does not apply to update' })
-  expect(USAGE).toContain('[--auto-update | --no-auto-update]')
+  expect(USAGE).toContain('[--beta | --no-beta]')
 })
 
 test('update takes only --dry-run', () => {
@@ -103,4 +103,23 @@ test('--embeddings picks the provider; a local LLM takes its model and loopback 
   expect(parseArgs(['install', '--embeddings', 'agent'])).toMatchObject({ ok: false, error: expect.stringContaining('--embeddings takes local, openrouter or local-llm:<model>@<url>') })
   expect(parseArgs(['status', '--embeddings', 'local'])).toEqual({ ok: false, error: '--embeddings does not apply to status' })
   expect(USAGE).toContain('--embeddings local|openrouter|local-llm:<model>@<url>')
+})
+
+test('--updates takes a level, and --beta or --no-beta the channel', () => {
+  expect(parseArgs(['install', '--updates', 'notify'])).toMatchObject({ ok: true, value: { updates: 'notify', beta: false, noBeta: false } })
+  expect(parseArgs(['install', '--updates=off', '--beta'])).toMatchObject({ ok: true, value: { updates: 'off', beta: true } })
+  expect(parseArgs(['install', '--no-beta'])).toMatchObject({ ok: true, value: { updates: null, noBeta: true } })
+  expect(parseArgs(['install', '--updates', 'weekly'])).toEqual({ ok: false, error: '--updates takes off, notify or patch' })
+  expect(parseArgs(['install', '--beta', '--no-beta'])).toEqual({ ok: false, error: '--beta and --no-beta cannot be given together' })
+  expect(parseArgs(['update', '--beta'])).toEqual({ ok: false, error: '--beta does not apply to update' })
+})
+
+test('--updates does not mix with the older update flags it replaces', () => {
+  expect(parseArgs(['install', '--updates', 'patch', '--no-update-check'])).toEqual({ ok: false, error: '--updates cannot be given with --no-update-check, --auto-update or --no-auto-update' })
+})
+
+test('update --staged names the staged release the dashboard installs', () => {
+  expect(parseArgs(['update', '--staged', '0.6.0'])).toMatchObject({ ok: true, value: { staged: '0.6.0' } })
+  expect(parseArgs(['update', '--staged', '../x'])).toEqual({ ok: false, error: '--staged takes a version' })
+  expect(parseArgs(['install', '--staged', '0.6.0'])).toEqual({ ok: false, error: '--staged does not apply to install' })
 })

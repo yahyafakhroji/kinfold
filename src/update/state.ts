@@ -6,6 +6,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeFileAtomic } from '../fs/atomic'
 import { DATA_FILE_MODE } from '../store/data-dir'
+import { MAX_CHANGE_CHARS, MAX_CHANGE_LINES, type ReleaseInfo } from './release'
+import { parseVersion } from './version-order'
 
 export const UPDATE_STATE_FILE = 'update-check.json'
 
@@ -14,9 +16,40 @@ export interface UpdateState {
   latestVersion: string | null
   checkedAt: number | null
   notified: Readonly<Record<string, string>>
+  /** Whether the check that found latestVersion read the beta channel; null for a state from before it. */
+  beta?: boolean | null
+  /** latestVersion's change lines; null for a state from before them. */
+  release?: ReleaseInfo | null
 }
 
-const EMPTY: UpdateState = { lastAttemptAt: null, latestVersion: null, checkedAt: null, notified: {} }
+const EMPTY: UpdateState = { lastAttemptAt: null, latestVersion: null, checkedAt: null, notified: {}, beta: null, release: null }
+
+function linesOf(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  return value.filter((line): line is string => typeof line === 'string').map((line) => line.slice(0, MAX_CHANGE_CHARS)).slice(0, MAX_CHANGE_LINES)
+}
+
+function releaseOf(value: unknown): ReleaseInfo | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const { version, prerelease, changes, breaking } = value as Record<string, unknown>
+  if (typeof version !== 'string' || parseVersion(version) === null || typeof prerelease !== 'boolean') return null
+  const lines = linesOf(changes)
+  const broken = linesOf(breaking)
+  return lines === null || broken === null ? null : { version, prerelease, changes: lines, breaking: broken }
+}
+
+/**
+ * The release on offer as the check last saw it, or null: none known, or a
+ * prerelease while the beta channel is off, so a choice to leave the channel
+ * counts at once and never waits for the next check.
+ */
+export function knownRelease(state: UpdateState, beta: boolean): ReleaseInfo | null {
+  const version = state.latestVersion
+  const parsed = version === null ? null : parseVersion(version)
+  if (version === null || parsed === null) return null
+  const release = state.release?.version === version ? state.release : { version, prerelease: parsed.pre !== null, changes: [], breaking: [] }
+  return release.prerelease && !beta ? null : release
+}
 
 function timeOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -28,7 +61,7 @@ export function readUpdateState(dataDir: string): UpdateState {
   try {
     const value: unknown = JSON.parse(readFileSync(path, 'utf8'))
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return EMPTY
-    const { lastAttemptAt, latestVersion, checkedAt, notified } = value as Record<string, unknown>
+    const { lastAttemptAt, latestVersion, checkedAt, notified, beta, release } = value as Record<string, unknown>
     const notes: Record<string, string> = {}
     if (typeof notified === 'object' && notified !== null && !Array.isArray(notified)) {
       for (const [key, note] of Object.entries(notified)) if (typeof note === 'string') notes[key] = note
@@ -38,6 +71,8 @@ export function readUpdateState(dataDir: string): UpdateState {
       latestVersion: typeof latestVersion === 'string' ? latestVersion : null,
       checkedAt: timeOrNull(checkedAt),
       notified: notes,
+      beta: typeof beta === 'boolean' ? beta : null,
+      release: releaseOf(release),
     }
   } catch {
     return EMPTY
@@ -45,7 +80,7 @@ export function readUpdateState(dataDir: string): UpdateState {
 }
 
 export function writeUpdateState(dataDir: string, state: UpdateState): void {
-  const content = `${JSON.stringify({ lastAttemptAt: state.lastAttemptAt, latestVersion: state.latestVersion, checkedAt: state.checkedAt, notified: state.notified }, null, 2)}\n`
+  const content = `${JSON.stringify({ lastAttemptAt: state.lastAttemptAt, latestVersion: state.latestVersion, checkedAt: state.checkedAt, notified: state.notified, beta: state.beta ?? null, release: state.release ?? null }, null, 2)}\n`
   writeFileAtomic(join(dataDir, UPDATE_STATE_FILE), content, DATA_FILE_MODE)
 }
 
@@ -53,7 +88,7 @@ export function writeUpdateState(dataDir: string, state: UpdateState): void {
  * Every writer goes through here: the file is read again right before the
  * write and only the fields the caller owns are replaced, so a slow daily check
  * cannot undo a notice marked meanwhile, nor the reverse. The check owns
- * lastAttemptAt, checkedAt and latestVersion; notices own `notified`.
+ * lastAttemptAt, checkedAt, latestVersion, beta and release; notices own `notified`.
  */
 export function mergeUpdateState(dataDir: string, change: Partial<UpdateState> | ((current: UpdateState) => Partial<UpdateState>)): void {
   const current = readUpdateState(dataDir)

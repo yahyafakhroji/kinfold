@@ -54,7 +54,7 @@ import { type PathAnswer, type PathFlag, pathQuestionNeeded, planPathSetup } fro
 import { type Choice, PromptCancelled, type Prompts } from '../prompt/prompts'
 import { confirmRecoveryCode, recoverySinkFromPrompts } from '../recovery-confirm'
 import { LOCKED_FOLDER_NOTE, type SetupState, lockedFolderProblem, savedObserversForYes } from './prefill'
-import { readInstallRecord } from './record'
+import { type UpdateLevel, readInstallRecord, switchesFor, updateLevel } from './record'
 
 export interface SetupFlags {
   dataDir: string | null
@@ -66,6 +66,10 @@ export interface SetupFlags {
   noAutoUpdate: boolean
   /** --auto-update: on, whatever was saved. */
   autoUpdate: boolean
+  /** --updates: the level, asked about no further. */
+  updates?: UpdateLevel
+  /** --beta or --no-beta: the beta question answered up front. */
+  beta?: boolean
   yes: boolean
   /** --path or --no-path: the PATH question answered up front. */
   path?: PathFlag
@@ -90,6 +94,8 @@ export interface SetupAnswers {
   port: number
   updateCheck: boolean
   autoUpdate: boolean
+  /** Prereleases are offered too, each waiting for a yes. */
+  beta: boolean
   /** The answer to "Add kinfold to your PATH?"; null or absent when it was not asked. */
   path?: PathAnswer | null
   /** The answer to "Run the impact test?"; absent when it was not asked, and the setting then stays as it is. */
@@ -480,8 +486,8 @@ async function summaryStep(env: InstallEnv, ask: Prompts, answers: SetupAnswers,
     ...answers.observers.map((observer) => `Observer        ${observer.input.host}: ${describeInput(observer.input)} (${observer.check})`),
     `Encryption      ${ENCRYPTION_TEXT[answers.encryption.kind]}`,
     `Port            ${answers.port}`,
-    `Update check    ${answers.updateCheck ? 'daily' : 'off'}`,
-    `Auto-update     ${!answers.updateCheck ? 'off (the update check is off)' : answers.autoUpdate ? 'patch releases' : 'off'}`,
+    `Updates         ${LEVEL_TEXT[updateLevel(answers)]}`,
+    ...(updateLevel(answers) === 'off' ? [] : [`Beta releases   ${answers.beta ? 'offered, each waiting for your yes' : 'no'}`]),
     ...(answers.holdout === undefined ? [] : [`Impact test     ${answers.holdout ? `on for ${impactAgents(profiles)}` : 'off'}`]),
     ...(embeddings === null ? [] : [`Embeddings      ${describeEmbeddings(embeddings)}`]),
     ...(command === null ? [] : [`kinfold command ${command}`]),
@@ -500,26 +506,51 @@ async function pathStep(env: InstallEnv, ask: Prompts | null, flags: SetupFlags)
 
 // ---- the sequence -----------------------------------------------------------
 
-type UpdatesChoice = 'auto' | 'notify' | 'off'
+/** A level, with `+beta` where prereleases are offered too. Off keeps the saved beta answer. */
+type UpdatesChoice = 'patch' | 'patch+beta' | 'notify' | 'notify+beta' | 'off'
 
 const UPDATES_CHOICES: readonly Choice<UpdatesChoice>[] = [
-  { value: 'auto', label: 'Check daily and install patch releases', hint: 'larger releases wait for kinfold update' },
+  { value: 'patch', label: 'Check daily, install patch releases, and download larger ones for your yes', hint: 'kinfold update or the dashboard installs them' },
+  { value: 'patch+beta', label: 'The same, and offer beta releases too', hint: 'each beta waits for your yes' },
   { value: 'notify', label: 'Check daily and tell me' },
+  { value: 'notify+beta', label: 'Check daily and tell me, betas included' },
   { value: 'off', label: 'Off' },
 ]
 
+const LEVEL_TEXT: Readonly<Record<UpdateLevel, string>> = {
+  patch: 'patch releases install themselves; larger ones wait for your yes',
+  notify: 'checked daily; nothing installs by itself',
+  off: 'off',
+}
+
+const choiceOf = (level: UpdateLevel, beta: boolean): UpdatesChoice => (level === 'off' ? 'off' : beta ? `${level}+beta` : level)
+
+/** The rows a flag leaves: --no-auto-update takes the patch rows away, --beta or --no-beta the other half. */
+function updatesChoices(flags: SetupFlags): readonly Choice<UpdatesChoice>[] {
+  return UPDATES_CHOICES.filter((choice) => {
+    if (flags.noAutoUpdate && choice.value.startsWith('patch')) return false
+    if (flags.beta !== undefined && choice.value !== 'off' && choice.value.endsWith('+beta') !== flags.beta) return false
+    return true
+  })
+}
+
 /**
- * One question for both settings, since auto-update only means something
- * while the daily check runs. Turning the check off keeps the saved
- * auto-update choice, so turning it back on later brings that choice back.
+ * One question for the level and the beta channel. The level is kept as the
+ * two older switches: turning the check off keeps the saved auto-update
+ * choice, so turning it back on later brings that choice back, and off keeps
+ * the saved beta answer too.
  */
-async function updatesStep(ask: Prompts | null, state: SetupState, flags: SetupFlags): Promise<{ updateCheck: boolean; autoUpdate: boolean }> {
+async function updatesStep(ask: Prompts | null, state: SetupState, flags: SetupFlags): Promise<{ updateCheck: boolean; autoUpdate: boolean; beta: boolean }> {
   const autoUpdate = flags.noAutoUpdate ? false : flags.autoUpdate ? true : state.autoUpdate
-  if (flags.noUpdateCheck) return { updateCheck: false, autoUpdate }
-  if (ask === null) return { updateCheck: state.updateCheck, autoUpdate }
-  const choices = flags.noAutoUpdate ? UPDATES_CHOICES.filter((choice) => choice.value !== 'auto') : UPDATES_CHOICES
-  const picked = await ask.select('Updates:', choices, !state.updateCheck ? 'off' : autoUpdate ? 'auto' : 'notify')
-  return picked === 'off' ? { updateCheck: false, autoUpdate } : { updateCheck: true, autoUpdate: picked === 'auto' }
+  const beta = flags.beta ?? state.beta
+  if (flags.updates !== undefined) return { ...switchesFor(flags.updates, autoUpdate), beta }
+  if (flags.noUpdateCheck) return { updateCheck: false, autoUpdate, beta }
+  if (ask === null) return { updateCheck: state.updateCheck, autoUpdate, beta }
+  const choices = updatesChoices(flags)
+  const saved = choiceOf(updateLevel({ updateCheck: state.updateCheck, autoUpdate }), beta)
+  const picked = await ask.select('Updates:', choices, choices.some((choice) => choice.value === saved) ? saved : (choices[0]?.value ?? 'off'))
+  const level: UpdateLevel = picked === 'off' ? 'off' : picked.startsWith('patch') ? 'patch' : 'notify'
+  return { ...switchesFor(level, autoUpdate), beta: picked === 'off' ? beta : picked.endsWith('+beta') }
 }
 
 const impactAgents = (profiles: ProfileTable): string => HOLDOUT_HOSTS.map((host) => profiles[host as InstallHost].name).join(', ')
@@ -626,12 +657,12 @@ export async function runWizard(
   const observers = await observersStep(env, ask, state, flags, choice, agents, profiles)
   const encryption = await encryptionStep(env, ask, state, flags, choice.dryRun)
   const port = await portStep(env, ask, state, flags)
-  const { updateCheck, autoUpdate } = await updatesStep(ask, state, flags)
+  const { updateCheck, autoUpdate, beta } = await updatesStep(ask, state, flags)
   const holdout = await holdoutStep(env, ask, flags, hosts, profiles)
   const embeddings = await embeddingsStep(env, ask, flags, observers)
   const path = await pathStep(env, ask, flags)
   const answers: SetupAnswers = {
-    dataDir, hosts, observers, encryption, port, updateCheck, autoUpdate, path, ...(holdout !== undefined ? { holdout } : {}), ...(embeddings.send !== undefined ? { embeddings: embeddings.send } : {}),
+    dataDir, hosts, observers, encryption, port, updateCheck, autoUpdate, beta, path, ...(holdout !== undefined ? { holdout } : {}), ...(embeddings.send !== undefined ? { embeddings: embeddings.send } : {}),
   }
   if (ask !== null) await summaryStep(env, ask, answers, flags, profiles, embeddings.shown)
   return answers

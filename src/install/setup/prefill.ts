@@ -45,6 +45,8 @@ export interface SetupState {
   port: number
   updateCheck: boolean
   autoUpdate: boolean
+  /** The saved beta channel; off when nothing was saved. */
+  beta: boolean
   /** The install predates auto-update, so its hosts are still owed the notice that it is on. */
   autoUpdateIntro: boolean
   channel: InstallChannel
@@ -202,6 +204,7 @@ export async function readSetupState(env: InstallEnv, options: SetupStateOptions
     port: service !== null && service.isConfigured() ? (service.configuredPort() ?? DEFAULT_PORT) : readDaemonInfo(dataDir).port,
     updateCheck: record?.updateCheck ?? true,
     autoUpdate: record?.autoUpdate ?? true,
+    beta: record?.beta === true,
     autoUpdateIntro: record?.autoUpdateIntro ?? false,
     channel: currentChannel(env, record),
     firstInstalledAt: record?.firstInstalledAt ?? null,

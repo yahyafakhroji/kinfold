@@ -256,6 +256,8 @@ input[type="file"] { padding: var(--space-1) var(--space-2); }
 .run-warn { color: var(--run-warn); background: var(--run-warn-bg); }
 .run-failed { color: var(--run-failed); background: var(--run-failed-bg); }
 .badges { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.changes { margin: var(--space-2) 0; padding-left: 1.2rem; }
+.changes li { margin: var(--space-1) 0; }
 
 /* ---- Tables ----------------------------------------------------------- */
 

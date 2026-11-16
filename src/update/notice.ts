@@ -2,8 +2,8 @@
 // that announce it, and who has been told. The daemon's daily check writes
 // the newest version; this module only reads it, and marks a host as told
 // through the shared merge in state.ts. The user sees "is available" with the
-// command to run; an agent, which has no user channel, is told it may pass
-// the news on.
+// command to run, or "is ready" for a staged release; no notice ever goes
+// into a model's context.
 
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -13,12 +13,15 @@ import { currentPlatform, osOf } from '../platform/platform'
 import { type InstallChannel, type InstallRecord, readInstallRecord } from '../install/setup/record'
 import { type AutoUpdateState, STALE_ATTEMPT_MS, lostAttempt, readAutoState } from './auto-state'
 import { autoUpdateSetting, updatesEnabled } from './enabled'
-import { type UpdateState, markNotified, readUpdateState } from './state'
-import { compareVersions, isPatchUpdate, parseVersion } from './version-order'
+import { releaseAssetName } from '../install/self-install'
+import { releaseKind } from './release'
+import { readStageRecord, stagedProgram } from './stage'
+import { type UpdateState, knownRelease, markNotified, readUpdateState } from './state'
+import { compareVersions, isPatchUpdate } from './version-order'
 
 export type { UpdateNotice } from '../context/types'
 export { STALE_ATTEMPT_MS }
-export { agentLine, availableMessage, installCommand, updateCommand, userMessage } from './notice-text'
+export { availableMessage, installCommand, updateCommand, userMessage } from './notice-text'
 
 type Env = Readonly<Record<string, string | undefined>>
 
@@ -33,30 +36,69 @@ export interface AutoHold {
   now: number
 }
 
+/** Where a release that waits for a yes is staged: the data folder, this platform, and whether a daemon here stages at all. */
+export interface StageContext {
+  dataDir: string
+  platform: NodeJS.Platform
+  arch: string
+  capable: boolean
+  /** Now; past STAGE_WAIT_MS after the check that found the release, staging that never reported back is given up on. Absent: never. */
+  now?: number
+}
+
+/** Long enough for a release download on a slow line; past it the release is told rather than held for an offer that may never come. */
+export const STAGE_WAIT_MS = 3_600_000
+
 /**
- * The newer release to install by hand, or null: nothing newer known, or
+ * Whether a release bigger than a patch is still being staged at the patch
+ * level, so its notice waits for the offer. It stops waiting once staging
+ * failed for it or cannot happen here, and the release is told instead.
+ */
+function stillStaging(stage: StageContext, version: string, checkedAt: number | null): boolean {
+  if (!stage.capable || releaseAssetName(stage.platform, stage.arch) === null) return false
+  if (stage.now !== undefined && checkedAt !== null && stage.now - checkedAt > STAGE_WAIT_MS) return false
+  return readStageRecord(stage.dataDir).failure?.version !== version
+}
+
+/**
+ * The newer release to tell about, or null: nothing newer known, or
  * updates are off here (see updatesEnabled). With `hold`, a patch that
  * auto-update will install is held back, so the user is not told to do what
  * is about to be done. The notice comes back once that update has failed, or
- * once its attempt has gone an hour without a result.
+ * once its attempt has gone an hour without a result. With `stage`, at the
+ * patch level, a bigger release is offered once its program is staged and
+ * held while it is being staged.
  */
-export function pendingNotice(state: UpdateState, record: InstallRecord | null, running: string, env: Env, hold?: AutoHold): UpdateNotice | null {
+export function pendingNotice(state: UpdateState, record: InstallRecord | null, running: string, env: Env, hold?: AutoHold, stage?: StageContext): UpdateNotice | null {
   if (!updatesEnabled(running, record, env)) return null
-  const latest = state.latestVersion
-  if (latest === null || parseVersion(latest) === null) return null
-  if (compareVersions(latest, running) <= 0) return null
-  if (hold !== undefined && isPatchUpdate(running, latest) && autoUpdateSetting(running, record, env).on) {
+  const release = knownRelease(state, record?.beta === true)
+  if (release === null || compareVersions(release.version, running) <= 0) return null
+  const latest = release.version
+  const patchLevel = autoUpdateSetting(running, record, env).on
+  if (hold !== undefined && isPatchUpdate(running, latest) && patchLevel) {
     // A blocker stops every patch, not only the one it was recorded for.
     const gaveUp = hold.auto.failure?.version === latest || hold.auto.failure?.blocked === true || lostAttempt(hold.auto, hold.now)?.version === latest
     if (!gaveUp) return null
   }
-  return { version: latest, channel: noticeChannel(record) }
+  // Counts only from lines the check saw for this release: a state from before them knows the version alone.
+  const counts = state.release?.version === latest ? { changes: release.changes.length, breaking: release.breaking.length } : {}
+  const base = { version: latest, channel: noticeChannel(record), ...counts, ...(release.prerelease ? { prerelease: true as const } : {}) }
+  if (stage !== undefined && patchLevel && releaseKind(running, latest) !== 'patch') {
+    if (stagedProgram(stage.dataDir, stage.platform)?.version === latest) return { kind: 'offer', ...base }
+    if (stillStaging(stage, latest, state.checkedAt)) return null
+  }
+  return base
 }
+
+const stageHere = (dataDir: string, context: NoticeContext | undefined, platform: NodeJS.Platform = context?.platform ?? currentPlatform().node): StageContext => ({ dataDir, platform, arch: context?.arch ?? process.arch, capable: context?.capable === true, now: context?.now ?? Date.now() })
 
 /** Whether this daemon applies patch releases itself, and the time: what decides if a patch notice is held back. */
 export interface NoticeContext {
   capable: boolean
   now: number
+  /** Where this daemon stages releases; absent: this process's own platform. */
+  platform?: NodeJS.Platform
+  arch?: string
 }
 
 const holdOf = (auto: AutoUpdateState, context: NoticeContext | undefined): AutoHold | undefined => (context?.capable === true ? { auto, now: context.now } : undefined)
@@ -105,7 +147,7 @@ function owedNotice(dataDir: string, host: string, running: string, env: Env, co
   if (introOwed && state.notified[`auto-on:${host}`] === undefined) return { notice: { kind: 'auto-on', version: running, channel: noticeChannel(record) }, key: `auto-on:${host}`, mark: '1' }
   const updated = updatedNotice(dataDir, auto, record, running, env, platform)
   if (updated !== null && state.notified[`updated:${host}`] !== running) return { notice: updated, key: `updated:${host}`, mark: running }
-  const available = pendingNotice(state, record, running, env, holdOf(auto, context))
+  const available = pendingNotice(state, record, running, env, holdOf(auto, context), stageHere(dataDir, context, platform))
   if (available !== null && state.notified[host] !== available.version) return { notice: available, key: host, mark: available.version }
   return null
 }
@@ -138,5 +180,5 @@ export function bannerNotice(dataDir: string, running: string, env: Env, context
     if (markShown) markNotified(dataDir, `updated:${DASHBOARD}`, running)
     return updated
   }
-  return pendingNotice(state, record, running, env, holdOf(auto, context))
+  return pendingNotice(state, record, running, env, holdOf(auto, context), stageHere(dataDir, context))
 }

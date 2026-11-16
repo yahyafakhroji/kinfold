@@ -28,7 +28,7 @@ test('--yes, --hosts and repeated --observer parse into one value', () => {
   expect(parsed).toEqual({
     ok: true,
     value: {
-      command: 'install', dryRun: false, yes: true, skipCheck: true, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false, embeddings: null,
+      command: 'install', dryRun: false, yes: true, skipCheck: true, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, updates: null, beta: false, noBeta: false, staged: null, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false, embeddings: null,
       hosts: ['claude-code', 'opencode'],
       observerEndpoint: null,
       observers: [

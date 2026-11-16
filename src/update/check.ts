@@ -5,10 +5,13 @@
 
 import { readInstallRecord } from '../install/setup/record'
 import { updatesEnabled } from './enabled'
+import { type ReleaseInfo, releaseFromGithub } from './release'
 import { mergeUpdateState, readUpdateState } from './state'
-import { parseVersion } from './version-order'
+import { compareVersions } from './version-order'
 
 export const LATEST_RELEASE_URL = 'https://api.github.com/repos/yahyafakhroji/kinfold/releases/latest'
+/** The beta channel's one URL: /releases/latest never names a prerelease. */
+export const RELEASES_URL = 'https://api.github.com/repos/yahyafakhroji/kinfold/releases?per_page=10'
 export const UPDATE_USER_AGENT = 'kinfold-update-check'
 export const CHECK_INTERVAL_MS = 86_400_000
 export const CHECK_TICK_MS = 3_600_000
@@ -34,16 +37,6 @@ export class UpdateCheckError extends Error {
   }
 }
 
-/** The release's version, or null for a draft, a prerelease, or a tag that is not `v<semver>`. */
-export function latestFromRelease(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null) return null
-  const { tag_name: tag, draft, prerelease } = body as Record<string, unknown>
-  if (draft === true || prerelease === true) return null
-  if (typeof tag !== 'string' || !tag.startsWith('v')) return null
-  const version = tag.slice(1)
-  return parseVersion(version) === null ? null : version
-}
-
 /** Reads the body up to the cap and stops there; a longer one is refused, not truncated. */
 async function readCapped(response: Response): Promise<string> {
   const reader = response.body?.getReader()
@@ -63,11 +56,32 @@ async function readCapped(response: Response): Promise<string> {
   return new TextDecoder().decode(Buffer.concat(chunks))
 }
 
-/** The one request, shared with `kinfold update`. Throws UpdateCheckError. */
-export async function fetchLatestRelease(fetchFn: UpdateCheckDeps['fetch'], now: () => number): Promise<{ latestVersion: string; checkedAt: number }> {
+/** The newest of `releases` the channel takes: finals, and prereleases with beta on. */
+function newest(releases: readonly ReleaseInfo[], beta: boolean): ReleaseInfo | null {
+  let best: ReleaseInfo | null = null
+  for (const release of releases) {
+    if (release.prerelease && !beta) continue
+    if (best === null || compareVersions(release.version, best.version) > 0) best = release
+  }
+  return best
+}
+
+/**
+ * The one request, shared with `kinfold update`: the latest release, or with
+ * the beta channel the newest of the last few. Throws UpdateCheckError.
+ */
+export async function fetchNewestRelease(fetchFn: UpdateCheckDeps['fetch'], now: () => number, beta: boolean = false): Promise<{ release: ReleaseInfo; checkedAt: number }> {
+  const body = await fetchJson(fetchFn, beta ? RELEASES_URL : LATEST_RELEASE_URL)
+  const releases = (Array.isArray(body) ? body : [body]).map(releaseFromGithub).filter((release): release is ReleaseInfo => release !== null)
+  const release = newest(releases, beta)
+  if (release === null) throw new UpdateCheckError('no usable release')
+  return { release, checkedAt: now() }
+}
+
+async function fetchJson(fetchFn: UpdateCheckDeps['fetch'], url: string): Promise<unknown> {
   let response: Response
   try {
-    response = await fetchFn(LATEST_RELEASE_URL, { headers: { 'user-agent': UPDATE_USER_AGENT }, signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) })
+    response = await fetchFn(url, { headers: { 'user-agent': UPDATE_USER_AGENT }, signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) })
   } catch (error: unknown) {
     throw new UpdateCheckError(error instanceof Error ? error.name : 'error')
   }
@@ -76,33 +90,34 @@ export async function fetchLatestRelease(fetchFn: UpdateCheckDeps['fetch'], now:
     throw new UpdateCheckError(String(response.status))
   }
   const text = await readCapped(response)
-  let body: unknown
   try {
-    body = JSON.parse(text)
+    return JSON.parse(text)
   } catch {
     throw new UpdateCheckError('malformed response')
   }
-  const latestVersion = latestFromRelease(body)
-  if (latestVersion === null) throw new UpdateCheckError('no usable release')
-  return { latestVersion, checkedAt: now() }
 }
 
 export function checkEnabled(deps: UpdateCheckDeps): boolean {
   return updatesEnabled(deps.version, readInstallRecord(deps.dataDir), deps.envVars())
 }
 
+const betaOn = (deps: UpdateCheckDeps): boolean => readInstallRecord(deps.dataDir)?.beta === true
+
 export async function runUpdateCheck(deps: UpdateCheckDeps): Promise<'disabled' | 'not-due' | 'checked' | 'failed'> {
   try {
     if (!checkEnabled(deps)) return 'disabled'
     const state = readUpdateState(deps.dataDir)
     const startedAt = deps.now()
-    if (state.lastAttemptAt !== null && startedAt - state.lastAttemptAt < CHECK_INTERVAL_MS) return 'not-due'
+    const beta = betaOn(deps)
+    // A check made for the other channel answers a different question, so it is due now.
+    const sameChannel = (state.beta ?? false) === beta
+    if (sameChannel && state.lastAttemptAt !== null && startedAt - state.lastAttemptAt < CHECK_INTERVAL_MS) return 'not-due'
     try {
-      const found = await fetchLatestRelease(deps.fetch, deps.now)
-      mergeUpdateState(deps.dataDir, { lastAttemptAt: startedAt, latestVersion: found.latestVersion, checkedAt: found.checkedAt })
+      const found = await fetchNewestRelease(deps.fetch, deps.now, beta)
+      mergeUpdateState(deps.dataDir, { lastAttemptAt: startedAt, latestVersion: found.release.version, checkedAt: found.checkedAt, beta, release: found.release })
       return 'checked'
     } catch (error: unknown) {
-      mergeUpdateState(deps.dataDir, { lastAttemptAt: startedAt })
+      mergeUpdateState(deps.dataDir, { lastAttemptAt: startedAt, beta })
       deps.log(`update check failed (${error instanceof UpdateCheckError ? error.label : error instanceof Error ? error.name : 'error'})`)
       return 'failed'
     }

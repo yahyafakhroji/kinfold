@@ -12,6 +12,8 @@ import { INSTALL_HOSTS, type InstallHost } from './detect'
 import type { DisplayChange } from '../store/display-settings'
 import { type EmbeddingSettings, parseEmbeddingSettings } from '../vectors/embedding-settings'
 import { type ObserverFlag, defaultInput, parseProviderModel, withObserverEndpoint } from './observer-choice'
+import { type UpdateLevel, isUpdateLevel } from './setup/record'
+import { parseVersion } from '../update/version-order'
 
 export const COMMANDS = ['install', 'uninstall', 'status', 'update'] as const
 export type Command = (typeof COMMANDS)[number]
@@ -36,6 +38,13 @@ export interface CliArgs {
   autoUpdate: boolean
   /** `update --auto`: the run the daemon starts for a patch release. Not in USAGE, since no one types it. */
   auto: boolean
+  /** --updates: the level. null: left as it is, or asked. */
+  updates: UpdateLevel | null
+  /** --beta / --no-beta: the beta channel. Neither: left as it is, or asked. */
+  beta: boolean
+  noBeta: boolean
+  /** `update --staged <version>`: the run the dashboard's Install button starts. Not in USAGE either. */
+  staged: string | null
   port: number | null
   /** --path or --no-path: the answer to the PATH question, given up front. null: neither. */
   path: 'path' | 'no-path' | null
@@ -53,7 +62,7 @@ export interface CliArgs {
   embeddings: EmbeddingSettings | null
 }
 
-type BooleanFlag = 'addPath' | 'noPath' | 'verbose' | 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck' | 'noAutoUpdate' | 'autoUpdate' | 'auto'
+type BooleanFlag = 'addPath' | 'noPath' | 'verbose' | 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck' | 'noAutoUpdate' | 'autoUpdate' | 'auto' | 'beta' | 'noBeta'
   | 'showRecall' | 'noShowRecall' | 'holdout' | 'noHoldout'
 
 /** What the display flags ask for: only the switches a flag named. */
@@ -80,6 +89,8 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
   '--holdout': { key: 'holdout', commands: ['install'] },
   '--no-holdout': { key: 'noHoldout', commands: ['install'] },
   '--auto': { key: 'auto', commands: ['update'] },
+  '--beta': { key: 'beta', commands: ['install'] },
+  '--no-beta': { key: 'noBeta', commands: ['install'] },
   '--path': { key: 'addPath', commands: ['install'] },
   '--no-path': { key: 'noPath', commands: ['install'] },
   '--verbose': { key: 'verbose', commands: ['install', 'uninstall'] },
@@ -92,7 +103,9 @@ export const USAGE = [
   '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>|off]...',
   '             [--observer-endpoint <url>] (the address for qwen-api or openai-compatible: https, or http on this machine)',
   '             [--skip-check] [--replace-credential] [--credential-stdin] [--takeover]',
-  '             [--no-encrypt] [--port <1024-65535>] [--no-update-check] [--auto-update | --no-auto-update]',
+  '             [--no-encrypt] [--port <1024-65535>] [--updates off|notify|patch] [--beta | --no-beta]',
+  '             --updates patch (the default) installs patch releases itself and downloads larger ones to install when you say so;',
+  '             notify checks daily and tells you; off stops checking. --beta also offers prereleases, each waiting for your yes',
   '             [--path | --no-path] [--verbose] [--show-recall|--no-show-recall] [--holdout|--no-holdout]',
   '             --no-show-recall hides the line and list agents show for what Kinfold recalled; --holdout turns on the impact test, which',
   '             holds recall back on about 1 prompt in 10 (Claude Code only, and says so each time) to measure what memory changes',
@@ -384,7 +397,7 @@ export function parseObserverFlag(value: string): Parsed<ObserverFlag> {
 }
 
 function initial(command: Command): CliArgs {
-  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], observerEndpoint: null, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false, embeddings: null }
+  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], observerEndpoint: null, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, updates: null, beta: false, noBeta: false, staged: null, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false, embeddings: null }
 }
 
 /** `--flag value` or `--flag=value`; returns the value and how many argv slots it used. */
@@ -426,6 +439,15 @@ function applyValueFlag(args: CliArgs, name: string, value: string): Parsed<CliA
     const port = parsePort(value)
     return port.ok ? { ok: true, value: { ...args, port: port.value } } : port
   }
+  if (name === '--updates') {
+    if (!isUpdateLevel(value)) return { ok: false, error: '--updates takes off, notify or patch' }
+    return { ok: true, value: { ...args, updates: value } }
+  }
+  if (name === '--staged') {
+    // It becomes a file name and a URL path, so only a version passes.
+    if (parseVersion(value) === null) return { ok: false, error: '--staged takes a version' }
+    return { ok: true, value: { ...args, staged: value } }
+  }
   if (name === '--hosts') {
     const hosts = parseHosts(value)
     return hosts.ok ? { ok: true, value: { ...args, hosts: hosts.value } } : hosts
@@ -453,9 +475,9 @@ export function parseArgs(argv: readonly string[]): Parsed<CliArgs> {
       index += 1
       continue
     }
-    const name = ['--hosts', '--observer-endpoint', '--observer', '--port', '--embeddings'].find((flag) => arg === flag || arg.startsWith(`${flag}=`))
+    const name = ['--hosts', '--observer-endpoint', '--observer', '--port', '--embeddings', '--updates', '--staged'].find((flag) => arg === flag || arg.startsWith(`${flag}=`))
     if (name === undefined) return { ok: false, error: `unknown argument ${JSON.stringify(arg)}\n${USAGE}` }
-    if (args.command !== 'install') return { ok: false, error: `${name} does not apply to ${args.command}` }
+    if (args.command !== (name === '--staged' ? 'update' : 'install')) return { ok: false, error: `${name} does not apply to ${args.command}` }
     const found = valueOf(argv, index, name)
     if (found === null) return { ok: false, error: `${name} needs a value` }
     const applied = applyValueFlag(args, name, found.value)
@@ -464,6 +486,8 @@ export function parseArgs(argv: readonly string[]): Parsed<CliArgs> {
     index += found.used
   }
   if (args.autoUpdate && args.noAutoUpdate) return { ok: false, error: '--auto-update and --no-auto-update cannot be given together' }
+  if (args.beta && args.noBeta) return { ok: false, error: '--beta and --no-beta cannot be given together' }
+  if (args.updates !== null && (args.noUpdateCheck || args.autoUpdate || args.noAutoUpdate)) return { ok: false, error: '--updates cannot be given with --no-update-check, --auto-update or --no-auto-update' }
   if (args.addPath && args.noPath) return { ok: false, error: '--path and --no-path cannot be given together' }
   if (args.showRecall && args.noShowRecall) return { ok: false, error: '--show-recall and --no-show-recall cannot be given together' }
   if (args.holdout && args.noHoldout) return { ok: false, error: '--holdout and --no-holdout cannot be given together' }

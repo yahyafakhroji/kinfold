@@ -312,3 +312,12 @@ test('encrypt or decrypt of a Windows store whose daemon WSL cannot reach writes
   expect(readFileSync(encryptedPath).equals(encryptedBytes)).toBe(true)
   expect(encryptedStore.values.get(DB_KEY_REF)).toBe(key)
 })
+
+test('a linked install keeps the saved beta channel and takes --updates and --beta', async () => {
+  const s = stand()
+  const wslRecord = (): Record<string, unknown> => JSON.parse(readFileSync(join(wslHomeDir(s.world.home), 'install.json'), 'utf8')) as Record<string, unknown>
+  expect(await wslInstall(s.env, { ...s.options, updates: 'notify', beta: true })).toBe(EXIT_OK)
+  expect(wslRecord()).toMatchObject({ updates: 'notify', autoUpdate: false, beta: true })
+  expect(await wslInstall(s.env, s.options)).toBe(EXIT_OK)
+  expect(wslRecord()).toMatchObject({ updates: 'notify', beta: true })
+})

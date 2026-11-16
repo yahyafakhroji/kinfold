@@ -71,6 +71,8 @@ export interface AgentProfile {
   wiring: AgentWiring
   /** Steps the user takes by hand; any command in them is the one install would write on this env. */
   manualSteps(os: OsName, env: InstallEnv): readonly string[]
+  /** The agent shows the user no line Kinfold writes, so update news reaches its user only through status, the dashboard and kinfold watch. */
+  updateNewsElsewhere?: true
   /** The agent reads another agent's hook file, so its events may arrive under that agent's id. */
   alsoFiresFrom?: AgentId
   /** Whether the agent runs alsoFiresFrom's hooks on this env, from its own settings, and what status should say about that setting; absent means it always does. Install and status only, never the hook. */
@@ -117,9 +119,17 @@ export function capabilityBrief(profile: AgentProfile, os: OsName): string {
   return parts.length === 0 ? 'no automatic wiring' : parts.join(', ')
 }
 
+/** Where an agent with no line the user reads gets update news instead: no update notice goes into a model's context. */
+export const UPDATE_NEWS_LIMIT = 'update news shows in kinfold status, the dashboard and kinfold watch, not in the agent'
+
 export function capabilityLine(profile: AgentProfile, os: OsName): string {
-  const line = capabilitySummary(profile.capabilities(os))
-  const limit = profile.limit(os)
+  const caps = profile.capabilities(os)
+  const line = capabilitySummary(caps)
+  const own = profile.limit(os)
+  // Only where its hooks run: an agent with none on this OS hears nothing from Kinfold at all.
+  const hooked = caps.capture !== 'none' || caps.context.sessionStart || caps.context.prompt
+  const news = profile.updateNewsElsewhere === true && hooked ? UPDATE_NEWS_LIMIT : null
+  const limit = own === null ? news : news === null ? own : `${own}; ${news}`
   // With nothing to list, the limit is the whole story.
   if (line === '') return limit ?? 'nothing wired'
   return limit === null ? line : `${line} (${limit})`

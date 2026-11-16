@@ -70,14 +70,17 @@ export function errorText(error) {
 }
 
 /**
- * The update banner's text, or null when there is none or the daemon cannot say.
- * @returns {Promise<string | null>}
+ * The update banner's text and the release it is about, or null when there is
+ * no banner or the daemon cannot say.
+ * @returns {Promise<{ message: string, release: unknown, install: unknown } | null>}
  */
-export async function fetchUpdateMessage() {
+export async function fetchUpdate() {
   try {
     const answer = await api('GET', '/update')
-    const found = answer !== null && typeof answer === 'object' && 'notice' in answer ? answer.notice : null
-    return found !== null && typeof found === 'object' && 'message' in found && typeof found.message === 'string' ? found.message : null
+    if (answer === null || typeof answer !== 'object') return null
+    const found = 'notice' in answer ? answer.notice : null
+    if (found === null || typeof found !== 'object' || !('message' in found) || typeof found.message !== 'string') return null
+    return { message: found.message, release: 'release' in answer ? answer.release : null, install: 'install' in answer ? answer.install : null }
   } catch {
     return null
   }

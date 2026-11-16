@@ -8,7 +8,7 @@ import { type FakeWorld, createWorld } from '../install/test-support'
 import { builtInSettings } from '../observer/settings'
 import { INSTALL_PROFILES, hasWiring, isWired, profileOf } from './install-profiles'
 import { UNPROVEN_CLI_PROVIDERS } from '../observer/types'
-import { ACTS_HEADLESS, type AgentId, NO_HEADLESS, NO_TOOLS_OFF, capabilityLine } from './profile'
+import { ACTS_HEADLESS, type AgentId, NO_HEADLESS, NO_TOOLS_OFF, UPDATE_NEWS_LIMIT, capabilityLine } from './profile'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -34,7 +34,7 @@ describe('INSTALL_PROFILES', () => {
     const line = (id: AgentId): string => capabilityLine(profileOf(id), 'macos')
     expect(line('claude-code')).toBe('captures, context at start and on each prompt, search')
     expect(line('codex')).toBe('captures, context at start and on each prompt, search')
-    expect(line('cursor')).toBe('captures, context at start, search')
+    expect(line('cursor')).toBe(`captures, context at start, search (${UPDATE_NEWS_LIMIT})`)
     expect(line('opencode')).toBe('captures, search')
   })
 })
@@ -126,4 +126,9 @@ describe('observerLogin', () => {
     expect(reasons.zed).toBe(NO_HEADLESS)
     expect(reasons.auggie).toBe(UNPROVEN_CLI_PROVIDERS['auggie-cli'])
   })
+})
+
+test('an agent with no line the user reads says where update news appears; one with a line does not', () => {
+  for (const id of ['cursor', 'cline', 'kiro', 'antigravity', 'devin', 'goose'] as const) expect(capabilityLine(INSTALL_PROFILES[id], 'macos')).toContain(UPDATE_NEWS_LIMIT)
+  for (const id of ['claude-code', 'codex', 'copilot', 'opencode', 'kilo-code', 'zed'] as const) expect(capabilityLine(INSTALL_PROFILES[id], 'macos')).not.toContain(UPDATE_NEWS_LIMIT)
 })

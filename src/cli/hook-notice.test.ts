@@ -7,7 +7,6 @@ import { runHook } from './hook'
 
 const FIXTURES = join(import.meta.dir, '../../test/fixtures')
 const NOTICE = { version: '0.2.0', channel: 'curl' } as const
-const AGENT_LINE = 'Kinfold 0.2.0 is out; you may tell the user they can run `kinfold update`.'
 
 let root: string
 let dataDir: string
@@ -49,16 +48,15 @@ test('Claude Code still gets the systemMessage when the pack is empty', async ()
   expect(out).toEqual({ systemMessage: 'Kinfold 0.2.0 is available. Run `kinfold update`.' })
 })
 
-test('Codex shows the notice to the user, like Claude Code; Cursor, with no user channel, gets the agent line in the block', async () => {
+test('Codex shows the notice to the user, like Claude Code; Cursor, with no user channel, gets the context alone: no notice reaches a model', async () => {
   const codex = JSON.parse((await run('codex', 'session-start', { text: '<kinfold>pack</kinfold>', tokens: 5, updateNotice: NOTICE })) ?? '') as Record<string, any>
   expect(codex.systemMessage).toBe('Kinfold 0.2.0 is available. Run `kinfold update`.')
   expect(codex.hookSpecificOutput.additionalContext).toBe('<kinfold>pack</kinfold>')
   const cursor = JSON.parse((await run('cursor', 'session-start', { text: '<kinfold>pack</kinfold>', tokens: 5, updateNotice: NOTICE })) ?? '') as Record<string, string>
-  expect(cursor.additional_context).toBe(`<kinfold>pack</kinfold>\n${AGENT_LINE}`)
+  expect(cursor.additional_context).toBe('<kinfold>pack</kinfold>')
   const alone = JSON.parse((await run('codex', 'session-start', { updateNotice: NOTICE })) ?? '') as Record<string, unknown>
   expect(alone).toEqual({ systemMessage: 'Kinfold 0.2.0 is available. Run `kinfold update`.' })
-  const cursorAlone = JSON.parse((await run('cursor', 'session-start', { updateNotice: NOTICE })) ?? '') as Record<string, string>
-  expect(cursorAlone.additional_context).toBe(AGENT_LINE)
+  expect(await run('cursor', 'session-start', { updateNotice: NOTICE })).toBeNull()
 })
 
 test('no notice on prompt deltas', async () => {
@@ -68,14 +66,13 @@ test('no notice on prompt deltas', async () => {
   expect(out).not.toContain('systemMessage')
 })
 
-test('an update that installed itself reaches the user through Claude Code and the agent elsewhere', async () => {
+test('an update that installed itself reaches the user through Claude Code and Codex, and never the model elsewhere', async () => {
   const updated = { kind: 'updated', version: '0.2.1', previous: '0.2.0', channel: 'curl' } as const
   const claude = JSON.parse((await run('claude-code', 'session-start', { selfNotice: updated })) ?? '') as Record<string, any>
   expect(claude.systemMessage).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0).')
   const codex = JSON.parse((await run('codex', 'session-start', { selfNotice: updated })) ?? '') as Record<string, any>
   expect(codex).toEqual({ systemMessage: 'Kinfold updated itself to 0.2.1 (was 0.2.0).' })
-  const cursor = JSON.parse((await run('cursor', 'session-start', { selfNotice: updated })) ?? '') as Record<string, string>
-  expect(cursor.additional_context).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0); you may tell the user.')
+  expect(await run('cursor', 'session-start', { selfNotice: updated })).toBeNull()
 })
 
 test('a notice of a kind this hook does not know is dropped, and the pack still arrives', async () => {
@@ -83,3 +80,13 @@ test('a notice of a kind this hook does not know is dropped, and the pack still 
   expect(out.systemMessage).toBeUndefined()
   expect(out.hookSpecificOutput.additionalContext).toBe('<kinfold>pack</kinfold>')
 })
+
+test('an offer reaches the user and never a model, wherever the host shows it', async () => {
+  const offer = { kind: 'offer', version: '0.6.0', channel: 'curl', changes: 3, breaking: 1 } as const
+  const claude = JSON.parse((await run('claude-code', 'session-start', { text: '<kinfold>pack</kinfold>', tokens: 5, selfNotice: offer })) ?? '') as Record<string, any>
+  expect(claude.systemMessage).toBe('Kinfold 0.6.0 is ready · 3 changes, 1 breaking · kinfold update to install')
+  expect(claude.hookSpecificOutput.additionalContext).toBe('<kinfold>pack</kinfold>')
+  const cursor = JSON.parse((await run('cursor', 'session-start', { text: '<kinfold>pack</kinfold>', tokens: 5, selfNotice: offer })) ?? '') as Record<string, string>
+  expect(JSON.stringify(cursor)).not.toContain('0.6.0')
+})
+

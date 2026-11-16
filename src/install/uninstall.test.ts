@@ -192,3 +192,14 @@ test('--remove-credentials also removes the keys setup stores for the API observ
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: true })).toBe(EXIT_OK)
   for (const ref of ['openrouter', 'anthropic', 'dashscope', 'openai-compatible']) expect(w.keychain.has(ref)).toBe(false)
 })
+
+test('uninstall removes a staged release download with the program', async () => {
+  const w = createWorld({ claudeVersion: '2.1.310 (Claude Code)', opencodeVersion: null })
+  world = w
+  mkdirSync(join(w.dataDir, 'updates'), { recursive: true })
+  writeFileSync(join(w.dataDir, 'updates', 'kinfold-0.6.0'), 'program')
+  writeFileSync(join(w.dataDir, 'updates', 'staged.json'), '{}')
+  expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
+  expect(existsSync(join(w.dataDir, 'updates'))).toBe(false)
+  expect(w.out.join('\n')).toContain('the downloaded release waiting to be installed')
+})

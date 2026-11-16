@@ -590,3 +590,25 @@ test('status names the key each API provider reads and the address of an endpoin
   expect(w.out).toContain('  opencode: openai-compatible/llama3.2 at http://127.0.0.1:11434/v1; source host')
   expect(w.out).toContain('keychain anthropic: missing')
 })
+
+const stageFor = (w: FakeWorld, version: string): void => {
+  const dir = join(w.dataDir, 'updates')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, `kinfold-${version}`), 'program')
+  const stat = statSync(join(dir, `kinfold-${version}`))
+  writeFileSync(join(dir, 'staged.json'), JSON.stringify({ staged: { version, asset: 'kinfold-darwin-arm64', sha256: 'a'.repeat(64), size: stat.size, mtimeMs: stat.mtimeMs, at: 1 }, failure: null }))
+}
+
+test('status says a larger release is being downloaded, then that it is ready for a yes', async () => {
+  const w = installed()
+  w.env = { ...w.env, arch: 'arm64' }
+  writeUpdateState(w.dataDir, { lastAttemptAt: 1, latestVersion: '0.3.0', checkedAt: ON_DATE, notified: {}, beta: false, release: { version: '0.3.0', prerelease: false, changes: ['A.', 'BREAKING: B.'], breaking: ['BREAKING: B.'] } })
+  expect(await linesOf(w)).toContain('update: downloading Kinfold 0.3.0 so it is ready to install')
+  stageFor(w, '0.3.0')
+  expect(await linesOf(w)).toContain('update: Kinfold 0.3.0 is ready · 2 changes, 1 breaking · kinfold update to install')
+})
+
+test('status names the beta channel when it is on', async () => {
+  expect(await linesOf(installed({ ...AUTO_RECORD, beta: true }))).toContain('beta releases: on (each one waits for your yes)')
+  expect((await linesOf(installed())).some((line) => line.startsWith('beta releases'))).toBe(false)
+})

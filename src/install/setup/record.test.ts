@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { envName } from '../../env-names'
 import { runPlan } from '../plan'
 import { type FakeWorld, createWorld } from '../test-support'
-import { AGENT_HOME_VARS, INSTALL_RECORD_FILE, type InstallRecord, agentHomesOf, applyAgentHomes, currentChannel, installRecordAction, readInstallRecord, setAutoUpdate, writeInstallRecord } from './record'
+import { AGENT_HOME_VARS, INSTALL_RECORD_FILE, type InstallRecord, agentHomesOf, applyAgentHomes, currentChannel, installRecordAction, readInstallRecord, setAutoUpdate, setUpdateSettings, updateLevel, writeInstallRecord } from './record'
 import { posixOnly } from '../../../test/platform-guards'
 
 let world: FakeWorld | null = null
@@ -22,7 +22,7 @@ posixOnly('file modes')('install.json round-trips at 0600', async () => {
   await runPlan(world.env, [installRecordAction(world.dataDir, RECORD)], false)
   const path = join(world.dataDir, INSTALL_RECORD_FILE)
   expect(statSync(path).mode & 0o777).toBe(0o600)
-  expect(Object.keys(JSON.parse(readFileSync(path, 'utf8')) as object)).toEqual(['channel', 'updateCheck', 'autoUpdate', 'firstInstalledAt'])
+  expect(Object.keys(JSON.parse(readFileSync(path, 'utf8')) as object)).toEqual(['channel', 'updates', 'updateCheck', 'autoUpdate', 'firstInstalledAt'])
   expect(readInstallRecord(world.dataDir)).toEqual(RECORD)
 })
 
@@ -38,7 +38,7 @@ test('the owed notice is written only when owed, and survives a round trip', asy
   mkdirSync(world.dataDir, { recursive: true })
   await runPlan(world.env, [installRecordAction(world.dataDir, { ...RECORD, autoUpdate: false, autoUpdateIntro: true })], false)
   const path = join(world.dataDir, INSTALL_RECORD_FILE)
-  expect(Object.keys(JSON.parse(readFileSync(path, 'utf8')) as object)).toEqual(['channel', 'updateCheck', 'autoUpdate', 'firstInstalledAt', 'autoUpdateIntro'])
+  expect(Object.keys(JSON.parse(readFileSync(path, 'utf8')) as object)).toEqual(['channel', 'updates', 'updateCheck', 'autoUpdate', 'firstInstalledAt', 'autoUpdateIntro'])
   expect(readInstallRecord(world.dataDir)).toEqual({ ...RECORD, autoUpdate: false, autoUpdateIntro: true })
 })
 
@@ -134,7 +134,7 @@ test('a dashboard switch made while an install runs is kept: the newest choice w
   const planned = installRecordAction(world.dataDir, { ...RECORD, channel: 'npx', updateCheck: false })
   expect(setAutoUpdate(world.dataDir, false, 5000)).toBe(true)
   await runPlan(world.env, [planned], false)
-  expect(readInstallRecord(world.dataDir)).toMatchObject({ channel: 'npx', updateCheck: false, autoUpdate: false, autoUpdateAt: 5000 })
+  expect(readInstallRecord(world.dataDir)).toMatchObject({ channel: 'npx', updateCheck: true, autoUpdate: false, autoUpdateAt: 5000 })
 })
 
 test('an install that chose auto-update itself, later than the switch, wins the write', async () => {
@@ -182,4 +182,65 @@ test('the dashboard switch keeps the PATH fields', () => {
   writeInstallRecord(world.dataDir, { ...RECORD, pathSetup: 'added', pathLink: '/home/u/.local/bin/kinfold' })
   expect(setAutoUpdate(world.dataDir, false, 5)).toBe(true)
   expect(readInstallRecord(world.dataDir)).toMatchObject({ autoUpdate: false, pathSetup: 'added', pathLink: '/home/u/.local/bin/kinfold' })
+})
+
+const writeRaw = (dir: string, fields: Record<string, unknown>): void => {
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, INSTALL_RECORD_FILE), JSON.stringify({ channel: 'curl', updateCheck: true, autoUpdate: true, firstInstalledAt: 1_792_900_000_000, ...fields }))
+}
+
+test('the updates level maps from the older switches: check off is off, auto-update off is notify, else patch', () => {
+  expect(updateLevel(null)).toBe('patch')
+  expect(updateLevel(RECORD)).toBe('patch')
+  expect(updateLevel({ ...RECORD, autoUpdate: false })).toBe('notify')
+  expect(updateLevel({ ...RECORD, updateCheck: false })).toBe('off')
+  expect(updateLevel({ ...RECORD, updateCheck: false, autoUpdate: false })).toBe('off')
+})
+
+test('a saved updates level wins over the older switches it is kept in step with', () => {
+  world = createWorld()
+  writeRaw(world.dataDir, { updates: 'notify' })
+  expect(readInstallRecord(world.dataDir)).toMatchObject({ updateCheck: true, autoUpdate: false })
+  writeRaw(world.dataDir, { updates: 'off', autoUpdate: true })
+  expect(readInstallRecord(world.dataDir)).toMatchObject({ updateCheck: false, autoUpdate: true })
+  writeRaw(world.dataDir, { updates: 'patch', updateCheck: false, autoUpdate: false })
+  expect(readInstallRecord(world.dataDir)).toMatchObject({ updateCheck: true, autoUpdate: true })
+  writeRaw(world.dataDir, { updates: 'sometimes', autoUpdate: false })
+  expect(readInstallRecord(world.dataDir)).toMatchObject({ updateCheck: true, autoUpdate: false })
+})
+
+test('the beta channel is off unless saved on, and is written only when on', () => {
+  world = createWorld()
+  writeRaw(world.dataDir, {})
+  expect(readInstallRecord(world.dataDir)?.beta).toBeUndefined()
+  writeRaw(world.dataDir, { beta: 'yes' })
+  expect(readInstallRecord(world.dataDir)?.beta).toBeUndefined()
+  writeInstallRecord(world.dataDir, { ...RECORD, beta: true })
+  const saved = JSON.parse(readFileSync(join(world.dataDir, INSTALL_RECORD_FILE), 'utf8')) as Record<string, unknown>
+  expect(saved).toMatchObject({ updates: 'patch', beta: true })
+  expect(readInstallRecord(world.dataDir)?.beta).toBe(true)
+})
+
+test('setUpdateSettings saves the level and beta, keeps the auto-update choice under off, and reports a missing record', () => {
+  world = createWorld()
+  mkdirSync(world.dataDir, { recursive: true })
+  expect(setUpdateSettings(world.dataDir, { level: 'notify', beta: true }, 10)).toBe(false)
+  writeInstallRecord(world.dataDir, RECORD)
+  expect(setUpdateSettings(world.dataDir, { level: 'off', beta: true }, 10)).toBe(true)
+  expect(readInstallRecord(world.dataDir)).toMatchObject({ updateCheck: false, autoUpdate: true, beta: true, autoUpdateAt: 10 })
+  expect(updateLevel(readInstallRecord(world.dataDir))).toBe('off')
+  expect(setUpdateSettings(world.dataDir, { level: 'notify', beta: false }, 20)).toBe(true)
+  const record = readInstallRecord(world.dataDir)
+  expect(record).toMatchObject({ updateCheck: true, autoUpdate: false, autoUpdateAt: 20 })
+  expect(record?.beta).toBeUndefined()
+})
+
+test('a dashboard updates choice made while an install runs keeps its level and beta', async () => {
+  world = createWorld()
+  mkdirSync(world.dataDir, { recursive: true })
+  writeInstallRecord(world.dataDir, RECORD)
+  const planned = installRecordAction(world.dataDir, { ...RECORD, channel: 'npx' })
+  setUpdateSettings(world.dataDir, { level: 'off', beta: true }, 5000)
+  await runPlan(world.env, [planned], false)
+  expect(readInstallRecord(world.dataDir)).toMatchObject({ channel: 'npx', updateCheck: false, beta: true, autoUpdateAt: 5000 })
 })

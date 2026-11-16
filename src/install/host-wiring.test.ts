@@ -89,7 +89,7 @@ test('detected Codex (CLI) and Cursor (app): wired with backups, foreign entries
   w.out.length = 0
   expect(await status(w.env)).toBe(EXIT_OK)
   expect(w.out).toContain(`  codex: detected codex-cli 0.120.0; wired: yes in ${paths.codexHooks}; captures, context at start and on each prompt, search`)
-  expect(w.out).toContain(`  cursor: detected 2.4.21; wired: yes in ${paths.cursorHooks}; captures, context at start, search`)
+  expect(w.out).toContain(`  cursor: detected 2.4.21; wired: yes in ${paths.cursorHooks}; captures, context at start, search (update news shows in kinfold status, the dashboard and kinfold watch, not in the agent)`)
 
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
   expect(JSON.parse(readFileSync(paths.codexHooks, 'utf8'))).toEqual(CODEX_FILE)

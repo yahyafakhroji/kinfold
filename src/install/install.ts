@@ -44,7 +44,7 @@ import { type ProgramCheck, checkProgram, programInstallActions } from './self-i
 import { migrationFailureNote, renameMigrationActions } from './rename-migration'
 import { applySetup } from './setup/apply'
 import { type SetupState, readSetupState } from './setup/prefill'
-import { INSTALL_RECORD_FILE, type InstallRecord, agentHomesOf, installRecordAction, readInstallRecord } from './setup/record'
+import { INSTALL_RECORD_FILE, type InstallRecord, type UpdateLevel, agentHomesOf, installRecordAction, readInstallRecord } from './setup/record'
 import { type UpdateLockDeps, acquireUpdateLock, updateLockHolder } from '../update/lock'
 import { type FolderTarget, type SetupAnswers, type SetupFlags, runWizard } from './setup/wizard'
 import { sqlite3mcInstallActions } from './sqlite3mc-install'
@@ -83,6 +83,10 @@ export interface InstallOptions extends ChoiceOptions {
   noAutoUpdate?: boolean
   /** --auto-update: turns automatic patch updates back on. */
   autoUpdate?: boolean
+  /** --updates: the level. */
+  updates?: UpdateLevel
+  /** --beta or --no-beta. */
+  beta?: boolean
   /** --show-recall, --holdout and their opposites: only the switches a flag named. */
   display?: DisplayChange
   /** --embeddings: the embedding provider to save. */
@@ -393,12 +397,13 @@ export interface InstallPlan {
 function recordActions(env: InstallEnv, state: SetupState, answers: SetupAnswers, saved: InstallRecord | null, path: PathPlan): Action[] {
   // A choice made in this run is stamped now; one only carried over keeps its old stamp, so a dashboard switch
   // flipped while this install ran is the newer one and survives the write.
-  const chosenAt = answers.autoUpdate !== state.autoUpdate ? env.now() : saved?.autoUpdateAt
+  const chosenAt = answers.autoUpdate !== state.autoUpdate || answers.updateCheck !== state.updateCheck || answers.beta !== state.beta ? env.now() : saved?.autoUpdateAt
   const record: InstallRecord = {
     channel: state.channel,
     updateCheck: answers.updateCheck,
     autoUpdate: answers.autoUpdate,
     autoUpdateIntro: state.autoUpdateIntro,
+    ...(answers.beta ? { beta: true as const } : {}),
     agentHomes: agentHomesOf(env),
     ...(chosenAt !== undefined ? { autoUpdateAt: chosenAt } : {}),
     firstInstalledAt: state.firstInstalledAt ?? env.now(),
@@ -406,7 +411,7 @@ function recordActions(env: InstallEnv, state: SetupState, answers: SetupAnswers
   }
   const pathOf = (from: InstallRecord): string => JSON.stringify([from.pathSetup ?? null, from.pathLink ?? null, from.pathFiles ?? []])
   const same = saved !== null && saved.channel === record.channel && saved.updateCheck === record.updateCheck && saved.autoUpdate === record.autoUpdate
-    && saved.firstInstalledAt === record.firstInstalledAt && JSON.stringify(saved.agentHomes) === JSON.stringify(record.agentHomes) && pathOf(saved) === pathOf(record)
+    && (saved.beta === true) === (record.beta === true) && saved.firstInstalledAt === record.firstInstalledAt && JSON.stringify(saved.agentHomes) === JSON.stringify(record.agentHomes) && pathOf(saved) === pathOf(record)
   return same ? [] : [installRecordAction(env.dataDir, record)]
 }
 
@@ -590,6 +595,8 @@ function setupFlags(options: InstallOptions, envVars: Readonly<Record<string, st
     // The variable is saved like the flag: the daemon runs under the service and never sees this shell's environment.
     noAutoUpdate: (options.noAutoUpdate ?? false) || readEnv(envVars, 'NO_AUTO_UPDATE') === '1',
     autoUpdate: options.autoUpdate ?? false,
+    ...(options.updates !== undefined ? { updates: options.updates } : {}),
+    ...(options.beta !== undefined ? { beta: options.beta } : {}),
     yes: options.yes,
     path: options.path ?? null,
     ...(options.display?.holdout !== undefined ? { holdout: options.display.holdout } : {}),
