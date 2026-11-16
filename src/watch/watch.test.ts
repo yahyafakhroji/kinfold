@@ -12,7 +12,8 @@ import { type TempStore, T0, openTempStore } from '../observer/test-support'
 import { recordInjection } from '../store/context-store'
 import { insertPrompt, upsertProject, upsertSession } from '../store/writes'
 import { type WatchEnv, formatWatchLine, runWatch } from './cli'
-import { WATCH_SETTLE_MS, latestPromptId, watchRows } from './reads'
+import { idsInLine } from '../context/recall-line'
+import { WATCH_SETTLE_MS, latestInjectionId, latestPromptId, watchRows, watchStarts } from './reads'
 
 const MINUTE = 60_000
 let temp: TempStore
@@ -234,4 +235,84 @@ test('a watcher polling once a second does not count as activity, so it never ke
   // Anything else still counts.
   await get('/sessions')
   expect(await quiet()).toBeLessThan(before)
+})
+
+// --- session starts: the first-screen list a plugin toasts ---
+
+function pack(host: string, hostSessionId: string, ids: number[], at: number, channel: 'session_start' | 'request' | 'prompt' = 'request', projectKey = 'org/repo'): number {
+  return recordInjection(temp.store.db, { sessionId: null, host, hostSessionId, projectKey, observationIds: ids, channel, tokens: 9, occurredAt: at, promptNumber: channel === 'prompt' ? 1 : null })
+}
+const starts = (extra: Partial<Parameters<typeof watchStarts>[1]> = {}) => watchStarts(temp.store.db, { afterId: 0, host: null, project: null, limit: 100, now: T0 + 3 * 60 * MINUTE, ...extra })
+
+test('a session start is one row: the first pack a session was sent, as the list a hook would show', () => {
+  const older = seedObservation(temp.store, { sessionId: cursorSession, projectKey: 'org/repo', host: 'cursor', title: 'Older memory', at: T0 - 26 * 60 * MINUTE })
+  const newer = seed('CI pins Bun with .bun-version')
+  upsertSession(temp.store.db, { host: 'opencode', hostSessionId: 'ses_1', projectKey: 'org/repo', cwd: '/w', occurredAt: T0 + MINUTE })
+  const first = pack('opencode', 'ses_1', [older, newer], T0 + MINUTE)
+  // The same session asking again (after a compaction, say) and its prompt deltas are not session starts.
+  pack('opencode', 'ses_1', [older, newer], T0 + 30 * MINUTE)
+  pack('opencode', 'ses_1', [newer], T0 + 31 * MINUTE, 'prompt')
+  const hook = pack('claude-code', 'cc-1', [newer], T0 + 40 * MINUTE, 'session_start')
+
+  const rows = starts()
+  expect(rows.map((row) => [row.id, row.host, row.hostSessionId, row.project, row.at])).toEqual([
+    [first, 'opencode', 'ses_1', 'repo', T0 + MINUTE],
+    [hook, 'claude-code', 'cc-1', 'repo', T0 + 40 * MINUTE],
+  ])
+  expect(rows[0]!.ids).toEqual([older, newer])
+  expect(rows[0]!.list).toBe([
+    'kinfold · repo · 2 memories · last session 3h ago',
+    `  #${newer} CI pins Bun with .bun-version (3h)`,
+    `  #${older} Older memory (1d)`,
+  ].join('\n'))
+  // The list names the ids the pack carried and no other.
+  expect(idsInLine(rows[0]!.list).sort()).toEqual([older, newer].sort())
+  expect(starts({ afterId: first }).map((row) => row.id)).toEqual([hook])
+  expect(starts({ host: 'opencode' }).map((row) => row.host)).toEqual(['opencode'])
+  expect(starts({ project: 'REPO' }).length).toBe(2)
+  expect(starts({ project: 'other' })).toEqual([])
+  expect(starts({ limit: 1 }).length).toBe(1)
+  expect(latestInjectionId(temp.store.db)).toBe(hook)
+})
+
+test('GET /watch hands over session starts only to a watcher that asks, from now on', async () => {
+  const memory = seed('In the pack')
+  const before = pack('opencode', 'ses_old', [memory], Date.now() - 10 * MINUTE)
+  daemon = startDaemon({ dataDir: temp.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
+  const token = readFileSync(join(temp.dataDir, 'daemon.token'), 'utf8').trim()
+  const get = async (query: string): Promise<{ status: number; body: Record<string, any> }> => {
+    const response = await fetch(`http://127.0.0.1:${daemon!.port}/watch${query}`, { headers: { authorization: `Bearer ${token}` } })
+    return { status: response.status, body: (await response.json()) as Record<string, any> }
+  }
+  // A watcher that does not ask (kinfold watch, an older plugin) gets what it always got.
+  expect(Object.keys((await get('')).body).sort()).toEqual(['cursor', 'rows'])
+  expect(Object.keys((await get('?after=0')).body).sort()).toEqual(['cursor', 'rows'])
+
+  const first = (await get('?startsAfter=now')).body
+  expect(first).toMatchObject({ rows: [], starts: [], startCursor: before })
+  const fresh = pack('opencode', 'ses_new', [memory], Date.now())
+  pack('cursor', 'cu-9', [memory], Date.now(), 'session_start')
+  const next = (await get(`?after=${first.cursor}&startsAfter=${first.startCursor}&host=opencode`)).body
+  expect(next.starts).toHaveLength(1)
+  expect(next.starts[0]).toMatchObject({ id: fresh, host: 'opencode', hostSessionId: 'ses_new', project: 'repo', ids: [memory] })
+  expect(String(next.starts[0].list).split('\n')[0]).toMatch(/^kinfold · repo · 1 memory/)
+  // The cursor passes the other agent's row too, so it is not looked at again.
+  expect(next.startCursor).toBe(latestInjectionId(temp.store.db))
+  expect((await get(`?after=${first.cursor}&startsAfter=${next.startCursor}`)).body.starts).toEqual([])
+  for (const bad of ['abc', '-1', '1.5', '']) expect((await get(`?startsAfter=${bad}`)).status).toBe(400)
+})
+
+test('a watcher whose cursors are past the store (a restore put a smaller one in place) starts again from now', async () => {
+  const memory = seed('In the pack')
+  pack('opencode', 'ses_a', [memory], Date.now() - 10 * MINUTE)
+  prompt(claude, 1, Date.now() - 10 * MINUTE)
+  daemon = startDaemon({ dataDir: temp.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
+  const token = readFileSync(join(temp.dataDir, 'daemon.token'), 'utf8').trim()
+  const get = async (query: string): Promise<Record<string, any>> =>
+    (await (await fetch(`http://127.0.0.1:${daemon!.port}/watch${query}`, { headers: { authorization: `Bearer ${token}` } })).json()) as Record<string, any>
+  const far = await get('?after=500&startsAfter=900')
+  expect(far).toMatchObject({ cursor: latestPromptId(temp.store.db), startCursor: latestInjectionId(temp.store.db), rows: [], starts: [] })
+  const fresh = pack('opencode', 'ses_b', [memory], Date.now())
+  const next = await get(`?after=${far.cursor}&startsAfter=${far.startCursor}`)
+  expect(next.starts.map((row: { id: number }) => row.id)).toEqual([fresh])
 })

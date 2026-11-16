@@ -27,6 +27,7 @@ import { entryCommand } from './entry'
 import { type InstallKeyStore, chooseInstallKeyStore, keyStoreOf, keyStoreRecordActions, refusalLines, secretSetAction } from './key-store-choice'
 import { describeTextChange, readTextOrNull } from './files'
 import { isAgentLoaded, legacyPrintArgv } from './launch-agent'
+import { readDisplayFile } from '../context/display-file'
 import type { DisplayChange } from '../store/display-settings'
 import { ChoiceError, type ChoiceOptions, type ObserverChoice } from './observer-choice'
 import { hmacMigrationActions } from './hmac-migration'
@@ -358,6 +359,13 @@ export function displayActions(env: InstallEnv, change: DisplayChange, noDaemon:
   return []
 }
 
+/** The switches to send: the ones a flag named, and the impact test when the wizard's answer differs from what is saved. */
+function displayChange(env: InstallEnv, options: InstallOptions, answers: SetupAnswers): DisplayChange {
+  const flagged = options.display ?? {}
+  if (answers.holdout === undefined || answers.holdout === readDisplayFile(env.dataDir).holdout) return flagged
+  return { ...flagged, holdout: answers.holdout }
+}
+
 export interface InstallPlan {
   actions: Action[]
   /** A progress-bar label for each action, by index. */
@@ -443,7 +451,7 @@ export async function buildPlan(
     ...dropped.map((host): [string, Action[]] => [`unwiring ${profileOf(host).name}`, hostUnwireActions(env, host)]),
     [null, serviceActions(env, service, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon, answers.port)],
     [null, await plannedSettingsActions(env, choices, state, manual && !situation.health.up)],
-    [null, displayActions(env, options.display ?? {}, manual && !situation.health.up)],
+    [null, displayActions(env, displayChange(env, options, answers), manual && !situation.health.up)],
     [null, hmac.cleanup],
     [null, recordActions(env, state, answers, saved, path)],
   ]
@@ -570,6 +578,7 @@ function setupFlags(options: InstallOptions, envVars: Readonly<Record<string, st
     autoUpdate: options.autoUpdate ?? false,
     yes: options.yes,
     path: options.path ?? null,
+    ...(options.display?.holdout !== undefined ? { holdout: options.display.holdout } : {}),
   }
 }
 

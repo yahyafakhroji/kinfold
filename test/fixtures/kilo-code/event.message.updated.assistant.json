@@ -1,0 +1,37 @@
+{
+  "id": "evt_1e1931ee7001qJZcDl2b2rkKE9",
+  "type": "message.updated",
+  "properties": {
+    "sessionID": "ses_e1e6d0192ffe7pZ5J19xRJk76C",
+    "info": {
+      "id": "msg_1e1931e65001B5sDL4VOm5js8Z",
+      "parentID": "msg_1e1931dc1001J5BWge7z8El5Le",
+      "role": "assistant",
+      "mode": "code",
+      "agent": "code",
+      "path": {
+        "cwd": "/Users/me/project",
+        "root": "/Users/me/project"
+      },
+      "cost": 0,
+      "tokens": {
+        "total": 18,
+        "input": 10,
+        "output": 8,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 0
+        }
+      },
+      "modelID": "fake-1",
+      "providerID": "fake",
+      "time": {
+        "created": 1794785877605,
+        "completed": 1794785877735
+      },
+      "sessionID": "ses_e1e6d0192ffe7pZ5J19xRJk76C",
+      "finish": "stop"
+    }
+  }
+}

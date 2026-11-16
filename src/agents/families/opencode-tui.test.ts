@@ -91,7 +91,7 @@ async function loadPart(dataDir: string, name: string): Promise<{ toasts: Toast[
   const dir = join(world.root, name)
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'stand-in.js'), 'export const Plugin = { define: (plugin) => plugin };\n')
-  const source = opencodeTuiContent(dataDir).replace("'@opencode/plugin/tui'", "'./stand-in.js'").replace('const POLL_MS = 1000;', 'const POLL_MS = 20;')
+  const source = opencodeTuiContent(dataDir).replace("'@opencode/plugin/tui'", "'./stand-in.js'").replace('const POLL_MS = 1000;', 'const POLL_MS = 20;').replace('const LIST_HOLD_MS = 6000;', 'const LIST_HOLD_MS = 150;')
   writeFileSync(join(dir, 'tui.js'), source)
   const part = (await import(join(dir, 'tui.js'))) as { default: { id: string; setup(context: unknown): () => void } }
   expect(part.default.id).toBe('kinfold.recall')
@@ -132,9 +132,10 @@ test("the TUI part starts from now, then toasts each new OpenCode prompt's line 
       { title: 'Kinfold', message: 'recalled 1 (new from other sessions) · #16 A title', variant: 'info', duration: 8000, sessionID: 'ses_1' },
       { title: 'Kinfold', message: 'nothing recalled', variant: 'info', duration: 8000, sessionID: 'ses_2' },
     ])
-    expect(asked[0]).toBe('Bearer tok-123 /watch?host=opencode')
-    expect(asked[1]).toBe('Bearer tok-123 /watch?host=opencode&after=4')
-    expect(asked[2]).toBe('Bearer tok-123 /watch?host=opencode&after=6')
+    // No daemon here names a start cursor, so the part keeps asking for starts from now.
+    expect(asked[0]).toBe('Bearer tok-123 /watch?host=opencode&startsAfter=now')
+    expect(asked[1]).toBe('Bearer tok-123 /watch?host=opencode&after=4&startsAfter=now')
+    expect(asked[2]).toBe('Bearer tok-123 /watch?host=opencode&after=6&startsAfter=now')
     // Stopped: its timer is gone. One request may still have been in flight when it stopped.
     await settle(60)
     const count = asked.length
@@ -163,6 +164,71 @@ test('with the recall line off, or with no daemon, the TUI part shows nothing an
     await settle()
     off.stop()
     expect(off.toasts).toEqual([])
+  } finally {
+    await server.stop(true)
+  }
+})
+
+test("the TUI part toasts a new session's list once, and holds the first prompt's line until the list has had its time", async () => {
+  const dataDir = join(world.root, 'data-starts')
+  mkdirSync(dataDir, { recursive: true })
+  const asked: string[] = []
+  const list = 'kinfold · repo · 12 memories · last session 2h ago\n  #7 CI pins Bun (2h)\n  … 4 more · kinfold dashboard'
+  const answers: unknown[] = [
+    // The first answer is the starting point: a start it carried is never replayed.
+    { cursor: 4, rows: [], startCursor: 9, starts: [{ id: 9, hostSessionId: 'ses_old', list: 'kinfold · old' }] },
+    { cursor: 4, rows: [], startCursor: 11, starts: [{ id: 11, hostSessionId: 'ses_1', list }, { id: 10, list: 42 }, { hostSessionId: 'ses_x' }] },
+    { cursor: 5, rows: [{ line: 'kinfold · recalled 1 · #7 CI pins Bun', hostSessionId: 'ses_1' }], startCursor: 11, starts: [] },
+  ]
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: (request) => {
+      const url = new URL(request.url)
+      asked.push(`${url.pathname}${url.search}`)
+      return Response.json(answers.shift() ?? { cursor: 5, rows: [], startCursor: 11, starts: [] })
+    },
+  })
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: server.port }))
+  writeFileSync(join(dataDir, 'daemon.token'), 'tok')
+  try {
+    const part = await loadPart(dataDir, 'part-starts')
+    const shownAt: number[] = []
+    for (let waited = 0; part.toasts.length < 2 && waited < 5_000; waited += 5) {
+      await settle(5)
+      while (shownAt.length < part.toasts.length) shownAt.push(Date.now())
+    }
+    part.stop()
+    expect(part.toasts).toEqual([
+      { title: 'Kinfold', message: list.replace(/^kinfold · /, ''), variant: 'info', duration: 12000, sessionID: 'ses_1' },
+      { title: 'Kinfold', message: 'recalled 1 · #7 CI pins Bun', variant: 'info', duration: 8000, sessionID: 'ses_1' },
+    ])
+    // A new toast replaces the one on screen, so the line waits for the list's hold (150 ms here) instead of wiping it at once.
+    expect(shownAt[1]! - shownAt[0]!).toBeGreaterThanOrEqual(120)
+    expect(asked[0]).toBe('/watch?host=opencode&startsAfter=now')
+    expect(asked[1]).toBe('/watch?host=opencode&after=4&startsAfter=9')
+    expect(asked[2]).toBe('/watch?host=opencode&after=4&startsAfter=11')
+  } finally {
+    await server.stop(true)
+  }
+})
+
+test('a toast still waiting behind a list is dropped when the TUI part stops', async () => {
+  const dataDir = join(world.root, 'data-stop')
+  mkdirSync(dataDir, { recursive: true })
+  const answers: unknown[] = [
+    { cursor: 1, rows: [], startCursor: 1, starts: [] },
+    { cursor: 2, rows: [{ line: 'kinfold · nothing recalled', hostSessionId: 's' }], startCursor: 2, starts: [{ id: 2, hostSessionId: 's', list: 'kinfold · repo · 1 memory' }] },
+  ]
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json(answers.shift() ?? { cursor: 2, rows: [], startCursor: 2, starts: [] }) })
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: server.port }))
+  writeFileSync(join(dataDir, 'daemon.token'), 'tok')
+  try {
+    const part = await loadPart(dataDir, 'part-stop')
+    for (let waited = 0; part.toasts.length < 1 && waited < 5_000; waited += 5) await settle(5)
+    part.stop()
+    await settle(250)
+    // The list came first, in the same answer as the line; the line was still waiting when the part stopped.
+    expect(part.toasts.map((toast) => toast.message)).toEqual(['repo · 1 memory'])
   } finally {
     await server.stop(true)
   }

@@ -1,0 +1,34 @@
+{
+  "input": {
+    "sessionID": "ses_e1e6d0192ffe7pZ5J19xRJk76C",
+    "agent": "code",
+    "model": {
+      "providerID": "fake",
+      "modelID": "fake-1"
+    }
+  },
+  "output": {
+    "message": {
+      "id": "msg_1e1931dc1001J5BWge7z8El5Le",
+      "role": "user",
+      "sessionID": "ses_e1e6d0192ffe7pZ5J19xRJk76C",
+      "time": {
+        "created": 1794785877441
+      },
+      "agent": "code",
+      "model": {
+        "providerID": "fake",
+        "modelID": "fake-1"
+      }
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "read the readme and summarise it",
+        "messageID": "msg_1e1931dc1001J5BWge7z8El5Le",
+        "sessionID": "ses_e1e6d0192ffe7pZ5J19xRJk76C",
+        "id": "prt_1e1931dc2001hefXvnv6KFcClL"
+      }
+    ]
+  }
+}

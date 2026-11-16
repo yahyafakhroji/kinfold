@@ -1,0 +1,35 @@
+{
+  "id": "evt_1e192fe6e0016ki4vOO7mpJGlR",
+  "type": "session.created",
+  "properties": {
+    "sessionID": "ses_e1e6d0192ffe7pZ5J19xRJk76C",
+    "info": {
+      "id": "ses_e1e6d0192ffe7pZ5J19xRJk76C",
+      "slug": "swift-orchid",
+      "version": "7.8.27",
+      "projectID": "global",
+      "directory": "/Users/me/project",
+      "path": "",
+      "title": "New session - 2026-11-15T23:37:49.421Z",
+      "agent": "code",
+      "model": {
+        "id": "fake-1",
+        "providerID": "fake"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1794785869421,
+        "updated": 1794785869421
+      }
+    }
+  }
+}

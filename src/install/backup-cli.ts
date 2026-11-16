@@ -1,4 +1,4 @@
-// `kinfold backup <file>` and `kinfold restore <file>`.
+// `kinfold backup <file>`, `kinfold restore <file>` and `kinfold restore --undo`.
 //
 // With the daemon running, both go through its authenticated routes: the
 // daemon holds the store open and unlocked, so it writes the snapshot, and a
@@ -17,6 +17,7 @@ import { type BackupManifest, BackupError, readArchive } from '../backup/archive
 import { createBackup } from '../backup/create'
 import { applyRestore, inspectBackup, stageSnapshot } from '../backup/restore'
 import { snapshotStoreFile } from '../backup/snapshot'
+import { applyUndo } from '../backup/undo'
 import { isRecord } from '../contract/event'
 import { readDaemonEndpoint } from '../daemon/daemon-info'
 import { DB_KEY_REF } from '../secrets/credentials'
@@ -181,6 +182,12 @@ async function restoreThroughDaemon(env: InstallEnv, daemon: Endpoint, file: str
   const body = JSON.stringify(key === null ? { upload: answer.upload } : { upload: answer.upload, code: encodeRecoveryCode(key) })
   const started = await env.fetch(`${daemon.base}/restore`, { method: 'POST', headers: { authorization, 'content-type': 'application/json' }, body, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
   if (started.status !== 202) throw await refusalOf(started, 'POST /restore')
+  await followDaemon(env, daemon, busy, 'the restore')
+}
+
+/** Watches GET /restore/status until the run in the daemon ends, and says how. */
+async function followDaemon(env: InstallEnv, daemon: Endpoint, busy: CommandBusy | undefined, what: string): Promise<void> {
+  const authorization = `Bearer ${daemon.token}`
   const deadline = env.now() + STATUS_WAIT_MS
   for (;;) {
     const response = await env.fetch(`${daemon.base}/restore/status`, { headers: { authorization }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
@@ -189,8 +196,8 @@ async function restoreThroughDaemon(env: InstallEnv, daemon: Endpoint, file: str
       sayOutcome(env, status.lines, busy)
       return
     }
-    if (status?.state === 'failed') throw new Refusal(status.error ?? 'the restore failed')
-    if (env.now() >= deadline) throw new Refusal('the restore is still running in the daemon; kinfold status shows when it is done')
+    if (status?.state === 'failed') throw new Refusal(status.error ?? `${what} failed`)
+    if (env.now() >= deadline) throw new Refusal(`${what} is still running in the daemon; kinfold status shows when it is done`)
     await env.sleep(STATUS_POLL_MS)
   }
 }
@@ -223,9 +230,30 @@ async function restore(env: InstallEnv, file: string): Promise<void> {
   }
 }
 
+/** `restore --undo`: the daemon's route when it runs, the same steps here when it does not. No recovery code: both keys are in the key store. */
+async function undo(env: InstallEnv): Promise<void> {
+  const daemon = await runningDaemon(env)
+  const busy = env.ui?.busy('switching back')
+  try {
+    if (daemon === null) {
+      const outcome = await applyUndo({ dataDir: env.dataDir, keyStore: keyStoreOf(env), log: env.out, sleep: env.sleep, now: env.now })
+      sayOutcome(env, outcome.lines, busy)
+      env.out('the daemon is not running; start it when you are ready')
+    } else {
+      const started = await env.fetch(`${daemon.base}/restore/undo`, { method: 'POST', headers: { authorization: `Bearer ${daemon.token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+      if (started.status !== 202) throw await refusalOf(started, 'POST /restore/undo')
+      await followDaemon(env, daemon, busy, 'the switch back')
+    }
+    busy?.done()
+  } catch (error: unknown) {
+    busy?.fail()
+    throw error
+  }
+}
+
 export async function runBackupCommand(env: InstallEnv, args: BackupArgs): Promise<number> {
   try {
-    await (args.command === 'backup' ? backup(env, args.file) : restore(env, args.file))
+    await ('undo' in args ? undo(env) : args.command === 'backup' ? backup(env, args.file) : restore(env, args.file))
     return EXIT_OK
   } catch (error: unknown) {
     // Ctrl-C at the recovery code is the person stopping, not a failure: the frame ends the run with 130.

@@ -25,7 +25,7 @@ import { type ContextClientOptions, type ContextFetch, fetchContext } from '../c
 import { readDisplayFile } from '../context/display-file'
 import {
   DAEMON_DOWN_LINE, DAEMON_DOWN_START_LINE, HELD_OUT_LINE, NO_ANSWER_LINE, NO_ANSWER_START_LINE, NO_PROMPT_MEMORY_LINE,
-  daemonDownWith, firstScreenList, recallLine,
+  cleanTitle, daemonDownWith, firstScreenLine, firstScreenList, recallLine,
 } from '../context/recall-line'
 import { type ContextChannel, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
 import { userMessage as noticeMessage } from '../update/notice-text'
@@ -97,7 +97,7 @@ function contextFor(event: NormalizedEvent, host: HookHost): { channel: ContextC
  * line (none when no context is printed), so the line cannot name a memory the
  * model was not sent, and it costs no second request.
  */
-function recallMessage(channel: ContextChannel, fetched: ContextFetch, takesPack: boolean): string {
+function recallMessage(channel: ContextChannel, fetched: ContextFetch, takesPack: boolean, oneLine = false): string {
   const result = fetched.result
   const start = channel === 'session_start'
   if (result === null) {
@@ -106,9 +106,8 @@ function recallMessage(channel: ContextChannel, fetched: ContextFetch, takesPack
   }
   if (result.display?.heldOut === true) return HELD_OUT_LINE
   const ids = result.text === '' ? [] : result.observationIds
-  const line = start
-    ? firstScreenList(result.display?.firstScreen ?? null, ids, Date.now(), { takesPack })
-    : recallLine(ids, result.display?.recalled ?? [])
+  const screen = result.display?.firstScreen ?? null
+  const line = !start ? recallLine(ids, result.display?.recalled ?? []) : oneLine ? firstScreenLine(screen, ids) : firstScreenList(screen, ids, Date.now(), { takesPack })
   // The stored copy is also read after a daemon that was only slow; "not running" is said only when nothing was listening.
   return fetched.source === 'fallback' && fetched.daemonDown ? daemonDownWith(line) : line
 }
@@ -130,8 +129,11 @@ async function contextOutput(event: NormalizedEvent, dataDir: string, host: Hook
   // An agent running this host's hooks under its own name is not known to show the message, so it gets the context alone.
   const hasUserChannel = spec.userMessage !== undefined && event.host === host
   const show = hasUserChannel && readDisplayFile(dataDir).showRecall
+  // A progress line rides in front of the normal output; an agent running this host's hooks under its own name is not known to strip it.
+  const progress = spec.progressLine !== undefined && event.host === host && readDisplayFile(dataDir).showRecall ? spec.progressLine : null
   const wanted = contextFor(event, host)
   if (wanted === null) {
+    if (progress !== null) return event.kind === 'user_prompt' ? progress(NO_PROMPT_MEMORY_LINE) : null
     if (!show) return null
     // The agent takes no memory here, so the daemon is not asked on a prompt; at session start only the header is.
     if (event.kind === 'user_prompt') return printed(spec, null, NO_PROMPT_MEMORY_LINE)
@@ -150,9 +152,11 @@ async function contextOutput(event: NormalizedEvent, dataDir: string, host: Hook
   // The notice rides on session start only; the route never attaches it to a prompt delta.
   const notice = wanted.channel === 'session_start' ? result?.updateNotice : undefined
   if (!hasUserChannel) {
-    if (result === null) return null
-    if (notice !== undefined) return spec.sessionContextWithNotice(result.text, notice)
-    return result.text === '' ? null : wanted.render(result.text)
+    const normal = result === null ? null : notice !== undefined ? spec.sessionContextWithNotice(result.text, notice) : result.text === '' ? null : wanted.render(result.text)
+    if (progress === null) return normal
+    // cleanTitle again, on the whole line: it must stay one line of stdout whatever a title or project name holds.
+    const line = progress(cleanTitle(recallMessage(wanted.channel, fetched, true, true)))
+    return normal === null ? line : `${line}\n${normal}`
   }
   const context = result === null || result.text === '' ? null : wanted.render(result.text)
   const lines = [...(notice !== undefined ? [noticeMessage(notice)] : []), ...(show ? [recallMessage(wanted.channel, fetched, true)] : [])]

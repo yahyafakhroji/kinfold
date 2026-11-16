@@ -3,11 +3,14 @@
 // an injection because an answer that carried nothing records no injection,
 // and the user still wants to see that the prompt was seen. Rows hold ids,
 // titles, an agent and a project name; never prompt or reply text.
+// A watcher that asks also gets session starts: the first pack each session
+// was sent, as the list a hook shows at session start. An agent whose plugin
+// cannot print at session start (OpenCode, Kilo Code) toasts it from here.
 
-import { HELD_OUT_LINE, type Recalled, recallLine } from '../context/recall-line'
+import { FIRST_SCREEN_ROWS, HELD_OUT_LINE, type Recalled, firstScreenToast, recallLine } from '../context/recall-line'
 import type { RouteAnswer } from '../daemon/data-routes'
 import type { Database } from '../sqlite/types'
-import { titlesFor } from '../store/context-store'
+import { firstScreenFor, titlesFor } from '../store/context-store'
 
 /**
  * A prompt is shown this long after its event time. The hook asks for recall
@@ -106,13 +109,74 @@ export function watchRows(db: Database, query: WatchQuery): WatchRow[] {
   })
 }
 
+export interface WatchStart {
+  /** The injection's row id: the cursor a watcher hands back. */
+  id: number
+  at: number
+  host: string
+  project: string
+  hostSessionId: string
+  /** The pack's ids: the list names these and no other. */
+  ids: number[]
+  /** The session-start list, sized for a toast. */
+  list: string
+}
+
+export interface WatchStartsQuery {
+  afterId: number
+  host: string | null
+  project: string | null
+  limit: number
+  now: number
+}
+
+/** 0 on a store that has sent nothing yet. */
+export function latestInjectionId(db: Database): number {
+  return db.query<{ id: number }, []>('SELECT coalesce(max(id), 0) AS id FROM injections').get()?.id ?? 0
+}
+
+interface StartRow {
+  id: number
+  at: number
+  host: string
+  hostSessionId: string
+  projectKey: string
+  project: string
+  ids: string
+}
+
+/**
+ * The first pack each session was sent, after `afterId`. A session that asks
+ * for its pack again (OpenCode does after a compaction) is not a new start,
+ * and an empty pack records no injection, so it has no row here.
+ */
+export function watchStarts(db: Database, query: WatchStartsQuery): WatchStart[] {
+  const rows = db.query<StartRow, Record<string, string | number | null>>(
+    `SELECT i.id, i.occurred_at AS at, i.host, i.host_session_id AS hostSessionId, i.project_key AS projectKey, pr.display_name AS project, i.observation_ids AS ids
+     FROM injections i JOIN projects pr ON pr.key = i.project_key
+     WHERE i.id > $afterId AND i.channel IN ('session_start', 'request') AND i.host_session_id IS NOT NULL
+       AND ($host IS NULL OR i.host = $host)
+       AND ($project IS NULL OR pr.key = $project OR lower(pr.display_name) = lower($project))
+       AND NOT EXISTS (SELECT 1 FROM injections e WHERE e.host = i.host AND e.host_session_id = i.host_session_id
+                       AND e.channel IN ('session_start', 'request') AND e.id < i.id)
+     ORDER BY i.id LIMIT $limit`,
+  ).all({ afterId: query.afterId, host: query.host, project: query.project, limit: query.limit })
+  return rows.map((row) => {
+    const ids = parseIds(row.ids)
+    const screen = firstScreenFor(db, { projectKey: row.projectKey, host: row.host, hostSessionId: row.hostSessionId, ids, rows: FIRST_SCREEN_ROWS })
+    return { id: row.id, at: row.at, host: row.host, project: row.project, hostSessionId: row.hostSessionId, ids, list: firstScreenToast(screen, ids, query.now) }
+  })
+}
+
 const HOST_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const MAX_PROJECT_CHARS = 300
 
 /**
- * GET /watch[?after=<id>][&host=][&project=] (token only). Without `after` it
- * answers the current cursor and no rows, so a watcher starts from now; with
- * it, the settled prompts after that id and the cursor to ask from next.
+ * GET /watch[?after=<id>][&startsAfter=now|<id>][&host=][&project=] (token
+ * only). Without `after` it answers the current cursor and no rows, so a
+ * watcher starts from now; with it, the settled prompts after that id and the
+ * cursor to ask from next. `startsAfter` adds session starts the same way,
+ * under their own cursor; a watcher that leaves it out gets none.
  */
 export function watchRoute(db: Database, method: string, url: URL, now: number): RouteAnswer {
   if (method !== 'GET') return { status: 405, body: { error: 'method not allowed' } }
@@ -122,8 +186,24 @@ export function watchRoute(db: Database, method: string, url: URL, now: number):
   if (after !== null && !/^\d{1,15}$/.test(after)) return { status: 400, body: { error: 'after must be a prompt id' } }
   if (host !== null && !HOST_PATTERN.test(host)) return { status: 400, body: { error: 'host must be an agent id' } }
   if (project !== null && (project === '' || project.length > MAX_PROJECT_CHARS)) return { status: 400, body: { error: 'project must be a name or key' } }
-  if (after === null) return { status: 200, body: { cursor: latestPromptId(db), rows: [] } }
+  const startsAfter = url.searchParams.get('startsAfter')
+  if (startsAfter !== null && startsAfter !== 'now' && !/^\d{1,15}$/.test(startsAfter)) return { status: 400, body: { error: 'startsAfter must be now or an id' } }
+  const starts = startsAfter === null ? {} : startsPart(db, startsAfter === 'now' ? null : Number(startsAfter), host, project, now)
+  if (after === null) return { status: 200, body: { cursor: latestPromptId(db), rows: [], ...starts } }
   const afterId = Number(after)
+  const newest = latestPromptId(db)
+  // The same for prompts: a cursor from a store that is no longer here would wait for ids that may never come.
+  if (afterId > newest) return { status: 200, body: { cursor: newest, rows: [], ...starts } }
   const rows = watchRows(db, { afterId, before: now - WATCH_SETTLE_MS, host, project, limit: WATCH_LIMIT })
-  return { status: 200, body: { cursor: rows.at(-1)?.id ?? afterId, rows } }
+  return { status: 200, body: { cursor: rows.at(-1)?.id ?? afterId, rows, ...starts } }
+}
+
+/** The session starts after `afterId` (null: from now) and the cursor to ask from next, which passes every row looked at, shown or not. */
+function startsPart(db: Database, afterId: number | null, host: string | null, project: string | null, now: number): { startCursor: number; starts: WatchStart[] } {
+  // Read first: a pack recorded while the rows are read is then left for the next ask.
+  const latest = latestInjectionId(db)
+  // A cursor past the newest row is from a store that was replaced (a restore, a switch back): start again from now.
+  if (afterId === null || afterId > latest) return { startCursor: latest, starts: [] }
+  const starts = watchStarts(db, { afterId, host, project, limit: WATCH_LIMIT, now }).filter((row) => row.id <= latest)
+  return { startCursor: starts.length === WATCH_LIMIT ? (starts.at(-1)?.id ?? latest) : Math.max(latest, afterId), starts }
 }

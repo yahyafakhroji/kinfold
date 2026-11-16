@@ -38,6 +38,8 @@ export interface ContextInjectorOptions {
   cwd: string
   fetch: (request: ContextRequest) => Promise<ContextResult | null>
   log: (line: string) => void
+  /** What its log lines start with; the agent's plugin name. */
+  label?: string
   deltaIntervalMs?: number
   now?: () => number
 }
@@ -87,6 +89,7 @@ export function createContextInjector(options: ContextInjectorOptions): ContextI
   const pending = new Map<string, string>()
   const now = options.now ?? Date.now
   const interval = options.deltaIntervalMs ?? DELTA_INTERVAL_MS
+  const label = options.label ?? 'kinfold-opencode'
 
   const ask = (sessionId: string, channel: 'request' | 'prompt', prompt?: string): Promise<ContextResult | null> => {
     const startedAt = Date.now()
@@ -94,11 +97,11 @@ export function createContextInjector(options: ContextInjectorOptions): ContextI
     const request: ContextRequest = { host: options.host, cwd: options.cwd, hostSessionId: sessionId, channel, ...(prompt !== undefined ? { prompt } : {}) }
     return options.fetch(request).then(
       (result) => {
-        options.log(`kinfold-opencode: ${kind} session=${sessionId} ids=${result?.observationIds.length ?? 0} tokens=${result?.tokens ?? 0} ms=${Date.now() - startedAt}`)
+        options.log(`${label}: ${kind} session=${sessionId} ids=${result?.observationIds.length ?? 0} tokens=${result?.tokens ?? 0} ms=${Date.now() - startedAt}`)
         return result
       },
       (error: unknown) => {
-        options.log(`kinfold-opencode: ${kind} session=${sessionId} failed: ${errorName(error)}`)
+        options.log(`${label}: ${kind} session=${sessionId} failed: ${errorName(error)}`)
         return null
       },
     )
@@ -191,7 +194,7 @@ export function createContextInjector(options: ContextInjectorOptions): ContextI
 
   const onCompaction = (event: unknown): void => {
     const sessionId = sessionOf(event)
-    if (sessionId !== null && cache.delete(sessionId)) options.log(`kinfold-opencode: context cache dropped session=${sessionId} (compaction)`)
+    if (sessionId !== null && cache.delete(sessionId)) options.log(`${label}: context cache dropped session=${sessionId} (compaction)`)
   }
 
   return { onContext, onPrompt, onCompaction, cachedSessions: () => [...cache.keys()] }

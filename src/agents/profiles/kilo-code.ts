@@ -1,15 +1,24 @@
-// Kilo Code: the OpenCode plugin file in Kilo's own folder, plus an MCP entry.
-// Built from the Kilo docs, checked 2026-11-13:
-//   kilo.ai/docs/automate/extending/plugins (every .ts/.js file in
-//     ~/.config/kilo/plugin/ loads at startup; "behavior is identical to
-//     OpenCode"; KILO_PURE=1 skips external plugins)
+// Kilo Code (the CLI, 7.x): a plugin file in Kilo's own plugin folder, the
+// recall toast, and an MCP entry. Checked live on Kilo CLI 7.8.27 in a
+// throwaway HOME (payloads in test/fixtures/kilo-code/):
+//   ~/.config/kilo/plugin/ loads every .js file at startup, on OpenCode's 1.x
+//     plugin contract: the default export must be { id, server }, and a 2.x
+//     plugin ({ id, setup }) is rejected ("must default export an object
+//     with server()"). Kinfold up to 0.4 wrote OpenCode's plugin here, so it
+//     captured nothing; Kilo now gets its own (src/plugins/kilo.ts), and an
+//     install over the old file replaces it.
+//   the plugin's experimental.chat.system.transform adds the context pack,
+//     and what other sessions wrote since, to each request: seen reaching the
+//     model live. The capability line counts it as context at start and on
+//     each prompt.
+//   ~/.config/kilo/tui.json lists TUI plugins under "plugin"; Kinfold's toast
+//     is one entry there (families/kilo-tui.ts), shown live.
 //   kilo.ai/docs/automate/mcp/using-in-kilo-code (servers under `mcp` in
 //     ~/.config/kilo/kilo.json(c), { type: "local", command: [...], environment })
-// The docs name no Windows folder, no binary name and no variable that moves
-// the config folder, so the folder is ~/.config/kilo on every OS (the way
-// OpenCode's is) and detection is `kilo --version`. Kilo's plugin is JS that
-// Kilo itself runs, so no shell quoting is involved on Windows. The one OpenCode
-// bundle serves Kilo: the file carries KINFOLD_HOST so events say kilo-code.
+// The docs name no Windows folder and no variable that moves the config
+// folder, so the folder is ~/.config/kilo on every OS (the way OpenCode's is)
+// and detection is `kilo --version`. Kilo's plugin is JS that Kilo itself
+// runs, so no shell quoting is involved on Windows.
 // Kilo's docs say its config is kilo.json(c) "or the legacy opencode.json(c)"
 // and that it no longer reads .opencode folders, so we cannot assume Kilo reads
 // OpenCode's file: Kilo always gets its own `mcp.kinfold` in kilo.json. Both
@@ -18,7 +27,7 @@
 // folder (the docs say it may differ), any variable that moves the config
 // folder (none documented), and kilo.jsonc (a JSONC file can't be merged
 // safely, so with one present we write no kilo.json and leave the MCP entry
-// to the user). No recorded Kilo payloads exist yet, so verification stays 'docs'.
+// to the user).
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -27,15 +36,16 @@ import { openCodeMcpEntry } from '../../install/mcp-config'
 import { MCP_HOST_ENV } from '../../mcp/read-reporter'
 import { PLUGIN_FILE_NAME } from '../../names'
 import { type PluginFileSpec, pluginFileActions, pluginFileLine, pluginFileState, pluginFileUninstallActions } from '../families/plugin-file'
+import { kiloTuiInstallActions, kiloTuiLine, kiloTuiUninstallActions } from '../families/kilo-tui'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpEntryText } from '../families/json-agent'
 import { mcpEntryState } from '../families/mcp-entry'
 import type { AgentProfile, Capabilities } from '../profile'
 
-const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: false, prompt: false }, search: true, observer: false }
+const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: true }, search: true, observer: false }
 
 const kiloDir = (env: InstallEnv): string => join(env.homeDir, '.config', 'kilo')
 
-export const KILO_PLUGIN_SPEC: PluginFileSpec = { dir: (env) => join(kiloDir(env), 'plugin'), fileName: PLUGIN_FILE_NAME, host: 'kilo-code', label: 'Kilo Code' }
+export const KILO_PLUGIN_SPEC: PluginFileSpec = { dir: (env) => join(kiloDir(env), 'plugin'), fileName: PLUGIN_FILE_NAME, host: 'kilo-code', label: 'Kilo Code', plugin: 'kilo' }
 
 const configPath = (env: InstallEnv): string => join(kiloDir(env), 'kilo.json')
 
@@ -51,7 +61,7 @@ export const KILO_CODE_PROFILE: AgentProfile = {
   id: 'kilo-code',
   name: 'Kilo Code',
   family: 'opencode-plugin',
-  verification: 'docs',
+  verification: 'live',
   capabilities: () => CAPABILITIES,
   limit: (os) =>
     os === 'windows'
@@ -66,11 +76,13 @@ export const KILO_CODE_PROFILE: AgentProfile = {
         env.out(`kilo-code: plugin skipped; ${errorMessage(error)}`)
         return []
       })
-      if (!hasJsonc(env)) return [...plugin, ...jsonAgentFileInstallActions(env, 'kilo-code', KILO_MCP_FILE)]
+      // The toast shows what the plugin recorded; with no plugin there is nothing to show.
+      const toast = plugin.length > 0 || pluginFileState(env, KILO_PLUGIN_SPEC) === 'yes' ? kiloTuiInstallActions(env) : []
+      if (!hasJsonc(env)) return [...plugin, ...toast, ...jsonAgentFileInstallActions(env, 'kilo-code', KILO_MCP_FILE)]
       env.out(`kilo-code: ${jsoncPath(env)} found; add the kinfold MCP entry there by hand, no kilo.json was written`)
-      return plugin
+      return [...plugin, ...toast]
     },
-    uninstall: (env) => [...pluginFileUninstallActions(env, KILO_PLUGIN_SPEC), ...jsonAgentFileUninstallActions(env, 'kilo-code', KILO_MCP_FILE)],
+    uninstall: (env) => [...pluginFileUninstallActions(env, KILO_PLUGIN_SPEC), ...kiloTuiUninstallActions(env), ...jsonAgentFileUninstallActions(env, 'kilo-code', KILO_MCP_FILE)],
     // A plugin file by our name that is not ours is not our wiring.
     state: (env) => {
       const state = pluginFileState(env, KILO_PLUGIN_SPEC)
@@ -80,7 +92,7 @@ export const KILO_CODE_PROFILE: AgentProfile = {
       const mcp = hasJsonc(env)
         ? `MCP skipped (${jsoncPath(env)} found; add the entry by hand)`
         : KILO_MCP_FILE.mcp === undefined ? '' : `MCP ${mcpEntryState(env, KILO_MCP_FILE.mcp, 'kilo-code')} in ${configPath(env)}`
-      return `plugin ${pluginFileLine(env, KILO_PLUGIN_SPEC)}; ${mcp}`
+      return `plugin ${pluginFileLine(env, KILO_PLUGIN_SPEC)}; ${kiloTuiLine(env)}; ${mcp}`
     },
   },
   manualSteps: (_os, env) => [

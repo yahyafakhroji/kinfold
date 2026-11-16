@@ -29,6 +29,8 @@ export const FIRST_SCREEN_ROWS = 8
 export const LINE_TITLES = 5
 const LINE_TITLE_CHARS = 40
 const LIST_TITLE_CHARS = 60
+/** A toast box is narrow (about 56 columns in OpenCode 2.2.5), and a row that wraps reads badly. */
+const TOAST_TITLE_CHARS = 34
 
 export const NOTHING_RECALLED_LINE = 'kinfold · nothing recalled'
 export const HELD_OUT_LINE = 'kinfold · recall held out for this prompt (impact test)'
@@ -96,6 +98,18 @@ export function shortAge(from: number, now: number): string {
 
 const count = (n: number, one: string, many: string): string => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
 
+/**
+ * The list on one line, for an agent whose user channel is known to show one:
+ * the header and how many memories the session's context holds. `ids` is what
+ * the pack carried, as for the list.
+ */
+export function firstScreenLine(screen: FirstScreen | null, ids: readonly number[]): string {
+  if (screen === null) return firstScreenList(null, ids, 0)
+  const project = cut(screen.project, 60)
+  if (screen.total === 0) return `kinfold · ${project} · no memories yet`
+  return `kinfold · ${project} · ${count(screen.total, 'memory', 'memories')} · ${ids.length === 0 ? 'none' : ids.length.toLocaleString('en-US')} in this session's context`
+}
+
 export interface FirstScreenOptions {
   /** False for an agent that drops what a hook prints at session start, so its model got no pack. */
   takesPack?: boolean
@@ -124,4 +138,19 @@ export function firstScreenList(screen: FirstScreen | null, ids: readonly number
   const lines = rows.map((row) => `  ${row.id.padEnd(idWidth)}  ${row.title.padEnd(titleWidth)}  ${row.age}`)
   const more = ids.length - rows.length
   return [header, ...lines, ...(more > 0 ? [`  … ${more.toLocaleString('en-US')} more in this session's context · kinfold dashboard`] : [])].join('\n')
+}
+
+/**
+ * The session-start list for a toast: the same header, rows and count as
+ * firstScreenList, with each row short and unpadded so it fits a narrow box
+ * on one line.
+ */
+export function firstScreenToast(screen: FirstScreen | null, ids: readonly number[], now: number): string {
+  if (screen === null || screen.total === 0) return firstScreenList(screen, ids, now)
+  const [header = ''] = firstScreenList({ ...screen, rows: [] }, [], now).split('\n')
+  const sent = new Set(ids)
+  const rows = screen.rows.filter((row) => sent.has(row.id)).slice(0, FIRST_SCREEN_ROWS)
+  const lines = rows.map((row) => `  #${row.id} ${cut(row.title, TOAST_TITLE_CHARS)} (${shortAge(row.occurredAt, now)})`)
+  const more = ids.length - rows.length
+  return [header, ...lines, ...(more > 0 ? [`  … ${more.toLocaleString('en-US')} more · kinfold dashboard`] : [])].join('\n')
 }

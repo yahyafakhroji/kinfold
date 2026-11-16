@@ -46,6 +46,7 @@ function fakeAssets(bundle: string): EmbeddedAssets {
     vec0: { bytes: async () => new Uint8Array(), sha256: 'vec0-sha' },
     dashboardFile: () => null,
     opencodePlugin: async () => bundle,
+    kiloPlugin: async () => bundle,
   }
 }
 

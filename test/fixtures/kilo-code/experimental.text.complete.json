@@ -1,0 +1,10 @@
+{
+  "input": {
+    "sessionID": "ses_e1e6d0192ffe7pZ5J19xRJk76C",
+    "messageID": "msg_1e192ff76001FCtWPBD4JAJk53",
+    "partID": "prt_1e192ffc4001haAxNeJErNU18D"
+  },
+  "output": {
+    "text": "Fake model reply: pinned with .bun-version."
+  }
+}

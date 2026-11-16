@@ -1,5 +1,5 @@
 // The files a release build carries inside the `kinfold` program: sqlite3mc,
-// sqlite-vec, the dashboard pages and the OpenCode plugin. A checkout run has
+// sqlite-vec, the dashboard pages and the OpenCode and Kilo Code plugins. A checkout run has
 // none of them (the committed stub names no files, so this returns null) and
 // keeps using the local build, the pinned download and src/dashboard/public.
 //
@@ -14,6 +14,8 @@ export interface EmbeddedAssets {
   vec0: { bytes: () => Promise<Uint8Array>; sha256: string }
   dashboardFile: (name: string) => Blob | null
   opencodePlugin: () => Promise<string>
+  /** Kilo Code's plugin, which is a file of its own (src/plugins/kilo.ts). */
+  kiloPlugin: () => Promise<string>
 }
 
 /** What the generator writes into embedded.generated.ts; a checkout's stub leaves it null. */
@@ -22,6 +24,7 @@ export interface GeneratedAssets {
   vec0: { file: string; sha256: string }
   dashboard: Readonly<Record<string, string>>
   opencodePlugin: string
+  kiloPlugin: string
 }
 
 /**
@@ -54,5 +57,6 @@ export function embeddedAssets(): EmbeddedAssets | null {
       return file === undefined ? null : Bun.file(file)
     },
     opencodePlugin: () => Bun.file(generated.opencodePlugin).text(),
+    kiloPlugin: () => Bun.file(generated.kiloPlugin).text(),
   }
 }

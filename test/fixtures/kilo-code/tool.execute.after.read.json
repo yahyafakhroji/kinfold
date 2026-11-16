@@ -1,0 +1,28 @@
+{
+  "input": {
+    "tool": "read",
+    "sessionID": "ses_e1e6d0192ffe7pZ5J19xRJk76C",
+    "callID": "call_fake_1",
+    "args": {
+      "filePath": "/Users/me/project/README.md"
+    }
+  },
+  "output": {
+    "title": "README.md",
+    "output": "<path>/Users/me/project/README.md</path>\n<type>file</type>\n<content>\n1: # demo\n\n(End of file - total 1 lines)\n</content>",
+    "metadata": {
+      "preview": "# demo",
+      "truncated": false,
+      "loaded": [],
+      "display": {
+        "type": "file",
+        "path": "/Users/me/project/README.md",
+        "text": "# demo",
+        "lineStart": 1,
+        "lineEnd": 1,
+        "totalLines": 1,
+        "truncated": false
+      }
+    }
+  }
+}

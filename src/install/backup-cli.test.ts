@@ -5,6 +5,7 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readArchive } from '../backup/archive'
 import { inspectBackup, applyRestore, replacedPath, stageSnapshot } from '../backup/restore'
+import { applyUndo } from '../backup/undo'
 import { PROJECT_A, seedMcpObservation, seedMcpSession } from '../mcp/test-support'
 import { DB_KEY_NEXT_REF, DB_KEY_REF, DB_KEY_REPLACED_REF } from '../secrets/credentials'
 import { dbKeyStoreOf, newDbKey } from '../sqlite/keys'
@@ -400,4 +401,89 @@ test('on a terminal Ctrl-C at the recovery code exits 130 with the store untouch
   const missing = fakeTerminal([])
   expect(await runFramed({ ...to.env, terminal: missing }, 'restore', (env) => runBackupCommand(env, { command: 'restore', file: join(to.w.root, 'none.kinfold') }))).toBe(EXIT_FAILED)
   expect(drawnLines(missing).slice(-2)).toEqual([`x kinfold restore: ${join(to.w.root, 'none.kinfold')} does not exist`, 'kinfold restore did not finish.'])
+})
+
+/** A machine whose store ('mine') was replaced by a restored backup ('first'), with the old one kept. */
+async function restoredMachine(): Promise<{ used: Machine; restoredKey: string }> {
+  const old = machine({ titles: ['first'] })
+  const file = await backupOf(old)
+  const used = machine({ titles: ['mine'], code: encodeRecoveryCode(old.key!) })
+  expect(await runBackupCommand(used.env, { command: 'restore', file })).toBe(EXIT_OK)
+  used.asked.length = 0
+  used.w.out.length = 0
+  return { used, restoredKey: old.key! }
+}
+
+test('restore --undo is its own form: no file, and no other flag', () => {
+  expect(parseBackupArgs(['restore', '--undo'])).toEqual({ ok: true, value: { command: 'restore', undo: true } })
+  for (const argv of [['restore', '--undo', 'a.kfb'], ['restore', 'a.kfb', '--undo'], ['backup', '--undo'], ['restore', '--undo', '--yes']]) {
+    expect(parseBackupArgs(argv)).toMatchObject({ ok: false })
+  }
+})
+
+test('restore --undo switches back to the kept store with no recovery code, and can be run again', async () => {
+  const { used, restoredKey } = await restoredMachine()
+  expect(await runBackupCommand(used.env, { command: 'restore', undo: true })).toBe(EXIT_OK)
+  expect(titles(used)).toEqual(['mine'])
+  expect(used.asked).toEqual([])
+  expect(used.keyStore.values.get(DB_KEY_REF)).toBe(used.key!)
+  expect(used.keyStore.values.get(DB_KEY_REPLACED_REF)).toBe(restoredKey)
+  const text = used.w.out.join('\n')
+  expect(text).toContain('switched back')
+  expect(text).toContain('the daemon is not running')
+  for (const secret of [used.key!, restoredKey]) expect(text).not.toContain(secret)
+
+  expect(await runBackupCommand(used.env, { command: 'restore', undo: true })).toBe(EXIT_OK)
+  expect(titles(used)).toEqual(['first'])
+})
+
+test('restore --undo with nothing kept says so and changes nothing', async () => {
+  const m = machine({ titles: ['mine'] })
+  expect(await runBackupCommand(m.env, { command: 'restore', undo: true })).toBe(EXIT_FAILED)
+  expect(m.w.out.join('\n')).toContain('nothing to switch back to')
+  expect(titles(m)).toEqual(['mine'])
+})
+
+test('with the daemon running, restore --undo goes through its route', async () => {
+  const { used } = await restoredMachine()
+  const calls = withDaemon(used)
+  expect(await runBackupCommand(used.env, { command: 'restore', undo: true })).toBe(EXIT_OK)
+  const paths = calls.urls.map((url) => new URL(url).pathname)
+  expect(paths).toContain('/restore/undo')
+  expect(paths).toContain('/restore/status')
+  expect(titles(used)).toEqual(['mine'])
+  const text = used.w.out.join('\n')
+  expect(text).toContain('switched back')
+  expect(text).not.toContain('the daemon is not running')
+})
+
+test("with the daemon running, a refused restore --undo reports the daemon's reason", async () => {
+  const m = machine({ titles: ['mine'] })
+  withDaemon(m)
+  expect(await runBackupCommand(m.env, { command: 'restore', undo: true })).toBe(EXIT_FAILED)
+  expect(m.w.out.join('\n')).toContain('nothing to switch back to')
+})
+
+test('kinfold key resume finishes or rolls back a restore --undo that was killed', async () => {
+  for (const [point, title, says] of [['after-move-in', 'mine', 'finished'], ['after-keys', 'first', 'back as it was']] as const) {
+    const { used } = await restoredMachine()
+    await expect(applyUndo({ dataDir: used.w.dataDir, keyStore: used.keyStore, log: () => {}, sleep: async () => {}, faultAt: point })).rejects.toThrow()
+    // While it is cut short, the other commands refuse and point at resume.
+    expect(await runBackupCommand(used.env, { command: 'restore', undo: true })).toBe(EXIT_FAILED)
+    expect(await runKeyCommand(used.env, 'rekey')).toBe(EXIT_FAILED)
+    expect(used.w.out.join('\n')).toContain('kinfold key resume')
+    expect(await runKeyCommand(used.env, 'resume')).toBe(EXIT_OK)
+    expect(titles(used)).toEqual([title])
+    expect(existsSync(maintenancePath(join(used.w.dataDir, DB_FILE)))).toBe(false)
+    expect(used.w.out.join('\n')).toContain(says)
+  }
+})
+
+test('a restore --undo whose process is still alive is left alone by resume', async () => {
+  const m = machine({ titles: ['mine'] })
+  const marker = maintenancePath(join(m.w.dataDir, DB_FILE))
+  writeFileSync(marker, JSON.stringify({ op: 'restore-undo', pid: process.ppid, startedAt: 1, current: 'encrypted', kept: 'encrypted' }))
+  expect(await runKeyCommand(m.env, 'resume')).toBe(EXIT_FAILED)
+  expect(m.w.out.join('\n')).toContain('restore --undo is still running')
+  expect(existsSync(marker)).toBe(true)
 })

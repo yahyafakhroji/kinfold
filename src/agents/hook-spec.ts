@@ -25,6 +25,14 @@ export interface HookHostSpec {
    */
   userMessage?: (output: string | null, message: string) => string
   /**
+   * For an agent that takes a line out of the hook's stdout and shows it to
+   * the user: that line, carrying `message`. It is printed on its own line
+   * before the hook's normal output, which is left exactly as it would be
+   * without it, so the model reads the same bytes either way. The message is
+   * always one line: the session list goes in its one-line form.
+   */
+  progressLine?: (message: string) => string
+  /**
    * Another agent that runs this agent's hooks, named by a documented signal
    * in its payload or environment; null when nothing shows one. Payload and
    * env only: it runs on every hook call.

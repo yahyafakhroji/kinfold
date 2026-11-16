@@ -1,5 +1,5 @@
 // The setup wizard's questions: folder, agents, an observer per agent,
-// encryption, port, update check, then a summary. It only asks; the answer set
+// encryption, port, update check, the impact test, then a summary. It only asks; the answer set
 // goes to the plan, so a Ctrl-C or a closed stdin anywhere leaves nothing
 // written. Without a terminal, or under --yes, nothing is asked and each step
 // takes its flag, then the saved value, then the default.
@@ -7,6 +7,8 @@
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { OBSERVER_PROVIDERS, type ObserverProvider } from '../../observer/types'
+import { readDisplayFile } from '../../context/display-file'
+import { HOLDOUT_HOSTS } from '../../context/holdout'
 import { encodeRecoveryCode } from '../../sqlite/recovery'
 import { newDbKey } from '../../sqlite/keys'
 import { checkHealth, readDaemonInfo } from '../daemon-client'
@@ -59,6 +61,8 @@ export interface SetupFlags {
   yes: boolean
   /** --path or --no-path: the PATH question answered up front. */
   path?: PathFlag
+  /** --holdout or --no-holdout: the impact test question answered up front. */
+  holdout?: boolean
 }
 
 export type EncryptionAnswer =
@@ -78,6 +82,8 @@ export interface SetupAnswers {
   autoUpdate: boolean
   /** The answer to "Add kinfold to your PATH?"; null or absent when it was not asked. */
   path?: PathAnswer | null
+  /** The answer to "Run the impact test?"; absent when it was not asked, and the setting then stays as it is. */
+  holdout?: boolean
 }
 
 export const NO_TTY_ENCRYPTION_CHANGE = 'changing encryption on an existing store needs a terminal; run kinfold encrypt or kinfold decrypt'
@@ -415,7 +421,7 @@ function commandRow(env: InstallEnv, answers: SetupAnswers, flags: SetupFlags): 
   return summary === null ? null : summary.startsWith(COMMAND_PREFIX) ? summary.slice(COMMAND_PREFIX.length) : summary
 }
 
-async function summaryStep(env: InstallEnv, ask: Prompts, answers: SetupAnswers, flags: SetupFlags): Promise<void> {
+async function summaryStep(env: InstallEnv, ask: Prompts, answers: SetupAnswers, flags: SetupFlags, profiles: ProfileTable): Promise<void> {
   const command = commandRow(env, answers, flags)
   const rows = [
     `Memory folder   ${tildeHome(env, answers.dataDir)}`,
@@ -425,6 +431,7 @@ async function summaryStep(env: InstallEnv, ask: Prompts, answers: SetupAnswers,
     `Port            ${answers.port}`,
     `Update check    ${answers.updateCheck ? 'daily' : 'off'}`,
     `Auto-update     ${!answers.updateCheck ? 'off (the update check is off)' : answers.autoUpdate ? 'patch releases' : 'off'}`,
+    ...(answers.holdout === undefined ? [] : [`Impact test     ${answers.holdout ? `on for ${impactAgents(profiles)}` : 'off'}`]),
     ...(command === null ? [] : [`kinfold command ${command}`]),
   ]
   ask.section('Your choices', rows.map((text) => ({ mark: 'none' as const, text })))
@@ -463,6 +470,20 @@ async function updatesStep(ask: Prompts | null, state: SetupState, flags: SetupF
   return picked === 'off' ? { updateCheck: false, autoUpdate } : { updateCheck: true, autoUpdate: picked === 'auto' }
 }
 
+const impactAgents = (profiles: ProfileTable): string => HOLDOUT_HOSTS.map((host) => profiles[host as InstallHost].name).join(', ')
+
+/**
+ * The opt-in impact test, asked only when an agent it runs on is being wired:
+ * elsewhere it would hold nothing back and measure nothing. A flag answers it,
+ * and with nothing to ask the setting stays as it is. The default is the
+ * saved choice, read from the copy the daemon keeps in the data folder.
+ */
+async function holdoutStep(env: InstallEnv, ask: Prompts | null, flags: SetupFlags, hosts: readonly InstallHost[], profiles: ProfileTable): Promise<boolean | undefined> {
+  if (ask === null || flags.holdout !== undefined || !hosts.some((host) => HOLDOUT_HOSTS.includes(host))) return undefined
+  const agents = impactAgents(profiles)
+  return ask.confirm(`Run the impact test? Kinfold skips memory on about 1 in 10 ${agents} prompts and compares token use, to measure what memory saves.`, readDisplayFile(env.dataDir).holdout)
+}
+
 /** The machine as seen from another folder: the env aimed there and the state read from it. */
 export interface FolderTarget {
   env: InstallEnv
@@ -495,8 +516,9 @@ export async function runWizard(
   const encryption = await encryptionStep(env, ask, state, flags, choice.dryRun)
   const port = await portStep(env, ask, state, flags)
   const { updateCheck, autoUpdate } = await updatesStep(ask, state, flags)
+  const holdout = await holdoutStep(env, ask, flags, hosts, profiles)
   const path = await pathStep(env, ask, flags)
-  const answers: SetupAnswers = { dataDir, hosts, observers, encryption, port, updateCheck, autoUpdate, path }
-  if (ask !== null) await summaryStep(env, ask, answers, flags)
+  const answers: SetupAnswers = { dataDir, hosts, observers, encryption, port, updateCheck, autoUpdate, path, ...(holdout !== undefined ? { holdout } : {}) }
+  if (ask !== null) await summaryStep(env, ask, answers, flags, profiles)
   return answers
 }

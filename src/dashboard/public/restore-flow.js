@@ -80,3 +80,29 @@ const STEPS = {
 export function stepText(step) {
   return (step !== null && STEPS[step]) || 'Restoring…'
 }
+
+const UNDO_STEPS = {
+  check: 'Checking the kept store and its key…',
+  close: 'Closing the store. This waits up to half a minute for agent sessions to let go of it…',
+  swap: 'Putting the kept store in place…',
+  reopen: 'Opening the store…',
+}
+
+/**
+ * What the page says while GET /restore/status reports a step of a switch back.
+ * @param {string | null} step
+ */
+export function undoStepText(step) {
+  return (step !== null && UNDO_STEPS[step]) || 'Switching back…'
+}
+
+/**
+ * When the kept store was replaced, from a /restore/status answer; null when
+ * none is kept, or when the daemon is too old to say.
+ * @param {unknown} answer
+ * @returns {number | null}
+ */
+export function keptAt(answer) {
+  const kept = answer !== null && typeof answer === 'object' ? answer.kept : null
+  return kept !== null && typeof kept === 'object' && typeof kept.replacedAt === 'number' ? kept.replacedAt : null
+}

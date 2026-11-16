@@ -1,6 +1,6 @@
 import { writeBackupRecord } from '../backup/record'
 import { afterEach, expect, test } from 'bun:test'
-import { chmodSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { mergeSamHooks, samHookGroup } from './claude-hooks'
 import { entryCommand, entryIdentity, installedProgramPath } from './entry'
@@ -233,6 +233,19 @@ test('status says when the last backup was made, and nothing when there is none'
   expect(w.out).toContain('backup: last made 2027-01-15T08:00:00.000Z')
   // An old backup is stated, never nagged about.
   expect(w.out.filter((line) => line.includes('backup')).join('\n')).not.toMatch(/warning|old|overdue/i)
+})
+
+test('status mentions a store a restore kept, with the way back, and nothing when there is none', async () => {
+  const w = make({ withLibrary: false })
+  mkdirSync(w.dataDir, { recursive: true })
+  await status(w.env, '0.1.0')
+  expect(w.out.some((line) => line.includes('kinfold-replaced'))).toBe(false)
+  w.out.length = 0
+  const kept = join(w.dataDir, 'memory.db.kinfold-replaced')
+  writeFileSync(kept, 'SQLite format 3\u0000 and the rest of a store')
+  utimesSync(kept, 1_800_000_000, 1_800_000_000)
+  await status(w.env, '0.1.0')
+  expect(w.out).toContain(`kept store: the store replaced on 2027-01-15T08:00:00.000Z is kept as ${kept}; kinfold restore --undo switches back to it`)
 })
 
 test('status names the service', async () => {

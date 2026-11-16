@@ -56,3 +56,47 @@ export function readRestoreJournal(dbPath: string): RestoreJournal | null {
     return null
   }
 }
+
+/** How a store is held: with a key in the key store, or as plaintext. */
+export type StoreKind = 'plain' | 'encrypted'
+
+/** The entry of `kinfold restore --undo`, which makes the kept store and the store in use change places. */
+export interface UndoJournal {
+  op: 'restore-undo'
+  pid: number
+  startedAt: number
+  /** The store that was in use when the run began. */
+  current: StoreKind
+  /** The store a restore had kept. */
+  kept: StoreKind
+  /** Set once the kept store is under memory.db: from here the run can only be finished. */
+  phase?: 'swapped'
+  /** The run gave up with the marker left for `kinfold key resume`; its pid no longer means "still running". */
+  abandoned?: boolean
+}
+
+export function writeUndoJournal(dbPath: string, journal: UndoJournal): void {
+  writeFileAtomic(maintenancePath(dbPath), `${JSON.stringify(journal)}\n`, DATA_FILE_MODE)
+}
+
+const isKind = (value: unknown): value is StoreKind => value === 'plain' || value === 'encrypted'
+
+/** The marker's content when it is an undo's; null for a missing or unreadable marker and for any other operation. */
+export function readUndoJournal(dbPath: string): UndoJournal | null {
+  try {
+    const value: unknown = JSON.parse(readFileSync(maintenancePath(dbPath), 'utf8'))
+    if (!isRecord(value) || value.op !== 'restore-undo' || typeof value.pid !== 'number') return null
+    if (!isKind(value.current) || !isKind(value.kept)) return null
+    return {
+      op: 'restore-undo',
+      pid: value.pid,
+      startedAt: Number(value.startedAt ?? 0),
+      current: value.current,
+      kept: value.kept,
+      ...(value.phase === 'swapped' ? { phase: 'swapped' as const } : {}),
+      ...(value.abandoned === true ? { abandoned: true } : {}),
+    }
+  } catch {
+    return null
+  }
+}

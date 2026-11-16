@@ -36,6 +36,7 @@ function fakeAssets(overrides: { sqlite3mcSha256?: string; vec0Sha256?: string; 
     vec0: { bytes: async () => VEC0, sha256: overrides.vec0Sha256 ?? sha(VEC0) },
     dashboardFile: (name) => (name === 'index.html' || name.endsWith('.js') ? new Blob([`embedded ${name}`]) : null),
     opencodePlugin: async () => 'embedded opencode plugin',
+    kiloPlugin: async () => 'embedded kilo plugin',
   }
 }
 

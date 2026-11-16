@@ -25,7 +25,7 @@ plan (dry run, nothing is changed): 25 actions
   13. write <root>/home/.config/opencode/plugins/kinfold.js: create (6 lines)
   14. mkdir <root>/home/.config/opencode/plugins/kinfold-recall (mode 0755)
   15. write <root>/home/.config/opencode/plugins/kinfold-recall/server.js: create (3 lines)
-  16. write <root>/home/.config/opencode/plugins/kinfold-recall/tui.js: create (84 lines)
+  16. write <root>/home/.config/opencode/plugins/kinfold-recall/tui.js: create (124 lines)
   17. mkdir <root>/home/.config/opencode (mode 0755)
   18. write <root>/home/.config/opencode/opencode.json: add the Kinfold MCP server under "mcp"; every other key kept
   19. mkdir <root>/home/Library/LaunchAgents (mode 0755)

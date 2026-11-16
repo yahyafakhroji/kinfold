@@ -277,8 +277,8 @@ test('a newer program from npx replaces bin/kinfold after the summary', async ()
   const { w, binPath, source } = programWorld()
   expect(await install(w.env, { ...YES, programSource: source })).toBe(EXIT_OK)
   writeFileSync(source, 'kinfold program v2\n', { mode: 0o755 })
-  // agents, observer, keep encryption, port, update check, summary
-  const { log, terminal } = logged(w, Array(6).fill(ENTER))
+  // agents, observer, keep encryption, port, update check, impact test, summary
+  const { log, terminal } = logged(w, Array(7).fill(ENTER))
   w.env = { ...w.env, terminal, io: { ...w.env.io, interactive: true } }
   // --verbose puts each numbered step on the terminal as it ends, so the order shows there.
   expect(await install(w.env, { ...YES, yes: false, verbose: true, programSource: source })).toBe(EXIT_OK)
@@ -361,8 +361,8 @@ posixOnly('POSIX paths')('a first install on a typed folder plans against that f
   const w = make({ interactive: true })
   const other = join(w.root, 'other-memory')
   openStore(other, { keys: NO_DB_KEYS }).db.close()
-  // folder, agents, observer, keep it plaintext, port, update check, summary
-  const term = fakeTerminal([other, ENTER, ENTER, ENTER, 'n', ENTER, ENTER, ENTER])
+  // folder, agents, observer, keep it plaintext, port, update check, impact test, summary
+  const term = fakeTerminal([other, ENTER, ENTER, ENTER, 'n', ENTER, ENTER, ENTER, ENTER])
   w.env = { ...w.env, terminal: term }
   expect(await install(w.env, { ...YES, yes: false, dryRun: true })).toBe(EXIT_OK)
   // A dry run on a terminal still lists the whole plan, on the terminal.

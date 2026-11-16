@@ -42,6 +42,8 @@ const ROUTES: readonly (readonly [method: string, path: string, reads: boolean])
   // Answers 503 unread in a daemon with no observer, as this rig's is.
   ['POST', '/observer/test', false],
   ['POST', '/spool/nudge', false],
+  // Takes no body: it is answered without reading one.
+  ['POST', '/restore/undo', false],
   ['POST', '/data/scan', false],
   ['POST', '/dashboard/login-code', false],
   ['GET', '/sessions', false],
