@@ -5,6 +5,7 @@
 
 import { api, errorText } from './api.js'
 import { h, notice, replaceContent } from './dom.js'
+import { loadEmbeddingsBlock } from './embeddings-block.js'
 
 // The daemon's OBSERVER_PROVIDERS, in its order (a test holds them equal).
 export const PROVIDERS = ['claude-cli', 'openrouter', 'codex-cli', 'opencode-cli', 'goose-cli', 'anthropic-api', 'openai-api', 'gemini-api', 'qwen-api', 'openai-compatible']
@@ -241,10 +242,22 @@ export function hostForms(view) {
   return hostEntries(view).map((entry) => hostForm(entry.host, entry.choice, entry.problem, safety, probe))
 }
 
+/**
+ * An OpenAI-compatible observer's address on this machine, offered as the
+ * local LLM embedding address; a remote one never is.
+ * @param {SettingsView} view
+ */
+export function loopbackObserverEndpoint(view) {
+  const row = view.rows.find((entry) => entry.provider === 'openai-compatible' && typeof entry.endpoint === 'string' && /^https?:\/\/(127\.\d+\.\d+\.\d+|localhost|\[::1\])(:\d+)?(\/|$)/.test(entry.endpoint))
+  return row === undefined ? null : row.endpoint
+}
+
 export async function renderModels() {
   const view = await api('GET', '/observer/settings')
+  const embeddings = await loadEmbeddingsBlock(loopbackObserverEndpoint(view))
   return h('section', { class: 'page', 'aria-labelledby': 'page-title' },
     h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '01'), h('h1', { id: 'page-title' }, 'Model settings'),
       h('p', { class: 'lede' }, 'Which observer model turns each host\'s events into memory. There is no silent fallback: a failing model keeps events queued.')),
-    h('div', { class: 'host-forms' }, hostForms(view)))
+    h('div', { class: 'host-forms' }, hostForms(view)),
+    embeddings)
 }

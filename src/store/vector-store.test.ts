@@ -52,7 +52,7 @@ test('the embedding text is title, narrative and facts, trimmed, capped, and tol
   expect(embeddingText({ title: 'x'.repeat(MAX_EMBED_CHARS + 50), narrative: 'n', facts: '[]' }).length).toBe(MAX_EMBED_CHARS)
 })
 
-test('the queue is newest first, empties once embedded, and comes back for a new model', () => {
+test('the queue is newest first, empties once embedded, and comes back for a new model beside the old one', () => {
   const older = seed('older', T0)
   const newer = seed('newer', T0 + 1)
   expect(embeddingInputs(temp.store.db, space('m1'), 10).map((input) => input.id)).toEqual([newer, older])
@@ -62,8 +62,9 @@ test('the queue is newest first, empties once embedded, and comes back for a new
   expect(vectorCounts(temp.store.db, space('m1'))).toEqual({ indexed: 2, pending: 0 })
   expect(vectorCounts(temp.store.db, space('m2'))).toEqual({ indexed: 0, pending: 2 })
   expect(embedAll('m2')).toBe(2)
-  expect(vectorRows()).toBe(2)
-  expect(vectorCounts(temp.store.db, space('m1'))).toEqual({ indexed: 0, pending: 2 })
+  // Each space keeps its own rows, so search can stay on m1 while m2 is built.
+  expect(vectorRows()).toBe(4)
+  expect(vectorCounts(temp.store.db, space('m1'))).toEqual({ indexed: 2, pending: 0 })
 })
 
 test('a limit smaller than the backlog returns its newest rows, newest first', () => {

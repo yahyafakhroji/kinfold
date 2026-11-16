@@ -98,6 +98,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bun tools/fetch-vec0.ts
 
+      # The model, its vocabulary and the runtime's wasm, each checked against
+      # its pin; gen-embedded refuses a build whose added size passes 60 MB.
+      - name: Fetch the pinned embedding model
+        timeout-minutes: 5
+        run: bun tools/fetch-model.ts
+
       - name: Build the program
         timeout-minutes: 10
         shell: bash
@@ -123,6 +129,10 @@ jobs:
             exit 1
           fi
           echo "$program --version printed $actual"
+          ls -l "$program"
+          # The program must run its embedded model with the checkout's copy out of reach.
+          rm -rf "${GITHUB_WORKSPACE:?}/.cache/embed-model"
+          "$program" embed-check
 
       - uses: actions/upload-artifact@v7
         with:

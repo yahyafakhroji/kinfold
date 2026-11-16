@@ -111,6 +111,25 @@ test('another connection holding the store, even idle, makes the conversion refu
   expect(existsSync(backupPath(path))).toBe(false)
 })
 
+const VEC0 = process.env.KINFOLD_TEST_VEC0
+test.skipIf(VEC0 === undefined || VEC0 === '')('a store holding a vec0 index converts without sqlite-vec loaded, and keeps the index rows', () => {
+  const key = newDbKey()
+  seed(holding(key))
+  const store = openStore(dataDir, { keys: holding(key) })
+  store.db.loadExtension(VEC0!)
+  store.db.run('CREATE VIRTUAL TABLE vec_space_1 USING vec0(observation_id INTEGER PRIMARY KEY, project_key TEXT PARTITION KEY, embedding float[2] distance_metric=cosine)')
+  store.db.prepare("INSERT INTO vec_space_1 (observation_id, project_key, embedding) VALUES (1, 'p', ?)").run(new Uint8Array(new Float32Array([1, 0]).buffer))
+  store.db.close()
+  inMaintenance(() => convertStore({ path, from: key, to: null, log: () => {}, freeBytes: PLENTY }))
+  expect(count(() => openPlain(path))).toBe(25)
+  const plain = openPlain(path)
+  try {
+    expect(plain.query<{ n: number }, []>('SELECT count(*) AS n FROM vec_space_1_rowids').get()!.n).toBe(1)
+  } finally {
+    plain.close()
+  }
+})
+
 test('the checks refuse: no marker, the wrong state, the same key, too little space, an old backup', () => {
   seed(NO_DB_KEYS)
   const key = newDbKey()

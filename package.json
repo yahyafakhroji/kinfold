@@ -23,6 +23,7 @@
     "typescript": "5.9.3"
   },
   "dependencies": {
-    "@clack/prompts": "1.8.1"
+    "@clack/prompts": "1.8.1",
+    "onnxruntime-web": "1.24.3"
   }
 }

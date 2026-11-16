@@ -25,6 +25,8 @@ export interface GeneratedAssets {
   dashboard: Readonly<Record<string, string>>
   opencodePlugin: string
   kiloPlugin: string
+  /** The local embedding model's files, read in place by the embed worker; absent in a build from before the model shipped. */
+  localModel?: { model: string; vocab: string; wasm: string }
 }
 
 /**

@@ -117,8 +117,7 @@ export function upsertVectors(db: Database, model: string, vectors: readonly Sto
   const statement = db.prepare(
     `INSERT INTO observation_vectors (observation_id, model, dims, embedding, created_at)
      SELECT id, $model, $dims, $embedding, $now FROM observations WHERE id = $id AND content_hash = $contentHash
-     ON CONFLICT (observation_id) DO UPDATE SET model = excluded.model, dims = excluded.dims,
-       embedding = excluded.embedding, created_at = excluded.created_at`,
+     ON CONFLICT (model, dims, observation_id) DO UPDATE SET embedding = excluded.embedding, created_at = excluded.created_at`,
   )
   const current = db.query<{ title: string; narrative: string; facts: string }, { id: number }>('SELECT title, narrative, facts FROM observations WHERE id = $id')
   return db.transaction(() => vectors.reduce((written, { id, contentHash, vector, text }) => {

@@ -24,7 +24,7 @@ On Windows, in PowerShell:
 irm https://github.com/yahyafakhroji/kinfold/releases/latest/download/install.ps1 | iex
 ```
 
-To install a specific release, run `npx kinfold@<version> install`, or set `KINFOLD_VERSION` for the script: `curl … | KINFOLD_VERSION=<version> sh`, or `$env:KINFOLD_VERSION = '<version>'` before `irm`. The curl and PowerShell installers download the program for your machine and check it against the release's `SHA256SUMS` before they run it. A program installed through npm checks its own bytes against the same list before `install` changes anything. The setup wizard asks where to keep the memory, which agents to wire, which model observes each one, whether to encrypt the store, which port the daemon uses, whether to check for updates and install patch releases on its own, and whether to put `kinfold` on your `PATH`. The agent list shows all 22 supported agents: you can tick the ones it found, and it shows the rest as not installed. Add `--dry-run` to see every change first, or `--yes` to take the defaults.
+To install a specific release, run `npx kinfold@<version> install`, or set `KINFOLD_VERSION` for the script: `curl … | KINFOLD_VERSION=<version> sh`, or `$env:KINFOLD_VERSION = '<version>'` before `irm`. The curl and PowerShell installers download the program for your machine and check it against the release's `SHA256SUMS` before they run it. A program installed through npm checks its own bytes against the same list before `install` changes anything. The setup wizard asks where to keep the memory, which agents to wire, which model observes each one, whether to encrypt the store, which port the daemon uses, whether to check for updates and install patch releases on its own, what makes the vectors for semantic search, and whether to put `kinfold` on your `PATH`. The agent list shows all 22 supported agents: you can tick the ones it found, and it shows the rest as not installed. Add `--dry-run` to see every change first, or `--yes` to take the defaults.
 
 On a terminal the install runs behind one progress bar and ends with a short summary. The full list of steps, with paths and backups, is in `~/.kinfold/logs/install.log`, and `--verbose` shows it on screen as it runs. When the output is not a terminal (a pipe, a script, CI) or under `--yes`, install prints that list as plain text and asks nothing.
 
@@ -62,7 +62,7 @@ Kinfold needs at least one supported coding agent. `kinfold status` lists them a
 - **Capture.** Hooks or plugins in each agent that has them record prompts, tool calls and their results. Most agents without hooks can still search Kinfold's memory through MCP. Secrets are redacted before anything is written.
 - **Observations.** A background observer reads finished turns and writes short observations that cite the events they came from: decisions, fixes, gotchas, how things work.
 - **Context.** Where an agent's hooks allow it, Kinfold adds a small block of related memory to the agent's context at session start, on each prompt, or both. `kinfold status` shows which.
-- **Search.** An MCP server gives agents `search`, `timeline` and `get_observations`. Goose and Continue need the server added by hand; Warp may need a setting turned on. Search is full-text, plus semantic search when you give Kinfold an OpenRouter key for embeddings.
+- **Search.** An MCP server gives agents `search`, `timeline` and `get_observations`. Goose and Continue need the server added by hand; Warp may need a setting turned on. Search is full-text plus semantic. The vectors for semantic search come from a small model Kinfold carries and runs on your CPU, so it is free, works offline, and no memory text leaves the machine. You can pick OpenRouter or a local LLM server instead. See [Embeddings for semantic search](#embeddings-for-semantic-search).
 - **What it recalled, on your screen.** After each prompt your agent shows one line, for example `kinfold · recalled 2 · #28771 Bun 1.4.4 is pinned · #94451 Schema version from MIGRATIONS`, or `kinfold · nothing recalled`. At session start it shows the newest memories it put in context. You see both; the model sees neither. See [Seeing what Kinfold does](#seeing-what-kinfold-does).
 - **Dashboard.** `kinfold dashboard` opens a local page. Sessions shows your prompts and the agents' replies as plain text, with what Kinfold recalled for each turn. Memory, Metrics and the observer settings sit beside it.
 - **Data control.** `kinfold retention` sets how long each kind of data is kept, `kinfold purge` removes a session, project or agent, and `kinfold scan` checks the store for secrets that slipped through. Purge shows what it would delete and asks first, and so does `kinfold findings --purge <id>`, which shows the finding and never the secret. A script passes `--yes`. Without a terminal or `--yes`, neither deletes anything.
@@ -176,18 +176,34 @@ To stop summaries for one agent, pick "off (capture only, no summaries)" in the 
 
 The observer sends session text to the model you picked. That text can include web pages and files someone else wrote. An API provider gets no tools in its request, so no tool can run, and an answer that asks for one is refused. Every login-based observer runs with its tools off, from a private folder, without your settings, hooks, plugins or MCP servers. Before Kinfold uses Codex, OpenCode or Goose as an observer, it plants an instruction to read a file. If the model calls a tool or repeats the file's contents, Kinfold stops that observer until its version or path changes, or you press Re-check in the dashboard.
 
+## Embeddings for semantic search
+
+Semantic search compares vectors, and something has to turn each memory and each query into one. You pick what:
+
+| Embedder | Runs | Costs | Needs |
+| --- | --- | --- | --- |
+| `local` (default) | all-MiniLM-L6-v2, bundled, on your CPU | nothing | nothing |
+| `openrouter` | `openai/text-embedding-3-small` at OpenRouter | OpenRouter's price per token | an OpenRouter API key; memory text goes to OpenRouter |
+| `local-llm` | an OpenAI-style `/embeddings` server on this machine, such as Ollama or LM Studio | nothing | the server's address on loopback and a model name |
+
+Pick one in the wizard, with `--embeddings local`, `--embeddings openrouter` or `--embeddings local-llm:<model>@<url>` (for example `--embeddings local-llm:nomic-embed-text@http://127.0.0.1:11434/v1`), or on the dashboard's Models page. A local LLM address must be 127.0.0.1, localhost or ::1, and Kinfold asks the server for one embedding before it saves the choice. The embedding address and the OpenAI-compatible observer's endpoint are separate settings, but setting up either one offers the other's address on this machine as its default.
+
+Each embedder and model has its own index. When you switch, Kinfold builds the new index in the background, about 64 memories every 10 seconds with the local model, and search keeps using the old one until the new index is complete. Then search moves over and the old vectors are deleted. Leaving OpenRouter or a local LLM server is the exception: queries stop going there at once, so semantic search falls back to keywords until the new index is ready. A store that already has OpenRouter vectors stays on OpenRouter until you switch. Any other store moves to the local model, even with an OpenRouter key, since that key may be there only for the observer.
+
+The local model and its runtime make the program about 36 MB larger: the model is 23 MB and the WebAssembly build of [ONNX Runtime](https://onnxruntime.ai) that runs it is 12 MB. Both are inside the program, checked against pinned SHA-256 hashes, and never downloaded at run time. The model runs in a worker thread on one core, so capture and the hooks don't wait for it, and a search query goes ahead of any indexing.
+
 ## Performance
 
-Measured on 2026-11-12 on an Apple-silicon Mac, against a 450 MB encrypted store holding 30,747 vectors:
+Measured on 2026-11-16 by `src/vectors/knn-bench.test.ts` on an Apple-silicon Mac, against a store seeded with 50,000 vectors of 384 dimensions:
 
-| What | Time or size |
+| What | Time |
 | --- | --- |
-| Semantic vector ranking, per search | 62 to 204 ms (2.5 s cold and 0.7 s warm before the in-memory vector cache) |
-| Daemon `/health` while searches run | under 2 ms |
-| Daemon memory | about 234 MB RSS |
-| Loading the vector cache at start | about 0.4 s |
+| Nearest 10 across every project, through the index | 26 ms (38 ms for a full scan) |
+| Nearest 10 in one project of 2,500 vectors | 1.4 ms (8.5 ms for a scan) |
+| Loading the local model | 0.2 to 1 s on the five release targets |
+| Embedding three short texts with the local model | 39 to 176 ms on the same runners |
 
-Ranking runs in a worker thread over a 16-bit copy of the vectors, so searches don't hold up capture or the hooks: `/health` stayed under 2 ms while they ran. Most of a semantic search's time is the embedding call to OpenRouter, which took 1.1 to 1.6 s in the same test.
+Each embedding space has a [sqlite-vec](https://github.com/asg017/sqlite-vec) `vec0` index inside the store, partitioned by project, so a search reads one project's vectors instead of every row. The index only proposes candidates: the exact distances and the filters come from the stored vectors. Searches run in a worker thread on their own connection, so they don't hold up capture or the hooks.
 
 ## Security
 
@@ -196,10 +212,10 @@ Ranking runs in a worker thread over a 16-bit copy of the vectors, so searches d
 - **Redaction before storage.** API keys, tokens, private keys and similar secrets become typed markers before an event is written. Each marker carries a short reference derived from an HMAC of the value, so two mentions of one secret match without the secret being stored. Redacting an observation later also drops the vector embedded from its old text.
 - **Loopback only.** The daemon listens on 127.0.0.1. Every route except `/health` needs its token, and a Host check blocks DNS rebinding.
 - **No elevation.** Install, update and uninstall run as you.
-- **One runtime dependency.** The program bundles [`@clack/prompts`](https://github.com/bombshell-dev/clack), pinned to an exact version, to draw the CLI's output on a terminal. The hook, the MCP server and the daemon do not load it, and a test enforces that.
+- **Two runtime dependencies.** The program bundles [`@clack/prompts`](https://github.com/bombshell-dev/clack) to draw the CLI's output on a terminal, and [`onnxruntime-web`](https://www.npmjs.com/package/onnxruntime-web) to run the local embedding model. Both are pinned to an exact version. The hook, the MCP server and the daemon do not load clack, and a test enforces that. Only the daemon's embedding worker loads ONNX Runtime.
 - **Checked downloads.** The curl and PowerShell installers, `kinfold install` and `kinfold update` refuse a program whose SHA-256 doesn't match the release's `SHA256SUMS`. The npm packages carry the same programs, published from CI with [npm provenance](https://docs.npmjs.com/generating-provenance-statements).
 
-What leaves your machine: session text goes to the observer model you chose (nothing leaves when that model runs on this machine), and observation text goes to OpenRouter for embeddings if you gave Kinfold an OpenRouter key.
+What leaves your machine: session text goes to the observer model you chose (nothing leaves when that model runs on this machine), and observation text goes to OpenRouter for embeddings only if you choose OpenRouter as the embedder. The local model and a local LLM server keep it on this machine.
 
 ## Backup and restore
 
@@ -279,6 +295,7 @@ cd kinfold
 bun install
 bun tools/build-sqlite3mc.ts   # builds the pinned sqlite3mc into .cache
 bun tools/fetch-vec0.ts        # downloads the pinned sqlite-vec build for semantic search
+bun tools/fetch-model.ts       # downloads the pinned embedding model and checks every file
 ```
 
 Run the tests and the type check:
@@ -297,7 +314,7 @@ bun tools/build-release.ts darwin-arm64 0.1.0-local.1
 ./dist/kinfold-darwin-arm64 --version
 ```
 
-The build embeds the sqlite3mc and sqlite-vec files from `.cache`, so build on the platform you target. `.github/workflows/release-build.yml` shows the same steps CI runs for each target.
+The build embeds the sqlite3mc, sqlite-vec and embedding model files from `.cache`, so build on the platform you target. `./dist/kinfold-<target> embed-check` loads the bundled model and embeds three fixed texts, which shows the program carries a working model. `.github/workflows/release-build.yml` shows the same steps CI runs for each target.
 
 ## Changes and releases
 

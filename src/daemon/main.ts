@@ -11,7 +11,8 @@ import { processKeyStoreDeps, resolveKeyStore } from '../secrets/key-store-recor
 import { type DbKeyStore, dbKeyStoreOf } from '../sqlite/keys'
 import { resolveDataDir } from '../store/data-dir'
 import { applyDataDirFlag } from '../store/data-dir-flag'
-import { type Embedder, createOpenRouterEmbedder } from '../vectors/embedder'
+import type { Database } from '../sqlite/types'
+import { type EmbedderSet, embeddersFor } from '../vectors/embedders'
 import { VERSION } from '../version'
 import { closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, realpathSync, writeSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -26,17 +27,12 @@ import { parseIdleMs, parseMaxWaitMs } from './observer-scheduler'
 const OWNER_ONLY_UMASK = 0o077
 
 /**
- * The observer's OpenRouter key, read at start and again after a 401; a keychain
- * error means no embeddings, not a failed start. With no key at start there is
- * no embedder until the next restart.
+ * The embedders from the store's settings, at each core start. The OpenRouter
+ * key is read then and again after a 401; a keychain error counts as no key,
+ * not a failed start.
  */
-function embedderFrom(credentials: CredentialProvider): Embedder | null {
-  try {
-    const apiKey = credentials.get(OPENROUTER_CREDENTIAL_REF)
-    return apiKey === null ? null : createOpenRouterEmbedder({ apiKey, rereadKey: () => credentials.get(OPENROUTER_CREDENTIAL_REF) })
-  } catch {
-    return null
-  }
+function embeddersFrom(credentials: CredentialProvider): (db: Database) => EmbedderSet {
+  return (db) => embeddersFor(db, { openRouterKey: () => credentials.get(OPENROUTER_CREDENTIAL_REF) }, Date.now())
 }
 
 /**
@@ -181,7 +177,7 @@ export async function runDaemon(argv: readonly string[]): Promise<void> {
       keychain: credentials,
       dbKeys,
       keyStore,
-      vectors: { embedder: embedderFrom(credentials) },
+      vectors: { embedders: embeddersFrom(credentials) },
       observer: {
         runnerFor: runnerFactory(runnerDeps),
         cliRunnerFor: (settings) => createCliRunner(settings, runnerDeps),

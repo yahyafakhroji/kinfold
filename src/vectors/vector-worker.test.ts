@@ -10,7 +10,9 @@ import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
 import { openStore } from '../store/db'
 import { NO_FILTERS, type VectorHit, nearestObservations, upsertVectors } from '../store/vector-store'
 import { upsertProject } from '../store/writes'
+import { startActive, setVecReady } from '../store/vector-spaces'
 import { loadVec0, vec0Path } from './extension'
+import { createVecIndex, reconcileVecIndex, writeVecRows } from './vec-index'
 import { type VectorQueries, runNow, startVectorWorker, workerOrInline } from './vector-worker'
 
 const FAKE = new URL('../../test/fake-search-worker.ts', import.meta.url).href
@@ -26,7 +28,7 @@ afterEach(async () => {
 })
 
 const startFake = (mode: string, limitMs = 2_000) =>
-  startVectorWorker({ dbPath: mode, dataDir: '/nowhere', key: null, libraryOverride: null, cacheKib: null, prewarm: null, workerUrl: FAKE, limitMs })
+  startVectorWorker({ dbPath: mode, dataDir: '/nowhere', key: null, libraryOverride: null, cacheKib: null, workerUrl: FAKE, limitMs })
 
 async function fake(mode: string, limitMs = 2_000): Promise<VectorQueries> {
   const started = await startFake(mode, limitMs)
@@ -109,30 +111,6 @@ test('exclusive work waits for the read in the worker, and new reads wait for th
   expect(order).toEqual(['read', 'work', 'later read'])
 })
 
-test('exclusive work waits for the cache prewarm, which reads the store like a search', async () => {
-  const started = await startVectorWorker({
-    dbPath: 'prewarm', dataDir: '/nowhere', key: null, libraryOverride: null, cacheKib: null, prewarm: { model: 'm', dims: 2 }, workerUrl: FAKE,
-  })
-  if (!started.ok) throw new Error(started.reason)
-  opened.push(started.queries)
-  const at = performance.now()
-  const ranAfter = await started.queries.exclusive(() => performance.now() - at)
-  expect(ranAfter).toBeGreaterThan(200)
-})
-
-test('a cache refresh asked during exclusive work waits until the work is done', async () => {
-  const queries = await fake('ok')
-  const order: string[] = []
-  const work = queries.exclusive(() => {
-    queries.changed([1, 2])
-    order.push('work')
-  })
-  await work
-  // The refresh was held, then posted; the next exclusive pass waits for its answer.
-  await queries.exclusive(() => order.push('next work'))
-  expect(order).toEqual(['work', 'next work'])
-})
-
 test('with no read in flight, exclusive work runs at once', async () => {
   const queries = await fake('ok')
   let ran = false
@@ -157,7 +135,7 @@ test('a worker that stops fails its query and every later one with a reason', as
 test('after a worker stops, searches move to the daemon connection and the move is logged once', async () => {
   const lines: string[] = []
   const inlineHits: VectorHit[] = [{ id: 1, distance: 0.5 }]
-  const inline: VectorQueries = { nearest: async () => inlineHits, distances: async () => [], exclusive: runNow, changed: () => {}, close: async () => {} }
+  const inline: VectorQueries = { nearest: async () => inlineHits, distances: async () => [], exclusive: runNow, close: async () => {} }
   const queries = workerOrInline(startFake('crash'), inline, (line) => lines.push(line))
   opened.push(queries)
   expect(await queries.nearest(NEAREST)).toEqual(inlineHits)
@@ -167,7 +145,7 @@ test('after a worker stops, searches move to the daemon connection and the move 
 
 test('a worker that cannot start leaves searches on the daemon connection', async () => {
   const lines: string[] = []
-  const inline: VectorQueries = { nearest: async () => [{ id: 2, distance: 0.1 }], distances: async () => [], exclusive: runNow, changed: () => {}, close: async () => {} }
+  const inline: VectorQueries = { nearest: async () => [{ id: 2, distance: 0.1 }], distances: async () => [], exclusive: runNow, close: async () => {} }
   const queries = workerOrInline(startFake('fail-start'), inline, (line) => lines.push(line))
   expect(await queries.nearest(NEAREST)).toEqual([{ id: 2, distance: 0.1 }])
   expect(lines).toEqual(['vectors search worker off (cannot open the store); searching on the daemon connection'])
@@ -201,21 +179,29 @@ for (const encrypted of [false, true]) {
       const points: [number, number][] = [[1, 0], [0, 1], [-1, 0]]
       upsertVectors(store.db, 'm', ids.map((id, index) => ({ id, contentHash: hash(id), vector: Float32Array.from(points[index]!) })), T0)
 
-      const started = await startVectorWorker({ dbPath: store.path, dataDir, key, libraryOverride: process.env[SQLITE3MC_LIB_ENV] ?? null, cacheKib: 1_024, prewarm: { model: 'm', dims: 2 } })
+      const started = await startVectorWorker({ dbPath: store.path, dataDir, key, libraryOverride: process.env[SQLITE3MC_LIB_ENV] ?? null, cacheKib: 1_024 })
       if (!started.ok) throw new Error(started.reason)
       opened.push(started.queries)
       const query = { ...NEAREST, vector: Float32Array.from([1, 0.1]), project: 'b', k: 10 }
+      // No space row yet: the worker scans, as before the index.
       expect(await started.queries.nearest(query)).toEqual(nearestObservations(store.db, query))
 
-      // A vector the indexer writes after the cache loaded is found once the worker is told.
+      // Through the vec0 index once the daemon has built it.
+      const space = startActive(store.db, { model: 'm', dims: 2 }, T0)
+      createVecIndex(store.db, space)
+      reconcileVecIndex(store.db, space)
+      setVecReady(store.db, space.id, true)
+      expect(await started.queries.nearest(query)).toEqual(nearestObservations(store.db, query))
+
+      // A vector the indexer writes, and the daemon puts in the index, is found.
       const added = seedObservation(store, { sessionId: session, projectKey: 'b', host: 'claude-code', title: 'closest', at: T0 + 1 })
       upsertVectors(store.db, 'm', [{ id: added, contentHash: hash(added), vector: Float32Array.from([1, 0.11]) }], T0)
-      started.queries.changed([added])
+      writeVecRows(store.db, space, [{ id: added, project: 'b', vector: Float32Array.from([1, 0.11]) }])
       const withAdded = await started.queries.nearest(query)
       expect(withAdded?.[0]?.id).toBe(added)
       expect(withAdded).toEqual(nearestObservations(store.db, query))
 
-      // A row deleted under an exclusive pass (as purge deletes) is gone from the answer and the cache.
+      // A row deleted under an exclusive pass (as purge deletes) is gone from the answer before the index catches up.
       await started.queries.exclusive(() => store.db.run(`DELETE FROM observations WHERE id = ${ids[0]}`))
       const afterDelete = await started.queries.nearest(query)
       expect(afterDelete?.map((hit) => hit.id)).not.toContain(ids[0])

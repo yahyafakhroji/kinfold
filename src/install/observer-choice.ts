@@ -60,6 +60,8 @@ export interface ChoiceOptions {
   flags: readonly ObserverFlag[]
   /** What each host has now (setup/prefill.ts); under --yes a host with no flag keeps its row instead of taking the built-in default. */
   saved?: ReadonlyMap<InstallHost, ObserverSettingsInput>
+  /** The local LLM address the embeddings use, offered for an OpenAI-compatible observer; read only when that question is asked. */
+  embeddingUrl?: () => Promise<string | null>
   /** The providers whose CLI is not on this machine; read only when a question is asked, so a run that asks nothing looks for no CLI. Absent: every provider is offered. */
   missingClis?: () => Promise<MissingClis>
   /**
@@ -124,11 +126,17 @@ export function describeInput(input: ObserverSettingsInput): string {
   return `${input.provider}/${input.model}${input.endpoint === undefined ? '' : ` at ${input.endpoint}`}`
 }
 
-/** The address offered for an endpoint provider: this agent's saved one, then another agent's, then the usual local or regional one. */
-export function defaultEndpoint(provider: EndpointProvider, host: string, saved?: ReadonlyMap<InstallHost, ObserverSettingsInput>): string {
+/**
+ * The address offered for an endpoint provider: this agent's saved one, then
+ * another agent's, then (for an OpenAI-compatible server) the local LLM the
+ * embeddings already use, then the usual local or regional one. The two
+ * settings stay separate; this only saves typing the same address twice.
+ */
+export function defaultEndpoint(provider: EndpointProvider, host: string, saved?: ReadonlyMap<InstallHost, ObserverSettingsInput>, embeddingUrl?: string | null): string {
   const rows = [...(saved?.values() ?? [])].filter((row) => row.provider === provider && row.endpoint !== undefined)
   const own = rows.find((row) => row.host === host) ?? rows[0]
   if (own?.endpoint !== undefined) return own.endpoint
+  if (provider === 'openai-compatible' && embeddingUrl !== undefined && embeddingUrl !== null) return embeddingUrl
   return provider === 'qwen-api' ? DASHSCOPE_DEFAULT_ENDPOINT : LOCAL_ENDPOINT
 }
 

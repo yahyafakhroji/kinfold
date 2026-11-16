@@ -42,3 +42,24 @@ test('an embed timeout is a timeout answer, and any other embed failure is unava
   expect(await search(REQUEST)).toMatchObject({ status: 'timeout' })
   expect(await search(REQUEST)).toEqual({ status: 'unavailable', reason: 'the query could not be embedded (openrouter answered 429)' })
 })
+
+test('the query is embedded as a query, so a local model puts it ahead of indexing', async () => {
+  const purposes: (string | undefined)[] = []
+  const embedder = { model: 'm', dims: 2, embed: async (texts: readonly string[], _signal?: AbortSignal, purpose?: 'query' | 'index') => (purposes.push(purpose), texts.map(() => new Float32Array(2))) }
+  const search = createSemanticSearch({ db: temp.store.db, embedder, support: { ok: true, detail: 'sqlite-vec v0.1.9' } })
+  await search(REQUEST)
+  expect(purposes).toEqual(['query'])
+})
+
+test('the embedder is asked for at each search; none gives its reason, and a new one does not reuse the old cache', async () => {
+  let current: { embedder: ReturnType<typeof fakeEmbedder> | null; reason: string } = { embedder: null, reason: 'the new space is still being built' }
+  const search = createSemanticSearch({ db: temp.store.db, embedder: null, embedderFor: () => current, support: { ok: true, detail: 'sqlite-vec v0.1.9' } })
+  expect(await search(REQUEST)).toEqual({ status: 'unavailable', reason: 'the new space is still being built' })
+  const first = fakeEmbedder('one')
+  current = { embedder: first, reason: '' }
+  await search(REQUEST)
+  const second = fakeEmbedder('two')
+  current = { embedder: second, reason: '' }
+  await search(REQUEST)
+  expect([first.calls.length, second.calls.length]).toEqual([1, 1])
+})

@@ -44,11 +44,12 @@ export interface IndexerOptions {
   db: Database
   embedder: Embedder
   batchSize?: number
-  maxBatchesPerTick?: number
+  /** A function is read at each pass: the daemon slows the local model down so it never holds a core for long. */
+  maxBatchesPerTick?: number | (() => number)
   now?: () => number
   log: (line: string) => void
-  /** After each batch, the ids it embedded: the search worker re-reads them into its vector cache. */
-  onWritten?: (ids: readonly number[]) => void
+  /** After each batch, the rows it wrote and their vectors: the daemon puts them in the vec0 index. */
+  onWritten?: (rows: readonly { id: number; vector: Float32Array }[]) => void
 }
 
 export function backoffMs(failures: number): number {
@@ -64,7 +65,8 @@ export function createVectorIndexer(options: IndexerOptions): VectorIndexer {
   const { db, embedder, log } = options
   const now = options.now ?? Date.now
   const batchSize = options.batchSize ?? DEFAULT_EMBED_BATCH
-  const maxBatches = options.maxBatchesPerTick ?? DEFAULT_BATCHES_PER_TICK
+  const cap = options.maxBatchesPerTick ?? DEFAULT_BATCHES_PER_TICK
+  const maxBatches = (): number => (typeof cap === 'function' ? cap() : cap)
   let running: Promise<void> | null = null
   let stopped = false
   let failures = 0
@@ -77,11 +79,12 @@ export function createVectorIndexer(options: IndexerOptions): VectorIndexer {
   const runBatch = async (): Promise<number> => {
     const inputs = embeddingInputs(db, space, batchSize)
     if (inputs.length === 0) return 0
-    const vectors = await embedder.embed(inputs.map((input) => input.text), abort.signal)
+    const vectors = await embedder.embed(inputs.map((input) => input.text), abort.signal, 'index')
     if (stopped) return 0
-    const written = upsertVectors(db, embedder.model, inputs.map((input, index) => ({ id: input.id, contentHash: input.contentHash, text: input.text, vector: vectors[index]! })), now())
-    // A row skipped as purged is re-read too; the cache drops what the store no longer has.
-    if (written > 0) options.onWritten?.(inputs.map((input) => input.id))
+    const rows = inputs.map((input, index) => ({ id: input.id, contentHash: input.contentHash, text: input.text, vector: vectors[index]! }))
+    const written = upsertVectors(db, embedder.model, rows, now())
+    // A row skipped as purged has no stored vector, so search never takes it from the index either.
+    if (written > 0) options.onWritten?.(rows.map((row) => ({ id: row.id, vector: row.vector })))
     return written
   }
 
@@ -89,7 +92,8 @@ export function createVectorIndexer(options: IndexerOptions): VectorIndexer {
     const startedAt = now()
     let written = 0
     try {
-      for (let batch = 0; batch < maxBatches && !stopped; batch += 1) {
+      const batches = maxBatches()
+      for (let batch = 0; batch < batches && !stopped; batch += 1) {
         const n = await runBatch()
         if (n === 0) break
         written += n

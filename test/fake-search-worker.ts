@@ -5,7 +5,7 @@
 // does), 'crash' (throws on a request), anything else answers at once. A hit's
 // id is the nearest query's k, or the first id of a distances query.
 
-import type { WorkerChanged, WorkerClose, WorkerInvalidate, WorkerReply, WorkerRequest, WorkerStart } from '../src/vectors/vector-worker-protocol'
+import type { WorkerClose, WorkerReply, WorkerRequest, WorkerStart } from '../src/vectors/vector-worker-protocol'
 
 declare const self: Worker
 
@@ -20,26 +20,16 @@ function busy(): void {
   }
 }
 
-self.onmessage = (event: MessageEvent<WorkerStart | WorkerRequest | WorkerClose | WorkerChanged | WorkerInvalidate>) => {
+self.onmessage = (event: MessageEvent<WorkerStart | WorkerRequest | WorkerClose>) => {
   const message = event.data
   if (message.kind === 'start') {
     mode = message.dbPath
     const reply: WorkerReply = mode === 'fail-start' ? { kind: 'started', ok: false, reason: 'cannot open the store' } : { kind: 'started', ok: true }
     postMessage(reply)
-    // 'prewarm' loads its cache for BUSY_MS after the start, as a cold store would.
-    if (message.prewarm !== null) {
-      if (mode === 'prewarm') busy()
-      postMessage({ kind: 'upkept', rows: 0 } satisfies WorkerReply)
-    }
     return
   }
   if (message.kind === 'close') {
     postMessage({ kind: 'closed' } satisfies WorkerReply)
-    return
-  }
-  // Cache upkeep answers once it is done, as in the real worker.
-  if (message.kind === 'changed' || message.kind === 'invalidate') {
-    postMessage({ kind: 'upkept' } satisfies WorkerReply)
     return
   }
   if (mode === 'slow') return

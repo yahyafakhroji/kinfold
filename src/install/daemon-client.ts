@@ -5,6 +5,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { parseEmbeddingSettings, type EmbeddingSettings } from '../vectors/embedding-settings'
 import { isRecord } from '../contract/event'
 import { DEFAULT_PORT } from '../daemon/daemon'
 import { readDaemonEndpoint } from '../daemon/daemon-info'
@@ -149,6 +150,39 @@ export async function putObserverSettings(env: InstallEnv, input: ObserverSettin
   const detail = isRecord(body) && typeof body.error === 'string' ? `: ${body.error}` : ''
   throw new Error(`PUT /observer/settings for ${input.host} answered ${response.status}${detail}`)
 }
+
+/** The saved embedding settings, or null when no daemon answers or it is an older one without the route. */
+export async function getEmbeddingSettings(env: InstallEnv): Promise<EmbeddingSettings | null> {
+  try {
+    const { base, token } = authorized(env)
+    const response = await env.fetch(`${base}/embedding/settings`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+    if (response.status !== 200) return null
+    const body: unknown = await response.json()
+    if (!isRecord(body) || !isRecord(body.settings)) return null
+    const parsed = parseEmbeddingSettings(body.settings)
+    return parsed.ok ? { ...parsed.value, llmDims: typeof body.settings.llmDims === 'number' ? body.settings.llmDims : null } : null
+  } catch {
+    return null
+  }
+}
+
+/** Saves the embedding provider; the daemon checks a local LLM answers before it saves. Throws with the status and the daemon's message. */
+export async function putEmbeddingSettings(env: InstallEnv, settings: EmbeddingSettings): Promise<void> {
+  const { base, token } = authorized(env)
+  const response = await env.fetch(`${base}/embedding/settings`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(settings),
+    // A local LLM is probed before the save, and its first answer can take a model load.
+    signal: AbortSignal.timeout(EMBEDDING_PUT_TIMEOUT_MS),
+  })
+  if (response.status === 200) return
+  const body: unknown = await response.json().catch(() => null)
+  const detail = isRecord(body) && typeof body.error === 'string' ? `: ${body.error}` : ''
+  throw new Error(`PUT /embedding/settings answered ${response.status}${detail}`)
+}
+
+const EMBEDDING_PUT_TIMEOUT_MS = 70_000
 
 export type SettingsRead = { ok: true; view: ObserverSettingsView } | { ok: false; reason: string }
 

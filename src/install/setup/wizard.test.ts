@@ -25,8 +25,9 @@ import { LOCKED_FOLDER_NOTE, type SetupState, readSetupState } from './prefill'
 import { installRecordAction } from './record'
 import { INSTALL_HOSTS } from '../detect'
 import { withBlock } from '../path-setup'
-import { DOCS_HINT, DRY_RUN_NO_CODE, NOT_INSTALLED_HINT, NO_AGENTS_NOTE, NO_TTY_ENCRYPTION_CHANGE, STALE_DB_KEY, type SetupFlags, UNDETECTABLE_HINT, freePortFrom, runWizard } from './wizard'
+import { DOCS_HINT, DRY_RUN_NO_CODE, NOT_INSTALLED_HINT, NO_AGENTS_NOTE, NO_TTY_ENCRYPTION_CHANGE, STALE_DB_KEY, type SetupFlags, UNDETECTABLE_HINT, embeddingUrlDefault, freePortFrom, runWizard } from './wizard'
 import { posixOnly } from '../../../test/platform-guards'
+import { LOCAL_SETTINGS } from '../../vectors/embedding-settings'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -42,7 +43,8 @@ const CLAUDE_ROW: ObserverSettingsInput = { host: 'claude-code', provider: 'clau
 const CODEX_ROW: ObserverSettingsInput = { host: 'codex', provider: 'codex-cli', model: 'gpt-x', credentialRef: null, enabled: true }
 const NO_CHOICE: ChoiceOptions = { yes: false, dryRun: false, skipCheck: false, replaceCredential: false, credentialStdin: false, flags: [] }
 
-const flagsOf = (over: Partial<SetupFlags> = {}): SetupFlags => ({ dataDir: null, hosts: null, observers: [], noEncrypt: false, port: null, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, yes: false, ...over })
+// The embedding question is answered by flag here, so each test's keys reach the step it is about; its own tests clear it.
+const flagsOf = (over: Partial<SetupFlags> = {}): SetupFlags => ({ dataDir: null, hosts: null, observers: [], noEncrypt: false, port: null, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, yes: false, embeddings: LOCAL_SETTINGS, ...over })
 
 interface Setup {
   w: FakeWorld
@@ -825,4 +827,49 @@ test('an agent whose own CLI cannot observe is told why at its observer question
   const state = await readSetupState(w.env)
   await expect(runWizard(w.env, ask(w), state, flagsOf({ hosts: ['gemini-cli'], noEncrypt: true }), NO_CHOICE)).rejects.toBeInstanceOf(PromptCancelled)
   expect(term.output().replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '')).toContain('Gemini CLI cannot summarise through its own CLI')
+})
+
+const EMBEDDINGS_QUESTION = 'Embeddings for semantic search:'
+
+test('the embedding question comes after Updates, starts on the local model, and Enter changes nothing', async () => {
+  // observer, port, updates, embeddings, summary
+  const { answers, output } = await impactRun(Array(5).fill(ENTER), ['codex'], { embeddings: undefined })
+  expect(output.indexOf(EMBEDDINGS_QUESTION)).toBeGreaterThan(output.indexOf('Updates:'))
+  expect(output).toContain('runs on this machine, free, nothing leaves it')
+  expect(output).toContain('Embeddings      local model (on this machine)')
+  expect(answers.embeddings).toBeUndefined()
+})
+
+test('picking OpenRouter is sent', async () => {
+  const { answers, output } = await impactRun([ENTER, ENTER, ENTER, DOWN, ENTER, ENTER], ['codex'], { embeddings: undefined })
+  expect(answers.embeddings).toEqual({ provider: 'openrouter', llmUrl: null, llmModel: null, llmDims: null })
+  expect(output).toContain('Embeddings      OpenRouter')
+})
+
+test('a local LLM asks for its address and model, with Ollama defaults', async () => {
+  const { answers, output } = await impactRun([ENTER, ENTER, ENTER, DOWN, DOWN, ENTER, ENTER, ENTER, ENTER], ['codex'], { embeddings: undefined })
+  expect(answers.embeddings).toEqual({ provider: 'local-llm', llmUrl: 'http://127.0.0.1:11434/v1', llmModel: 'nomic-embed-text', llmDims: null })
+  expect(output).toContain('Local LLM address:')
+  expect(output).toContain('Embeddings      local LLM nomic-embed-text at http://127.0.0.1:11434/v1')
+})
+
+test('--embeddings answers the question, so it is not asked, and is sent', async () => {
+  const flag = { provider: 'openrouter' as const, llmUrl: null, llmModel: null, llmDims: null }
+  const { answers, output } = await impactRun(Array(4).fill(ENTER), ['codex'], { embeddings: flag })
+  expect(output).not.toContain(EMBEDDINGS_QUESTION)
+  expect(answers.embeddings).toEqual(flag)
+})
+
+test('--yes asks nothing about embeddings and sends nothing', async () => {
+  const { w } = setup([], { claudeVersion: '2.0.0' })
+  const answers = await runWizard(w.env, ask(w), await readSetupState(w.env), flagsOf({ yes: true, embeddings: undefined }), { ...NO_CHOICE, yes: true })
+  expect(answers.embeddings).toBeUndefined()
+})
+
+test('a local LLM embedding address defaults to the saved one, then to an OpenAI-compatible observer on this machine', () => {
+  const observer = (endpoint: string) => ({ input: { host: 'codex', provider: 'openai-compatible' as const, model: 'm', credentialRef: null, enabled: true, endpoint }, origin: 'prompt' as const, check: 'skipped' }) as unknown as Parameters<typeof embeddingUrlDefault>[1][number]
+  expect(embeddingUrlDefault(null, [observer('http://127.0.0.1:1234/v1')])).toBe('http://127.0.0.1:1234/v1')
+  expect(embeddingUrlDefault('http://127.0.0.1:5/v1', [observer('http://127.0.0.1:1234/v1')])).toBe('http://127.0.0.1:5/v1')
+  // A remote observer endpoint is never offered: embeddings stay on this machine.
+  expect(embeddingUrlDefault(null, [observer('https://api.groq.com/openai/v1')])).toBe('http://127.0.0.1:11434/v1')
 })

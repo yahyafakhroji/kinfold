@@ -6,6 +6,7 @@
 // The generator expects the target's inputs already in .cache:
 //   .cache/sqlite3mc/libsqlite3mc.<ext>  (bun tools/build-sqlite3mc.ts)
 //   .cache/vec0/vec0.<ext>               (bun tools/fetch-vec0.ts)
+//   .cache/embed-model/*                 (bun tools/fetch-model.ts)
 // plus src/dashboard/public and src/plugins/opencode.ts. It bundles the plugin
 // so the program can write a self-contained file for OpenCode.
 //
@@ -19,6 +20,7 @@ import { dirname, join, relative } from 'node:path'
 import { SQLITE3MC_ZIP_SHA256, sqlite3mcLibraryExtension } from '../src/sqlite/release'
 import { vec0AssetFor } from '../src/vectors/vec0-release'
 import { vec0FileName } from '../src/vectors/extension'
+import { LOCAL_MODEL_FILES, MAX_ADDED_BYTES } from '../src/vectors/local-model'
 import { KILO_PLUGIN_ENTRY, PLUGIN_ENTRY, bundlePlugin } from './bundle-plugin'
 
 const ROOT = join(import.meta.dir, '..')
@@ -79,6 +81,7 @@ async function generate(targetName: string): Promise<string> {
   const vec0Sha256 = sha256(vec0)
   if (vec0Sha256 !== asset.fileSha256) throw new Error(`${vec0Path} does not match the pinned sqlite-vec sha256 for ${targetName}; nothing was written`)
 
+  const modelPaths = localModelPaths()
   const plugins = await bundlesFor(targetName)
   const dashboard = readdirSync(PUBLIC_DIR).filter((name) => /^[a-z0-9-]+\.(js|css|html)$/.test(name)).sort()
 
@@ -88,6 +91,9 @@ async function generate(targetName: string): Promise<string> {
     `import vec0File from ${JSON.stringify(specifier(vec0Path))} with { type: 'file' }`,
     `import pluginFile from ${JSON.stringify(specifier(plugins.opencode))} with { type: 'file' }`,
     `import kiloPluginFile from ${JSON.stringify(specifier(plugins.kilo))} with { type: 'file' }`,
+    `import modelFile from ${JSON.stringify(specifier(modelPaths.model))} with { type: 'file' }`,
+    `import vocabFile from ${JSON.stringify(specifier(modelPaths.vocab))} with { type: 'file' }`,
+    `import wasmFile from ${JSON.stringify(specifier(modelPaths.wasm))} with { type: 'file' }`,
     ...dashboard.map((name) => `import ${identifier(name)} from ${JSON.stringify(specifier(join(PUBLIC_DIR, name)))} with { type: 'file' }`),
   ]
   const dashboardEntries = dashboard.map((name) => `    ${JSON.stringify(name)}: ${identifier(name)},`)
@@ -104,9 +110,28 @@ async function generate(targetName: string): Promise<string> {
     '  },',
     '  opencodePlugin: pluginFile,',
     '  kiloPlugin: kiloPluginFile,',
+    '  localModel: { model: modelFile, vocab: vocabFile, wasm: wasmFile },',
     '}',
     '',
   ].join('\n')
+}
+
+const MODEL_DIR = join(CACHE_DIR, 'embed-model')
+/** The JS half of the model runtime; the bundle carries it, so it counts toward the added size. */
+const ORT_BUNDLE = join(ROOT, 'node_modules', 'onnxruntime-web', 'dist', 'ort.wasm.bundle.min.mjs')
+
+/** The model files, each checked against its pin, and the whole runtime held under the size ceiling. */
+function localModelPaths(): { model: string; vocab: string; wasm: string } {
+  const paths = { model: join(MODEL_DIR, LOCAL_MODEL_FILES.model.name), vocab: join(MODEL_DIR, LOCAL_MODEL_FILES.vocab.name), wasm: join(MODEL_DIR, LOCAL_MODEL_FILES.wasm.name) }
+  let added = readRequired(ORT_BUNDLE, 'run `bun install` first').length
+  for (const key of ['model', 'vocab', 'wasm'] as const) {
+    const bytes = readRequired(paths[key], 'run `bun tools/fetch-model.ts` first')
+    if (sha256(bytes) !== LOCAL_MODEL_FILES[key].sha256) throw new Error(`${paths[key]} does not match the pinned sha256; nothing was written`)
+    added += bytes.length
+  }
+  if (added > MAX_ADDED_BYTES) throw new Error(`the local model adds ${added} bytes, over the ${MAX_ADDED_BYTES} ceiling; nothing was written`)
+  console.log(`local model adds ${added} bytes (ceiling ${MAX_ADDED_BYTES})`)
+  return paths
 }
 
 /** The generated file is tracked as a stub, so a manual run needs reverting before a commit. The release build restores it on its own. */

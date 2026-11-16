@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { COMPILED_SNAPSHOT_WORKER_PATH } from '../src/backup/snapshot'
 import { COMPILED_WORKER_PATH } from '../src/vectors/vector-worker'
+import { COMPILED_EMBED_WORKER_PATH } from '../src/vectors/local-embedder'
 import { type BuildToolchain, type Host, type ReleasePaths, buildRelease, programName, releasePaths } from './build-release'
 import { posixOnly } from '../test/platform-guards'
 
@@ -124,13 +125,13 @@ test('an unknown target or a non-version is refused', async () => {
 
 test('the compile names each worker as an entry, and every named worker file exists', () => {
   const paths = releasePaths(join(import.meta.dir, '..'))
-  expect(paths.workers.map((path) => path.slice(paths.root.length + 1).replaceAll('\\', '/'))).toEqual(['src/vectors/search-worker.ts', 'src/backup/snapshot-worker.ts'])
+  expect(paths.workers.map((path) => path.slice(paths.root.length + 1).replaceAll('\\', '/'))).toEqual(['src/vectors/search-worker.ts', 'src/backup/snapshot-worker.ts', 'src/vectors/local-embed-worker.ts'])
   for (const worker of paths.workers) expect(existsSync(worker)).toBe(true)
   // The compiled program finds its worker by its path from the entries' common folder.
   const common = join(paths.root, 'src')
   expect([paths.entry, ...paths.workers].every((path) => path.startsWith(`${common}${sep}`))).toBe(true)
   const compiled = paths.workers.map((path) => `./${path.slice(common.length + 1).replaceAll('\\', '/')}`)
-  expect(compiled).toEqual([COMPILED_WORKER_PATH, COMPILED_SNAPSHOT_WORKER_PATH])
+  expect(compiled).toEqual([COMPILED_WORKER_PATH, COMPILED_SNAPSHOT_WORKER_PATH, COMPILED_EMBED_WORKER_PATH])
 })
 
 test('the Windows program carries the .exe suffix', () => {

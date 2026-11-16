@@ -14,7 +14,8 @@ import { KEY_STORE_MODULES } from '../secrets/stores/select'
 import type { EmbeddedAssets } from '../runtime/embedded'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import type { DisplayChange } from '../store/display-settings'
-import { START_WAIT_MS, putDisplaySettings, putObserverSettings, waitForHealth, waitForStart } from './daemon-client'
+import { START_WAIT_MS, putDisplaySettings, putEmbeddingSettings, putObserverSettings, waitForHealth, waitForStart } from './daemon-client'
+import type { EmbeddingSettings } from '../vectors/embedding-settings'
 import { createDbKey, createPlainStore, describeCreateDbKey, describeCreatePlainStore } from './db-encryption'
 import { type InstallEnv, installPaths, noticeOf } from './env'
 import { NOT_FOUND_EXIT } from './system'
@@ -61,6 +62,7 @@ export type Action =
   | { kind: 'settings-put'; input: ObserverSettingsInput }
   /** The display switches named by a flag (--show-recall, --holdout and their opposites), sent to the running daemon. */
   | { kind: 'display-put'; change: DisplayChange }
+  | { kind: 'embedding-put'; settings: EmbeddingSettings }
   /** description: the store's own dry-run text, filled at plan time; the value prints as <hidden>. */
   | { kind: 'secret-set'; ref: string; value: string; description: string }
   | { kind: 'secret-delete'; ref: string; description: string; summary?: string }
@@ -141,6 +143,10 @@ export function describeAction(action: Action): string {
     case 'display-put': {
       const parts = [...(action.change.showRecall !== undefined ? [`showRecall=${action.change.showRecall}`] : []), ...(action.change.holdout !== undefined ? [`holdout=${action.change.holdout}`] : [])]
       return `PUT /data/display ${parts.join(' ')}`
+    }
+    case 'embedding-put': {
+      const { provider, llmModel, llmUrl } = action.settings
+      return `PUT /embedding/settings provider=${provider}${provider === 'local-llm' ? ` model=${llmModel ?? ''} url=${llmUrl ?? ''}` : ''}`
     }
     case 'secret-set': return action.description
     case 'secret-delete': return `${action.description}${action.summary !== undefined ? `: ${action.summary}` : ''}`
@@ -281,6 +287,7 @@ export async function applyAction(env: InstallEnv, action: Action): Promise<Step
     case 'wait-health': return waitForDaemonStart(env)
     case 'settings-put': return putObserverSettings(env, action.input)
     case 'display-put': return putDisplaySettings(env, action.change)
+    case 'embedding-put': return putEmbeddingSettings(env, action.settings)
     case 'secret-set': return requireKeyStore(env).set(action.ref, action.value)
     case 'secret-delete': return void requireKeyStore(env).delete(action.ref)
     case 'remove-hmac-backup': return removeHmacBackup(env, action.path)
@@ -407,6 +414,7 @@ export function shortLabel(action: Action): string {
     case 'wait-health': return 'waiting for the daemon to answer'
     case 'settings-put': return `saving the observer for ${action.input.host}`
     case 'display-put': return 'saving the recall line and impact test settings'
+    case 'embedding-put': return 'saving the embedding choice'
     case 'secret-set': return 'storing a key'
     case 'secret-delete': return 'removing a key'
     case 'remove-hmac-backup':

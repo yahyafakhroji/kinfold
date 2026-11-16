@@ -42,7 +42,7 @@ test('migration 10 -> 11 indexes vectors by model, dims and observation, drops t
   try {
     expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(11)
     expect(store.schemaVersion).toBe(LATEST_SCHEMA_VERSION)
-    expect(indexes(store.db)).toEqual(['observation_vectors_by_space'])
+    expect(indexes(store.db)).toEqual(['observation_vectors_by_observation', 'observation_vectors_by_space'])
     expect(store.db.query('SELECT observation_id AS id, model, dims FROM observation_vectors ORDER BY observation_id').all()).toEqual([
       { id: 1, model: 'm1', dims: 2 },
       { id: 2, model: 'm1', dims: 2 },
