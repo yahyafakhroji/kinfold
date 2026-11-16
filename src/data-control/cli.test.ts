@@ -349,3 +349,43 @@ test('--redact deletes no row, so it asks nothing', async () => {
   expect(term.output()).not.toContain('Delete')
   expect(asked).toEqual(['POST /data/findings/4/resolve {"action":"redact"}'])
 })
+
+test('kinfold size lists the store by part, and past the threshold names the largest part', () => {
+  const plan = planFor(parsed(['size']))
+  const report = {
+    source: 'dbstat', pageSize: 4096, pageCount: 1, freelistPages: 0,
+    files: { db: 2000, wal: 0, shm: 0 }, totalBytes: 2000, freeBytes: 0, warnBytes: 1000, overWarn: true,
+    tables: [], projects: [],
+    parts: [
+      { name: 'prompts', bytes: 100 }, { name: 'replies', bytes: 1220 }, { name: 'events', bytes: 300 }, { name: 'observations', bytes: 200 },
+      { name: 'summaries', bytes: 0 }, { name: 'vectors', bytes: 80 }, { name: 'other', bytes: 100 },
+    ],
+    warning: 'replies are 61% of 2.0 KB; set prompts retention to trim them',
+  }
+  const lines = plan.lines(report)
+  expect(lines.slice(1, 3)).toEqual(['warning threshold 1000 B: OVER', 'warning: replies are 61% of 2.0 KB; set prompts retention to trim them'])
+  const byPart = lines.indexOf('by part:')
+  expect(byPart).toBeGreaterThan(-1)
+  expect(lines.slice(byPart + 1, byPart + 3)).toEqual(['  prompts 100 B (5%)', '  replies 1.2 KB (61%)'])
+  const under = plan.lines({ ...report, overWarn: false, warning: null })
+  expect(under[1]).toBe('warning threshold 1000 B: ok')
+  expect(under.some((line) => line.startsWith('warning: '))).toBe(false)
+})
+
+test('the threshold row and the line naming the largest part are flagged', async () => {
+  const { rowOf } = await import('./cli')
+  expect(rowOf('warning threshold 1000 B: OVER').mark).toBe('warn')
+  expect(rowOf('warning: replies are 61% of 2.0 KB; set prompts retention to trim them').mark).toBe('warn')
+  expect(rowOf('warning threshold 1000 B: ok').mark).toBe('none')
+})
+
+test('a daemon from before the part breakdown gets no empty by part heading', () => {
+  const plan = planFor(parsed(['size']))
+  const old = {
+    source: 'dbstat', pageSize: 4096, pageCount: 1, freelistPages: 0,
+    files: { db: 2000, wal: 0, shm: 0 }, totalBytes: 2000, freeBytes: 0, warnBytes: 1000, overWarn: true, tables: [], projects: [],
+  }
+  const lines = plan.lines(old)
+  expect(lines).not.toContain('by part:')
+  expect(lines[1]).toBe('warning threshold 1000 B: OVER')
+})

@@ -1,17 +1,21 @@
 name: release
 
-# Pushing a v<version> tag on main builds every program once and publishes those
-# bytes as a GitHub prerelease. The smoke then installs them on each OS against
-# that real Release, because a final build checks itself against its own
-# Release's SHA256SUMS and accepts no other list. Only then is the Release
-# promoted to latest and the same bytes published to npm through trusted
-# publishing. A failed smoke deletes the prerelease and publishes nothing.
+# A v<version> tag on main (or a prerelease tag on beta) builds every program
+# once and publishes those bytes as a GitHub prerelease. The smoke then installs
+# them on each OS against that real Release, because a final build checks itself
+# against its own Release's SHA256SUMS and accepts no other list. Only then is
+# the Release promoted to latest and the same bytes published to npm through
+# trusted publishing. A failed smoke deletes the prerelease and publishes nothing.
 # The npm trusted-publisher configs name this file, so renaming it breaks npm
 # publishing.
+# version.yml pushes the tag with GITHUB_TOKEN, and a tag pushed that way starts
+# no workflow, so it dispatches this one on the tag. A tag pushed by hand still
+# runs it through the push trigger.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions: {}
 
@@ -39,7 +43,12 @@ jobs:
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
+          if [ "$REF_TYPE" != "tag" ]; then
+            echo "$TAG is a $REF_TYPE; run this workflow on a v<version> tag"
+            exit 1
+          fi
           if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "$TAG is not v<major>.<minor>.<patch>[-<prerelease>]"
             exit 1
@@ -55,9 +64,17 @@ jobs:
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       # A tag on a branch that never merged would publish code main never had.
-      - name: Confirm the tagged commit is on main
+      # Prereleases come from the beta branch, which runs changesets pre mode.
+      - name: Confirm the tagged commit is on main, or a prerelease on beta
         shell: bash
-        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+        env:
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then exit 0; fi
+          if [ "$PRERELEASE" = "true" ] && git show-ref --quiet refs/remotes/origin/beta \
+            && git merge-base --is-ancestor "$GITHUB_SHA" origin/beta; then exit 0; fi
+          echo "the tagged commit is not on main (or, for a prerelease, on beta)"
+          exit 1
 
   build:
     name: build
@@ -69,9 +86,12 @@ jobs:
       version: ${{ needs.check.outputs.version }}
       skip_smoke: true
 
+  # The jobs that publish run in the 'release' environment, so each one waits
+  # for the maintainer's "Approve and deploy". Builds and the smoke do not.
   github-release:
     name: GitHub Release
     needs: [check, build]
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -129,6 +149,7 @@ jobs:
   promote:
     name: promote the Release
     needs: [check, smoke]
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -166,6 +187,9 @@ jobs:
   npm-publish:
     name: npm publish
     needs: [check, build, promote]
+    # npm's trusted publisher for every package names this environment, so a
+    # publish from any other job is refused.
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

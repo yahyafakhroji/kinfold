@@ -22,12 +22,19 @@ function section(kicker, title, ...body) {
   return h('section', { class: 'block', 'aria-label': title }, h('h2', { class: 'block-title' }, h('span', { class: 'kicker' }, kicker), ' ', title), ...body)
 }
 
+/** @param {number} bytes @param {number} total */
+const share = (bytes, total) => `${total === 0 ? 0 : Math.round((bytes / total) * 100)}%`
+
 /** @param {import('../../data-control/size').SizeReport} size */
-function sizeBlock(size) {
+export function sizeBlock(size) {
+  // A daemon from before the part breakdown answers without parts until it restarts.
+  const parts = size.parts ?? []
   return section('A', 'Size',
     h('p', { class: 'figure' }, h('span', { class: 'figure-value' }, formatBytes(size.totalBytes)),
       h('span', { class: size.overWarn ? 'badge run-failed' : 'badge run-ok' }, size.overWarn ? 'over threshold' : 'under threshold'),
       h('span', { class: 'hint' }, ` warns at ${formatBytes(size.warnBytes)} · free pages ${formatBytes(size.freeBytes)} · source ${size.source}`)),
+    size.overWarn && size.warning ? notice(size.warning, 'warn') : null,
+    table('Size by part', ['Part', 'Size', 'Share'], parts.map((part) => [part.name, formatBytes(part.bytes), share(part.bytes, size.totalBytes)])),
     h('div', { class: 'two-up' },
       table('Size by table', ['Table', 'Size'], size.tables.map((row) => [h('span', { class: 'mono' }, row.name), formatBytes(row.bytes)])),
       table('Size by project', ['Project', 'Events', 'Observations', 'Prompts'], size.projects.map((row) => [

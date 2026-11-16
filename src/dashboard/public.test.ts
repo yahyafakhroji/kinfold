@@ -27,6 +27,7 @@ interface HashModule { parseHash(hash: string): Hash; formatHash(state: Hash): s
 interface DataModule {
   purgeTarget(data: { get(name: string): string | null }): { ok: boolean; target?: Record<string, unknown>; error?: string }
   retentionBody(data: { get(name: string): string | null }): unknown
+  sizeBlock(size: Record<string, unknown>): FakeElement
 }
 
 const load = async <T>(name: string): Promise<T> => (await import(join(PUBLIC_DIR, name))) as T
@@ -191,4 +192,20 @@ test('the login script drops the code from the URL, posts it with our header, th
   expect(calls.fetched[0]!.url).toBe('/dashboard/session')
   expect(calls.fetched[0]!.init).toMatchObject({ method: 'POST', credentials: 'same-origin', headers: { 'x-sam-request': '1' }, body: '{"code":"abc_DEF-123"}' })
   expect(calls.navigated).toEqual(['/dashboard/'])
+})
+
+test('the data page lists the store by part and shows the warning past the threshold', async () => {
+  const data = await load<DataModule>('page-data.js')
+  const size = {
+    source: 'dbstat', totalBytes: 2000, freeBytes: 0, warnBytes: 1000, overWarn: true, tables: [], projects: [],
+    parts: [{ name: 'prompts', bytes: 100 }, { name: 'replies', bytes: 1220 }, { name: 'other', bytes: 680 }],
+    warning: 'replies are 61% of 2.0 KB; set prompts retention to trim them',
+  }
+  const text = textNodes(data.sizeBlock(size)).map((node) => node.textContent).join('')
+  expect(text).toContain('Size by part')
+  expect(text).toContain('replies')
+  expect(text).toContain('61%')
+  expect(text).toContain('replies are 61% of 2.0 KB; set prompts retention to trim them')
+  const under = textNodes(data.sizeBlock({ ...size, overWarn: false, warning: null })).map((node) => node.textContent).join('')
+  expect(under).not.toContain('set prompts retention')
 })

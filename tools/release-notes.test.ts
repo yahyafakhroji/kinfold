@@ -48,3 +48,19 @@ test('writeReleaseNotes reads dist/SHA256SUMS and writes dist/RELEASE_NOTES.md',
   expect(path).toBe(join(dir, 'RELEASE_NOTES.md'))
   expect(readFileSync(path, 'utf8')).toBe(releaseNotes('0.1.0', `${SUMS}\n`))
 })
+
+test('release notes carry the version\'s CHANGELOG.md section under Changes', () => {
+  const changelog = '# kinfold\n\n## 0.5.0\n\n### Minor Changes\n\n- abc1234: Add a size breakdown.\n\n## 0.4.1\n\n- Older.\n'
+  const notes = releaseNotes('0.5.0', SUMS, changelog)
+  expect(notes).toContain('## Changes\n\n### Minor Changes\n\n- abc1234: Add a size breakdown.\n')
+  expect(notes).not.toContain('Older.')
+  expect(releaseNotes('0.4.0', SUMS, changelog)).toContain('## Changes\n\nNo changelog for this release.\n')
+})
+
+test('writeReleaseNotes reads the changelog it is given', () => {
+  dir = mkdtempSync(join(tmpdir(), 'kinfold-notes-'))
+  writeFileSync(join(dir, 'SHA256SUMS'), `${SUMS}\n`)
+  writeFileSync(join(dir, 'CHANGELOG.md'), '## 0.1.0\n\n- First.\n')
+  expect(readFileSync(writeReleaseNotes(dir, '0.1.0', join(dir, 'CHANGELOG.md')), 'utf8')).toContain('- First.')
+  expect(readFileSync(writeReleaseNotes(dir, '0.1.0', join(dir, 'missing.md')), 'utf8')).toContain('No changelog for this release.')
+})

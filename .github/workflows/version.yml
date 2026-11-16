@@ -1,0 +1,134 @@
+name: version
+
+# Turns changesets into releases. On each push to main (or beta, which runs
+# changesets pre mode for prereleases):
+#   tag         package.json names a version with no tag yet (a Version PR just
+#               merged): push v<version> and dispatch release.yml on it.
+#   version-pr  changesets are pending: open or update the one Version PR, whose
+#               commit is `changeset version` (package.json and CHANGELOG.md).
+# Both use GITHUB_TOKEN. A tag pushed with it starts no workflow, which is why
+# release.yml is dispatched, the one event GITHUB_TOKEN may start. Opening the
+# PR needs the repository setting "Allow GitHub Actions to create and approve
+# pull requests". The v* tag ruleset lets only admins and GitHub Actions create
+# tags, so this token's push passes it, and the dispatched run is on the tag
+# ref, which the 'release' environment's v* tag policy accepts.
+on:
+  push:
+    branches:
+      - main
+      - beta
+
+permissions: {}
+
+concurrency:
+  group: version-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: tag a new version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: write
+    outputs:
+      pending: ${{ steps.plan.outputs.pending }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Read the pending changesets and the version
+        id: plan
+        shell: bash
+        run: bun tools/changesets.ts plan | tee -a "$GITHUB_OUTPUT"
+
+      - name: Tag the version and start the release
+        shell: bash
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          BRANCH: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$VERSION" = "0.0.0-dev" ]; then echo "0.0.0-dev is never released"; exit 0; fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "package.json version $VERSION is not <major>.<minor>.<patch>[-<prerelease>]"
+            exit 1
+          fi
+          if [ "$BRANCH" = "beta" ] && [[ "$VERSION" != *-* ]]; then
+            echo "beta releases prereleases only; $VERSION is released from main"
+            exit 0
+          fi
+          if git show-ref --tags --quiet "refs/tags/v$VERSION"; then
+            # A tag whose dispatch failed has no release run; this run starts it.
+            runs=$(gh run list --workflow release.yml --branch "v$VERSION" --limit 1 --json databaseId --jq 'length')
+            if [ "$runs" != "0" ]; then echo "v$VERSION is tagged and its release has run"; exit 0; fi
+            echo "v$VERSION is tagged but release.yml never ran on it"
+          else
+            # The commit that set the version, so a later push whose run gets here first still tags the Version PR's merge.
+            commit=$(git log -1 --format=%H -G'"version":' -- package.json)
+            git tag "v$VERSION" "$commit"
+            git push origin "refs/tags/v$VERSION"
+          fi
+          gh workflow run release.yml --ref "v$VERSION"
+          echo "started release.yml on v$VERSION"
+
+  version-pr:
+    name: open the Version PR
+    needs: tag
+    if: needs.tag.outputs.pending != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install development dependencies
+        timeout-minutes: 5
+        run: bun install --frozen-lockfile
+
+      - name: Version, commit and open the PR
+        shell: bash
+        env:
+          BRANCH: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A rerun of an older run would rebuild the PR without the changesets merged since.
+          if [ "$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)" != "$GITHUB_SHA" ]; then
+            echo "$BRANCH has moved past this run; the run for its new head updates the Version PR"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          head="changeset-release/$BRANCH"
+          git switch -C "$head"
+          bunx changeset version
+          NEXT=$(node -p "require('./package.json').version")
+          {
+            echo "Merging this releases Kinfold $NEXT: the version workflow tags v$NEXT and release.yml builds, smoke-tests and publishes it."
+            echo
+            bun tools/changesets.ts notes "$NEXT"
+          } > "$RUNNER_TEMP/version-pr.md"
+          git add -A
+          git commit -m "chore: version $NEXT"
+          # The branch is rebuilt from this push every time, so the PR always matches the pending changesets.
+          git push --force origin "$head"
+          number=$(gh pr list --head "$head" --base "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "Version $NEXT" --body-file "$RUNNER_TEMP/version-pr.md"
+          else
+            gh pr create --base "$BRANCH" --head "$head" --title "Version $NEXT" --body-file "$RUNNER_TEMP/version-pr.md"
+          fi

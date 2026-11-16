@@ -15,7 +15,7 @@ import type { Finding } from '../store/findings-store'
 import type { PurgeReport } from './purge'
 import type { RetentionOutcome, RetentionPreview } from './retention'
 import type { ScanResult } from './scanner'
-import type { SizeReport } from './size'
+import { type SizeReport, formatBytes } from './size'
 
 export type DataCliEnv = Pick<InstallEnv, 'dataDir' | 'fetch' | 'out' | 'ui'>
 
@@ -40,7 +40,7 @@ interface Planned {
 const RUN_AGAIN = 'run again with --yes to save and apply'
 
 /** A row worth a look: a size over its threshold, a finding still pending. */
-const rowMark = (line: string): Mark => (/: OVER$|^#\d+ .* pending$/.test(line) ? 'warn' : line === 'no findings' ? 'ok' : 'none')
+const rowMark = (line: string): Mark => (/: OVER$|^warning: |^#\d+ .* pending$/.test(line) ? 'warn' : line === 'no findings' ? 'ok' : 'none')
 
 /** A marked row stands at the margin; an unmarked one keeps its indent, so the rows under a heading read as a list. */
 export function rowOf(line: string): Row {
@@ -67,17 +67,14 @@ async function call(env: DataCliEnv, method: string, path: string, body?: unknow
   }
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-function sizeLines(report: SizeReport): string[] {
+function sizeLines(report: Omit<SizeReport, 'parts' | 'warning'> & Partial<Pick<SizeReport, 'parts' | 'warning'>>): string[] {
   const { files } = report
   return [
     `database ${formatBytes(report.totalBytes)} (db ${formatBytes(files.db)}, wal ${formatBytes(files.wal)}, shm ${formatBytes(files.shm)}); free pages ${formatBytes(report.freeBytes)}`,
     `warning threshold ${formatBytes(report.warnBytes)}: ${report.overWarn ? 'OVER' : 'ok'}`,
+    ...(report.overWarn && report.warning != null ? [`warning: ${report.warning}`] : []),
+    // A daemon from before the part breakdown answers without parts until it restarts.
+    ...(report.parts === undefined ? [] : ['by part:', ...report.parts.map((part) => `  ${part.name} ${formatBytes(part.bytes)} (${report.totalBytes === 0 ? 0 : Math.round((part.bytes / report.totalBytes) * 100)}%)`)]),
     `by table (${report.source}):`,
     ...report.tables.map((table) => `  ${table.name} ${formatBytes(table.bytes)}`),
     'by project (stored text):',
