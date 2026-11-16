@@ -185,3 +185,10 @@ test('uninstall holds the update lock while it runs and lets it go after', async
   expect(during).toBe(process.pid)
   expect(existsSync(join(w.dataDir, UPDATE_LOCK_FILE))).toBe(false)
 })
+
+test('--remove-credentials also removes the keys setup stores for the API observers', async () => {
+  const w = await installed()
+  for (const ref of ['anthropic', 'dashscope', 'openai-compatible']) w.keychain.add(ref)
+  expect(await uninstall(w.env, { dryRun: false, removeCredentials: true })).toBe(EXIT_OK)
+  for (const ref of ['openrouter', 'anthropic', 'dashscope', 'openai-compatible']) expect(w.keychain.has(ref)).toBe(false)
+})

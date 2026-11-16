@@ -1,6 +1,6 @@
 // Which observer providers this machine can run. A CLI provider runs its
 // agent's own CLI, so it can be picked only where that CLI answered
-// `--version`; openrouter needs a key and no CLI, so it is never missing. The
+// `--version`; the API providers need a key or an address and no CLI, so they are never missing. The
 // agent step has already asked each CLI, and its detections are read here
 // instead of asking again. Any installed CLI can observe any agent: an
 // OpenCode session can be summarised through claude.
@@ -22,6 +22,7 @@ export const PROVIDER_CLI: Readonly<Partial<Record<ObserverProvider, ProviderCli
   'claude-cli': { host: 'claude-code', binary: 'claude' },
   'codex-cli': { host: 'codex', binary: 'codex' },
   'opencode-cli': { host: 'opencode', binary: 'opencode' },
+  'goose-cli': { host: 'goose', binary: 'goose' },
 }
 
 /** Each provider that cannot run here, with the reason shown beside it. */

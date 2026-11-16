@@ -39,7 +39,7 @@ import { type PluginFileSpec, pluginFileActions, pluginFileLine, pluginFileState
 import { kiloTuiInstallActions, kiloTuiLine, kiloTuiUninstallActions } from '../families/kilo-tui'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpEntryText } from '../families/json-agent'
 import { mcpEntryState } from '../families/mcp-entry'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, NO_TOOLS_OFF } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: true }, search: true, observer: false }
 
@@ -60,6 +60,7 @@ const hasJsonc = (env: InstallEnv): boolean => existsSync(jsoncPath(env))
 export const KILO_CODE_PROFILE: AgentProfile = {
   id: 'kilo-code',
   name: 'Kilo Code',
+  observerLogin: { out: NO_TOOLS_OFF },
   family: 'opencode-plugin',
   verification: 'live',
   capabilities: () => CAPABILITIES,

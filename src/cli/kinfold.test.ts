@@ -30,6 +30,7 @@ test('--yes, --hosts and repeated --observer parse into one value', () => {
     value: {
       command: 'install', dryRun: false, yes: true, skipCheck: true, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false,
       hosts: ['claude-code', 'opencode'],
+      observerEndpoint: null,
       observers: [
         { host: 'claude-code', provider: 'claude-cli', model: 'sonnet' },
         { host: 'opencode', provider: 'openrouter', model: 'anthropic/claude-haiku:beta' },

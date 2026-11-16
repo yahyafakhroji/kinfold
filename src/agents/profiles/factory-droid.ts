@@ -20,7 +20,7 @@ import { join } from 'node:path'
 import { platformOf } from '../../install/env'
 import type { OsName } from '../../platform/platform'
 import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentWiring, mcpServersFile } from '../families/json-agent'
-import { type AgentProfile, type Capabilities, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
+import { ACTS_HEADLESS, type AgentProfile, type Capabilities, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: true }, search: true, observer: false }
 const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false }
@@ -50,6 +50,7 @@ export const FACTORY_DROID_FILES: readonly JsonAgentFile[] = [
 export const FACTORY_DROID_PROFILE: AgentProfile = {
   id: 'factory-droid',
   name: 'Factory Droid',
+  observerLogin: { out: ACTS_HEADLESS },
   family: 'claude-style',
   verification: 'docs',
   capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),

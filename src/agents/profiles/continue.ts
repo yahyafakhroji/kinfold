@@ -17,7 +17,7 @@ import { type InstallEnv } from '../../install/env'
 import { MCP_SERVER_NAME } from '../../install/mcp-config'
 import { mcpTarget } from '../../install/mcp-wiring'
 import { MCP_HOST_ENV } from '../../mcp/read-reporter'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, NO_TOOLS_OFF } from '../profile'
 
 const HOST = 'continue'
 
@@ -45,6 +45,7 @@ const addBlockStep = (env: InstallEnv): string =>
 export const CONTINUE_PROFILE: AgentProfile = {
   id: HOST,
   name: 'Continue',
+  observerLogin: { out: NO_TOOLS_OFF },
   family: 'mcp-only',
   verification: 'docs',
   capabilities: () => CAPABILITIES,

@@ -456,10 +456,18 @@ CREATE INDEX observations_by_session_prompt ON observations(session_id, prompt_n
 CREATE INDEX prompts_by_time ON prompts(occurred_at, session_id);
 `
 
+// v14: the base URL of an endpoint observer (the OpenAI-compatible provider
+// and Qwen's DashScope region). NULL for every other provider; the URL rules
+// live in observer/endpoint.ts, since SQL cannot hold them.
+const V14_OBSERVER_ENDPOINT = `
+ALTER TABLE observer_settings ADD COLUMN endpoint TEXT;
+`
+
 /** Index i holds the migration that takes user_version from i to i + 1. */
 export const MIGRATIONS: readonly string[] = [
   V1_CORE + V1_MEMORY + V1_DELIVERY, V2_OBSERVER, V3_CONTEXT, V4_DATA_CONTROL, V5_LINKS, V6_USAGE, V7_SHARED_SUMMARIES, V8_VECTORS, V9_RELATED_SERVED,
   V10_OBSERVER_SAFETY, V11_VECTOR_SPACE_INDEX, V12_VISIBLE, V13_LATE_AND_INDEXES,
+  V14_OBSERVER_ENDPOINT,
 ]
 
 /**

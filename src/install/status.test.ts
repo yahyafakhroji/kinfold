@@ -571,3 +571,22 @@ test('each kind of status line gets the mark its words call for', () => {
   expect(marks('semantic search: off in the running daemon; restart it (kinfold install restarts it)')).toBe('warn')
   expect(marks('update check: off')).toBe('none')
 })
+
+test('status names the key each API provider reads and the address of an endpoint provider', async () => {
+  const w = make()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  const realFetch = w.env.fetch
+  w.env.fetch = async (url, init) => {
+    if (new URL(url).pathname !== '/observer/settings') return realFetch(url, init)
+    const effective = [
+      { host: 'claude-code', settings: { provider: 'anthropic-api', model: 'claude-haiku-5-5', credentialRef: null, enabled: true, source: 'host' } },
+      { host: 'opencode', settings: { provider: 'openai-compatible', model: 'llama3.2', credentialRef: null, enabled: true, source: 'host', endpoint: 'http://127.0.0.1:11434/v1' } },
+    ]
+    return new Response(JSON.stringify({ rows: [], effective }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  w.out.length = 0
+  await status(w.env)
+  expect(w.out).toContain('  claude-code: anthropic-api/claude-haiku-5-5 key anthropic; source host')
+  expect(w.out).toContain('  opencode: openai-compatible/llama3.2 at http://127.0.0.1:11434/v1; source host')
+  expect(w.out).toContain('keychain anthropic: missing')
+})

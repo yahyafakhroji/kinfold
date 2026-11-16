@@ -36,7 +36,7 @@ import { join } from 'node:path'
 import { resolveAgentHome } from '../../install/codex-home'
 import type { InstallEnv } from '../../install/env'
 import { AGENT_HOOK_TIMEOUT_S, type AgentHome, type JsonAgentFile, jsonAgentWiring, mcpServersFile } from '../families/json-agent'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, NO_TOOLS_OFF } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: false }, search: true, observer: false }
 
@@ -75,6 +75,7 @@ export const COPILOT_FILES: readonly JsonAgentFile[] = [
 export const COPILOT_PROFILE: AgentProfile = {
   id: 'copilot',
   name: 'GitHub Copilot',
+  observerLogin: { out: NO_TOOLS_OFF },
   family: 'claude-style',
   verification: 'docs',
   capabilities: () => CAPABILITIES,

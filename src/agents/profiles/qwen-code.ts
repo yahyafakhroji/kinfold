@@ -25,7 +25,7 @@ import { join } from 'node:path'
 import type { InstallEnv } from '../../install/env'
 import type { McpEntrySpec } from '../families/mcp-entry'
 import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentWiring, stdioMcpEntry } from '../families/json-agent'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, NO_TOOLS_OFF } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: true }, search: true, observer: false }
 const settingsPath = (env: InstallEnv): string => join(env.homeDir, '.qwen', 'settings.json')
@@ -55,6 +55,7 @@ export const QWEN_CODE_FILES: readonly JsonAgentFile[] = [
 export const QWEN_CODE_PROFILE: AgentProfile = {
   id: 'qwen-code',
   name: 'Qwen Code',
+  observerLogin: { out: NO_TOOLS_OFF },
   family: 'claude-style',
   verification: 'docs',
   capabilities: () => CAPABILITIES,

@@ -7,7 +7,8 @@ import { detectFromSpec, detectHosts } from '../install/detect'
 import { type FakeWorld, createWorld } from '../install/test-support'
 import { builtInSettings } from '../observer/settings'
 import { INSTALL_PROFILES, hasWiring, isWired, profileOf } from './install-profiles'
-import { type AgentId, capabilityLine } from './profile'
+import { UNPROVEN_CLI_PROVIDERS } from '../observer/types'
+import { ACTS_HEADLESS, type AgentId, NO_HEADLESS, NO_TOOLS_OFF, capabilityLine } from './profile'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -107,4 +108,22 @@ test('isWired counts wiring that is in place, current or not; hasWiring counts a
   expect((['yes', 'stale', 'partial', 'no', 'unknown'] as const).map(isWired)).toEqual([true, true, true, false, false])
   // A config Kinfold cannot read may still hold its entries, so unknown keeps the agent's line.
   expect((['yes', 'stale', 'partial', 'no', 'unknown'] as const).map(hasWiring)).toEqual([true, true, true, false, true])
+})
+
+describe('observerLogin', () => {
+  test('the agents whose own CLI can observe name their provider; every other one says why not', () => {
+    const own = Object.fromEntries(KNOWN_HOSTS.flatMap((id) => {
+      const login = profileOf(id).observerLogin
+      return 'provider' in login ? [[id, login.provider]] : []
+    }))
+    expect(own).toEqual({ 'claude-code': 'claude-cli', opencode: 'opencode-cli', codex: 'codex-cli', goose: 'goose-cli' })
+    const reasons = Object.fromEntries(KNOWN_HOSTS.flatMap((id) => {
+      const login = profileOf(id).observerLogin
+      return 'out' in login ? [[id, login.out]] : []
+    }))
+    for (const id of ['gemini-cli', 'qwen-code', 'copilot', 'devin', 'kilo-code', 'kiro', 'amp', 'junie', 'antigravity', 'continue', 'warp', 'crush']) expect(reasons[id]).toBe(NO_TOOLS_OFF)
+    for (const id of ['cline', 'cursor', 'kimi-code', 'factory-droid']) expect(reasons[id]).toBe(ACTS_HEADLESS)
+    expect(reasons.zed).toBe(NO_HEADLESS)
+    expect(reasons.auggie).toBe(UNPROVEN_CLI_PROVIDERS['auggie-cli'])
+  })
 })

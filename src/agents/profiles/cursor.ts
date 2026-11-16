@@ -9,13 +9,14 @@
 // don't say which shell cursor-agent uses there, and it gets the same form.
 
 import { hostHookInstallActions, hostHookUninstallActions, hostWiringLine, hostWiringState } from '../../install/host-wiring'
-import type { AgentProfile, Capabilities } from '../profile'
+import { ACTS_HEADLESS, type AgentProfile, type Capabilities } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: false }, search: true, observer: false }
 
 export const CURSOR_PROFILE: AgentProfile = {
   id: 'cursor',
   name: 'Cursor',
+  observerLogin: { out: ACTS_HEADLESS },
   family: 'command-hooks',
   verification: 'live',
   capabilities: () => CAPABILITIES,

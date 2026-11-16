@@ -3,13 +3,15 @@
 // caller records, never a reason to try another provider.
 
 import { type CredentialProvider, isSystemCredentialRef } from '../../secrets/credentials'
-import { OPENROUTER_CREDENTIAL_REF } from '../settings'
-import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, ObserverError, type ObserverProvider, type ObserverRunner, type ObserverSettings } from '../types'
+import { credentialRefFor } from '../settings'
+import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, HTTP_API_PROVIDERS, type HttpApiProvider, ObserverError, type ObserverProvider, type ObserverRunner, type ObserverSettings } from '../types'
 import { type SpawnFn, createClaudeCliRunner } from './claude-cli'
 import { type CliAdapter, type CliObserverRunner, createCliObserverRunner } from './cli-core'
 import { codexAdapter } from './codex-cli'
+import { gooseAdapter } from './goose-cli'
 import { opencodeAdapter } from './opencode-cli'
-import { type FetchFn, createOpenRouterRunner } from './openrouter'
+import { createApiRunner } from './api'
+import type { FetchFn } from './http-core'
 
 export interface RunnerDeps {
   dataDir: string
@@ -36,7 +38,7 @@ function readCredential(credentials: CredentialProvider, ref: string): string {
 }
 
 /** One adapter per CLI login provider. */
-const CLI_ADAPTERS: Record<CliLoginProvider, CliAdapter> = { 'codex-cli': codexAdapter, 'opencode-cli': opencodeAdapter }
+const CLI_ADAPTERS: Record<CliLoginProvider, CliAdapter> = { 'codex-cli': codexAdapter, 'opencode-cli': opencodeAdapter, 'goose-cli': gooseAdapter }
 
 function isCliLoginProvider(provider: ObserverProvider): provider is CliLoginProvider {
   return (CLI_LOGIN_PROVIDERS as readonly string[]).includes(provider)
@@ -68,8 +70,18 @@ export function createRunner(settings: ObserverSettings, deps: RunnerDeps): Obse
     })
   }
   if (isCliLoginProvider(settings.provider)) return createCliRunner(settings, deps)
-  const apiKey = readCredential(deps.credentials, settings.credentialRef ?? OPENROUTER_CREDENTIAL_REF)
-  return createOpenRouterRunner({ apiKey, model: settings.model, ...(deps.fetch !== undefined ? { fetch: deps.fetch } : {}) })
+  if (!isHttpApiProvider(settings.provider)) throw new ObserverError('config_invalid', `${settings.provider} has no runner`)
+  const ref = credentialRefFor(settings)
+  return createApiRunner(settings.provider, {
+    apiKey: ref === null ? null : readCredential(deps.credentials, ref),
+    model: settings.model,
+    ...(settings.endpoint !== undefined ? { endpoint: settings.endpoint } : {}),
+    ...(deps.fetch !== undefined ? { fetch: deps.fetch } : {}),
+  })
+}
+
+function isHttpApiProvider(provider: ObserverProvider): provider is HttpApiProvider {
+  return (HTTP_API_PROVIDERS as readonly string[]).includes(provider)
 }
 
 export function runnerFactory(deps: RunnerDeps): RunnerFactory {

@@ -12,6 +12,8 @@ export interface ObserverSettingsInput {
   model: string
   credentialRef: string | null
   enabled: boolean
+  /** The base URL of an endpoint provider; absent for every other provider. */
+  endpoint?: string
 }
 
 export interface ObserverSettingsRow {
@@ -21,6 +23,7 @@ export interface ObserverSettingsRow {
   credentialRef: string | null
   enabled: boolean
   updatedAt: number
+  endpoint?: string
 }
 
 interface RawRow {
@@ -30,12 +33,14 @@ interface RawRow {
   credentialRef: string | null
   enabled: number
   updatedAt: number
+  endpoint: string | null
 }
 
-const COLUMNS = 'host, provider, model, credential_ref AS credentialRef, enabled, updated_at AS updatedAt'
+const COLUMNS = 'host, provider, model, credential_ref AS credentialRef, enabled, updated_at AS updatedAt, endpoint'
 
-function fromRaw(row: RawRow): ObserverSettingsRow {
-  return { ...row, enabled: row.enabled !== 0 }
+/** The endpoint is left out when empty, so a row of any other provider looks as it did before v14. */
+function fromRaw({ endpoint, ...row }: RawRow): ObserverSettingsRow {
+  return { ...row, enabled: row.enabled !== 0, ...(endpoint === null ? {} : { endpoint }) }
 }
 
 export function listObserverSettings(db: Database): ObserverSettingsRow[] {
@@ -45,12 +50,13 @@ export function listObserverSettings(db: Database): ObserverSettingsRow[] {
 /** Insert or replace the host's row; returns it as stored. */
 export function upsertObserverSettings(db: Database, input: ObserverSettingsInput, now: number): ObserverSettingsRow {
   const row = db.query<RawRow, Record<string, string | number | null>>(
-    `INSERT INTO observer_settings (host, provider, model, credential_ref, enabled, updated_at)
-     VALUES ($host, $provider, $model, $credentialRef, $enabled, $now)
+    `INSERT INTO observer_settings (host, provider, model, credential_ref, enabled, updated_at, endpoint)
+     VALUES ($host, $provider, $model, $credentialRef, $enabled, $now, $endpoint)
      ON CONFLICT (host) DO UPDATE SET provider = excluded.provider, model = excluded.model,
-       credential_ref = excluded.credential_ref, enabled = excluded.enabled, updated_at = excluded.updated_at
+       credential_ref = excluded.credential_ref, enabled = excluded.enabled, updated_at = excluded.updated_at,
+       endpoint = excluded.endpoint
      RETURNING ${COLUMNS}`,
-  ).get({ ...input, enabled: input.enabled ? 1 : 0, now })
+  ).get({ host: input.host, provider: input.provider, model: input.model, credentialRef: input.credentialRef, enabled: input.enabled ? 1 : 0, now, endpoint: input.endpoint ?? null })
   if (row === null) throw new Error('observer settings upsert returned no row')
   return fromRaw(row)
 }

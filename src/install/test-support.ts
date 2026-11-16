@@ -428,6 +428,7 @@ export function profilesWithDocsAgent(detected = true): ProfileTable {
   const docs: AgentProfile = {
     id: 'gemini-cli',
     name: 'Gemini CLI',
+    observerLogin: { out: 'none' },
     family: 'gemini-style',
     verification: 'docs',
     capabilities: () => ({ capture: 'full', context: { sessionStart: true, prompt: false }, search: true, observer: false }),

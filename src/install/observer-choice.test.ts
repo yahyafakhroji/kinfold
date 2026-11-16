@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { parseProviderModel, settingsInputFor } from './observer-choice'
 
+
 test('settingsInputFor gives a CLI-login provider no credential ref', () => {
   expect(settingsInputFor('codex', 'codex-cli', 'gpt-x').credentialRef).toBeNull()
   expect(settingsInputFor('codex', 'openrouter', 'm').credentialRef).toBe('openrouter')
@@ -14,7 +15,10 @@ import { afterEach } from 'bun:test'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
 import { ObserverError } from '../observer/types'
 import { parseObserverFlag } from './args'
-import { ChoiceError, chooseObservers, describeInput, runCheck } from './observer-choice'
+import { NO_TOOLS_OFF } from '../agents/profile'
+import { UNPROVEN_CLI_PROVIDERS } from '../observer/types'
+import { INSTALL_PROFILES } from '../agents/install-profiles'
+import { ChoiceError, chooseObservers, describeInput, runCheck, selfObserverNote, withObserverEndpoint } from './observer-choice'
 import { type FakeWorld, createWorld } from './test-support'
 
 let world: FakeWorld | null = null
@@ -105,7 +109,7 @@ test('the plain prompt marks a provider whose CLI is missing and refuses it when
   const asked = recordingAsk(world)
   const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: CODEX_MISSING })
   expect(choice?.input).toMatchObject({ provider: 'opencode-cli', model: 'm' })
-  expect(asked[0]).toContain('Providers: claude-cli, openrouter, codex-cli (codex not installed), opencode-cli.')
+  expect(asked[0]).toContain('Providers: claude-cli, openrouter, codex-cli (codex not installed), opencode-cli, goose-cli, anthropic-api,')
   expect(asked[0]).toContain('a bare opencode-cli lists')
   expect(asked[0]).not.toContain('a bare codex-cli')
   expect(world.out.filter((line) => line === 'codex-cli cannot be picked: codex not installed')).toHaveLength(2)
@@ -122,13 +126,14 @@ test('the plain prompt does not keep a default whose CLI is missing', async () =
   expect(world.out).toContain('claude not installed; pick another')
 })
 
-test('with every CLI found the plain prompt reads as it always did', async () => {
+test('with every CLI found the plain prompt lists every provider, and auggie-cli with why it cannot be picked', async () => {
   world = createWorld({ interactive: true, answers: [''] })
   const asked = recordingAsk(world)
   const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: async () => new Map() })
   expect(choice?.origin).toBe('default')
   expect(asked[0]).toBe(
-    'Observer for claude-code: default claude-cli/haiku. Providers: claude-cli, openrouter, codex-cli, opencode-cli.\n' +
+    'Observer for claude-code: default claude-cli/haiku. Providers: claude-cli, openrouter, codex-cli, opencode-cli, goose-cli, anthropic-api, openai-api, gemini-api, qwen-api, openai-compatible, ' +
+      `auggie-cli (${UNPROVEN_CLI_PROVIDERS['auggie-cli']}).\n` +
       "Press Enter to keep the default, or type provider:model (a bare codex-cli or opencode-cli lists that CLI's models), or off (capture only, no summaries) > ",
   )
 })
@@ -166,4 +171,77 @@ test('--observer <host>=off turns that observer off and keeps the model it had',
   expect(fresh?.credential).toBeNull()
   // A model can be named "off" only with its provider in front.
   expect(parseObserverFlag('codex=openrouter:off')).toEqual({ ok: true, value: { host: 'codex', provider: 'openrouter', model: 'off' } })
+})
+
+// ---- API providers, endpoints and goose -------------------------------------------
+
+test('settingsInputFor gives each API provider its own key ref, and a local OpenAI-compatible endpoint none', () => {
+  expect(settingsInputFor('codex', 'anthropic-api', 'claude-haiku-5-5')).toEqual({ host: 'codex', provider: 'anthropic-api', model: 'claude-haiku-5-5', credentialRef: 'anthropic', enabled: true })
+  expect(settingsInputFor('codex', 'qwen-api', 'qwen3.8-flash', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1')).toMatchObject({ credentialRef: 'dashscope', endpoint: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' })
+  expect(settingsInputFor('codex', 'openai-compatible', 'llama3.2', 'http://127.0.0.1:11434/v1')).toMatchObject({ credentialRef: null, endpoint: 'http://127.0.0.1:11434/v1' })
+  expect(settingsInputFor('codex', 'openai-compatible', 'llama-4', 'https://api.groq.com/openai/v1')).toMatchObject({ credentialRef: 'openai-compatible' })
+  expect(settingsInputFor('codex', 'goose-cli', 'ollama/qwen2.5:1.5b').credentialRef).toBeNull()
+})
+
+test('describeInput names the endpoint of an endpoint provider', () => {
+  expect(describeInput(settingsInputFor('codex', 'openai-compatible', 'llama3.2', 'http://127.0.0.1:11434/v1'))).toBe('openai-compatible/llama3.2 at http://127.0.0.1:11434/v1')
+})
+
+test('the plain prompt asks an endpoint provider for its address, offers a default, and refuses one the rules forbid', async () => {
+  world = createWorld({ interactive: true, answers: ['openai-compatible:llama3.2', 'http://example.com/v1', ''] })
+  const asked = recordingAsk(world)
+  const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: async () => new Map() })
+  expect(choice?.input).toEqual({ host: 'claude-code', provider: 'openai-compatible', model: 'llama3.2', credentialRef: null, enabled: true, endpoint: 'http://127.0.0.1:11434/v1' })
+  expect(choice?.credentialNote).toBe('no key needed')
+  expect(asked[1]).toBe('Endpoint for openai-compatible on claude-code (https, or http on this machine; Enter for http://127.0.0.1:11434/v1) > ')
+  expect(world.out).toContain('the endpoint must use https unless it is on this machine (127.0.0.1, ::1 or localhost)')
+})
+
+test('Qwen takes the Singapore DashScope address by default and asks for its key', async () => {
+  world = createWorld({ interactive: true, answers: ['qwen-api:qwen3.8-flash', ''], keychainRefs: ['dashscope'] })
+  const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: async () => new Map() })
+  expect(choice?.input).toMatchObject({ provider: 'qwen-api', credentialRef: 'dashscope', endpoint: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' })
+  expect(choice?.credentialNote).toContain('dashscope present')
+})
+
+test('the plain prompt refuses a goose model it cannot run safely, and auggie-cli with its reason', async () => {
+  world = createWorld({ interactive: true, answers: ['goose-cli:claude-code/sonnet', 'auggie-cli:x', 'goose-cli:ollama/qwen2.5:1.5b'] })
+  const asked = recordingAsk(world)
+  const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: async () => new Map() })
+  expect(choice?.input).toMatchObject({ provider: 'goose-cli', model: 'ollama/qwen2.5:1.5b' })
+  expect(world.out).toContain('goose-cli models are <provider>/<model>, provider one of anthropic, openai, google, openrouter, xai, ollama, tetrate')
+  expect(world.out).toContain(`auggie-cli cannot be picked: ${UNPROVEN_CLI_PROVIDERS['auggie-cli']}`)
+  expect(asked[0]).toContain(`auggie-cli (${UNPROVEN_CLI_PROVIDERS['auggie-cli']})`)
+})
+
+test('an agent whose own CLI cannot observe is told why before the question', async () => {
+  world = createWorld({ interactive: true, answers: [''], keychainRefs: ['openrouter'] })
+  await chooseObservers(world.env, ['gemini-cli'], { ...options, skipCheck: true, missingClis: async () => new Map(), observerNote: (host) => selfObserverNote(INSTALL_PROFILES[host]) })
+  expect(selfObserverNote(INSTALL_PROFILES.codex)).toBeNull()
+  expect(world.out).toContain(`Gemini CLI cannot summarise through its own CLI: ${NO_TOOLS_OFF}. Any provider below can.`)
+})
+
+test('--observer-endpoint gives an endpoint provider its address; Qwen without one takes the default', () => {
+  expect(withObserverEndpoint([{ host: 'codex', provider: 'openai-compatible', model: 'm' }], 'http://localhost:1234/v1/')).toEqual({ ok: true, value: [{ host: 'codex', provider: 'openai-compatible', model: 'm', endpoint: 'http://localhost:1234/v1' }] })
+  expect(withObserverEndpoint([{ host: 'codex', provider: 'qwen-api', model: 'm' }], null)).toEqual({ ok: true, value: [{ host: 'codex', provider: 'qwen-api', model: 'm', endpoint: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' }] })
+  expect(withObserverEndpoint([{ host: 'codex', provider: 'openai-compatible', model: 'm' }], null)).toEqual({ ok: false, error: '--observer codex=openai-compatible:... needs --observer-endpoint <url>' })
+  expect(withObserverEndpoint([{ host: 'codex', provider: 'openai-compatible', model: 'm' }], 'http://10.0.0.2/v1')).toEqual({ ok: false, error: '--observer-endpoint: the endpoint must use https unless it is on this machine (127.0.0.1, ::1 or localhost)' })
+  expect(withObserverEndpoint([{ host: 'codex', provider: 'openrouter', model: 'm' }], 'https://x.example.com')).toEqual({ ok: false, error: '--observer-endpoint is only for an --observer naming qwen-api or openai-compatible' })
+  expect(withObserverEndpoint([{ host: 'codex', provider: 'goose-cli', model: 'claude-code/x' }], null)).toEqual({ ok: false, error: '--observer codex=goose-cli:...: goose-cli models are <provider>/<model>, provider one of anthropic, openai, google, openrouter, xai, ollama, tetrate' })
+})
+
+test('a bare goose-cli asks for a model in goose\'s format, lists none, and refuses one it cannot run', async () => {
+  world = createWorld({ interactive: true, answers: ['goose-cli', 'ollama', 'ollama/qwen2.5:7b'], cliRunner: () => cli({ listModels: async () => { throw new Error('goose has no model list') } }) })
+  const asked = recordingAsk(world)
+  const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: async () => new Map() })
+  expect(choice?.input).toMatchObject({ provider: 'goose-cli', model: 'ollama/qwen2.5:7b' })
+  expect(asked[1]).toBe('Model for goose-cli on claude-code, as <goose provider>/<model> such as ollama/qwen2.5:7b > ')
+  expect(world.out.some((line) => line.includes('model list unavailable'))).toBe(false)
+  expect(world.out).toContain('goose-cli models are <provider>/<model>, provider one of anthropic, openai, google, openrouter, xai, ollama, tetrate')
+})
+
+test('a built-in object name is not taken for an unproven provider', async () => {
+  world = createWorld({ interactive: true, answers: ['constructor', ''] })
+  await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: async () => new Map() })
+  expect(world.out.some((line) => line.startsWith('constructor cannot be picked'))).toBe(false)
 })

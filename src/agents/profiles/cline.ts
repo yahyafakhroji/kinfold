@@ -37,7 +37,7 @@ import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstall
 import { hookTarget, shellCommand } from '../families/json-hooks'
 import { mcpEntryState } from '../families/mcp-entry'
 import { type OwnedFileSpec, ownedFileActions, ownedFileUninstallActions, ownedFilesState } from '../families/owned-file'
-import type { AgentProfile, Capabilities } from '../profile'
+import { ACTS_HEADLESS, type AgentProfile, type Capabilities } from '../profile'
 import { SHIM_MARKER } from '../../names'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: false, prompt: true }, search: true, observer: false }
@@ -98,6 +98,7 @@ function mcpLine(env: InstallEnv): string {
 export const CLINE_PROFILE: AgentProfile = {
   id: HOST,
   name: 'Cline',
+  observerLogin: { out: ACTS_HEADLESS },
   family: 'custom',
   verification: 'docs',
   capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),

@@ -93,7 +93,7 @@ What Kinfold wires for each agent on macOS and Linux. **Observer** is `yes` when
 | Amp <sup>10</sup> | yes | start, prompt | yes | no | docs | same |
 | Kimi Code <sup>11</sup> | yes | prompt | yes | no | docs | search only <sup>1</sup> |
 | Auggie <sup>12</sup> | yes | no | yes | no | docs | same |
-| Goose <sup>13</sup> | tool results | no | no | no | docs | none <sup>14</sup> |
+| Goose <sup>13</sup> | tool results | no | no | yes | docs | none <sup>14</sup> |
 | Crush <sup>15</sup> | no | no | yes | no | docs | same |
 | Zed <sup>16</sup> | no | no | yes | no | docs | same <sup>17</sup> |
 | Continue <sup>18</sup> | no | no | no | no | docs | same |
@@ -146,20 +146,35 @@ What Kinfold wires for each agent on macOS and Linux. **Observer** is `yes` when
 
 ## Choosing the observer model
 
-Each agent's sessions are summarised by a model you choose:
+Each agent's sessions are summarised by a model you choose. Some providers borrow a CLI login you already have, and the others call a model API with your own key:
 
-| Provider | Uses | Needs |
-| --- | --- | --- |
-| `claude-cli` | your Claude login, through the `claude` CLI | nothing extra |
-| `codex-cli` | your ChatGPT login, through `codex exec` | Codex 0.166 or later, logged in |
-| `opencode-cli` | the providers you signed in to in OpenCode | OpenCode 2 |
-| `openrouter` | any OpenRouter model | an OpenRouter API key, kept in the system key store |
+| Provider | Uses | Needs | Default model |
+| --- | --- | --- | --- |
+| `claude-cli` | your Claude login, through the `claude` CLI | nothing extra | `haiku` |
+| `codex-cli` | your ChatGPT login, through `codex exec` | Codex 0.166 or later, logged in | none |
+| `opencode-cli` | the providers you signed in to in OpenCode | OpenCode 2 | none |
+| `goose-cli` | a provider key you gave Goose, through `goose run` | Goose 1.59 or later | none |
+| `openrouter` | any OpenRouter model | an OpenRouter API key | `openrouter/auto` |
+| `anthropic-api` | the Anthropic API | an Anthropic API key | `claude-haiku-5-5` |
+| `openai-api` | the OpenAI API | an OpenAI API key | `gpt-6-luna` |
+| `gemini-api` | the Gemini API | a Google AI Studio key | `gemini-3.5-flash-lite` |
+| `qwen-api` | Qwen through DashScope | a DashScope key and its region's address | `qwen3.8-flash` |
+| `openai-compatible` | any server with an OpenAI-style chat API: Ollama, LM Studio, Groq, DeepSeek, Together, Mistral | its address, and a key unless it runs on this machine | none |
 
-Claude Code defaults to `claude-cli` with Haiku. The others default to OpenRouter. Pick one in the wizard, with `--observer <agent>=<provider>:<model>` (for example `--observer codex=codex-cli:<model>`), or later in the dashboard.
+Keys go in the system key store (Keychain, Credential Manager or libsecret, or a 0600 key file where there is none), never on a command line or in a log. The default models are each vendor's cheapest fast tier, since the observer only writes short summaries.
+
+Claude Code defaults to `claude-cli` with Haiku. The others default to OpenRouter. Pick one in the wizard, with `--observer <agent>=<provider>:<model>` (for example `--observer codex=anthropic-api:claude-haiku-5-5`), or later in the dashboard. A CLI provider is offered only when its CLI is installed.
+
+- `openai-compatible` takes `--observer-endpoint <url>`. The address must use https, or plain http on this machine: `http://127.0.0.1:11434/v1` for Ollama, `http://127.0.0.1:1234/v1` for LM Studio. A server on this machine needs no key. Setup asks for a key for any other server; for one that needs none, clear the Keychain entry on the dashboard Models page. Small local models often return JSON that misses a field the observer needs; a 1.5B model did in our test, so pick a 7B model or larger.
+- `qwen-api` uses the Singapore address `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` unless you give another. A DashScope key works only with the region it was created in.
+- `goose-cli` models are `<goose provider>/<model>`, such as `anthropic/claude-haiku-5-5` or `ollama/qwen2.5:7b`. The goose provider must be one that calls a model API: `anthropic`, `openai`, `google`, `openrouter`, `xai`, `ollama` or `tetrate`. Goose providers that run another agent's CLI, such as `claude-code` or `codex`, are refused, because that agent's tools would run where Goose cannot show them.
+- Auggie is listed and cannot be picked. Its docs describe the switches a safe run needs, but a live check needs an Augment account and the docs do not describe its JSON output.
+
+The wizard says why an agent's own CLI is not offered. Most agent CLIs have no switch that turns every tool off, so they could act on what a session tells them; Cline, Cursor, Kimi Code and Factory Droid run tools on their own in headless mode.
 
 To stop summaries for one agent, pick "off (capture only, no summaries)" in the wizard or pass `--observer <agent>=off`. Kinfold still captures that agent's prompts and replies, shows them in Sessions, and recalls memory that exists. Turns captured while the observer is off are not summarised later, so turning it back on starts from the next turn.
 
-The observer sends session text to the model you picked. That text can include web pages and files someone else wrote, so every login-based observer runs with its tools off, from a private folder, without your settings, hooks, plugins or MCP servers. Before Kinfold uses Codex or OpenCode as an observer, it plants an instruction to read a file. If the model calls a tool or repeats the file's contents, Kinfold stops that observer until its version or path changes, or you press Re-check in the dashboard.
+The observer sends session text to the model you picked. That text can include web pages and files someone else wrote. An API provider gets no tools in its request, so no tool can run, and an answer that asks for one is refused. Every login-based observer runs with its tools off, from a private folder, without your settings, hooks, plugins or MCP servers. Before Kinfold uses Codex, OpenCode or Goose as an observer, it plants an instruction to read a file. If the model calls a tool or repeats the file's contents, Kinfold stops that observer until its version or path changes, or you press Re-check in the dashboard.
 
 ## Performance
 
@@ -184,7 +199,7 @@ Ranking runs in a worker thread over a 16-bit copy of the vectors, so searches d
 - **One runtime dependency.** The program bundles [`@clack/prompts`](https://github.com/bombshell-dev/clack), pinned to an exact version, to draw the CLI's output on a terminal. The hook, the MCP server and the daemon do not load it, and a test enforces that.
 - **Checked downloads.** The curl and PowerShell installers, `kinfold install` and `kinfold update` refuse a program whose SHA-256 doesn't match the release's `SHA256SUMS`. The npm packages carry the same programs, published from CI with [npm provenance](https://docs.npmjs.com/generating-provenance-statements).
 
-What leaves your machine: session text goes to the observer model you chose, and observation text goes to OpenRouter for embeddings if you gave Kinfold an OpenRouter key.
+What leaves your machine: session text goes to the observer model you chose (nothing leaves when that model runs on this machine), and observation text goes to OpenRouter for embeddings if you gave Kinfold an OpenRouter key.
 
 ## Backup and restore
 
@@ -207,7 +222,7 @@ kinfold restore ~/kinfold.kfb
 Restore asks for the recovery code and checks that it opens the backup before it changes anything. A wrong code, a damaged file or a backup from a newer Kinfold leaves the current memory as it was. An older backup is migrated forward. The daemon keeps running: it closes the store, swaps in the backup and opens it again.
 
 - **The store that was there.** If it held no memory, as on a fresh install, it is removed. If it held memory, it is kept as `memory.db.kinfold-replaced` with its key under `db-key-replaced`, and `kinfold status` mentions it. Restore replaces the store. It does not merge two memories.
-- **What a backup leaves out.** The OpenRouter key, which you enter again. The key behind redaction markers, so markers written after a restore don't match older markers for the same secret. Nothing old is lost. Records about the machine, such as the install channel and logs, also stay behind.
+- **What a backup leaves out.** The OpenRouter key and any other observer key, which you enter again. The key behind redaction markers, so markers written after a restore don't match older markers for the same secret. Nothing old is lost. Records about the machine, such as the install channel and logs, also stay behind.
 - **An unencrypted store** backs up and restores without a code. The file is then readable by anyone who has it.
 - **Switching back.** `kinfold restore --undo` puts the kept store back in use, with no recovery code, and keeps the restored one in its place, so you can switch again. It refuses when nothing is kept, when the kept store's key doesn't open it, or while a backup or restore is running.
 - **If a restore or a switch back is cut short,** `kinfold key resume` finishes it or puts things back as they were.
@@ -243,7 +258,7 @@ When the output is not a terminal, every command prints the same plain lines as 
 | `KINFOLD_NO_UPDATE_CHECK=1` | Set when you run `kinfold install`: turns off the update check, and automatic updates with it. Install saves it, since the daemon does not read your shell's environment |
 | `KINFOLD_NO_AUTO_UPDATE=1` | Set when you run `kinfold install`: keeps the update check and turns off automatic patch updates. Install saves it, since the daemon does not read your shell's environment |
 
-Install flags: `--hosts claude-code,opencode,codex,cursor` picks agents, `--observer <agent>=<provider>:<model>` sets an observer, `--port <n>` sets the port, `--no-encrypt` creates a new store in plaintext, `--no-auto-update` turns off automatic patch updates, and `--auto-update` turns them back on.
+Install flags: `--hosts claude-code,opencode,codex,cursor` picks agents, `--observer <agent>=<provider>:<model>` sets an observer, `--observer-endpoint <url>` gives `openai-compatible` or `qwen-api` its address, `--port <n>` sets the port, `--no-encrypt` creates a new store in plaintext, `--no-auto-update` turns off automatic patch updates, and `--auto-update` turns them back on.
 
 ## Uninstall
 

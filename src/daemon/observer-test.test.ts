@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { CHECK_PROMPT } from '../install/observer-choice'
 import { type FakeRunner, type TempStore, fakeRunner, openTempStore } from '../observer/test-support'
 import { ObserverError, type ObserverSettings } from '../observer/types'
+import { createObserverTester } from './observer-test'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
 
 const LEAKY_DETAIL = 'sk-or-v1-REPLY-TEXT-THAT-MUST-NOT-LEAK'
@@ -86,4 +87,12 @@ test('without an observer the route says so with 503', async () => {
   await rig.stop()
   rig = startRig(temp.dataDir)
   expect((await rig.bearer('POST', '/observer/test', BODY)).status).toBe(503)
+})
+
+test('the tester hands an endpoint provider its address', async () => {
+  const seen: ObserverSettings[] = []
+  const tester = createObserverTester((settings) => (seen.push(settings), { run: async () => ({ text: 'OK', model: 'm' }) }), () => {})
+  const input = { host: 'codex', provider: 'openai-compatible', model: 'llama3.2', credentialRef: null, enabled: true, endpoint: 'http://127.0.0.1:11434/v1' } as const
+  expect(await tester.test!(input)).toEqual({ ok: true })
+  expect(seen[0]).toEqual({ provider: 'openai-compatible', model: 'llama3.2', credentialRef: null, enabled: true, source: 'host', endpoint: 'http://127.0.0.1:11434/v1' })
 })

@@ -6,6 +6,7 @@ import type { WiringState } from '../install/claude-hooks'
 import type { HostDetection, Semver } from '../install/detectors'
 import type { InstallEnv } from '../install/env'
 import type { Action } from '../install/plan'
+import type { ObserverProvider } from '../observer/types'
 import type { OsName } from '../platform/platform'
 import type { EmbeddedAssets } from '../runtime/embedded'
 
@@ -43,9 +44,22 @@ export interface AgentWiring {
   withoutHooks?: () => AgentWiring
 }
 
+/**
+ * Whether the agent's own CLI can run the observer on the user's login, and
+ * if not, why. The observer reads untrusted session text, so a CLI qualifies
+ * only with a real switch that turns every tool off, proven by a live run of
+ * the planted-instruction check (observer/runners/CLI-LOGIN-CANDIDATES.md).
+ */
+export type ObserverLogin = { provider: ObserverProvider } | { out: string }
+
+export const NO_TOOLS_OFF = 'its CLI has no switch that turns every tool off, so it could act on what a session says'
+export const ACTS_HEADLESS = 'its CLI runs tools on its own in headless mode'
+export const NO_HEADLESS = 'it has no headless CLI to run a summary through'
+
 export interface AgentProfile {
   id: AgentId
   name: string
+  observerLogin: ObserverLogin
   family: AgentFamily
   verification: Verification
   capabilities(os: OsName): Capabilities

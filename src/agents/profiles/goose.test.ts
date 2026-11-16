@@ -90,7 +90,7 @@ test('goose: on Windows nothing is written, and the capability line says why', a
 test('goose: built from the docs, tool results only, MCP left to the user as YAML, and a full install is idempotent', async () => {
   const goose = profile('goose')
   expect(goose).toMatchObject({ id: 'goose', verification: 'docs' })
-  expect(goose.capabilities('macos')).toEqual({ capture: 'partial', context: { sessionStart: false, prompt: false }, search: false, observer: false })
+  expect(goose.capabilities('macos')).toEqual({ capture: 'partial', context: { sessionStart: false, prompt: false }, search: false, observer: true })
   expect(capabilityLine(goose, 'macos')).toStartWith('captures tool results only (')
   expect(goose.limit('macos')).toContain('only the tool events are registered')
   const steps = goose.manualSteps('macos', bench.world().env).join(' ')

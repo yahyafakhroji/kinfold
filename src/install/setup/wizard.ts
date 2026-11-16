@@ -6,7 +6,9 @@
 
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
-import { OBSERVER_PROVIDERS, type ObserverProvider } from '../../observer/types'
+import { checkEndpoint } from '../../observer/endpoint'
+import { defaultModelFor, isEndpointProvider } from '../../observer/settings'
+import { type EndpointProvider, OBSERVER_PROVIDERS, type ObserverProvider, UNPROVEN_CLI_PROVIDERS } from '../../observer/types'
 import { readDisplayFile } from '../../context/display-file'
 import { HOLDOUT_HOSTS } from '../../context/holdout'
 import { encodeRecoveryCode } from '../../sqlite/recovery'
@@ -30,14 +32,19 @@ import {
   type ObserverFlag,
   chooseObserverWith,
   chooseObservers,
+  defaultEndpoint,
   defaultInput,
   describeInput,
+  endpointQuestion,
+  GOOSE_MODEL_HINT,
   flagInput,
   isCliLoginProvider,
   listModelsFor,
+  modelProblem,
   newCredentialSession,
   offInput,
   pickAnother,
+  selfObserverNote,
   settingsInputFor,
   showModels,
 } from '../observer-choice'
@@ -251,13 +258,38 @@ async function pickAgents(env: InstallEnv, ask: Prompts | null, state: SetupStat
 
 // ---- observers --------------------------------------------------------------
 
-type ProviderPick = 'current' | 'off' | ObserverProvider
+type ProviderPick = 'current' | 'off' | ObserverProvider | 'unproven'
+
+/** What an API provider asks for, shown beside it; a CLI provider's row says only whether its CLI is here. */
+const PROVIDER_HINTS: Readonly<Partial<Record<ObserverProvider, string>>> = {
+  'anthropic-api': 'your Anthropic API key',
+  'openai-api': 'your OpenAI API key',
+  'gemini-api': 'your Google AI Studio key',
+  'qwen-api': "your DashScope key and its region's address",
+  'openai-compatible': 'any OpenAI-style server: Ollama, LM Studio, Groq, DeepSeek…',
+}
+
 
 async function askModel(env: InstallEnv, ask: Prompts, host: InstallHost, provider: ObserverProvider, current: Candidate): Promise<string> {
-  if (isCliLoginProvider(provider)) showModels(env, provider, await listModelsFor(env, provider))
-  const initial = current.input.provider === provider ? current.input.model : ''
-  const model = await ask.text(`Model for ${provider} on ${host}:`, initial, (value) => (value.trim() === '' ? 'a model name is needed' : null))
+  // goose has no model list: its question says the format instead.
+  if (isCliLoginProvider(provider) && provider !== 'goose-cli') showModels(env, provider, await listModelsFor(env, provider))
+  const initial = current.input.provider === provider ? current.input.model : (defaultModelFor(provider) ?? '')
+  const format = provider === 'goose-cli' ? `, ${GOOSE_MODEL_HINT}` : ''
+  const check = (value: string): string | null => (value.trim() === '' ? 'a model name is needed' : modelProblem(provider, value.trim()))
+  const model = await ask.text(`Model for ${provider} on ${host}${format}:`, initial, check)
   return model.trim()
+}
+
+async function askEndpoint(ask: Prompts, host: InstallHost, provider: EndpointProvider, current: Candidate, saved: ChoiceOptions['saved']): Promise<string> {
+  const fallback = current.input.provider === provider && current.input.endpoint !== undefined ? current.input.endpoint : defaultEndpoint(provider, host, saved)
+  const check = (value: string): string | null => {
+    const checked = checkEndpoint(provider, value.trim() === '' ? fallback : value)
+    return checked.ok ? null : checked.error
+  }
+  const answer = await ask.text(`${endpointQuestion(provider, host, fallback)}:`, '', check)
+  const checked = checkEndpoint(provider, answer.trim() === '' ? fallback : answer)
+  if (!checked.ok) throw new ChoiceError(checked.error)
+  return checked.value
 }
 
 /**
@@ -270,8 +302,12 @@ function observerChoices(current: Candidate, missing: MissingClis): { choices: C
   const stale = missing.get(current.input.provider)
   const providers = OBSERVER_PROVIDERS.map((provider): Choice<ProviderPick> => {
     const reason = missing.get(provider)
-    return reason === undefined ? { value: provider, label: provider } : { value: provider, label: provider, disabled: reason }
+    const hint = PROVIDER_HINTS[provider]
+    if (reason !== undefined) return { value: provider, label: provider, disabled: reason }
+    return hint === undefined ? { value: provider, label: provider } : { value: provider, label: provider, hint }
   })
+  // Listed so the reason is seen, never pickable: each would run an agent no live check has proven safe.
+  const unproven = Object.entries(UNPROVEN_CLI_PROVIDERS).map(([provider, reason]): Choice<ProviderPick> => ({ value: 'unproven', label: provider, disabled: reason }))
   const first: Choice<ProviderPick> = {
     value: 'current',
     label: describeInput(current.input),
@@ -281,15 +317,18 @@ function observerChoices(current: Candidate, missing: MissingClis): { choices: C
   const pickable = providers.find((choice) => choice.disabled === undefined)
   // Last, and only when the agent is not off already: then the first row is that choice.
   const off: Choice<ProviderPick>[] = current.input.enabled ? [{ value: 'off', label: OFF_LABEL }] : []
-  return { choices: [first, ...providers, ...off], initial: stale === undefined || pickable === undefined ? 'current' : pickable.value }
+  return { choices: [first, ...providers, ...unproven, ...off], initial: stale === undefined || pickable === undefined ? 'current' : pickable.value }
 }
 
-async function askCandidate(env: InstallEnv, ask: Prompts, host: InstallHost, current: Candidate, missing: MissingClis): Promise<Candidate> {
+async function askCandidate(env: InstallEnv, ask: Prompts, host: InstallHost, current: Candidate, missing: MissingClis, saved: ChoiceOptions['saved']): Promise<Candidate> {
   const { choices, initial } = observerChoices(current, missing)
   const picked = await ask.select(`Observer for ${host}:`, choices, initial)
   if (picked === 'current') return current
   if (picked === 'off') return { input: offInput(current.input), origin: 'prompt' }
-  return { input: settingsInputFor(host, picked, await askModel(env, ask, host, picked, current)), origin: 'prompt' }
+  if (picked === 'unproven') throw new ChoiceError('an unproven provider cannot be picked')
+  const model = await askModel(env, ask, host, picked, current)
+  const endpoint = isEndpointProvider(picked) ? await askEndpoint(ask, host, picked, current, saved) : undefined
+  return { input: settingsInputFor(host, picked, model, endpoint), origin: 'prompt' }
 }
 
 async function observerFor(env: InstallEnv, ask: Prompts, host: InstallHost, flags: SetupFlags, choice: ChoiceOptions, saved: ChoiceOptions['saved'], clis: () => Promise<MissingClis>): Promise<ObserverChoice> {
@@ -297,8 +336,10 @@ async function observerFor(env: InstallEnv, ask: Prompts, host: InstallHost, fla
   const current: Candidate = row === undefined ? { input: defaultInput(host), origin: 'default' } : { input: row, origin: 'saved' }
   const flag = flags.observers.find((entry) => entry.host === host)
   const session = newCredentialSession()
+  const note = choice.observerNote?.(host) ?? null
+  if (note !== null && flag === undefined) ask.say(note)
   for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
-    const candidate: Candidate = attempt === 0 && flag !== undefined ? { input: flagInput(host, flag, row), origin: 'flag' } : await askCandidate(env, ask, host, current, await clis())
+    const candidate: Candidate = attempt === 0 && flag !== undefined ? { input: flagInput(host, flag, row), origin: 'flag' } : await askCandidate(env, ask, host, current, await clis(), saved)
     const result = await chooseObserverWith(env, host, candidate, choice, session)
     if (!('failed' in result)) return result
   }
@@ -311,7 +352,8 @@ async function observersStep(env: InstallEnv, ask: Prompts | null, state: SetupS
   // Worked out at the first question and kept: a run that asks nothing (--yes, a flag for every agent) looks for no CLI.
   let found: Promise<MissingClis> | null = null
   const clis = (): Promise<MissingClis> => (found ??= missingClis(env, agents.detections, profiles))
-  const options: ChoiceOptions = { ...choice, yes: choice.yes || flags.yes, flags: flags.observers, ...(saved === undefined ? {} : { saved }), missingClis: clis }
+  const observerNote = (host: InstallHost): string | null => selfObserverNote(profiles[host])
+  const options: ChoiceOptions = { ...choice, yes: choice.yes || flags.yes, flags: flags.observers, ...(saved === undefined ? {} : { saved }), missingClis: clis, observerNote }
   if (ask === null) return chooseObservers(env, hosts, options)
   const choices: ObserverChoice[] = []
   for (const host of hosts) choices.push(await observerFor(env, ask, host, flags, options, saved, clis))

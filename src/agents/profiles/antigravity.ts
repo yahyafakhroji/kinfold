@@ -34,7 +34,7 @@ import { ANTIGRAVITY_EVENTS } from '../../adapters/antigravity'
 import { type InstallEnv, platformOf } from '../../install/env'
 import type { OsName } from '../../platform/platform'
 import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentWiring, mcpServersFile } from '../families/json-agent'
-import { type AgentProfile, type Capabilities, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
+import { type AgentProfile, type Capabilities, NO_TOOLS_OFF, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: false }, search: true, observer: false }
 const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false }
@@ -58,6 +58,7 @@ export const ANTIGRAVITY_FILES: readonly JsonAgentFile[] = [
 export const ANTIGRAVITY_PROFILE: AgentProfile = {
   id: 'antigravity',
   name: 'Antigravity',
+  observerLogin: { out: NO_TOOLS_OFF },
   family: 'gemini-style',
   verification: 'docs',
   capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),

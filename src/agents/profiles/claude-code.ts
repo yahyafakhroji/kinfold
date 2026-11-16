@@ -14,6 +14,7 @@ const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: t
 export const CLAUDE_CODE_PROFILE: AgentProfile = {
   id: 'claude-code',
   name: 'Claude Code',
+  observerLogin: { provider: 'claude-cli' },
   family: 'claude-style',
   verification: 'live',
   capabilities: () => CAPABILITIES,

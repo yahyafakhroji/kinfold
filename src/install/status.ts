@@ -10,7 +10,7 @@ import { readDisplayFile } from '../context/display-file'
 import { HOLDOUT_HOSTS } from '../context/holdout'
 import type { EffectiveSettings } from '../daemon/settings-route'
 import { envName, readEnv } from '../env-names'
-import { OPENROUTER_CREDENTIAL_REF, providerTakesKey } from '../observer/settings'
+import { OPENROUTER_CREDENTIAL_REF, credentialRefFor } from '../observer/settings'
 import { getObserverSettings } from './daemon-client'
 import { dbStatusLines } from './db-encryption'
 import { detectHosts } from './detect'
@@ -92,10 +92,11 @@ function daemonLines(env: InstallEnv, situation: DaemonSituation): string[] {
 
 function effectiveLine(entry: EffectiveSettings): string {
   if ('error' in entry) return `  ${entry.host}: invalid setting (${entry.error})`
-  const { provider, model, credentialRef, enabled, source } = entry.settings
+  const { provider, model, enabled, source, endpoint } = entry.settings
   // Off runs no model: the agent is still captured, and nothing is summarised.
   if (!enabled) return `  ${entry.host}: off (capture only); source ${source}`
-  return `  ${entry.host}: ${provider}/${model}${credentialRef !== null && providerTakesKey(provider) ? ` key ${credentialRef}` : ''}; source ${source}`
+  const ref = credentialRefFor(entry.settings)
+  return `  ${entry.host}: ${provider}/${model}${endpoint === undefined ? '' : ` at ${endpoint}`}${ref === null ? '' : ` key ${ref}`}; source ${source}`
 }
 
 /**
@@ -116,7 +117,10 @@ function displayLines(env: InstallEnv): string[] {
 async function observerLines(env: InstallEnv): Promise<{ lines: string[]; refs: string[] }> {
   const read = await getObserverSettings(env)
   if (!read.ok) return { lines: [`observer settings: unknown (${read.reason})`], refs: [OPENROUTER_CREDENTIAL_REF] }
-  const refs = read.view.effective.flatMap((entry) => ('settings' in entry && entry.settings.enabled && providerTakesKey(entry.settings.provider) ? [entry.settings.credentialRef ?? OPENROUTER_CREDENTIAL_REF] : []))
+  const refs = read.view.effective.flatMap((entry) => {
+    const ref = 'settings' in entry && entry.settings.enabled ? credentialRefFor(entry.settings) : null
+    return ref === null ? [] : [ref]
+  })
   return { lines: ['observer settings:', ...read.view.effective.map(effectiveLine)], refs: [...new Set([OPENROUTER_CREDENTIAL_REF, ...refs])] }
 }
 

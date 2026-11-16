@@ -125,3 +125,36 @@ test('a host whose provider has a probe failure shows "Not running: <class>" as 
   expect(hostForms({ ...view, probe: [] }).map(textOf).join('|')).not.toContain('Not running:')
   expect(hostForms({ ...view, probe: undefined }).map(textOf).join('|')).not.toContain('Not running:')
 })
+
+test('the provider list is the daemon\'s, and auggie-cli is not in it', async () => {
+  const { PROVIDERS } = (await load()) as unknown as { PROVIDERS: string[] }
+  const { OBSERVER_PROVIDERS } = await import('../observer/types')
+  expect(PROVIDERS).toEqual([...OBSERVER_PROVIDERS])
+})
+
+test('an endpoint provider\'s form shows its address and key entry; a CLI provider\'s shows neither', async () => {
+  const { hostForms } = (await load()) as unknown as { hostForms(view: unknown): FakeElement[] }
+  const local = { provider: 'openai-compatible', model: 'llama3.2', credentialRef: null, enabled: true, source: 'host', endpoint: 'http://127.0.0.1:11434/v1' }
+  const claude = { provider: 'anthropic-api', model: 'claude-haiku-5-5', credentialRef: 'anthropic', enabled: true, source: 'host' }
+  const forms = hostForms({ rows: [], safety: [], effective: [{ host: 'codex', settings: local }, { host: 'cursor', settings: CODEX }, { host: 'amp', settings: claude }] })
+  const field = (form: FakeElement, marker: string) => elements(form).find((element) => element.getAttribute(marker) !== null)!
+  const input = (form: FakeElement, name: string) => elements(form).find((element) => element.tagName === 'INPUT' && element.getAttribute('name') === name)!
+  expect(field(forms[0]!, 'data-endpoint').getAttribute('hidden')).toBeNull()
+  expect(input(forms[0]!, 'endpoint').getAttribute('value')).toBe('http://127.0.0.1:11434/v1')
+  expect(field(forms[0]!, 'data-credential').getAttribute('hidden')).toBeNull()
+  expect(field(forms[1]!, 'data-endpoint').getAttribute('hidden')).not.toBeNull()
+  expect(field(forms[1]!, 'data-credential').getAttribute('hidden')).not.toBeNull()
+  expect(field(forms[2]!, 'data-endpoint').getAttribute('hidden')).not.toBeNull()
+  expect(input(forms[2]!, 'credentialRef').getAttribute('placeholder')).toBe('anthropic')
+})
+
+test('settingsBody sends the endpoint only when one is typed', async () => {
+  const { settingsBody } = (await load()) as unknown as { settingsBody(host: string, data: FormData): Record<string, unknown> }
+  const data = new FormData()
+  data.set('provider', 'openai-compatible')
+  data.set('model', 'llama3.2')
+  data.set('endpoint', ' http://127.0.0.1:11434/v1 ')
+  expect(settingsBody('codex', data)).toEqual({ host: 'codex', provider: 'openai-compatible', model: 'llama3.2', enabled: false, credentialRef: null, endpoint: 'http://127.0.0.1:11434/v1' })
+  data.set('endpoint', '')
+  expect(settingsBody('codex', data)).not.toHaveProperty('endpoint')
+})

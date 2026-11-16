@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { type InstallEnv, platformOf } from '../../install/env'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpEntryText, stdioMcpEntry } from '../families/json-agent'
 import { mcpEntryState } from '../families/mcp-entry'
-import { type AgentProfile, type Capabilities, SHORT_NO_HOOKS } from '../profile'
+import { type AgentProfile, type Capabilities, NO_HEADLESS, SHORT_NO_HOOKS } from '../profile'
 
 const HOST = 'zed'
 
@@ -37,6 +37,7 @@ const spec = ZED_MCP_FILE.mcp
 export const ZED_PROFILE: AgentProfile = {
   id: HOST,
   name: 'Zed',
+  observerLogin: { out: NO_HEADLESS },
   family: 'mcp-only',
   verification: 'docs',
   capabilities: () => CAPABILITIES,
