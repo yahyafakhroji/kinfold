@@ -441,6 +441,16 @@ test('an automatic run clears the failure an earlier one recorded', async () => 
   expect(readAutoState(w.dataDir).failure).toBeNull()
 })
 
+test('with beta on, an automatic run installs the patch of the running release, not the newer beta', async () => {
+  const { w } = updateWorld({ tag: 'v0.1.1' })
+  writeFileSync(join(w.dataDir, 'install.json'), JSON.stringify({ channel: 'curl', updateCheck: true, autoUpdate: true, beta: true, firstInstalledAt: 1 }))
+  const base = w.env.fetch
+  const list = [{ tag_name: 'v0.2.0-beta.1', draft: false, prerelease: true }, { tag_name: 'v0.1.1', draft: false, prerelease: false }]
+  w.env = { ...w.env, fetch: async (url, init) => (url === RELEASES_URL ? new Response(JSON.stringify(list)) : base(url, init)) }
+  expect(await runUpdate(w.env, { dryRun: false, auto: true }, { version: '0.1.0', runProgram: ok })).toBe(0)
+  expect(readAutoState(w.dataDir).updated).toMatchObject({ version: '0.1.1', previous: '0.1.0' })
+})
+
 test('an automatic run leaves a release that is no longer a patch for kinfold update', async () => {
   // The daemon saw 0.1.1; by the time the updater asks, the latest release is a minor.
   const { w, binPath, fetched } = updateWorld({ tag: 'v0.2.0' })

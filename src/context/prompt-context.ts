@@ -13,7 +13,9 @@ import type { ServedRelated } from '../store/related-served-store'
 import { currentObservationsByIds, keywordCandidates, matchedTermCounts } from '../store/related-store'
 import { NO_FILTERS } from '../store/vector-store'
 import type { SemanticAnswer, SemanticRequest } from '../vectors/search'
+import type { CandidateSource, SearchTrace } from '../debug/trace'
 import { computeDelta } from './delta'
+import { explainRelated } from './explain'
 import { type LateHit, type LateMatches, lateSessionKey } from './late-matches'
 import { promptSecretRules, promptTerms, termMatches } from './prompt-query'
 import { RELATED_BUDGET_TOKENS, RELATED_CANDIDATES, type RelatedCandidate, type RelatedGate, type RelatedMode, buildRelated, isRelated, joinContext, rankRelated } from './related'
@@ -41,7 +43,11 @@ export interface PromptContext extends ContextResult {
   relatedMs: number
   /** The related lines in `relatedText`, with what earned them; recorded only when the answer is (src/daemon/context-route.ts). */
   relatedServed: ServedRelated[]
+  /** What the related search weighed and why, for `kinfold watch --debug`; null when none ran. Built only when called, so the answer never waits for it. */
+  explain: () => SearchTrace | null
 }
+
+const NO_SEARCH = (): null => null
 
 /** Counts embeds in flight, shared by every prompt the daemon answers. */
 export interface EmbedSlots {
@@ -139,15 +145,15 @@ export async function preparePromptContext(deps: PromptContextDeps, request: Con
   const projectName = projectDisplayName(deps.db, projectKey)
   // Sliced here as well as at the parser, so the scan and the embedder see one string.
   const prompt = (request.prompt ?? '').slice(0, MAX_CONTEXT_PROMPT_CHARS).trim()
-  if (projectName === null || prompt === '') return { ...delta, relatedText: '', related: 0, semantic: 'no_prompt', deltaMs, relatedMs: 0, relatedServed: [] }
+  if (projectName === null || prompt === '') return { ...delta, relatedText: '', related: 0, semantic: 'no_prompt', deltaMs, relatedMs: 0, relatedServed: [], explain: NO_SEARCH }
   const relatedStart = performance.now()
   try {
     const related = await relatedFor(deps, { request, projectKey, projectName, prompt, delta, now, deadlineAt: began + (deps.deadlineMs ?? PROMPT_SEMANTIC_DEADLINE_MS), clock })
     return { ...joinContext(delta, related.result), relatedText: related.result.text, related: related.result.observationIds.length, semantic: related.semantic,
-      deltaMs, relatedMs: Math.round(performance.now() - relatedStart), relatedServed: related.served }
+      deltaMs, relatedMs: Math.round(performance.now() - relatedStart), relatedServed: related.served, explain: related.explain }
   } catch (error: unknown) {
     deps.log(`prompt related failed: ${errorName(error)}`)
-    return { ...delta, relatedText: '', related: 0, semantic: 'error', deltaMs, relatedMs: Math.round(performance.now() - relatedStart), relatedServed: [] }
+    return { ...delta, relatedText: '', related: 0, semantic: 'error', deltaMs, relatedMs: Math.round(performance.now() - relatedStart), relatedServed: [], explain: NO_SEARCH }
   }
 }
 
@@ -163,7 +169,9 @@ interface RelatedInputs {
   clock: () => number
 }
 
-async function relatedFor(deps: PromptContextDeps, inputs: RelatedInputs): Promise<{ result: ContextResult; semantic: SemanticOutcome; served: ServedRelated[] }> {
+type DroppedHit = { id: number; distance: number | null; matchedTerms?: number; source?: CandidateSource; outcome: 'already delivered' | 'not current here' }
+
+async function relatedFor(deps: PromptContextDeps, inputs: RelatedInputs): Promise<{ result: ContextResult; semantic: SemanticOutcome; served: ServedRelated[]; explain: () => SearchTrace }> {
   const { request, projectKey, prompt, now } = inputs
   const sessionKey = lateSessionKey(request.host, request.hostSessionId)
   const sessionId = sessionStartFor(deps.db, request.host, request.hostSessionId)?.id ?? null
@@ -193,12 +201,18 @@ async function relatedFor(deps: PromptContextDeps, inputs: RelatedInputs): Promi
   const keyword: RelatedCandidate[] = keywordRows.map((row) => ({ row, matchedTerms: counts.get(row.id) ?? 0, promptTerms: terms.length, distance: null }))
 
   let vector: RelatedCandidate[] = []
+  let space: string | null = null
+  let dropped: DroppedHit[] = []
   if (pending !== null) {
     const raced = await race(pending, Math.max(0, inputs.deadlineAt - inputs.clock()))
     if (raced.kind === 'answer') {
       semantic = raced.answer.status
       if (raced.answer.status === 'ok') {
-        vector = vectorCandidates(matching, raced.answer.hits, sent)
+        const hits = raced.answer.hits
+        space = raced.answer.model ?? null
+        vector = vectorCandidates(matching, hits, sent)
+        // Kept as the array the search returned; only explain() reads it, after the answer.
+        dropped = droppedHits(hits, sent, vector)
         deps.log(`prompt semantic ok hits=${vector.length} embed_ms=${raced.answer.embedMs} top=${topDistances(vector)}`)
       }
     } else {
@@ -208,12 +222,43 @@ async function relatedFor(deps: PromptContextDeps, inputs: RelatedInputs): Promi
   }
 
   const late = lateCandidates(matching, deps.late.take(sessionKey, now).filter((hit) => !sent.has(hit.id)))
+  const lateIds = new Set(late.map((candidate) => candidate.row.id))
+  const deltaIds = new Set(inputs.delta.observationIds)
   // This prompt's hits first: a row in both keeps this prompt's distance.
   const ranked = rankRelated(keyword, [...vector, ...late], deps.gate ?? isRelated)
   const inTime = new Set(vector.map((candidate) => candidate.row.id))
   const usedLate = ranked.some((row) => !inTime.has(row.id) && late.some((candidate) => candidate.row.id === row.id))
-  const result = buildRelated({ projectName: inputs.projectName, observations: ranked, mode: modeFor(vector.length > 0, usedLate), budgetTokens: RELATED_BUDGET_TOKENS, now })
-  return { result, semantic, served: servedLines(result.observationIds, keyword, [...vector, ...late]) }
+  const mode = modeFor(vector.length > 0, usedLate)
+  const result = buildRelated({ projectName: inputs.projectName, observations: ranked, mode, budgetTokens: RELATED_BUDGET_TOKENS, now })
+  const explain = (): SearchTrace => explainRelated({
+    db: deps.db, gate: deps.gate, mode, semantic, space, terms, query: pending === null ? null : prompt,
+    keyword, vector: [...vector, ...late], lateIds, served: result.observationIds,
+    // The delta's own lines are shown as new memory, so they are not listed again as already delivered.
+    dropped: [...dropped, ...deliveredKeywordMatches(matching, any, sent, dropped)].filter((hit) => !deltaIds.has(hit.id)),
+  })
+  return { result, semantic, served: servedLines(result.observationIds, keyword, [...vector, ...late]), explain }
+}
+
+/**
+ * Keyword matches the session already has: the candidate query leaves them out,
+ * so this asks again without that filter, for the trace only (after the answer).
+ */
+function deliveredKeywordMatches(matching: Matching, match: string, sent: ReadonlySet<number>, already: readonly DroppedHit[]): DroppedHit[] {
+  if (matching.terms.length === 0 || sent.size === 0) return []
+  const listed = new Set(already.map((hit) => hit.id))
+  const rows = keywordCandidates(matching.db, { projectKey: matching.projectKey, match, excludeIds: [], excludeSessionId: matching.sessionId, limit: RELATED_CANDIDATES })
+    .filter((row) => sent.has(row.id) && !listed.has(row.id))
+  const counts = matchedTermCounts(matching.db, rows.map((row) => row.id), matching.each)
+  return rows.map((row) => ({ id: row.id, distance: null, matchedTerms: counts.get(row.id) ?? 0, source: 'keyword', outcome: 'already delivered' }))
+}
+
+/** Hits that never reached the gate: sent to this session already, or not a current row of this project from another session. */
+function droppedHits(hits: readonly { id: number; distance: number }[], sent: ReadonlySet<number>, kept: readonly RelatedCandidate[]): DroppedHit[] {
+  const keptIds = new Set(kept.map((candidate) => candidate.row.id))
+  return hits.flatMap((hit): DroppedHit[] => {
+    if (sent.has(hit.id)) return [{ id: hit.id, distance: hit.distance, outcome: 'already delivered' }]
+    return keptIds.has(hit.id) ? [] : [{ id: hit.id, distance: hit.distance, outcome: 'not current here' }]
+  })
 }
 
 /** What earned each served line its place, for the labels table: the vector side's distance (this prompt's first) and the keyword side's terms. */

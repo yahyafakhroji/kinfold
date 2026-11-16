@@ -58,8 +58,9 @@ function stillBlocked(input: AutoUpdateInput): boolean {
 
 export function autoUpdateDecision(input: AutoUpdateInput): AutoUpdateDecision {
   if (!autoUpdateSetting(input.running, input.record, input.env).on) return { apply: false, reason: 'off' }
-  const latest = input.state.latestVersion
-  if (latest === null || !isPatchUpdate(input.running, latest)) return { apply: false, reason: 'no-patch' }
+  // The patch the check found beside the offer comes first: a beta on offer waits for a yes, the patch does not.
+  const latest = [input.state.patchVersion, input.state.latestVersion].find((version): version is string => typeof version === 'string' && isPatchUpdate(input.running, version))
+  if (latest === undefined) return { apply: false, reason: 'no-patch' }
   if (input.lockHolder !== null) return { apply: false, reason: 'running' }
   if (stillBlocked(input)) return { apply: false, reason: 'blocked' }
   // One attempt per check: only a later daily check, with its own time, allows the next.

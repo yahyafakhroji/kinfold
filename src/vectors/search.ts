@@ -40,7 +40,8 @@ export interface SemanticRequest {
 }
 
 export type SemanticAnswer =
-  | { status: 'ok'; hits: VectorHit[]; embedMs: number; searchMs: number; cached: boolean }
+  /** model: the embedding space the query was embedded in, for `kinfold watch --debug`. */
+  | { status: 'ok'; hits: VectorHit[]; embedMs: number; searchMs: number; cached: boolean; model?: string }
   | { status: 'timeout'; ms: number }
   | { status: 'unavailable'; reason: string }
 
@@ -160,7 +161,7 @@ export function createSemanticSearch(deps: SemanticSearchDeps): (request: Semant
       const ids = request.alsoIds?.filter((id) => !found.has(id)) ?? []
       const extra = ids.length === 0 ? [] : await queries.distances({ model: embedder.model, vector: embedded.vector, project: request.project, ids }, left())
       if (extra === null) return { status: 'timeout', ms: Math.round(now() - startedAt) }
-      return { status: 'ok', hits: [...nearest, ...extra], embedMs: Math.round(embeddedAt - startedAt), searchMs: Math.round(now() - embeddedAt), cached: embedded.cached }
+      return { status: 'ok', hits: [...nearest, ...extra], embedMs: Math.round(embeddedAt - startedAt), searchMs: Math.round(now() - embeddedAt), cached: embedded.cached, model: embedder.model }
     } catch (error: unknown) {
       return { status: 'unavailable', reason: error instanceof Error ? error.message : 'the vector search failed' }
     }

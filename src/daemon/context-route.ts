@@ -17,9 +17,10 @@ import { HOLDOUT_HOSTS, HOLDOUT_RATE } from '../context/holdout'
 import { type LateMatches, createLateMatches } from '../context/late-matches'
 import { type PreparedContext, prepareContext, recordServed } from '../context/packs'
 import { type PromptContextDeps, createEmbedSlots, preparePromptContext } from '../context/prompt-context'
-import { FIRST_SCREEN_ROWS } from '../context/recall-line'
+import { FIRST_SCREEN_ROWS, HELD_OUT_LINE, lateLine, recallLine } from '../context/recall-line'
+import type { SearchTrace, TraceBuffer } from '../debug/trace'
 import { type ContextDisplay, type ContextRequest, type ContextResult, EMPTY_CONTEXT, type UpdateNotice } from '../context/types'
-import { firstScreenFor, titlesFor } from '../store/context-store'
+import { firstScreenFor, projectDisplayName, titlesFor } from '../store/context-store'
 import { peekNotice, takeNotice } from '../update/notice'
 import type { Database } from '../sqlite/types'
 import type { ProjectKeyResolver } from '../store/project-key'
@@ -44,6 +45,8 @@ export interface ContextRouteDeps {
    */
   holdout?: { on: () => boolean; pick?: () => boolean }
   /** Where update-check.json lives and which version is running; absent means no update notice. */
+  /** Where `kinfold watch --debug` reads why each answer came out as it did; absent records nothing. */
+  trace?: TraceBuffer
   updates?: { dataDir: string; version: string; envVars?: () => Readonly<Record<string, string | undefined>>; /** This daemon applies patch releases itself, so their notice is held back. */ canAutoUpdate?: boolean; platform?: NodeJS.Platform; arch?: string }
 }
 
@@ -52,9 +55,10 @@ export const PROMPT_SERVE_BUDGET_MS = DAEMON_SHARE_MS - 20
 
 export { HOLDOUT_HOSTS, HOLDOUT_RATE }
 
-type Prepared = PreparedContext & { promptDetail: string; relatedText: string; relatedServed: ServedRelated[] }
+type Prepared = PreparedContext & { promptDetail: string; relatedText: string; relatedServed: ServedRelated[]; explain: () => SearchTrace | null }
 
-const NOTHING: Prepared = { ...EMPTY_CONTEXT, rebuilt: false, promptDetail: '', relatedText: '', relatedServed: [] }
+const NO_SEARCH = (): null => null
+const NOTHING: Prepared = { ...EMPTY_CONTEXT, rebuilt: false, promptDetail: '', relatedText: '', relatedServed: [], explain: NO_SEARCH }
 
 /** Titles and a header for the ids the answer carries; it adds no id of its own. */
 function displayFor(deps: ContextRouteDeps, request: ContextRequest, projectKey: string, prepared: Prepared, heldOut: boolean): ContextDisplay {
@@ -95,6 +99,50 @@ function noticeField(notice: UpdateNotice | null): Pick<ContextResult, 'updateNo
   return notice.kind === undefined || notice.kind === 'available' ? { updateNotice: notice } : { selfNotice: notice }
 }
 
+interface Answered {
+  request: ContextRequest
+  projectKey: string
+  prepared: Prepared
+  at: number
+  durationMs: number
+  late: boolean
+  heldOut: boolean
+}
+
+function traceEvent(deps: ContextRouteDeps, answered: Answered): Parameters<TraceBuffer['push']>[0] {
+  const { request, projectKey, prepared, at } = answered
+  const base = { at, host: request.host, project: projectDisplayName(deps.db, projectKey) ?? projectKey, projectKey, hostSessionId: request.hostSessionId }
+  const ids = prepared.observationIds
+  const titles = titlesFor(deps.db, ids)
+  const rows = ids.map((id) => ({ id, title: titles.get(id) ?? '' }))
+  if (request.channel !== 'prompt') return { ...base, kind: 'start', rows, tokens: prepared.tokens }
+  const related = new Set(prepared.relatedServed.map((line) => line.observationId))
+  const recall = recallLine(ids, rows.map((row) => ({ ...row, part: related.has(row.id) ? 'related' as const : 'new' as const })))
+  return {
+    ...base,
+    kind: 'prompt',
+    hook: { ms: answered.durationMs, budgetMs: shownBudgetMs(request.host), late: answered.late, heldOut: answered.heldOut },
+    fresh: rows.filter((row) => !related.has(row.id)),
+    search: prepared.explain(),
+    sent: { ids, tokens: prepared.tokens, line: answered.heldOut ? HELD_OUT_LINE : answered.late ? lateLine(recall) : recall },
+  }
+}
+
+/**
+ * On the next turn of the event loop, so the hook's answer is sent before
+ * any of this runs: the prompt's clock never includes the trace. A failure
+ * here costs the trace one event, never the answer.
+ */
+function traceLater(deps: ContextRouteDeps, trace: TraceBuffer, answered: Answered): void {
+  setTimeout(() => {
+    try {
+      trace.push(traceEvent(deps, answered))
+    } catch (error: unknown) {
+      deps.log(`trace failed: ${error instanceof Error ? error.name : 'error'}`)
+    }
+  }, 0)
+}
+
 export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest) => Promise<ContextResult> {
   const now = deps.now ?? Date.now
   const clock = deps.clock ?? (() => performance.now())
@@ -110,9 +158,9 @@ export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest
     ...(deps.semanticDeadlineMs !== undefined ? { deadlineMs: deps.semanticDeadlineMs } : {}),
   }
   const prepare = async (request: ContextRequest, projectKey: string, at: number, startedAt: number): Promise<Prepared> => {
-    if (request.channel !== 'prompt' || request.prompt === undefined) return { ...prepareContext(deps.db, request, projectKey, at), promptDetail: '', relatedText: '', relatedServed: [] }
+    if (request.channel !== 'prompt' || request.prompt === undefined) return { ...prepareContext(deps.db, request, projectKey, at), promptDetail: '', relatedText: '', relatedServed: [], explain: NO_SEARCH }
     const answer = await preparePromptContext(prompt, request, projectKey, at, startedAt)
-    return { text: answer.text, observationIds: answer.observationIds, tokens: answer.tokens, rebuilt: false, relatedText: answer.relatedText, relatedServed: answer.relatedServed,
+    return { text: answer.text, observationIds: answer.observationIds, tokens: answer.tokens, rebuilt: false, relatedText: answer.relatedText, relatedServed: answer.relatedServed, explain: answer.explain,
       promptDetail: ` related=${answer.related} semantic=${answer.semantic} delta_ms=${answer.deltaMs} related_ms=${answer.relatedMs}` }
   }
   return async (request) => {
@@ -133,6 +181,8 @@ export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest
     deps.log(`context host=${request.host} channel=${request.channel} injection=${injectionId ?? 'none'}${late ? ' late=1' : ''} ids=${prepared.observationIds.length}`
       + ` tokens=${prepared.tokens} rebuilt=${prepared.rebuilt}${prepared.promptDetail}${heldOut ? ' held_out=1' : ''} key_ms=${keyMs} ms=${durationMs}`)
     const notice = updateNoticeFor(deps.updates, request, durationMs, at)
+    // A watcher starts from now, so with none connected an event could never be shown: none is built.
+    if (deps.trace !== undefined && request.displayOnly !== true && deps.trace.watching(Date.now())) traceLater(deps, deps.trace, { request, projectKey, prepared, at, durationMs, late, heldOut })
     return {
       text: prepared.text, observationIds: prepared.observationIds, tokens: prepared.tokens, ...(prepared.relatedText !== '' ? { relatedText: prepared.relatedText } : {}),
       display: displayFor(deps, request, projectKey, prepared, heldOut), ...noticeField(notice),

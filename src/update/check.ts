@@ -7,7 +7,7 @@ import { readInstallRecord } from '../install/setup/record'
 import { updatesEnabled } from './enabled'
 import { type ReleaseInfo, releaseFromGithub } from './release'
 import { mergeUpdateState, readUpdateState } from './state'
-import { compareVersions } from './version-order'
+import { compareVersions, isPatchUpdate } from './version-order'
 
 export const LATEST_RELEASE_URL = 'https://api.github.com/repos/yahyafakhroji/kinfold/releases/latest'
 /** The beta channel's one URL: /releases/latest never names a prerelease. */
@@ -66,16 +66,31 @@ function newest(releases: readonly ReleaseInfo[], beta: boolean): ReleaseInfo | 
   return best
 }
 
+/** The newest final release that is a patch of `running`, so a newer beta on offer never holds it back. */
+function newestPatch(releases: readonly ReleaseInfo[], running: string | null): string | null {
+  if (running === null) return null
+  const patches = releases.filter((release) => isPatchUpdate(running, release.version))
+  return newest(patches, false)?.version ?? null
+}
+
+export interface NewestRelease {
+  /** The release on offer: the channel's newest. */
+  release: ReleaseInfo
+  /** The newest patch of the running version in the same answer, or null. */
+  patch: string | null
+  checkedAt: number
+}
+
 /**
  * The one request, shared with `kinfold update`: the latest release, or with
  * the beta channel the newest of the last few. Throws UpdateCheckError.
  */
-export async function fetchNewestRelease(fetchFn: UpdateCheckDeps['fetch'], now: () => number, beta: boolean = false): Promise<{ release: ReleaseInfo; checkedAt: number }> {
+export async function fetchNewestRelease(fetchFn: UpdateCheckDeps['fetch'], now: () => number, beta: boolean = false, running: string | null = null): Promise<NewestRelease> {
   const body = await fetchJson(fetchFn, beta ? RELEASES_URL : LATEST_RELEASE_URL)
   const releases = (Array.isArray(body) ? body : [body]).map(releaseFromGithub).filter((release): release is ReleaseInfo => release !== null)
   const release = newest(releases, beta)
   if (release === null) throw new UpdateCheckError('no usable release')
-  return { release, checkedAt: now() }
+  return { release, patch: newestPatch(releases, running), checkedAt: now() }
 }
 
 async function fetchJson(fetchFn: UpdateCheckDeps['fetch'], url: string): Promise<unknown> {
@@ -113,8 +128,8 @@ export async function runUpdateCheck(deps: UpdateCheckDeps): Promise<'disabled' 
     const sameChannel = (state.beta ?? false) === beta
     if (sameChannel && state.lastAttemptAt !== null && startedAt - state.lastAttemptAt < CHECK_INTERVAL_MS) return 'not-due'
     try {
-      const found = await fetchNewestRelease(deps.fetch, deps.now, beta)
-      mergeUpdateState(deps.dataDir, { lastAttemptAt: startedAt, latestVersion: found.release.version, checkedAt: found.checkedAt, beta, release: found.release })
+      const found = await fetchNewestRelease(deps.fetch, deps.now, beta, deps.version)
+      mergeUpdateState(deps.dataDir, { lastAttemptAt: startedAt, latestVersion: found.release.version, checkedAt: found.checkedAt, beta, release: found.release, patchVersion: found.patch })
       return 'checked'
     } catch (error: unknown) {
       mergeUpdateState(deps.dataDir, { lastAttemptAt: startedAt, beta })

@@ -172,8 +172,8 @@ export function watchStarts(db: Database, query: WatchStartsQuery): WatchStart[]
   })
 }
 
-const HOST_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
-const MAX_PROJECT_CHARS = 300
+export const HOST_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
+export const MAX_PROJECT_CHARS = 300
 
 /**
  * GET /watch[?after=<id>][&startsAfter=now|<id>][&host=][&project=] (token

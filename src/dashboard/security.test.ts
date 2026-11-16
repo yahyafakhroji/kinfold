@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { DASHBOARD_SESSIONS_FILE } from './auth'
 import { type TempStore, openTempStore } from '../observer/test-support'
 import { SECURITY_HEADERS } from './headers'
 import { listAssets } from './routes'
@@ -138,9 +141,13 @@ test('signed out, the app page sends you to the login page; sign-out ends the se
   expect((await rig.page('GET', '/data/size', { cookie })).status).toBe(401)
 })
 
-test('a daemon restart logs everyone out', async () => {
+test('a daemon restart keeps a live session; without its sessions file the restart signs it out', async () => {
   const cookie = await rig.login()
   await rig.stop()
+  rig = startRig(temp.dataDir)
+  expect((await rig.page('GET', '/metrics/summary', { cookie })).status).toBe(200)
+  await rig.stop()
+  rmSync(join(temp.dataDir, DASHBOARD_SESSIONS_FILE))
   rig = startRig(temp.dataDir)
   expect((await rig.page('GET', '/metrics/summary', { cookie })).status).toBe(401)
 })

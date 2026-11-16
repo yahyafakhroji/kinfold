@@ -216,3 +216,20 @@ test('after a backlog only the newest turn_end of a session is read, and only wh
   // Read long after the turn ended, the transcript may have moved on.
   expect(freshTurnEnds(drained.turnEnds, newest + MAX_TURN_END_AGE_MS + 1)).toEqual([])
 })
+
+test('read for the debug trace only, a turn is handed over and no turn_usage row is stored', () => {
+  const path = transcript('t.jsonl', TWO_TURNS)
+  spool(event(), event({ kind: 'user_prompt', promptText: 'p' }), event({ kind: 'turn_end', transcriptPath: path }))
+  const read: [number, number | null][] = []
+  expect(recordTurnUsage(store.db, drain().turnEnds, () => {}, { store: false, onRead: (turn, used) => read.push([turn.promptNumber, used?.outputTokens ?? null]) })).toBe(0)
+  expect(usageRows()).toEqual([])
+  expect(read).toEqual([[1, 100]])
+})
+
+test('a failing trace callback costs the trace only: the impact-test rows are still stored', () => {
+  const path = transcript('t.jsonl', TWO_TURNS)
+  spool(event(), event({ kind: 'user_prompt', promptText: 'p' }), event({ kind: 'turn_end', transcriptPath: path }))
+  const logs: string[] = []
+  expect(recordTurnUsage(store.db, drain().turnEnds, (line) => logs.push(line), { onRead: () => { throw new TypeError('boom') } })).toBe(1)
+  expect(logs).toContain('turn usage trace failed: TypeError')
+})

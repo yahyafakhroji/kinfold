@@ -159,3 +159,16 @@ test('the daemon the install restarted reports how the dashboard install ended',
   expect(await (await second.bearer('GET', '/update/install')).json()).toEqual({ running: '0.6.0', install: { version: '0.6.0', previous: '0.5.0', state: 'updated', message: null, at: T0 + 1 } })
   expect((await (await fetch(second.url('/health'))).json()) as Record<string, unknown>).toMatchObject({ version: '0.6.0' })
 })
+
+test('a dashboard session from before the install restart is still signed in after it, until sign-out', async () => {
+  const first = start()
+  const cookie = await first.login()
+  expect((await first.page('GET', '/update/install', { cookie })).status).toBe(200)
+  await first.stop()
+  rig = null
+  const second = startRig(temp.dataDir, { version: '0.6.0', updateCheck: { fetch: () => new Promise<Response>(() => undefined), now: () => T0, envVars: () => ({}) } })
+  rig = second
+  expect((await second.page('GET', '/update/install', { cookie })).status).toBe(200)
+  expect((await second.page('POST', '/dashboard/logout', { cookie })).status).toBe(204)
+  expect((await second.page('GET', '/update/install', { cookie })).status).toBe(401)
+})
