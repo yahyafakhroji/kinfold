@@ -58,7 +58,7 @@ async function fetchHealth() {
 }
 
 /**
- * Read without api(): after the restart the session is gone, and api() would leave for the login page.
+ * Read without api(): while the daemon restarts a read fails, and api() would leave for the login page.
  * @returns {Promise<InstallRun | null>}
  */
 async function fetchInstallState() {

@@ -125,8 +125,8 @@ test('GET /watch needs the token, starts from now, and then hands over what sett
 
 test('watch takes --host and --project, and nothing else', () => {
   expect(parseWatchArgs(['status'])).toBeNull()
-  expect(parseWatchArgs(['watch'])).toEqual({ ok: true, value: { command: 'watch', host: null, project: null } })
-  expect(parseWatchArgs(['watch', '--host', 'claude-code', '--project=repo'])).toEqual({ ok: true, value: { command: 'watch', host: 'claude-code', project: 'repo' } })
+  expect(parseWatchArgs(['watch'])).toEqual({ ok: true, value: { command: 'watch', host: null, project: null, debug: false, json: false } })
+  expect(parseWatchArgs(['watch', '--host', 'claude-code', '--project=repo'])).toEqual({ ok: true, value: { command: 'watch', host: 'claude-code', project: 'repo', debug: false, json: false } })
   expect(parseWatchArgs(['watch', '--host', 'not-an-agent'])?.ok).toBe(false)
   expect(parseWatchArgs(['watch', '--host'])?.ok).toBe(false)
   expect(parseWatchArgs(['watch', '--follow'])?.ok).toBe(false)
@@ -184,7 +184,7 @@ test('the command starts from now, prints each new prompt once, keeps the filter
     Response.json({ cursor: 6, rows: [rowAt(5, T0), rowAt(6, T0 + MINUTE)] }),
     Response.json({ cursor: 6, rows: [] }),
   ], stop)
-  const code = await runWatch(fake.env, { command: 'watch', host: 'codex', project: 'my repo' }, { stop: stop.signal })
+  const code = await runWatch(fake.env, { command: 'watch', host: 'codex', project: 'my repo', debug: false, json: false }, { stop: stop.signal })
   expect(code).toBe(0)
   expect(fake.asked).toEqual(['/watch?host=codex&project=my+repo', '/watch?after=4&host=codex&project=my+repo', '/watch?after=6&host=codex&project=my+repo'])
   expect(fake.out).toEqual([
@@ -196,13 +196,13 @@ test('the command starts from now, prints each new prompt once, keeps the filter
 
 test('with no daemon the command says so and fails; a daemon that stops answering mid-watch is waited for, said once', async () => {
   const none = fakeWatch([], new AbortController())
-  expect(await runWatch(none.env, { command: 'watch', host: null, project: null }, {})).toBe(1)
+  expect(await runWatch(none.env, { command: 'watch', host: null, project: null, debug: false, json: false }, {})).toBe(1)
   expect(none.out).toEqual(['kinfold watch failed: the daemon is not running (no daemon.json or daemon.token)'])
   expect(none.asked).toEqual([])
 
   daemon = startDaemon({ dataDir: temp.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
   const old = fakeWatch([new Response('{}', { status: 404 })], new AbortController())
-  expect(await runWatch(old.env, { command: 'watch', host: null, project: null }, {})).toBe(1)
+  expect(await runWatch(old.env, { command: 'watch', host: null, project: null, debug: false, json: false }, {})).toBe(1)
   expect(old.out).toEqual(['kinfold watch failed: the running daemon is an older build without watch; run kinfold update'])
 
   const stop = new AbortController()
@@ -213,7 +213,7 @@ test('with no daemon the command says so and fails; a daemon that stops answerin
     Response.json({ cursor: 2, rows: [rowAt(2, T0)] }),
     Response.json({ cursor: 2, rows: [] }),
   ], stop)
-  expect(await runWatch(flaky.env, { command: 'watch', host: null, project: null }, { stop: stop.signal })).toBe(0)
+  expect(await runWatch(flaky.env, { command: 'watch', host: null, project: null, debug: false, json: false }, { stop: stop.signal })).toBe(0)
   expect(flaky.out).toEqual([
     'watching every agent; one line per prompt, Ctrl-C to stop',
     'the daemon is not answering; waiting for it',
@@ -329,7 +329,7 @@ test('the watch prints an update notice once, on its own line, and again only fo
     Response.json({ cursor: 5, rows: [rowAt(5, T0)], update: { version: '0.7.0', message: 'Kinfold 0.7.0 is ready' } }),
     Response.json({ cursor: 5, rows: [], update: null }),
   ], stop)
-  expect(await runWatch(fake.env, { command: 'watch', host: null, project: null }, { stop: stop.signal })).toBe(0)
+  expect(await runWatch(fake.env, { command: 'watch', host: null, project: null, debug: false, json: false }, { stop: stop.signal })).toBe(0)
   expect(fake.out).toEqual([
     'watching every agent; one line per prompt, Ctrl-C to stop',
     'Kinfold 0.6.0 is available. Run `kinfold update`.',

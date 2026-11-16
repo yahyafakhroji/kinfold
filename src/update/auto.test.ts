@@ -247,3 +247,8 @@ test('the tick recovers once the state file can be written again, and a new erro
   expect(tick()).toBe('started')
   expect(spawned).toHaveLength(1)
 })
+
+test('a newer beta on offer does not hold back the patch of the running release', () => {
+  expect(decide({ state: { ...found('0.3.0-beta.1'), patchVersion: '0.2.1' } })).toEqual({ apply: true, version: '0.2.1' })
+  expect(decide({ state: { ...found('0.3.0-beta.1'), patchVersion: null } })).toEqual({ apply: false, reason: 'no-patch' })
+})

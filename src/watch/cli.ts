@@ -1,6 +1,9 @@
-// `kinfold watch [--host <agent>] [--project <name>]`: what Kinfold recalled,
-// live, for every agent: one line per prompt with the time, the agent and the
-// project. It is the view for agents that cannot show the line themselves.
+// `kinfold watch [--host <agent>] [--project <name>] [--debug [--json]]`: what
+// Kinfold recalled, live, for every agent: one line per prompt with the time,
+// the agent and the project. It is the view for agents that cannot show the
+// line themselves. --debug reads the daemon's in-memory trace instead: why
+// each recall came out as it did, the turn's usage and the observer's runs;
+// --json prints those events as JSON, one per line, for scripts.
 // It polls the daemon's authenticated route once a second and starts from
 // now. A daemon that stops answering is waited for; Ctrl-C ends the watch
 // with exit 0. Lines go through `env.out`, so a terminal gets the CLI's framed
@@ -12,6 +15,7 @@ import { readDaemonEndpoint } from '../daemon/daemon-info'
 import type { WatchArgs } from '../install/args'
 import type { InstallEnv } from '../install/env'
 import type { WatchRow } from './reads'
+import { debugLines, parseDebugEvent } from './debug'
 
 export type WatchEnv = Pick<InstallEnv, 'dataDir' | 'fetch' | 'out' | 'sleep'> & Partial<Pick<InstallEnv, 'ui'>>
 
@@ -56,21 +60,50 @@ function parseRow(value: unknown): ShownRow | null {
 
 /** The update the user is owed, as the dashboard banner says it; null for none. */
 type Update = { version: string; message: string } | null
-type Poll = { kind: 'rows'; cursor: number; rows: ShownRow[]; update: Update } | { kind: 'old' } | { kind: 'down' }
+type Poll = { kind: 'rows'; cursor: number; lines: string[]; update: Update; epoch?: string } | { kind: 'old' } | { kind: 'down' }
+
+/** What one route answers and how its answer becomes lines: the prompt rows, or the debug trace. */
+interface Source {
+  path: string
+  /** Null for an answer of the wrong shape. */
+  read(body: Record<string, unknown>): { cursor: number; lines: string[]; update: Update; epoch?: string } | null
+  /** Why a 404 means the daemon is too old for this view. */
+  missing: string
+}
+
+const ROWS: Source = {
+  path: '/watch',
+  read: (body) => (!Number.isSafeInteger(body.cursor) || !Array.isArray(body.rows) ? null
+    : { cursor: body.cursor as number, lines: body.rows.flatMap((row) => parseRow(row) ?? []).map(formatWatchLine), update: parseUpdate(body.update) }),
+  missing: 'the running daemon is an older build without watch; run kinfold update',
+}
+
+function traceSource(json: boolean): Source {
+  return {
+    path: '/watch/debug',
+    read: (body) => {
+      if (!Number.isSafeInteger(body.cursor) || !Array.isArray(body.events)) return null
+      const events = body.events.flatMap((event) => parseDebugEvent(event) ?? [])
+      return { cursor: body.cursor as number, lines: events.flatMap((event) => (json ? [JSON.stringify(event)] : debugLines(event))), update: null,
+        ...(typeof body.epoch === 'string' ? { epoch: body.epoch } : {}) }
+    },
+    missing: 'the running daemon is an older build without watch --debug; run kinfold update',
+  }
+}
 
 function parseUpdate(value: unknown): Update {
   if (!isRecord(value) || typeof value.version !== 'string' || typeof value.message !== 'string') return null
   return { version: value.version, message: cleanTitle(value.message) }
 }
 
-async function poll(env: WatchEnv, port: number, token: string, args: WatchArgs, cursor: number | null, stop?: AbortSignal): Promise<Poll> {
+async function poll(env: WatchEnv, source: Source, port: number, token: string, args: WatchArgs, cursor: number | null, stop?: AbortSignal): Promise<Poll> {
   const query = new URLSearchParams()
   if (cursor !== null) query.set('after', String(cursor))
   if (args.host !== null) query.set('host', args.host)
   if (args.project !== null) query.set('project', args.project)
   const search = query.toString()
   try {
-    const response = await env.fetch(`http://127.0.0.1:${port}/watch${search === '' ? '' : `?${search}`}`, {
+    const response = await env.fetch(`http://127.0.0.1:${port}${source.path}${search === '' ? '' : `?${search}`}`, {
       headers: { authorization: `Bearer ${token}` },
       // Ctrl-C ends a request in flight too, so the command stops at once and not at its timeout.
       signal: stop === undefined ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : AbortSignal.any([AbortSignal.timeout(REQUEST_TIMEOUT_MS), stop]),
@@ -78,8 +111,8 @@ async function poll(env: WatchEnv, port: number, token: string, args: WatchArgs,
     if (response.status === 404) return { kind: 'old' }
     if (response.status !== 200) return { kind: 'down' }
     const body: unknown = await response.json()
-    if (!isRecord(body) || !Number.isSafeInteger(body.cursor) || !Array.isArray(body.rows)) return { kind: 'down' }
-    return { kind: 'rows', cursor: body.cursor as number, rows: body.rows.flatMap((row) => parseRow(row) ?? []), update: parseUpdate(body.update) }
+    const read = isRecord(body) ? source.read(body) : null
+    return read === null ? { kind: 'down' } : { kind: 'rows', ...read }
   } catch {
     return { kind: 'down' }
   }
@@ -87,7 +120,8 @@ async function poll(env: WatchEnv, port: number, token: string, args: WatchArgs,
 
 function heading(args: WatchArgs): string {
   const who = args.host ?? 'every agent'
-  return `watching ${who}${args.project === null ? '' : ` in ${cleanTitle(args.project)}`}; one line per prompt, Ctrl-C to stop`
+  const where = `${who}${args.project === null ? '' : ` in ${cleanTitle(args.project)}`}`
+  return args.debug ? `watching ${where} with the reasons behind each recall; Ctrl-C to stop` : `watching ${where}; one line per prompt, Ctrl-C to stop`
 }
 
 /** Resolves after `ms`, or at once when the watch is stopped. */
@@ -111,20 +145,24 @@ export async function runWatch(env: WatchEnv, args: WatchArgs, deps: WatchDeps =
   }
   const endpoint = readDaemonEndpoint(env.dataDir)
   if (endpoint === null) return fail('the daemon is not running (no daemon.json or daemon.token)')
-  const first = await poll(env, endpoint.port, endpoint.token, args, null)
-  if (first.kind === 'old') return fail('the running daemon is an older build without watch; run kinfold update')
+  const source = args.debug ? traceSource(args.json) : ROWS
+  // JSON output is for scripts: every line on stdout is one event, so nothing else is printed there.
+  const say = args.json ? (): void => {} : (line: string): void => env.out(line)
+  const first = await poll(env, source, endpoint.port, endpoint.token, args, null)
+  if (first.kind === 'old') return fail(source.missing)
   if (first.kind === 'down') return fail('the daemon is not answering')
-  env.out(heading(args))
+  say(heading(args))
   env.ui?.next('Stopped watching.')
 
   let cursor = first.cursor
+  let epoch = first.epoch
   let waiting = false
   // Each notice is printed once per watch, on its own line; a new one replaces it.
   let shown: string | null = null
   const showUpdate = (update: Update): void => {
     if (update === null || update.message === shown) return
     shown = update.message
-    env.out(update.message)
+    say(update.message)
   }
   showUpdate(first.update)
   // A function, so the check after an await is not narrowed away by the one in the loop's condition.
@@ -132,17 +170,23 @@ export async function runWatch(env: WatchEnv, args: WatchArgs, deps: WatchDeps =
   while (!stopped()) {
     // The endpoint is read each time: a daemon that restarted may listen on another port with another token.
     const now = readDaemonEndpoint(env.dataDir)
-    const answer: Poll = now === null ? { kind: 'down' } : await poll(env, now.port, now.token, args, cursor, deps.stop)
+    const answer: Poll = now === null ? { kind: 'down' } : await poll(env, source, now.port, now.token, args, cursor, deps.stop)
     if (stopped()) break
     if (answer.kind === 'rows') {
-      if (waiting) env.out('the daemon is back')
+      if (waiting) say('the daemon is back')
       waiting = false
       showUpdate(answer.update)
-      for (const row of answer.rows) env.out(formatWatchLine(row))
-      cursor = Math.max(cursor, answer.cursor)
+      if (answer.epoch !== undefined && epoch !== undefined && answer.epoch !== epoch) {
+        // A restarted daemon's trace counts from 0 again: read it from its start, and drop this answer, which was cut by the old cursor.
+        epoch = answer.epoch
+        cursor = 0
+      } else {
+        for (const line of answer.lines) env.out(line)
+        cursor = Math.max(cursor, answer.cursor)
+      }
     } else if (!waiting) {
       waiting = true
-      env.out('the daemon is not answering; waiting for it')
+      say('the daemon is not answering; waiting for it')
     }
     await pause(env, deps.pollMs ?? WATCH_POLL_MS, deps.stop)
   }

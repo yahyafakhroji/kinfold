@@ -52,6 +52,15 @@ export function isRelated({ matchedTerms, promptTerms, distance }: RelatedCandid
   return matchedTerms >= Math.max(MIN_MATCHED_TERMS, Math.ceil(promptTerms * MIN_TERM_SHARE))
 }
 
+/** Why isRelated refused a candidate, in words for `kinfold watch --debug`; it mirrors isRelated's order. */
+export function refusalRule({ matchedTerms, promptTerms, distance }: RelatedCandidate): string {
+  if (distance !== null && distance > VETO_DISTANCE) return `farther than ${VETO_DISTANCE.toFixed(2)} in meaning`
+  const needed = Math.max(MIN_MATCHED_TERMS, Math.ceil(promptTerms * MIN_TERM_SHARE))
+  const terms = `${matchedTerms} of ${needed} prompt terms needed`
+  if (distance === null) return terms
+  return matchedTerms >= 1 ? `not within ${STRONG_DISTANCE.toFixed(2)} in meaning, ${terms}` : `not within ${STRONG_DISTANCE.toFixed(2)} in meaning, or ${SUPPORTED_DISTANCE.toFixed(2)} with a shared term`
+}
+
 export type RelatedMode = 'keyword' | 'keyword and meaning' | 'keyword, and meaning from the previous prompt'
 
 /** The first candidate per id: callers put this prompt's vector hits before parked ones from the previous prompt. */

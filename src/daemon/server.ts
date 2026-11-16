@@ -80,6 +80,8 @@ export interface ServerDeps {
   sessions?: (method: string, url: URL) => RouteAnswer | null
   /** GET /watch (token only): the prompts since a cursor with what was recalled for each, for `kinfold watch`. Absent: 404. */
   watch?: (method: string, url: URL) => RouteAnswer
+  /** GET /watch/debug (token only): the in-memory trace `kinfold watch --debug` prints. Absent: 404. */
+  debugWatch?: (method: string, url: URL) => RouteAnswer
   /** POST /metrics/mcp-read: one MCP tool call reported by the read-only MCP server (token only). */
   mcpRead: (read: McpRead) => number
   /** POST /observer/test: one fixed prompt through the chosen runner. */
@@ -233,6 +235,10 @@ async function route(request: Request, url: URL, deps: ServerDeps, via: Credenti
     if (request.method !== 'POST') return json(405, { error: 'method not allowed' })
     deps.onNudge()
     return json(202, { accepted: true })
+  }
+  if (url.pathname === '/watch/debug' && deps.debugWatch !== undefined) {
+    const answer = deps.debugWatch(request.method, url)
+    return json(answer.status, answer.body)
   }
   if (url.pathname === '/watch' && deps.watch !== undefined) {
     const answer = deps.watch(request.method, url)
@@ -408,11 +414,11 @@ export function localhostRedirect(host: string | null, url: URL, port: number): 
 /**
  * The updater, `kinfold status` and the dashboard's banner ask these; asking
  * must not itself keep an update waiting. Nor must a watcher: `kinfold watch`
- * and OpenCode's toast poll /watch once a second for as long as they are
+ * (with or without --debug) and OpenCode's toast poll /watch once a second for as long as they are
  * open, which would otherwise mean the daemon is never quiet.
  */
 function isUpdateQuestion(path: string): boolean {
-  return path === '/update' || path.startsWith('/update/') || path === '/watch'
+  return path === '/update' || path.startsWith('/update/') || path === '/watch' || path === '/watch/debug'
 }
 
 /**

@@ -29,6 +29,7 @@ import { pathRemovalActions } from './path-setup'
 import { uiFor } from './prompt/ui'
 import { INSTALL_RECORD_FILE, type InstallRecord, readInstallRecord } from './setup/record'
 import { STAGE_DIR } from '../update/stage'
+import { DASHBOARD_SESSIONS_FILE } from '../dashboard/auth'
 import { openSession } from './setup/session'
 import { VERSION } from '../version'
 import { INSTALL_HOSTS, type InstallHost } from './detect'
@@ -71,10 +72,13 @@ function installedFilesActions(env: InstallEnv): Action[] {
   const lib = join(env.dataDir, 'lib')
   // A release staged for the user's yes is a program too, and only an install could ever run it.
   const staged = join(env.dataDir, STAGE_DIR)
+  // Dashboard sign-ins belong to this install; a later install starts signed out.
+  const sessions = join(env.dataDir, DASHBOARD_SESSIONS_FILE)
   return [
     ...(existsSync(bin) ? [{ kind: 'remove-program-dir', path: bin, summary: 'the installed kinfold program' } as const] : []),
     ...(existsSync(lib) ? [{ kind: 'remove', path: lib, summary: 'the installed sqlite libraries', recursive: true } as const] : []),
     ...(existsSync(staged) ? [{ kind: 'remove', path: staged, summary: 'the downloaded release waiting to be installed', recursive: true } as const] : []),
+    ...(existsSync(sessions) ? [{ kind: 'remove', path: sessions, summary: 'the dashboard sign-ins' } as const] : []),
   ]
 }
 

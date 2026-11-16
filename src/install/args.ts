@@ -119,7 +119,7 @@ export const USAGE = [
   '             be checked, and a later install starts a new master (hmac.key is written back from hmac-legacy first)',
   '  status',
   '  dashboard  [--print]',
-  '  watch      [--host <agent>] [--project <name>]   what Kinfold recalled for each prompt, live, for every agent; Ctrl-C stops it',
+  '  watch      [--host <agent>] [--project <name>] [--debug [--json]]   what Kinfold recalled for each prompt, live, for every agent; --debug adds why; Ctrl-C stops it',
   '  size',
   '  retention  [--set <events|prompts|observations|summaries>=<days|keep>]... [--set warn_bytes=<n>] [--yes]',
   '  scan',
@@ -302,6 +302,10 @@ export interface WatchArgs {
   host: string | null
   /** Only this project's prompts, by its name or key; null for every project. */
   project: string | null
+  /** The reasons behind each recall, from the daemon's in-memory trace. */
+  debug: boolean
+  /** With debug: one JSON object per event, for scripts. */
+  json: boolean
 }
 
 const MAX_WATCH_PROJECT_CHARS = 300
@@ -309,11 +313,18 @@ const MAX_WATCH_PROJECT_CHARS = 300
 /** Null when argv is not `watch`, so every other command parses exactly as before. */
 export function parseWatchArgs(argv: readonly string[]): Parsed<WatchArgs> | null {
   if (argv[0] !== 'watch') return null
-  const usage = `watch takes --host <agent> and --project <name>\n${USAGE}`
+  const usage = `watch takes --host <agent>, --project <name>, --debug and --json\n${USAGE}`
   let host: string | null = null
   let project: string | null = null
+  let debug = false
+  let json = false
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index] ?? ''
+    if (arg === '--debug' || arg === '--json') {
+      if (arg === '--debug') debug = true
+      else json = true
+      continue
+    }
     const name = ['--host', '--project'].find((flag) => arg === flag || arg.startsWith(`${flag}=`))
     if (name === undefined) return { ok: false, error: usage }
     const value = arg === name ? argv[index + 1] : arg.slice(name.length + 1)
@@ -327,7 +338,8 @@ export function parseWatchArgs(argv: readonly string[]): Parsed<WatchArgs> | nul
       project = value
     }
   }
-  return { ok: true, value: { command: 'watch', host, project } }
+  if (json && !debug) return { ok: false, error: '--json goes with --debug' }
+  return { ok: true, value: { command: 'watch', host, project, debug, json } }
 }
 
 /** Null when argv is not `dashboard`, so every other command parses exactly as before. */

@@ -51,11 +51,13 @@ import { type DrainOptions, type DrainResult, drainSpool } from './ingest'
 import { logLine } from './log-line'
 import { DEFAULT_OBSERVER_TICK_MS, type ObserverScheduleConfig, type ObserverScheduler, createObserverScheduler } from './observer-scheduler'
 import { type DrainScheduler, createDrainScheduler } from './scheduler'
-import { createDashboardAuth } from '../dashboard/auth'
+import { createDashboardAuth, fileSessionStore } from '../dashboard/auth'
 import { metricsRoute } from '../dashboard/metrics'
 import { writeDisplayFile } from '../context/display-file'
 import { watchRoute } from '../watch/reads'
-import { freshTurnEnds, recordTurnUsage } from './transcript-usage'
+import { type TurnEnd, type TurnUsage, freshTurnEnds, recordTurnUsage } from './transcript-usage'
+import { createTraceBuffer, type TraceBuffer } from '../debug/trace'
+import { debugWatchRoute, observerTrace, turnTrace } from './debug-trace'
 import { sessionRoute } from './session-routes'
 import { countEmbeddingCall } from '../store/impact-reads'
 import { type DisplaySettings, readDisplaySettings } from '../store/display-settings'
@@ -274,7 +276,7 @@ export interface RunningDaemon {
 }
 
 /** The routes that read or write memory.db; a restore swaps them for the new store's. */
-type CoreRoutes = Pick<ServerDeps, 'schemaVersion' | 'vectorSearch' | 'semanticSearch' | 'onNudge' | 'listSessions' | 'context' | 'retryFailed' | 'observerSettings' | 'data' | 'exclusive' | 'memory' | 'metrics' | 'watch' | 'sessions' | 'mcpRead' | 'reads' | 'embeddingSettings'>
+type CoreRoutes = Pick<ServerDeps, 'schemaVersion' | 'vectorSearch' | 'semanticSearch' | 'onNudge' | 'listSessions' | 'context' | 'retryFailed' | 'observerSettings' | 'data' | 'exclusive' | 'memory' | 'metrics' | 'watch' | 'debugWatch' | 'sessions' | 'mcpRead' | 'reads' | 'embeddingSettings'>
 
 /** Everything that holds memory.db open. */
 interface Core {
@@ -336,6 +338,18 @@ function rebuildAfterWrite(db: Database, sessionId: number, outcome: BatchOutcom
   }
 }
 
+/** What the observer did, for `kinfold watch --debug`; only while a debug watcher is connected, so an unwatched daemon does no extra reads. */
+function traceObserver(db: Database, trace: TraceBuffer, sessionId: number, outcome: BatchOutcome, log: (line: string) => void): void {
+  const at = Date.now()
+  if (!trace.watching(at)) return
+  try {
+    const event = observerTrace(db, sessionId, outcome, at)
+    if (event !== null) trace.push(event)
+  } catch (error: unknown) {
+    log(`trace failed: ${errorMessage(error)}`)
+  }
+}
+
 /** Settings or credential changes send exhausted failed events back to pending, then the observer looks again. */
 function resetCheck(db: Database, options: DaemonObserverOptions, keys: HmacKeyState, observer: ObserverScheduler, log: (line: string) => void): void {
   try {
@@ -347,7 +361,7 @@ function resetCheck(db: Database, options: DaemonObserverOptions, keys: HmacKeyS
 }
 
 /** Recovers runs a crash left open, then ticks on an interval and after every drain that inserted rows. */
-function startObserver(db: Database, options: DaemonObserverOptions, keys: HmacKeyState, afterWrite: () => void, log: (line: string) => void): Observing {
+function startObserver(db: Database, options: DaemonObserverOptions, keys: HmacKeyState, afterWrite: () => void, log: (line: string) => void, trace: TraceBuffer): Observing {
   const recovered = recoverInterrupted(db, Date.now())
   if (recovered.events > 0 || recovered.runs > 0) log(`observer recovered events=${recovered.events} runs=${recovered.runs}`)
   const safety = options.safety?.(db, log)
@@ -357,6 +371,7 @@ function startObserver(db: Database, options: DaemonObserverOptions, keys: HmacK
       const outcome = await processSessionBatch({ db, runnerFor: options.runnerFor, log, ...(safety !== undefined ? { safety } : {}) }, sessionId)
       rebuildAfterWrite(db, sessionId, outcome, log)
       if (outcome.status === 'succeeded' && outcome.inserted > 0) afterWrite()
+      traceObserver(db, trace, sessionId, outcome, log)
       return outcome
     },
     ...(options.schedule !== undefined ? { config: options.schedule } : {}),
@@ -453,6 +468,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const token = readOrCreateSecret(join(dataDir, TOKEN_FILE))
   const hmacKeys = createHmacKeys({ dataDir, keychain: options.keychain ?? NO_CREDENTIALS, now: options.hmac?.now ?? Date.now, log })
   const projectKeyFor = createProjectKeyResolver(gitRunnerWithTimeout(DAEMON_GIT_TIMEOUT_MS))
+  // In memory only, and kept across a core restart (a restore), so a debug watcher keeps its cursor.
+  const trace = createTraceBuffer()
 
   /** Bound once the restarter exists; a change saved before that has nothing to restart. */
   let applyEmbedding = (): void => {}
@@ -473,11 +490,18 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       const line = describeDrain(result)
       if (line !== null) log(line)
       if (result.inserted > 0) observer?.tick()
-      // Transcripts are read only while the impact test is on, and after the drain, so a hook's nudge never waits on a file read.
-      if (result.turnEnds.length > 0 && readDisplaySettings(store.db).holdout) {
+      // Transcripts are read only while the impact test is on or a debug watcher is connected, and after the drain,
+      // so a hook's nudge never waits on a file read. Rows are stored for the impact test only; the watcher gets the trace.
+      const impactTest = result.turnEnds.length > 0 && readDisplaySettings(store.db).holdout
+      const watched = result.turnEnds.length > 0 && trace.watching(Date.now())
+      if (impactTest || watched) {
         setTimeout(() => {
           try {
-            const stored = recordTurnUsage(store.db, freshTurnEnds(result.turnEnds, Date.now()), log)
+            const onRead = watched ? (turn: TurnEnd, usage: TurnUsage | null): void => {
+              const event = turnTrace(store.db, turn, usage)
+              if (event !== null) trace.push(event)
+            } : undefined
+            const stored = recordTurnUsage(store.db, freshTurnEnds(result.turnEnds, Date.now()), log, { store: impactTest, ...(onRead !== undefined ? { onRead } : {}) })
             if (stored > 0) log(`turn usage stored=${stored}`)
           } catch (error: unknown) {
             log(`turn usage failed: ${errorMessage(error)}`)
@@ -488,7 +512,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     const scheduler = createDrainScheduler(drain, (error) => log(`drain failed: ${errorMessage(error)}`), options.debounceMs)
     drain()
     const interval = setInterval(() => scheduler.request(), options.fallbackDrainMs ?? FALLBACK_DRAIN_MS)
-    const observing = options.observer !== undefined ? startObserver(store.db, options.observer, hmacKeys, () => vectors.indexer?.tick(), log) : null
+    const observing = options.observer !== undefined ? startObserver(store.db, options.observer, hmacKeys, () => vectors.indexer?.tick(), log, trace) : null
     observer = observing?.observer ?? null
     const dataTicks = startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, exclusive: vectors.queries.exclusive, ...options.dataControl })
 
@@ -505,6 +529,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, updates: { dataDir, version, envVars, canAutoUpdate, ...stagePlace },
       // Read per prompt, so a change from the dashboard or a restored store applies to the next one.
       holdout: { on: () => readDisplaySettings(store.db).holdout },
+      trace,
     })
     const routes: CoreRoutes = {
       schemaVersion: store.schemaVersion,
@@ -520,6 +545,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       memory: memoryHandlers(store.db, log),
       metrics: (window) => metricsRoute(store.db, window),
       watch: (method, url) => watchRoute(store.db, method, url, Date.now()),
+      debugWatch: (method, url) => debugWatchRoute(trace, method, url, Date.now()),
       sessions: (method, url) => sessionRoute(method, url, store.db, log),
       mcpRead: mcpReadHandler(store.db, log),
       reads: reads.deps,
@@ -654,7 +680,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     },
     observerModels: observerModelsRoute(options.observer?.cliRunnerFor ?? null, log, Date.now),
     observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log)),
-    auth: createDashboardAuth(),
+    auth: createDashboardAuth(Date.now, fileSessionStore(dataDir, log)),
     backup,
     unavailable: () => (restarter.down() ? RESTORING : null),
     log,

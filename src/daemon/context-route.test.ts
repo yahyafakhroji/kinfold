@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { seedObservation } from '../context/test-support'
+import { type TraceBuffer, createTraceBuffer } from '../debug/trace'
 import { type TempStore, T0, fakeRunner, openTempStore, seedEvent } from '../observer/test-support'
 import { sessionDeliveries } from '../store/context-store'
 import { MAX_OBSERVER_ATTEMPTS } from '../store/observer-store'
@@ -241,4 +242,76 @@ describe('update notices', () => {
     const viaContext = (await (await post('/context', contextBody())).json()) as { updateNotice?: unknown }
     expect(viaContext.updateNotice).toEqual({ version: '0.2.0', channel: 'curl' })
   })
+})
+
+describe('the debug trace', () => {
+  const handler = (trace?: TraceBuffer, extra: Partial<Parameters<typeof contextHandler>[0]> = {}) => contextHandler({
+    db: temp.store.db, projectKeyFor: () => ({ key: projectKey, kind: 'path' }) as never, log: (line) => logs.push(line), now: () => T0 + 1_000,
+    ...(trace !== undefined ? { trace } : {}), ...extra,
+  })
+  const events = (trace: TraceBuffer) => trace.read({ after: 0, host: null, project: null }).events
+  /** A trace with a debug watcher connected, as the daemon has while `kinfold watch --debug` polls. */
+  const watched = (): TraceBuffer => {
+    const trace = createTraceBuffer()
+    trace.read({ after: null, host: null, project: null })
+    return trace
+  }
+  const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 5))
+  const startBody = (hostSessionId = 'cc-1') => ({ ...contextBody(hostSessionId), channel: 'session_start' as const })
+  const prompt = (text: string) => ({ host: 'claude-code', cwd: projectKey, hostSessionId: 'cc-1', channel: 'prompt' as const, prompt: text })
+
+  test('a session start is traced with its pack rows and tokens, after the answer is returned', async () => {
+    const id = seedObservation(temp.store, { sessionId: session, projectKey, host: 'opencode', title: 'Route serves stored packs', at: T0 })
+    const trace = watched()
+    const answer = await handler(trace)(startBody())
+    // The answer does not wait for the trace.
+    expect(events(trace)).toEqual([])
+    await tick()
+    expect(events(trace)).toMatchObject([{ kind: 'start', host: 'claude-code', project: 'route-repo', projectKey, hostSessionId: 'cc-1', rows: [{ id, title: 'Route serves stored packs' }], tokens: answer.tokens }])
+  })
+
+  test('a prompt is traced with the hook timing, the new memory, the search and what was sent', async () => {
+    const other = upsertSession(temp.store.db, { host: 'opencode', hostSessionId: 'oc-1', projectKey, cwd: projectKey, occurredAt: T0 - 10_000 })
+    const old = seedObservation(temp.store, { sessionId: other, projectKey, host: 'opencode', title: 'CSV parser drops quotes', at: T0 - 5_000 })
+    const trace = watched()
+    const answer = await handler(trace)(prompt('why does the csv parser drop quotes?'))
+    await tick()
+    const [event] = events(trace)
+    expect(event).toMatchObject({ kind: 'prompt', hook: { late: false, heldOut: false, budgetMs: PROMPT_SERVE_BUDGET_MS }, sent: { ids: answer.observationIds, tokens: answer.tokens } })
+    expect(event!.kind === 'prompt' && event!.search?.candidates.find((candidate) => candidate.id === old)?.outcome).toBe('sent')
+    expect(event!.kind === 'prompt' && event!.sent.line).toContain(`#${old}`)
+  })
+
+  test('a held-out prompt is traced as held out, with no search', async () => {
+    const trace = watched()
+    await handler(trace, { holdout: { on: () => true, pick: () => true } })(prompt('anything at all'))
+    await tick()
+    expect(events(trace)).toMatchObject([{ kind: 'prompt', hook: { heldOut: true }, search: null, sent: { ids: [] } }])
+  })
+
+  test('with no debug watcher connected nothing is traced, since a watcher starts from now', async () => {
+    const trace = createTraceBuffer()
+    await handler(trace)(startBody())
+    await tick()
+    expect(trace.read({ after: 0, host: null, project: null }, 0).events).toEqual([])
+  })
+
+  test('the answer is the same with the trace on and off', async () => {
+    seedObservation(temp.store, { sessionId: session, projectKey, host: 'opencode', title: 'Route serves stored packs', at: T0 })
+    const plain = await handler()(startBody('cc-a'))
+    const traced = await handler(watched())(startBody('cc-b'))
+    expect(traced).toEqual(plain)
+  })
+})
+
+test('GET /watch/debug shows a prompt the daemon answered, through the real server', async () => {
+  const other = upsertSession(temp.store.db, { host: 'opencode', hostSessionId: 'oc-9', projectKey, cwd: projectKey, occurredAt: T0 - 10_000 })
+  const old = seedObservation(temp.store, { sessionId: other, projectKey, host: 'opencode', title: 'CSV parser drops quotes', at: T0 - 5_000 })
+  start()
+  const debug = async (query: string) => (await (await fetch(url(`/watch/debug${query}`), { headers: { authorization: `Bearer ${token()}` } })).json()) as { cursor: number; events: Record<string, unknown>[] }
+  const first = await debug('')
+  await post('/context', { host: 'claude-code', cwd: projectKey, hostSessionId: 'cc-1', channel: 'prompt', prompt: 'why does the csv parser drop quotes?' })
+  await Bun.sleep(10)
+  const next = await debug(`?after=${first.cursor}&project=route-repo`)
+  expect(next.events).toMatchObject([{ kind: 'prompt', host: 'claude-code', project: 'route-repo', sent: { ids: [old] } }])
 })

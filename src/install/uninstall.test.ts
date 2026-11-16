@@ -1,3 +1,4 @@
+import { DASHBOARD_SESSIONS_FILE } from '../dashboard/auth'
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -202,4 +203,13 @@ test('uninstall removes a staged release download with the program', async () =>
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
   expect(existsSync(join(w.dataDir, 'updates'))).toBe(false)
   expect(w.out.join('\n')).toContain('the downloaded release waiting to be installed')
+})
+
+test('uninstall removes the dashboard sign-ins', async () => {
+  const w = createWorld({ claudeVersion: '2.1.310 (Claude Code)', opencodeVersion: null })
+  world = w
+  writeFileSync(join(w.dataDir, DASHBOARD_SESSIONS_FILE), '{"sessions":[]}')
+  expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
+  expect(existsSync(join(w.dataDir, DASHBOARD_SESSIONS_FILE))).toBe(false)
+  expect(w.out.join('\n')).toContain('the dashboard sign-ins')
 })

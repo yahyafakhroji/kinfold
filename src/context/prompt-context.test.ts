@@ -202,3 +202,56 @@ test('each served related line carries the distance and terms that earned it, fo
   expect(answer.relatedServed).toEqual([{ observationId: strong, distance: 0.31, matchedTerms: expect.any(Number) }])
   expect(answer.relatedServed[0]!.matchedTerms).toBeGreaterThan(0)
 })
+
+test('explain() says what the search weighed and why each candidate was sent or not', async () => {
+  const strong = earlier('CSV parser drops quotes on export')
+  const weak = earlier('Release notes mention quotes')
+  const delivered = earlier('Exporter mangles delimited text')
+  recordInjection(temp.store.db, { sessionId: null, host: 'claude-code', hostSessionId: 'cc-me', projectKey: CWD, observationIds: [delivered], channel: 'session_start', tokens: 1, occurredAt: T0 })
+  const search = async (): Promise<SemanticAnswer> => ({
+    status: 'ok', embedMs: 1, searchMs: 1, cached: false, model: 'local/bge-small',
+    hits: [{ id: delivered, distance: 0.2 }, { id: 987_654, distance: 0.3 }, { id: weak, distance: 0.9 }],
+  })
+  const answer = await preparePromptContext(deps(search, { gate: undefined }), ask('why does the csv parser drop quotes?'), CWD, T0)
+  expect(answer.observationIds).toEqual([strong])
+  const explained = answer.explain()
+  expect(explained).toMatchObject({ semantic: 'ok', space: 'local/bge-small', query: 'why does the csv parser drop quotes?', mode: 'keyword and meaning' })
+  expect(explained!.terms).toContain('csv')
+  const byId = new Map(explained!.candidates.map((candidate) => [candidate.id, candidate]))
+  expect(byId.get(strong)).toMatchObject({ outcome: 'sent', source: 'keyword', title: 'CSV parser drops quotes on export' })
+  expect(byId.get(weak)).toMatchObject({ outcome: 'below cutoff', distance: 0.9 })
+  expect(byId.get(weak)!.rule).toContain('0.70')
+  expect(byId.get(delivered)).toMatchObject({ outcome: 'already delivered', title: 'Exporter mangles delimited text' })
+  expect(byId.get(987_654)).toMatchObject({ outcome: 'not current here' })
+  // Sent lines come first.
+  expect(explained!.candidates[0]!.id).toBe(strong)
+})
+
+test('explain() marks a candidate the gate passed but the budget had no room for', async () => {
+  const ids = Array.from({ length: 6 }, (_, n) => earlier(`CSV parser quotes ${n} ${'detail '.repeat(18)}`))
+  const answer = await preparePromptContext(deps(null), ask('csv parser quotes'), CWD, T0)
+  const outcomes = answer.explain()!.candidates.filter((candidate) => ids.includes(candidate.id)).map((candidate) => candidate.outcome)
+  expect(outcomes).toContain('sent')
+  expect(outcomes).toContain('over budget')
+  expect(answer.explain()).toMatchObject({ semantic: 'off', space: null, query: '' })
+})
+
+test('explain() is null when no related search ran', async () => {
+  const answer = await preparePromptContext(deps(null), ask('   '), CWD, T0)
+  expect(answer.explain()).toBeNull()
+})
+
+test('explain() names a keyword match the session already has as already delivered', async () => {
+  const sent = earlier('CSV parser drops quotes on export')
+  recordInjection(temp.store.db, { sessionId: null, host: 'claude-code', hostSessionId: 'cc-me', projectKey: CWD, observationIds: [sent], channel: 'session_start', tokens: 1, occurredAt: T0 })
+  const answer = await preparePromptContext(deps(null), ask('why does the csv parser drop quotes?'), CWD, T0)
+  expect(answer.observationIds).toEqual([])
+  expect(answer.explain()!.candidates).toEqual([{ id: sent, title: 'CSV parser drops quotes on export', source: 'keyword', distance: null, matchedTerms: 3, outcome: 'already delivered' }])
+})
+
+test('explain() leaves out memory this prompt sends as new; the trace lists it under new instead', async () => {
+  const fresh = seedObservation(temp.store, { sessionId: other, projectKey: CWD, host: 'opencode', title: 'CSV parser quotes fixed today', at: T0 + 500 })
+  const answer = await preparePromptContext(deps(null), ask('csv parser quotes'), CWD, T0 + 1_000)
+  expect(answer.observationIds).toContain(fresh)
+  expect(answer.explain()!.candidates.map((candidate) => candidate.id)).not.toContain(fresh)
+})

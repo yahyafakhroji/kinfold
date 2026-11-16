@@ -433,7 +433,9 @@ async function applyUpdateSteps(env: InstallEnv, options: StepOptions, deps: Upd
   const running = deps.version ?? VERSION
   let latest: string
   try {
-    latest = (await fetchNewestRelease(env.fetch, env.now, readInstallRecord(env.dataDir)?.beta === true)).release.version
+    const found = await fetchNewestRelease(env.fetch, env.now, readInstallRecord(env.dataDir)?.beta === true, running)
+    // An automatic run applies only a patch, so the beta on offer beside it is left for kinfold update.
+    latest = options.patchOnly ? (found.patch ?? found.release.version) : found.release.version
   } catch (error: unknown) {
     env.out(`${PREFIX} could not ask GitHub for the latest release (${error instanceof UpdateCheckError ? error.label : 'error'})`)
     return failed(null)
@@ -612,7 +614,8 @@ async function runAuto(env: InstallEnv, deps: UpdateDeps, onInterrupt: () => voi
     return EXIT_FAILED
   }
   // What the daemon decided to apply; the failure is filed under it until GitHub names the release.
-  const expected = readUpdateState(env.dataDir).latestVersion ?? running
+  const seen = readUpdateState(env.dataDir)
+  const expected = seen.patchVersion ?? seen.latestVersion ?? running
   try {
     if (!(await serviceRunsDaemon(env))) {
       out(`${PREFIX} ${NOT_RUN_BY_SERVICE}`)

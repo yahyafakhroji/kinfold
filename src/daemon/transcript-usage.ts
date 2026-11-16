@@ -194,12 +194,19 @@ function wasHeldOut(db: Database, turn: TurnEnd): boolean {
   ).get({ sessionId: turn.sessionId, promptNumber: turn.promptNumber }) !== null
 }
 
+export interface TurnUsageOptions {
+  /** false: read for `kinfold watch --debug` only, so no row is stored. Default true (the impact test). */
+  store?: boolean
+  /** Handed each turn's usage as read, null when the transcript gave none. */
+  onRead?: (turn: TurnEnd, usage: TurnUsage | null) => void
+}
+
 /**
  * Reads each turn's usage and stores one row per turn; Stop firing again for
  * the same prompt replaces its row with the larger, later figures. Returns
  * how many were stored. Logs carry ids and counts, never a path or text.
  */
-export function recordTurnUsage(db: Database, turns: readonly TurnEnd[], log: (line: string) => void): number {
+export function recordTurnUsage(db: Database, turns: readonly TurnEnd[], log: (line: string) => void, options: TurnUsageOptions = {}): number {
   const write = db.query(
     `INSERT INTO turn_usage (session_id, prompt_number, host, project_key, held_out, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
        tool_calls, duration_ms, occurred_at)
@@ -213,6 +220,13 @@ export function recordTurnUsage(db: Database, turns: readonly TurnEnd[], log: (l
   let stored = 0
   for (const turn of turns) {
     const usage = readTurnUsage(turn.transcriptPath)
+    try {
+      options.onRead?.(turn, usage)
+    } catch (error: unknown) {
+      // The trace loses this turn; the impact test's rows must not.
+      log(`turn usage trace failed: ${error instanceof Error ? error.name : 'error'}`)
+    }
+    if (options.store === false) continue
     if (usage === null) {
       log(`turn usage session=${turn.sessionId} prompt=${turn.promptNumber} not read`)
       continue

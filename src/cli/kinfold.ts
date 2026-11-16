@@ -162,6 +162,8 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     const onInterrupt = (): void => stop.abort()
     process.once('SIGINT', onInterrupt)
     try {
+      // JSON lines are for a script reading stdout, so no frame goes around them, even on a terminal.
+      if (watch.value.json) return await runWatch(effective, watch.value, { stop: stop.signal })
       return await runFramed(effective, 'watch', (env) => runWatch(env, watch.value, { stop: stop.signal }))
     } finally {
       process.off('SIGINT', onInterrupt)

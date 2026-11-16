@@ -117,3 +117,15 @@ test('only the dashboard session uses up the once-only banner; the token can rea
   expect(await (await r.page('GET', '/update', { cookie })).json()).toMatchObject({ notice: null })
   expect(await (await r.bearer('GET', '/update')).json()).toMatchObject({ notice: null })
 })
+
+test('kinfold watch --debug polling is not activity, and needs the daemon token', async () => {
+  pending()
+  const r = start()
+  clock = T0 + QUIET_MS - 1000
+  expect((await r.bearer('GET', '/watch/debug')).status).toBe(200)
+  expect((await r.bearer('GET', '/watch/debug?after=0')).status).toBe(200)
+  expect((await fetch(r.url('/watch/debug'))).status).toBe(401)
+  clock = T0 + QUIET_MS + 5000
+  await Bun.sleep(40)
+  expect(spawned).toHaveLength(1)
+})

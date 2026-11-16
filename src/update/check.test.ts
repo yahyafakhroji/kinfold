@@ -134,7 +134,7 @@ test('without the beta channel, a prerelease answer is not a usable release', as
 
 test('a damaged state file reads as empty and keeps notices it can parse', () => {
   writeFileSync(join(dir, UPDATE_STATE_FILE), '{oops')
-  expect(readUpdateState(dir)).toEqual({ lastAttemptAt: null, latestVersion: null, checkedAt: null, notified: {}, beta: null, release: null })
+  expect(readUpdateState(dir)).toEqual({ lastAttemptAt: null, latestVersion: null, checkedAt: null, notified: {}, beta: null, release: null, patchVersion: null })
   writeUpdateState(dir, { lastAttemptAt: 1, latestVersion: '0.2.0', checkedAt: 1, notified: { cli: '0.2.0' } })
   expect(readUpdateState(dir).notified).toEqual({ cli: '0.2.0' })
   expect(JSON.parse(readFileSync(join(dir, UPDATE_STATE_FILE), 'utf8')).latestVersion).toBe('0.2.0')
@@ -214,4 +214,22 @@ test('a saved prerelease is not offered once the beta channel is off', () => {
 test('a state from before release lines knows the version alone', () => {
   writeFileSync(join(dir, UPDATE_STATE_FILE), JSON.stringify({ lastAttemptAt: T0, latestVersion: '0.3.0', checkedAt: T0, notified: {} }))
   expect(knownRelease(readUpdateState(dir), false)).toEqual({ version: '0.3.0', prerelease: false, changes: [], breaking: [] })
+})
+
+test('with beta on, the check also keeps the newest patch of the running major.minor', async () => {
+  writeRecord({ beta: true })
+  respond = async () => new Response(JSON.stringify([
+    { tag_name: 'v0.2.0-beta.1', draft: false, prerelease: true, body: '' },
+    { tag_name: 'v0.1.2', draft: false, prerelease: false, body: '' },
+    { tag_name: 'v0.1.1', draft: false, prerelease: false, body: '' },
+    { tag_name: 'v0.1.3-rc.1', draft: false, prerelease: true, body: '' },
+  ]))
+  expect(await runUpdateCheck(deps())).toBe('checked')
+  expect(readUpdateState(dir)).toMatchObject({ latestVersion: '0.2.0-beta.1', patchVersion: '0.1.2' })
+})
+
+test('without a patch of the running line, the check keeps none', async () => {
+  respond = async () => release('v0.2.0')
+  expect(await runUpdateCheck(deps())).toBe('checked')
+  expect(readUpdateState(dir)).toMatchObject({ latestVersion: '0.2.0', patchVersion: null })
 })

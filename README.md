@@ -140,6 +140,8 @@ What Kinfold wires for each agent on macOS and Linux. **Observer** is `yes` when
 
 **`kinfold watch`** prints one line per prompt for every agent, with the time, the agent and the project. `--host <agent>` and `--project <name>` narrow it. Ctrl-C stops it.
 
+**`kinfold watch --debug`** adds the reasons. For each prompt it prints how long the hook waited and whether the daemon answered in time, how the search matched (keyword or meaning, and which embedding model), the prompt's terms, each candidate with its distance and matched terms and why it was sent or left out (below the cutoff, already delivered, over the 200-token budget), the new memory from other sessions, and what was sent. At a Claude Code turn end it prints the turn's usage from the transcript beside the tokens Kinfold added. It also shows session-start packs and observer runs. `--json` prints one JSON object per event for scripts. The daemon records the trace only while a debug watch is connected and keeps it in memory (the last few hundred events, gone after a restart). The prompt hook makes no extra request for it.
+
 **Sessions in the dashboard.** Open a session to read it turn by turn: your prompt, the memories recalled, the agent's reply, and the memories saved from that turn. Prompt and reply are the stored text after the secret scan, so a secret shows as its redaction marker. The AI summary of a turn is folded away under it. Replies follow the prompts retention setting.
 
 **Turning the line off.** Run `kinfold install --no-show-recall`, or use the switch on the dashboard's Data page. Memory still reaches the model.
