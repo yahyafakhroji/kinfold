@@ -86,7 +86,7 @@ export interface ServerDeps {
   auth: DashboardAuth
   /** The /read/ routes (token only); absent, every /read/ path is 404. */
   reads?: ReadRouteDeps
-  /** GET /backup, POST /restore/upload, POST /restore, GET /restore/status; absent, each is 404. */
+  /** GET /backup, POST /restore/upload, POST /restore, POST /restore/undo, GET /restore/status; absent, each is 404. */
   backup?: BackupRoutes
   /** Why the store cannot be reached right now (a restore is replacing it), or null. Routes that read or write it answer 503 meanwhile. */
   unavailable?: () => string | null
@@ -124,7 +124,8 @@ export const MAX_BODY_BYTES = 16_384
 /** The most the restore upload may ever take, and so the server-wide cap; the route lowers it to what the disk can hold. */
 export const MAX_UPLOAD_BYTES = 8 * 1024 ** 3
 const UPLOAD_PATH = '/restore/upload'
-const BACKUP_PATHS: ReadonlySet<string> = new Set(['/backup', '/restore', UPLOAD_PATH, '/restore/status'])
+const UNDO_PATH = '/restore/undo'
+const BACKUP_PATHS: ReadonlySet<string> = new Set(['/backup', '/restore', UPLOAD_PATH, UNDO_PATH, '/restore/status'])
 
 function declaredLength(request: Request): number {
   const length = Number(request.headers.get('content-length') ?? '0')
@@ -260,6 +261,7 @@ async function backupRoute(request: Request, path: string, deps: ServerDeps): Pr
   const answered = (answer: RouteAnswer): Response => json(answer.status, answer.body)
   if (path === '/restore/status') return request.method === 'GET' ? answered(routes.status()) : wrongMethod
   if (request.method !== 'POST') return wrongMethod
+  if (path === UNDO_PATH) return answered(routes.undo())
   return answered(path === UPLOAD_PATH ? await routes.upload(request) : await routes.start(() => readJson(request)))
 }
 

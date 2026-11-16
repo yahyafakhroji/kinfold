@@ -152,6 +152,7 @@ const assets = {
   vec0: { bytes: async () => new Uint8Array(), sha256: 'vec0-sha' },
   dashboardFile: () => null,
   opencodePlugin: async () => PLUGIN_BUNDLE,
+  kiloPlugin: async () => PLUGIN_BUNDLE,
 }
 
 async function run(command: string): Promise<void> {

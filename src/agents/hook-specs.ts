@@ -110,10 +110,17 @@ const JUNIE_SPEC: HookHostSpec = {
 }
 
 // Copilot drops command-hook output on UserPromptSubmit; sessionStart reads a top-level additionalContext.
+// What Kinfold recalled reaches the user through a progress line: Copilot CLI
+// takes every stdout line of the form {"type":"progress","message":...} out of
+// a hook's output before the model sees it and shows the message as an info
+// row; its docs call these lines "display-only". Built from Copilot's source
+// (1.0.60), not tested live. The update notice stays where it was, in the
+// context, since a line nobody has seen on screen is no place for news.
 const COPILOT_SPEC: HookHostSpec = {
   normalize: normalizeClaudeStyle(CLAUDE_STYLE_EVENTS, 'copilot'),
   sessionContext: topLevelContext,
   sessionContextWithNotice: (text, notice) => topLevelContext(withAgentLine(text, notice)),
+  progressLine: (message) => JSON.stringify({ type: 'progress', message }),
 }
 
 // Gemini CLI reads hookSpecificOutput.additionalContext on SessionStart and

@@ -1,0 +1,34 @@
+{
+  "input": {
+    "sessionID": "ses_e1e6d0192ffe7pZ5J19xRJk76C",
+    "agent": "code",
+    "model": {
+      "providerID": "fake",
+      "modelID": "fake-1"
+    }
+  },
+  "output": {
+    "message": {
+      "id": "msg_1e192fe7d001mVkFE9r3rMzZZ1",
+      "role": "user",
+      "sessionID": "ses_e1e6d0192ffe7pZ5J19xRJk76C",
+      "time": {
+        "created": 1794785869437
+      },
+      "agent": "code",
+      "model": {
+        "providerID": "fake",
+        "modelID": "fake-1"
+      }
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "how do we pin bun in CI?",
+        "messageID": "msg_1e192fe7d001mVkFE9r3rMzZZ1",
+        "sessionID": "ses_e1e6d0192ffe7pZ5J19xRJk76C",
+        "id": "prt_1e192fe820017Gxo8ctNkBEP1e"
+      }
+    ]
+  }
+}

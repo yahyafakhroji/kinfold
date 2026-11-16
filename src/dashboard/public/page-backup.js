@@ -3,7 +3,9 @@
 // streams. Restore uploads a chosen file, shows what its manifest says, takes
 // the recovery code and a confirmation, then follows GET /restore/status
 // until the daemon reports how it ended. The session survives the restore,
-// so this page stays signed in throughout.
+// so this page stays signed in throughout. When the last restore kept the
+// store it replaced, a third block offers to switch back to it (POST
+// /restore/undo), behind a confirmation and with the same progress display.
 //
 // The recovery code is read from its field once, put in the body of the one
 // POST /restore, and the field is cleared in the same step. It is never kept
@@ -11,7 +13,8 @@
 
 import { api, errorText, uploadFile } from './api.js'
 import { h, notice, replaceContent } from './dom.js'
-import { canRestore, describeManifest, idleRestore, restoreBody, stepText, uploadedRestore } from './restore-flow.js'
+import { formatTime } from './format.js'
+import { canRestore, describeManifest, idleRestore, keptAt, restoreBody, stepText, undoStepText, uploadedRestore } from './restore-flow.js'
 
 export const STATUS_POLL_MS = 700
 
@@ -43,8 +46,80 @@ function setEnabled(button, enabled) {
   else button.setAttribute('disabled', '')
 }
 
-/** @param {BackupDeps} deps */
-function restoreBlock(deps) {
+/**
+ * Follows GET /restore/status until the daemon says how the run ended.
+ * @param {BackupDeps} deps
+ * @param {HTMLElement} status
+ * @param {{ step: (step: string | null) => string, done: string, failed: string, onDone: (answer: any) => void }} say
+ */
+async function followStatus(deps, status, say) {
+  for (;;) {
+    const answer = await deps.send('GET', '/restore/status')
+    if (answer.state === 'done') {
+      say.onDone(answer)
+      replaceContent(status, notice(say.done, 'ok'), h('ul', { class: 'plain' }, (answer.lines ?? []).map((line) => h('li', {}, String(line)))))
+      return
+    }
+    if (answer.state !== 'running') throw new Error(typeof answer.error === 'string' ? answer.error : say.failed)
+    replaceContent(status, notice(say.step(answer.step ?? null)))
+    await deps.wait(STATUS_POLL_MS)
+  }
+}
+
+/**
+ * The switch back to the store the last restore kept. Hidden until `show` is
+ * handed the time a kept store was replaced.
+ * @param {BackupDeps} deps
+ */
+function undoBlock(deps) {
+  let running = false
+  const status = h('div', { 'aria-live': 'polite' })
+  const lede = h('p', { class: 'lede' })
+  const confirm = h('input', { type: 'checkbox', name: 'undo-confirm' })
+  const button = h('button', { type: 'button', class: 'danger', 'data-action': 'undo', disabled: true }, 'Switch back')
+  const block = section('C', 'Switch back',
+    lede,
+    h('p', { class: 'hint' }, 'The last restore kept the store it replaced. Switching back puts that store in use again and keeps the one in use now in its place, so you can switch again. It needs no recovery code.'),
+    h('div', { class: 'form-grid' },
+      h('label', { class: 'check field-wide' }, confirm, 'Replace the memory in use with the kept store'),
+      h('div', { class: 'actions' }, button)),
+    status)
+  block.setAttribute('data-action', 'undo-block')
+  block.setAttribute('hidden', '')
+
+  const draw = () => setEnabled(button, !running && confirm.checked === true)
+  /** @param {number | null} replacedAt */
+  const show = (replacedAt) => {
+    if (replacedAt === null) {
+      block.setAttribute('hidden', '')
+      return
+    }
+    replaceContent(lede, `Switch back to the store replaced on ${formatTime(replacedAt)}.`)
+    block.removeAttribute('hidden')
+  }
+  confirm.addEventListener('change', draw)
+  button.addEventListener('click', () => {
+    if (running || confirm.checked !== true) return
+    running = true
+    draw()
+    replaceContent(status, notice(undoStepText('check')))
+    deps.send('POST', '/restore/undo')
+      .then(() => followStatus(deps, status, { step: undoStepText, done: 'Switched back.', failed: 'switching back failed', onDone: (answer) => show(keptAt(answer)) }))
+      .catch((error) => replaceContent(status, notice(errorText(error), 'error')))
+      .finally(() => {
+        running = false
+        confirm.checked = false
+        draw()
+      })
+  })
+  return { block, show }
+}
+
+/**
+ * @param {BackupDeps} deps
+ * @param {(replacedAt: number | null) => void} showKept
+ */
+function restoreBlock(deps, showKept) {
   let flow = idleRestore()
   let running = false
   const status = h('div', { 'aria-live': 'polite' })
@@ -64,25 +139,17 @@ function restoreBlock(deps) {
   }
   const fail = (error) => replaceContent(status, notice(errorText(error), 'error'))
 
-  /** Follows the restore until the daemon says how it ended. */
-  const follow = async () => {
-    for (;;) {
-      const answer = await deps.send('GET', '/restore/status')
-      if (answer.state === 'done') {
-        flow = idleRestore()
-        replaceContent(facts)
-        codeField.setAttribute('hidden', '')
-        replaceContent(status, notice('The backup is restored.', 'ok'), h('ul', { class: 'plain' }, (answer.lines ?? []).map((line) => h('li', {}, String(line)))))
-        return
-      }
-      if (answer.state !== 'running') {
-        fail(new Error(typeof answer.error === 'string' ? answer.error : 'the restore failed'))
-        return
-      }
-      replaceContent(status, notice(stepText(answer.step ?? null)))
-      await deps.wait(STATUS_POLL_MS)
-    }
-  }
+  const follow = () => followStatus(deps, status, {
+    step: stepText,
+    done: 'The backup is restored.',
+    failed: 'the restore failed',
+    onDone: (answer) => {
+      flow = idleRestore()
+      replaceContent(facts)
+      codeField.setAttribute('hidden', '')
+      showKept(keptAt(answer))
+    },
+  })
 
   file.addEventListener('change', () => {
     flow = idleRestore()
@@ -144,9 +211,13 @@ function restoreBlock(deps) {
  * @param {BackupDeps} [deps]
  */
 export async function renderBackup(_state, _ctx, deps = LIVE) {
+  const undo = undoBlock(deps)
+  // Whether a kept store is here. A daemon that cannot say leaves the block hidden; the rest of the page does not depend on it.
+  deps.send('GET', '/restore/status').then((answer) => undo.show(keptAt(answer)), () => {})
   return h('section', { class: 'page', 'aria-labelledby': 'page-title' },
     h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '06'), h('h1', { id: 'page-title' }, 'Backup'),
       h('p', { class: 'lede' }, 'Save the memory before reinstalling or moving machines, and bring it back afterwards.')),
     backupBlock(),
-    restoreBlock(deps))
+    restoreBlock(deps, undo.show),
+    undo.block)
 }

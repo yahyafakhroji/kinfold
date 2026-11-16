@@ -1,8 +1,8 @@
-// Bundles the OpenCode plugin into one ESM file whose only imports are Node
+// Bundles a plugin (OpenCode's, or Kilo Code's) into one ESM file whose only imports are Node
 // and Bun builtins. `kinfold install` writes that file beside the user's
 // OpenCode config, so it must not reach into the checkout or load SQLite.
 //
-// Usage: bun tools/bundle-plugin.ts <outfile>
+// Usage: bun tools/bundle-plugin.ts <outfile> [opencode|kilo]
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -10,6 +10,8 @@ import { basename, dirname, join, resolve } from 'node:path'
 const ROOT = join(import.meta.dir, '..')
 
 export const PLUGIN_ENTRY = join(ROOT, 'src', 'plugins', 'opencode.ts')
+/** Kilo Code's plugin: a file of its own, since Kilo runs OpenCode's 1.x plugin contract. */
+export const KILO_PLUGIN_ENTRY = join(ROOT, 'src', 'plugins', 'kilo.ts')
 
 /**
  * Bare names Bun emits for Node builtins, plus everything that may appear
@@ -63,18 +65,18 @@ export function stripModulePaths(text: string): string {
 }
 
 /** Writes the bundle to `outfile` and returns that path. */
-export async function bundlePlugin(outfile: string): Promise<string> {
+export async function bundlePlugin(outfile: string, entry: string = PLUGIN_ENTRY): Promise<string> {
   const target = resolve(outfile)
   mkdirSync(dirname(target), { recursive: true, mode: 0o700 })
   const result = await Bun.build({
-    entrypoints: [PLUGIN_ENTRY],
+    entrypoints: [entry],
     target: 'bun',
     format: 'esm',
     outdir: dirname(target),
     naming: basename(target),
   })
   if (!result.success || result.outputs.length === 0) {
-    throw new Error(`could not bundle the OpenCode plugin: ${result.logs.map(String).join(' | ')}`)
+    throw new Error(`could not bundle the plugin ${basename(entry)}: ${result.logs.map(String).join(' | ')}`)
   }
   const output = result.outputs[0]!.path
   const text = stripModulePaths(await Bun.file(output).text())
@@ -86,8 +88,8 @@ export async function bundlePlugin(outfile: string): Promise<string> {
 if (import.meta.main) {
   const outfile = process.argv[2]
   if (outfile === undefined || outfile === '') {
-    console.error('usage: bun tools/bundle-plugin.ts <outfile>')
+    console.error('usage: bun tools/bundle-plugin.ts <outfile> [opencode|kilo]')
     process.exit(2)
   }
-  console.log(await bundlePlugin(outfile))
+  console.log(await bundlePlugin(outfile, process.argv[3] === 'kilo' ? KILO_PLUGIN_ENTRY : PLUGIN_ENTRY))
 }

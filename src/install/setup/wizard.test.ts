@@ -92,7 +92,7 @@ async function installedWithTwoHosts(w: FakeWorld): Promise<void> {
 }
 
 test('Enter on every step keeps a re-run unchanged', async () => {
-  const { w, term } = setup(Array(7).fill(ENTER), { claudeVersion: '2.0.0', codexVersion: '1.0.0' })
+  const { w, term } = setup(Array(8).fill(ENTER), { claudeVersion: '2.0.0', codexVersion: '1.0.0' })
   await installedWithTwoHosts(w)
   const state = await readSetupState(w.env)
   expect(state.wiredHosts).toEqual(['claude-code', 'codex'])
@@ -158,7 +158,7 @@ test('a failed observer check asks again before encryption', async () => {
     probe: async () => ({ version: '1', binaryPath: '/x' }),
     listModels: async () => [],
   }
-  const keys = [ENTER, DOWN, DOWN, DOWN, ENTER, 'gpt-x\r', ENTER, ENTER, ENTER, ENTER, ENTER]
+  const keys = [ENTER, DOWN, DOWN, DOWN, ENTER, 'gpt-x\r', ENTER, ENTER, ENTER, ENTER, ENTER, ENTER]
   const { w, term } = setup(keys, { claudeVersion: '2.0.0', codexVersion: '1.0.0', cliRunner: () => failingOnce })
   await installedWithTwoHosts(w)
   const state = rerun(await readSetupState(w.env), { wiredHosts: ['claude-code'] })
@@ -177,7 +177,7 @@ test('a failed observer check asks again before encryption', async () => {
 })
 
 test('a wrong tail asks again, and the new code is shown on the terminal only', async () => {
-  const terminal = readingCodeFrom([ENTER, ENTER, ENTER, 'AAAAA-BBBBB\r'], '\r\r\r\r')
+  const terminal = readingCodeFrom([ENTER, ENTER, ENTER, 'AAAAA-BBBBB\r'], '\r\r\r\r\r')
   const { w } = setup([], { claudeVersion: '2.0.0' }, terminal)
   const state = await readSetupState(w.env)
   const flags = flagsOf({ observers: [{ host: 'claude-code', provider: 'claude-cli', model: 'haiku' }] })
@@ -359,7 +359,7 @@ test('without a TTY a flag wins, then the saved value, and the observer step nee
 })
 
 test('a wired host whose agent is gone can still be kept or unticked', async () => {
-  const { w } = setup([ENTER, ENTER, ENTER, ENTER, ENTER])
+  const { w } = setup(Array(6).fill(ENTER))
   const state = rerun(await readSetupState(w.env), { wiredHosts: ['claude-code'], encryption: 'off' })
   const flags = flagsOf({ observers: [{ host: 'claude-code', provider: 'claude-cli', model: 'haiku' }] })
   const answers = await runWizard(w.env, ask(w), state, flags, { ...NO_CHOICE, flags: flags.observers })
@@ -399,7 +399,7 @@ test('declining the summary cancels', async () => {
 })
 
 test('the wizard writes nothing to the machine', async () => {
-  const { w } = setup(Array(7).fill(ENTER), { claudeVersion: '2.0.0', codexVersion: '1.0.0' })
+  const { w } = setup(Array(8).fill(ENTER), { claudeVersion: '2.0.0', codexVersion: '1.0.0' })
   await installedWithTwoHosts(w)
   const state = await readSetupState(w.env)
   const before = snapshotTree(w.root)
@@ -482,7 +482,7 @@ test('every supported agent is a row: found ones can be ticked, the rest are sho
 
 test('Continue cannot be detected, so it starts unticked and can be picked', async () => {
   // Down moves from Claude Code over every disabled row to Continue, the only other open one.
-  const { w, term } = setup([ENTER, DOWN, ' ', ENTER, ENTER, ENTER, ENTER, ENTER, ENTER], { claudeVersion: '2.0.0', keychainRefs: ['openrouter'] })
+  const { w, term } = setup([ENTER, DOWN, ' ', ENTER, ENTER, ENTER, ENTER, ENTER, ENTER, ENTER], { claudeVersion: '2.0.0', keychainRefs: ['openrouter'] })
   const state = await readSetupState(w.env)
   const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)
   expect(answers.hosts).toEqual(['claude-code', 'continue'])
@@ -564,8 +564,8 @@ function programSetup(keys: readonly string[], pathEnv = '/usr/bin:/bin'): Setup
 }
 
 posixOnly('POSIX paths')('the PATH question comes after the updates, defaults to yes, and its answer is in the summary', async () => {
-  // folder, agents, observer, port, updates, PATH, summary
-  const { w, term } = programSetup(Array(7).fill(ENTER))
+  // folder, agents, observer, port, updates, impact test, PATH, summary
+  const { w, term } = programSetup(Array(8).fill(ENTER))
   const answers = await runWizard(w.env, ask(w), await readSetupState(w.env), flagsOf({ noEncrypt: true }), NO_CHOICE)
   expect(answers.path).toBe('add')
   const output = term.output()
@@ -575,24 +575,24 @@ posixOnly('POSIX paths')('the PATH question comes after the updates, defaults to
 })
 
 posixOnly('POSIX paths')('answering no is recorded as a decline, and the summary says PATH is left alone', async () => {
-  const { w, term } = programSetup([ENTER, ENTER, ENTER, ENTER, ENTER, 'n', ENTER])
+  const { w, term } = programSetup([ENTER, ENTER, ENTER, ENTER, ENTER, ENTER, 'n', ENTER])
   const answers = await runWizard(w.env, ask(w), await readSetupState(w.env), flagsOf({ noEncrypt: true }), NO_CHOICE)
   expect(answers.path).toBe('decline')
   expect(term.output()).toContain('kinfold command ~/.local/bin/kinfold; PATH left alone')
 })
 
 posixOnly('POSIX paths')('the PATH question is not asked when ~/.local/bin is on PATH, a flag answered it, or the run is a checkout', async () => {
-  const onPath = programSetup(Array(6).fill(ENTER), '/usr/bin')
+  const onPath = programSetup(Array(7).fill(ENTER), '/usr/bin')
   onPath.w.env = { ...onPath.w.env, pathEnv: `/usr/bin:${join(onPath.w.home, '.local', 'bin')}` }
   expect((await runWizard(onPath.w.env, ask(onPath.w), await readSetupState(onPath.w.env), flagsOf({ noEncrypt: true }), NO_CHOICE)).path).toBeNull()
   expect(onPath.term.output()).not.toContain('Add kinfold to your PATH?')
   await world?.cleanup()
-  const flagged = programSetup(Array(6).fill(ENTER))
+  const flagged = programSetup(Array(7).fill(ENTER))
   expect((await runWizard(flagged.w.env, ask(flagged.w), await readSetupState(flagged.w.env), flagsOf({ noEncrypt: true, path: 'no-path' }), NO_CHOICE)).path).toBeNull()
   expect(flagged.term.output()).not.toContain('Add kinfold to your PATH?')
   expect(flagged.term.output()).toContain('kinfold command not set up (--no-path)')
   await world?.cleanup()
-  const checkout = setup(Array(6).fill(ENTER), { claudeVersion: '2.0.0' })
+  const checkout = setup(Array(7).fill(ENTER), { claudeVersion: '2.0.0' })
   expect((await runWizard(checkout.w.env, ask(checkout.w), await readSetupState(checkout.w.env), flagsOf({ noEncrypt: true }), NO_CHOICE)).path).toBeNull()
   expect(checkout.term.output()).not.toContain('kinfold command')
 })
@@ -605,7 +605,7 @@ test('--yes and a run with no terminal never reach the PATH question', async () 
 })
 
 posixOnly('POSIX paths')('a block already in the startup file does not stop the question on an install that was never asked', async () => {
-  const { w, term } = programSetup(Array(7).fill(ENTER))
+  const { w, term } = programSetup(Array(8).fill(ENTER))
   writeFileSync(join(w.home, '.zshrc'), withBlock('x\n', 'posix'))
   await runWizard(w.env, ask(w), await readSetupState(w.env), flagsOf({ noEncrypt: true }), NO_CHOICE)
   expect(term.output()).toContain('Add kinfold to your PATH?')
@@ -719,4 +719,66 @@ test('a saved choice whose CLI is gone stays on its row with the warning, and ca
   expect(plain).toContain('claude-cli/haiku  saved · claude not installed; pick another')
   expect(plain).toContain('> openrouter')
   expect(answers.observers[0]).toMatchObject({ input: CLAUDE_ROW, origin: 'saved', check: 'unchanged' })
+})
+
+// ---- the impact test ----------------------------------------------------------
+
+const IMPACT_QUESTION = 'Run the impact test?'
+
+/** A re-run with only the named hosts picked, so the keys reach the impact question quickly: observer, port, updates, then it. */
+async function impactRun(keys: readonly string[], hosts: SetupFlags['hosts'], over: Partial<SetupFlags> = {}, prepare?: (w: FakeWorld) => void): Promise<{ answers: Awaited<ReturnType<typeof runWizard>>; output: string }> {
+  const { w, term } = setup(keys, { claudeVersion: '2.0.0', codexVersion: '1.0.0', keychainRefs: ['openrouter'] })
+  mkdirSync(w.dataDir, { recursive: true })
+  prepare?.(w)
+  const state = rerun(await readSetupState(w.env))
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ hosts, noEncrypt: true, ...over }), NO_CHOICE)
+  return { answers, output: term.output() }
+}
+
+test('the impact test is asked after Updates when Claude Code is picked, and defaults to no', async () => {
+  // observer, port, updates, impact test, summary
+  const { answers, output } = await impactRun(Array(5).fill(ENTER), ['claude-code'])
+  expect(answers.holdout).toBe(false)
+  expect(output).toContain('Run the impact test? Kinfold skips memory on about 1 in 10 Claude Code prompts and compares token use, to measure what memory saves.')
+  expect(output.indexOf(IMPACT_QUESTION)).toBeGreaterThan(output.indexOf('Updates:'))
+  expect(output.indexOf(IMPACT_QUESTION)).toBeLessThan(output.indexOf('Install with these choices?'))
+  expect(output).toContain('Impact test     off')
+})
+
+test('answering yes turns the impact test on, and the summary says so', async () => {
+  const { answers, output } = await impactRun([ENTER, ENTER, ENTER, 'y', ENTER], ['claude-code'])
+  expect(answers.holdout).toBe(true)
+  expect(output).toContain('Impact test     on for Claude Code')
+})
+
+test('the impact test is not asked when Claude Code is not among the picked agents', async () => {
+  // observer, port, updates, summary
+  const { answers, output } = await impactRun(Array(4).fill(ENTER), ['codex'])
+  expect(answers.holdout).toBeUndefined()
+  expect(output).not.toContain(IMPACT_QUESTION)
+  expect(output).not.toContain('Impact test')
+})
+
+test('a saved impact test choice is the default on a later install', async () => {
+  const { answers } = await impactRun(Array(5).fill(ENTER), ['claude-code'], {}, (w) => writeFileSync(join(w.dataDir, 'display.json'), JSON.stringify({ showRecall: true, holdout: true })))
+  expect(answers.holdout).toBe(true)
+})
+
+test('--holdout and --no-holdout answer the impact question, so it is not asked', async () => {
+  for (const holdout of [true, false]) {
+    const { answers, output } = await impactRun(Array(4).fill(ENTER), ['claude-code'], { holdout })
+    expect(answers.holdout).toBeUndefined()
+    expect(output).not.toContain(IMPACT_QUESTION)
+    await world?.cleanup()
+    world = null
+  }
+})
+
+test('--yes and a run with no terminal keep the saved impact test choice by asking nothing', async () => {
+  const { w, term } = setup([], { claudeVersion: '2.0.0' })
+  const answers = await runWizard(w.env, ask(w), await readSetupState(w.env), flagsOf({ yes: true }), { ...NO_CHOICE, yes: true })
+  expect(answers.holdout).toBeUndefined()
+  expect(term.output()).toBe('')
+  const quiet = await runWizard(w.env, null, await readSetupState(w.env), flagsOf(), NO_CHOICE).catch(() => null)
+  expect(quiet?.holdout).toBeUndefined()
 })

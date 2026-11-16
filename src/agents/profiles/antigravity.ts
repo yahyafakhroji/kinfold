@@ -20,6 +20,9 @@
 // per-prompt context is claimed or printed, and the line says prompts may go
 // unrecorded. The macOS bundle name comes from install
 // guides, not the docs.
+// What Kinfold recalled is not shown inside Antigravity (decided 2026-11-16):
+// the only hook output a user sees is `errorMessage`, which is styled as an
+// error and fails a `-p` turn. `kinfold watch` and the dashboard show it.
 // Gemini CLI shares ~/.gemini but reads settings.json; Antigravity's files
 // sit under config/, so neither writer touches the other's file.
 // The docs don't say which shell runs a hook; until a Windows run is checked

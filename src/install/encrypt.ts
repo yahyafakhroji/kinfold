@@ -21,8 +21,9 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BackupError } from '../backup/archive'
-import { type RestoreJournal, readRestoreJournal } from '../backup/journal'
+import { type RestoreJournal, type UndoJournal, readRestoreJournal, readUndoJournal } from '../backup/journal'
 import { resumeRestore } from '../backup/restore'
+import { resumeUndo } from '../backup/undo'
 import { DB_KEY_NEXT_REF, DB_KEY_REF } from '../secrets/credentials'
 import type { KeyStore } from '../secrets/key-store'
 import { createKeychainStore } from '../secrets/stores/keychain'
@@ -263,7 +264,7 @@ async function converting(ctx: Context, op: Op, from: string | null, to: string 
 }
 
 /** A restore's journal names a live run unless that run gave up and left the marker for resume. */
-function restoreRunning(journal: RestoreJournal): boolean {
+function restoreRunning(journal: RestoreJournal | UndoJournal): boolean {
   return journal.abandoned !== true && journal.pid !== process.pid && isProcessAlive(journal.pid)
 }
 
@@ -272,6 +273,10 @@ function requireNoRun(ctx: Context): void {
   const restore = readRestoreJournal(ctx.path)
   if (restore !== null) {
     throw new Refusal(restoreRunning(restore) ? `a kinfold restore is running (pid ${restore.pid}); wait for it` : 'a kinfold restore was cut short; run kinfold key resume first')
+  }
+  const undo = readUndoJournal(ctx.path)
+  if (undo !== null) {
+    throw new Refusal(restoreRunning(undo) ? `a kinfold restore --undo is running (pid ${undo.pid}); wait for it` : 'a kinfold restore --undo was cut short; run kinfold key resume first')
   }
   const journal = readJournal(ctx.path)
   if (journal !== null && isProcessAlive(journal.pid) && journal.pid !== process.pid) throw new Refusal(`a kinfold ${journal.op} is running (pid ${journal.pid}); wait for it`)
@@ -485,9 +490,12 @@ async function resume(ctx: Context): Promise<void> {
  * `kinfold key resume` when the marker is a restore's. It needs no key store
  * of its own: a plaintext backup restores where there is none.
  */
-async function resumeRestoreRun(env: InstallEnv, journal: RestoreJournal): Promise<void> {
-  if (restoreRunning(journal)) throw new Refusal(`a kinfold restore is still running (pid ${journal.pid}); wait for it`)
-  resumeRestore({ dataDir: env.dataDir, keyStore: keyStoreOf(env), log: env.out })
+async function resumeRestoreRun(env: InstallEnv, journal: RestoreJournal | UndoJournal): Promise<void> {
+  const what = journal.op === 'restore' ? 'restore' : 'restore --undo'
+  if (restoreRunning(journal)) throw new Refusal(`a kinfold ${what} is still running (pid ${journal.pid}); wait for it`)
+  const input = { dataDir: env.dataDir, keyStore: keyStoreOf(env), log: env.out }
+  if (journal.op === 'restore') resumeRestore(input)
+  else resumeUndo({ ...input, now: env.now })
   const service = managedServiceOf(env)
   if (service !== null && service.isConfigured() && !(await service.isRunning())) await startDaemon({ env, log: env.out }, { restart: true })
 }
@@ -503,7 +511,8 @@ const RUN: Record<KeyCommand, (ctx: Context) => Promise<void>> = {
 
 export async function runKeyCommand(env: InstallEnv, command: KeyCommand): Promise<number> {
   try {
-    const restore = command === 'resume' ? readRestoreJournal(join(env.dataDir, DB_FILE)) : null
+    const dbPath = join(env.dataDir, DB_FILE)
+    const restore = command === 'resume' ? (readRestoreJournal(dbPath) ?? readUndoJournal(dbPath)) : null
     if (restore !== null) await resumeRestoreRun(env, restore)
     else await RUN[command](context(env))
     return EXIT_OK

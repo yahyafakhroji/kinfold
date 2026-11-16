@@ -26,6 +26,9 @@
 // so with it false Devin keeps hooks of its own. The docs list no PostToolUseFailure, and no cwd or hook_event_name on
 // the payload; test/fixtures/devin/ assumes both, as Claude Code's format, in
 // docs-constructed-*.json.
+// What Kinfold recalled is not shown inside Devin (decided 2026-11-16): its
+// hook docs describe no output that reaches the user's screen, so the hook
+// prints no message for it. `kinfold watch` and the dashboard show it.
 // The docs name no shell for Windows, so the single-quoted command an install
 // writes is unchecked there; until a real run shows it works, Windows gets no
 // hooks and search only.

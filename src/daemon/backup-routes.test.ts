@@ -410,3 +410,93 @@ test('a daemon that must stop after a stranded restore stays up long enough for 
     expect(FATAL_EXIT_MS).toBeGreaterThanOrEqual(poll * 5)
   }
 })
+
+/** A daemon whose store was restored over one with memory, so a kept store sits beside it. */
+async function restoredBox(options: { encrypted?: boolean; backup?: DaemonOptions['backup'] } = {}): Promise<Box & { sourceKey: string | null }> {
+  const made = box({ titles: ['mine'], ...(options.encrypted !== undefined ? { encrypted: options.encrypted } : {}), ...(options.backup !== undefined ? { backup: options.backup } : {}) })
+  const source = await backupFile({ titles: ['from the backup'], ...(options.encrypted !== undefined ? { encrypted: options.encrypted } : {}) })
+  const id = await uploaded(made.rig, source.file)
+  const body = source.key === null ? { upload: id } : { upload: id, code: encodeRecoveryCode(source.key) }
+  expect((await made.rig.bearer('POST', '/restore', body)).status).toBe(202)
+  expect(await settled(made.rig)).toMatchObject({ state: 'done' })
+  return { ...made, sourceKey: source.key }
+}
+
+test('GET /restore/status says whether a kept store is here, and when it was replaced', async () => {
+  const plain = box({ titles: ['mine'] })
+  expect(await statusOf(plain.rig)).toMatchObject({ state: 'idle', kept: null })
+  const { rig } = await restoredBox()
+  const status = (await statusOf(rig)) as Status & { kept: { replacedAt: number } | null }
+  expect(Math.abs((status.kept?.replacedAt ?? 0) - Date.now())).toBeLessThan(60_000)
+  // The path is the daemon's business: the page needs the date only.
+  expect(Object.keys(status.kept ?? {})).toEqual(['replacedAt'])
+})
+
+test('POST /restore/undo switches back inside the daemon: the session survives and the stores change places', async () => {
+  const { rig, dataDir, keyStore, key, sourceKey } = await restoredBox()
+  const cookie = await rig.login()
+  expect(await titlesOver(rig, { cookie })).toContain('from the backup')
+  const started = await rig.page('POST', '/restore/undo', { cookie })
+  expect(started.status).toBe(202)
+  const status = await settled(rig)
+  expect(status).toMatchObject({ state: 'done', error: null })
+  expect(status.lines.join('\n')).toContain('switched back')
+  const after = await titlesOver(rig, { cookie })
+  expect(after).toContain('mine')
+  expect(after).not.toContain('from the backup')
+  expect(keyStore.values.get(DB_KEY_REF)).toBe(key!)
+  expect(keyStore.values.get(DB_KEY_REPLACED_REF)).toBe(sourceKey!)
+  expect(existsSync(maintenancePath(join(dataDir, DB_FILE)))).toBe(false)
+  expect(existsSync(replacedPath(join(dataDir, DB_FILE)))).toBe(true)
+  expect((await rig.bearer('POST', '/spool/nudge')).status).toBe(202)
+  const everything = [...rig.logs, JSON.stringify(status)].join('\n')
+  for (const secret of [key!, sourceKey!]) expect(everything).not.toContain(secret)
+
+  // And back again, with the token this time.
+  expect((await rig.bearer('POST', '/restore/undo')).status).toBe(202)
+  expect(await settled(rig)).toMatchObject({ state: 'done' })
+  expect(await titlesOver(rig)).toContain('from the backup')
+})
+
+test('POST /restore/undo with nothing kept is refused, and the store is untouched', async () => {
+  const { rig, keyStore, key } = box({ titles: ['mine'] })
+  const refused = await rig.bearer('POST', '/restore/undo')
+  expect(refused.status).toBe(400)
+  expect(((await refused.json()) as { error: string }).error).toContain('nothing to switch back to')
+  expect(await statusOf(rig)).toMatchObject({ state: 'idle' })
+  expect(await titlesOver(rig)).toContain('mine')
+  expect(keyStore.values.get(DB_KEY_REF)).toBe(key!)
+  expect((await rig.bearer('GET', '/restore/undo')).status).toBe(405)
+  expect((await fetch(rig.url('/restore/undo'), { method: 'POST' })).status).toBe(401)
+})
+
+test('POST /restore/undo is refused while a backup or restore runs, and nothing else runs while it does', async () => {
+  let release: () => void = () => {}
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let sleeps = 0
+  const { rig, dataDir } = await restoredBox({ encrypted: false, backup: { sleep: () => (sleeps += 1, waiting), lockAttempts: 2 } })
+  const source = await backupFile({ encrypted: false })
+  // Another process (an agent's MCP server) still has the store open.
+  const holder = openPlain(join(dataDir, DB_FILE))
+  holder.query('SELECT count(*) FROM observations').get()
+  try {
+    expect((await rig.bearer('POST', '/restore/undo')).status).toBe(202)
+    for (let tries = 0; sleeps === 0 && tries < 400; tries += 1) await Bun.sleep(5)
+    expect(await statusOf(rig)).toMatchObject({ state: 'running', step: 'close' })
+    expect((await rig.bearer('POST', '/restore/undo')).status).toBe(409)
+    expect((await rig.bearer('GET', '/backup')).status).toBe(409)
+    expect((await upload(rig, readFileSync(source.file))).status).toBe(409)
+    expect((await rig.bearer('GET', '/memory/observations')).status).toBe(503)
+  } finally {
+    release()
+  }
+  // The holder never let go: the switch gives up, and the daemon serves the store it had.
+  const status = await settled(rig)
+  expect(status.state).toBe('failed')
+  expect(status.error).toContain('another process is using memory.db')
+  holder.close()
+  expect(await titlesOver(rig)).toContain('from the backup')
+  expect(existsSync(maintenancePath(join(dataDir, DB_FILE)))).toBe(false)
+})

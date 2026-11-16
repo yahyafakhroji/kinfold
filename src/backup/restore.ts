@@ -20,7 +20,7 @@
 // old store; from then on it can only be finished. settle() decides which
 // from what is on disk, for a failure inside the run and for resume alike.
 
-import { existsSync, mkdirSync, renameSync, rmSync, statfsSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, rmSync, statfsSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeFileAtomic } from '../fs/atomic'
 import { readInstallRecord, writeInstallRecord } from '../install/setup/record'
@@ -42,7 +42,7 @@ export const LOCK_RETRY_MS = 1_000
 
 /** Rows in any of these mean the store holds memory worth keeping. */
 const MEMORY_TABLES = ['sessions', 'events', 'prompts', 'observations', 'summaries'] as const
-const SIDE_FILES = ['-wal', '-shm', '-journal'] as const
+export const SIDE_FILES = ['-wal', '-shm', '-journal'] as const
 
 export const FAULT_POINTS = ['after-journal', 'after-keys', 'after-move-aside', 'after-move-in', 'after-key-swap'] as const
 export type FaultPoint = (typeof FAULT_POINTS)[number]
@@ -76,6 +76,15 @@ export function replacedPath(dbPath: string): string {
 /** The old store between the two renames; gone again once the restore is finished or undone. */
 export function asidePath(dbPath: string): string {
   return `${dbPath}.kinfold-restore-aside`
+}
+
+/** Stamps a store with the moment it was put aside, which is what "replaced on" means to the person. */
+export function stampReplaced(path: string, at: number): void {
+  try {
+    utimesSync(path, at / 1000, at / 1000)
+  } catch {
+    // The date is a courtesy; the store is kept either way.
+  }
 }
 
 export interface Staged {
@@ -130,7 +139,8 @@ function openAt(path: string, key: string | null): Database {
   return key === null ? openPlain(path, { create: false }) : openEncrypted(path, key, { create: false })
 }
 
-function opens(path: string, key: string | null): boolean {
+/** Whether the store at `path` opens with `key` (null for plaintext). */
+export function opens(path: string, key: string | null): boolean {
   try {
     const db = openAt(path, key)
     try {
@@ -276,7 +286,7 @@ export function checkRestore(input: Pick<RestoreInput, 'dataDir' | 'staged' | 'k
 }
 
 /** Writes the key and reads it back, so a store that silently drops a write stops the run before any file moves. */
-function storeKey(store: KeyStore, ref: string, key: string): void {
+export function storeKey(store: KeyStore, ref: string, key: string): void {
   store.set(ref, key)
   if (store.get(ref) !== key) throw new BackupError('key-store', `${store.place} entry ${ref} did not read back`)
 }
@@ -289,7 +299,7 @@ class Locked extends Error {}
  * is reading, so the rename moves a whole store. Retries while a reader that
  * opened before the marker still holds it.
  */
-async function takeExclusive(plan: Plan, input: RestoreInput): Promise<void> {
+export async function takeExclusive(plan: Pick<Plan, 'dbPath' | 'oldKey'>, input: Pick<RestoreInput, 'lockAttempts' | 'log' | 'sleep'>, retry = 'restore again'): Promise<void> {
   const attempts = input.lockAttempts ?? LOCK_ATTEMPTS
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -305,7 +315,7 @@ async function takeExclusive(plan: Plan, input: RestoreInput): Promise<void> {
     } catch (error: unknown) {
       const locked = error instanceof Locked || (error instanceof SqliteError && /^SQLITE_(BUSY|LOCKED)/.test(error.code))
       if (!locked) throw new BackupError('state', `the store that is here could not be closed (${error instanceof Error ? error.name : 'error'})`)
-      if (attempt >= attempts) throw new BackupError('busy', 'another process is using memory.db (an agent session keeps it open through its MCP server). Close those sessions, then restore again. Nothing was changed')
+      if (attempt >= attempts) throw new BackupError('busy', `another process is using memory.db (an agent session keeps it open through its MCP server). Close those sessions, then ${retry}. Nothing was changed`)
       if (attempt === 1) input.log(`waiting up to ${Math.round((attempts * LOCK_RETRY_MS) / 1000)} s for agent sessions to let go of memory.db`)
       await input.sleep(LOCK_RETRY_MS)
     }
@@ -360,8 +370,12 @@ function finish(dataDir: string, keyStore: KeyStore | null, journal: RestoreJour
   }
   afterKeys?.()
   if (existsSync(paths.aside)) {
-    if (journal.keepPrevious) renameSync(paths.aside, paths.replaced)
-    else removeStore(paths.aside)
+    if (journal.keepPrevious) {
+      stampReplaced(paths.aside, Date.now())
+      renameSync(paths.aside, paths.replaced)
+    } else {
+      removeStore(paths.aside)
+    }
   }
   rmSync(stagingDir(dataDir), { recursive: true, force: true })
   applySettings(dataDir, journal.settings, log)
@@ -421,9 +435,7 @@ function outcomeLines(input: RestoreInput, plan: Plan): string[] {
   if (plan.keepPrevious) {
     const keyNote = plan.oldKey === null ? '' : `, and its key is in ${input.keyStore?.place ?? 'the key store'} as ${DB_KEY_REPLACED_REF}`
     lines.push(`the store that was here is kept as ${replacedPath(plan.dbPath)}${keyNote}`)
-    lines.push(plan.oldKey === null
-      ? 'to switch back: stop Kinfold, then move that file over memory.db'
-      : "to switch back: stop Kinfold, move that file over memory.db, then run kinfold key recover with that store's recovery code")
+    lines.push('to switch back to it: kinfold restore --undo')
   } else if (plan.previous !== 'none') {
     lines.push('the store that was here held no memory and was removed')
   }

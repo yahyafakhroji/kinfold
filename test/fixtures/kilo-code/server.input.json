@@ -1,0 +1,15 @@
+{
+  "directory": "/Users/me/project",
+  "worktree": "/Users/me/project",
+  "project": {
+    "id": "global",
+    "worktree": "/Users/me/project",
+    "vcs": "git",
+    "time": {
+      "created": 1794757736452,
+      "updated": 1794785859640
+    },
+    "sandboxes": []
+  },
+  "serverUrl": "http://localhost:4096/"
+}

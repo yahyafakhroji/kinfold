@@ -34,11 +34,27 @@ export interface PluginFileSpec {
   /** How messages name the agent; defaults to the id. */
   label?: string
   /**
+   * Which of Kinfold's plugins the file loads; OpenCode's when absent. Kilo
+   * Code has its own: it runs OpenCode's 1.x plugin contract and rejects a
+   * 2.x plugin.
+   */
+  plugin?: PluginName
+  /**
    * The whole file, for an agent whose plugin is a file of its own rather
    * than OpenCode's (Amp). Ours by the first-line marker; anything else
    * carrying it is stale.
    */
   template?: (env: InstallEnv) => string
+}
+
+export type PluginName = 'opencode' | 'kilo'
+
+/** The entry file of each plugin, under src/plugins in a checkout. */
+const PLUGIN_ENTRY_FILES: Readonly<Record<PluginName, string>> = { opencode: 'opencode.ts', kilo: 'kilo.ts' }
+
+/** Where a checkout keeps a plugin's entry file. */
+export function pluginEntryPath(projectRoot: string, plugin: PluginName = 'opencode'): string {
+  return join(projectRoot, 'src', 'plugins', PLUGIN_ENTRY_FILES[plugin])
 }
 
 export const OPENCODE_HOST_ID: AgentId = 'opencode'
@@ -49,7 +65,7 @@ export const HOST_CONSTANT = 'KINFOLD_HOST'
 const REEXPORT_PATTERN = /export\s*\{\s*default\s*\}\s*from\s*("(?:[^"\\]|\\.)*")/
 // The current form loads the plugin with a dynamic import.
 const IMPORT_PATTERN = /await\s+import\(\s*("(?:[^"\\]|\\.)*")\s*\)/
-const PLUGIN_SUFFIX = '/src/plugins/opencode.ts'
+const PLUGIN_SUFFIXES = Object.values(PLUGIN_ENTRY_FILES).map((file) => `/src/plugins/${file}`)
 
 export type ShimState = 'yes' | 'no' | 'stale' | 'foreign'
 
@@ -82,8 +98,8 @@ export const DATA_DIR_CONSTANT = 'KINFOLD_DATA_DIR'
  * own bundle under a data-folder constant. JSON.stringify keeps a folder with
  * quotes, backslashes or spaces one valid string.
  */
-export function pluginFileContent(mode: InstallMode, dataDir: string, bundle: string, host: AgentId = OPENCODE_HOST_ID, label?: string): string {
-  if (mode.kind === 'checkout') return shimContent(join(mode.projectRoot, 'src', 'plugins', 'opencode.ts'), dataDir, host, label)
+export function pluginFileContent(mode: InstallMode, dataDir: string, bundle: string, host: AgentId = OPENCODE_HOST_ID, label?: string, plugin: PluginName = 'opencode'): string {
+  if (mode.kind === 'checkout') return shimContent(pluginEntryPath(mode.projectRoot, plugin), dataDir, host, label)
   return [
     `// ${SHIM_MARKER}: written by \`kinfold install\`, removed by \`kinfold uninstall\`.`,
     `const ${DATA_DIR_CONSTANT} = ${JSON.stringify(dataDir)};`,
@@ -107,7 +123,7 @@ function pluginPathIn(literal: string | undefined): string | null {
   if (literal === undefined) return null
   try {
     const path: unknown = JSON.parse(literal)
-    return typeof path === 'string' && path.replaceAll('\\', '/').endsWith(PLUGIN_SUFFIX) ? path : null
+    return typeof path === 'string' && PLUGIN_SUFFIXES.some((suffix) => path.replaceAll('\\', '/').endsWith(suffix)) ? path : null
   } catch {
     return null
   }
@@ -145,7 +161,8 @@ export function isOwnShim(text: string | null): boolean {
 }
 
 function shimExpectation(env: InstallEnv, spec: PluginFileSpec): { pluginEntry: string; dataDir: string; host: AgentId; label?: string } {
-  return { pluginEntry: installPaths(env).pluginEntry, dataDir: env.dataDir, host: spec.host, ...(spec.label !== undefined ? { label: spec.label } : {}) }
+  const pluginEntry = spec.plugin === undefined || spec.plugin === 'opencode' ? installPaths(env).pluginEntry : pluginEntryPath(env.projectRoot, spec.plugin)
+  return { pluginEntry, dataDir: env.dataDir, host: spec.host, ...(spec.label !== undefined ? { label: spec.label } : {}) }
 }
 
 const fileOf = (env: InstallEnv, spec: PluginFileSpec): string => join(spec.dir(env), spec.fileName)
@@ -198,14 +215,21 @@ export async function pluginFileActions(env: InstallEnv, spec: PluginFileSpec, a
   const before = readTextOrNull(path)
   const state = inspectShim(before, shimExpectation(env, spec))
   if (state === 'foreign') throw new Error(`${path} exists and is not a Kinfold plugin file; move it away first`)
-  const bundle = env.mode.kind === 'program' ? (assets === null ? null : await assets.opencodePlugin()) : ''
+  const bundle = env.mode.kind === 'program' ? await bundleOf(assets, spec.plugin ?? 'opencode') : ''
   if (bundle === null) throw new Error(`this build carries no ${label} plugin; reinstall from a release build`)
-  const content = pluginFileContent(env.mode, env.dataDir, bundle, spec.host, spec.label)
+  const content = pluginFileContent(env.mode, env.dataDir, bundle, spec.host, spec.label, spec.plugin)
   if (state === 'yes' && before === content) {
     env.out(`${spec.host}: plugin already in ${path}`)
     return []
   }
   return writeActions(env, spec, before, content, state)
+}
+
+/** The bundle a program carries for a plugin; null when the build has none. */
+async function bundleOf(assets: EmbeddedAssets | null, plugin: PluginName): Promise<string | null> {
+  if (assets === null) return null
+  const read = plugin === 'kilo' ? assets.kiloPlugin : assets.opencodePlugin
+  return read === undefined ? null : read()
 }
 
 /** Our plugin file out; a file by our name that is not ours is named and left alone. */

@@ -75,7 +75,7 @@ test("OpenCode's plugin file is byte-identical to before", () => {
 
 posixOnly('POSIX paths')('install, re-run and uninstall meet the plugin-file contract, for both agents', async () => {
   const w = createWorld()
-  const assets = { opencodePlugin: async () => BUNDLE } as never
+  const assets = { opencodePlugin: async () => BUNDLE, kiloPlugin: async () => BUNDLE } as never
   const program = { ...w.env, mode: PROGRAM }
   for (const spec of [KILO_PLUGIN_SPEC, OPENCODE_PLUGIN_SPEC]) {
     const path = join(spec.dir(program), spec.fileName)
@@ -100,4 +100,59 @@ posixOnly('POSIX paths')('install, re-run and uninstall meet the plugin-file con
     rmSync(path)
   }
   await w.cleanup()
+})
+
+// --- Kilo Code loads its own plugin: Kilo CLI rejects the OpenCode 2.x one ---
+
+const KILO_BUNDLE = '// @bun\nvar plugin_default = { id: "kinfold", server() {} };\nexport { plugin_default as default };\n'
+
+test("Kilo's checkout shim loads Kilo's plugin, and OpenCode's shim still loads OpenCode's", async () => {
+  const w = createWorld()
+  try {
+    const written = readFileSync(await writeKiloShim(w), 'utf8')
+    expect(written).toContain(`await import(${JSON.stringify(join(w.projectRoot, 'src', 'plugins', 'kilo.ts'))})`)
+    expect(written).not.toContain('opencode.ts')
+    const [, opencode] = await pluginFileActions(w.env, OPENCODE_PLUGIN_SPEC)
+    expect(opencode?.kind === 'write' && opencode.content).toContain(JSON.stringify(join(w.projectRoot, 'src', 'plugins', 'opencode.ts')))
+  } finally {
+    await w.cleanup()
+  }
+})
+
+test('a Kilo shim from an older Kinfold, which loaded the plugin Kilo rejects, is stale and is replaced', async () => {
+  const w = createWorld()
+  try {
+    const path = join(KILO_PLUGIN_SPEC.dir(w.env), KILO_PLUGIN_SPEC.fileName)
+    mkdirSync(KILO_PLUGIN_SPEC.dir(w.env), { recursive: true })
+    writeFileSync(path, shimContent(join(w.projectRoot, 'src', 'plugins', 'opencode.ts'), w.env.dataDir, 'kilo-code', 'Kilo Code'))
+    expect(pluginFileState(w.env, KILO_PLUGIN_SPEC)).toBe('stale')
+    const actions = await pluginFileActions(w.env, KILO_PLUGIN_SPEC)
+    const write = actions.find((action) => action.kind === 'write')
+    expect(write?.kind === 'write' && write.content).toContain('kilo.ts')
+    // Uninstall still knows the old file as ours.
+    expect(pluginFileUninstallActions(w.env, KILO_PLUGIN_SPEC).map((action) => action.kind)).toEqual(['remove'])
+  } finally {
+    await w.cleanup()
+  }
+})
+
+posixOnly('POSIX paths')("a program writes each agent its own plugin's bundle, and replaces a Kilo file that carries OpenCode's", async () => {
+  const w = createWorld()
+  try {
+    const program = { ...w.env, mode: PROGRAM }
+    const assets = { opencodePlugin: async () => BUNDLE, kiloPlugin: async () => KILO_BUNDLE } as never
+    const path = join(KILO_PLUGIN_SPEC.dir(program), KILO_PLUGIN_SPEC.fileName)
+    mkdirSync(KILO_PLUGIN_SPEC.dir(program), { recursive: true })
+    // What v0.4.0 wrote for Kilo: OpenCode's bundle under Kilo's host constant.
+    writeFileSync(path, pluginFileContent(PROGRAM, program.dataDir, BUNDLE, 'kilo-code'))
+    const actions = await pluginFileActions(program, KILO_PLUGIN_SPEC, assets)
+    const write = actions.find((action) => action.kind === 'write')
+    expect(write?.kind === 'write' && write.content).toBe(pluginFileContent(PROGRAM, program.dataDir, KILO_BUNDLE, 'kilo-code'))
+    const opencode = (await pluginFileActions(program, OPENCODE_PLUGIN_SPEC, assets)).find((action) => action.kind === 'write')
+    expect(opencode?.kind === 'write' && opencode.content).toBe(pluginFileContent(PROGRAM, program.dataDir, BUNDLE))
+    await expect(pluginFileActions(program, KILO_PLUGIN_SPEC, { opencodePlugin: async () => BUNDLE } as never)).rejects.toThrow('this build carries no Kilo Code plugin')
+    await expect(pluginFileActions(program, KILO_PLUGIN_SPEC, null)).rejects.toThrow('this build carries no Kilo Code plugin')
+  } finally {
+    await w.cleanup()
+  }
 })

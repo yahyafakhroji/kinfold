@@ -84,7 +84,7 @@ What Kinfold wires for each agent on macOS and Linux. **Observer** is `yes` when
 | Qwen Code | yes | start, prompt | yes | no | docs | same |
 | Factory Droid | yes | start, prompt | yes | no | docs | search only <sup>1</sup> |
 | Devin <sup>2</sup> | yes | start, prompt | yes | no | docs | search only <sup>1</sup> |
-| Kilo Code <sup>3</sup> | yes | no | yes | no | docs | same <sup>4</sup> |
+| Kilo Code <sup>3</sup> | yes | start, prompt | yes | no | live | same <sup>4</sup> |
 | Cline <sup>5</sup> | yes | prompt | yes | no | docs | search only <sup>6</sup> |
 | GitHub Copilot | yes | start | yes | no | docs | same |
 | Antigravity <sup>7</sup> | yes | start | yes | no | docs | search only <sup>1</sup> |
@@ -128,7 +128,9 @@ What Kinfold wires for each agent on macOS and Linux. **Observer** is `yes` when
 | Agents | How |
 |---|---|
 | Claude Code, Codex, Gemini CLI, Qwen Code, Factory Droid, Junie, Auggie | A message from the hook, on session start and on each prompt. Codex and Droid style it as a warning. |
-| OpenCode | A toast. Install adds a small folder, `kinfold-recall`, beside the plugin in `~/.config/opencode/plugins/`. |
+| OpenCode | Toasts: the list when a session starts, then a line for each prompt. Install adds a small folder, `kinfold-recall`, beside the plugin in `~/.config/opencode/plugins/`. |
+| Kilo Code | The same toasts. Install writes `~/.config/kilo/kinfold-recall/tui.js` and adds its path to `plugin` in `~/.config/kilo/tui.json`, after a backup. Uninstall takes out only that entry. |
+| GitHub Copilot CLI | An info row, through Copilot's progress line. At session start it is one line: the project, how many memories it holds, and how many are in this session's context. Built from Copilot's source, not yet checked on a live run. |
 | Amp | A notification from the plugin. |
 | Every other agent | `kinfold watch` and the dashboard. |
 
@@ -140,7 +142,7 @@ What Kinfold wires for each agent on macOS and Linux. **Observer** is `yes` when
 
 **What it costs.** The Metrics page shows, per agent, the tokens Kinfold added to context per session and per prompt, the tokens the observer spent where its provider reports them, and embedding calls. These numbers start on the day your store was upgraded, and the page shows that date.
 
-**The impact test (opt-in).** `kinfold install --holdout`, or the switch on the Data page, turns on a test that measures what memory changes. About 1 prompt in 10 on Claude Code goes without recalled memory, and the line says `kinfold · recall held out for this prompt (impact test)`. Kinfold then reads that turn's token counts from Claude Code's transcript, and nothing else from it. The Metrics page sets held-out turns beside normal turns of the same projects: median tokens, tool calls and time per turn, with sample sizes. Below 30 turns in either group it says "not enough turns yet". Other agents keep full recall. `kinfold status` says when the test is on.
+**The impact test (opt-in).** `kinfold install` asks about it when you pick Claude Code, and the answer is no unless you saved a yes before. `--holdout`, `--no-holdout` or the switch on the Data page turn it on or off. The test measures what memory changes: about 1 prompt in 10 on Claude Code goes without recalled memory, and the line says `kinfold · recall held out for this prompt (impact test)`. Kinfold then reads that turn's token counts from Claude Code's transcript, and nothing else from it. The Metrics page sets held-out turns beside normal turns of the same projects: median tokens, tool calls and time per turn, with sample sizes. Below 30 turns in either group it says "not enough turns yet". Other agents keep full recall. `kinfold status` says when the test is on.
 
 ## Choosing the observer model
 
@@ -204,12 +206,13 @@ kinfold restore ~/kinfold.kfb
 
 Restore asks for the recovery code and checks that it opens the backup before it changes anything. A wrong code, a damaged file or a backup from a newer Kinfold leaves the current memory as it was. An older backup is migrated forward. The daemon keeps running: it closes the store, swaps in the backup and opens it again.
 
-- **The store that was there.** If it held no memory, as on a fresh install, it is removed. If it held memory, it is kept as `memory.db.kinfold-replaced` with its key under `db-key-replaced`, and restore prints how to switch back. Restore replaces the store. It does not merge two memories.
+- **The store that was there.** If it held no memory, as on a fresh install, it is removed. If it held memory, it is kept as `memory.db.kinfold-replaced` with its key under `db-key-replaced`, and `kinfold status` mentions it. Restore replaces the store. It does not merge two memories.
 - **What a backup leaves out.** The OpenRouter key, which you enter again. The key behind redaction markers, so markers written after a restore don't match older markers for the same secret. Nothing old is lost. Records about the machine, such as the install channel and logs, also stay behind.
 - **An unencrypted store** backs up and restores without a code. The file is then readable by anyone who has it.
-- **If a restore is cut short,** `kinfold key resume` finishes it or puts the old store back.
+- **Switching back.** `kinfold restore --undo` puts the kept store back in use, with no recovery code, and keeps the restored one in its place, so you can switch again. It refuses when nothing is kept, when the kept store's key doesn't open it, or while a backup or restore is running.
+- **If a restore or a switch back is cut short,** `kinfold key resume` finishes it or puts things back as they were.
 
-The dashboard's Backup page downloads the same file and restores from one: choose the file, check its date and version, type the recovery code and confirm. Once you have made a backup, `kinfold status` shows when.
+The dashboard's Backup page downloads the same file and restores from one: choose the file, check its date and version, type the recovery code and confirm. When a store is kept, the page offers to switch back to it, with the date it was replaced. Once you have made a backup, `kinfold status` shows when.
 
 ## WSL (preview)
 

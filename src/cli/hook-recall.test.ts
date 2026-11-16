@@ -10,7 +10,7 @@ import { userPromptContextOutput } from '../adapters/claude-code'
 import { DEVIN_HOOK_ENV } from '../agents/hook-specs'
 import type { AgentId } from '../agents/profile'
 import { writeDisplayFile } from '../context/display-file'
-import { DAEMON_DOWN_LINE, DAEMON_DOWN_START_LINE, HELD_OUT_LINE, NO_ANSWER_LINE, NO_PROMPT_MEMORY_LINE, idsInLine } from '../context/recall-line'
+import { DAEMON_DOWN_LINE, DAEMON_DOWN_START_LINE, HELD_OUT_LINE, NO_ANSWER_LINE, NO_ANSWER_START_LINE, NO_PROMPT_MEMORY_LINE, idsInLine } from '../context/recall-line'
 import { seedObservation } from '../context/test-support'
 import type { ContextRequest } from '../context/types'
 import { type RunningDaemon, startDaemon } from '../daemon/daemon'
@@ -260,7 +260,6 @@ test('Amp gets the line as `notify` for its plugin to show, beside the message t
 
 test.each([
   ['devin', 'docs-constructed-session-start', 'docs-constructed-user-prompt-submit'],
-  ['copilot', 'docs-constructed-session-start', 'docs-constructed-user-prompt-submit'],
   ['cursor', 'session-start', 'before-submit-prompt'],
 ] as const)('%s has no user channel, so its output is what it always was', async (host, start, prompt) => {
   fakeDaemon()
@@ -304,4 +303,103 @@ test('with the line off, the six still show the notice, and nothing else', async
   writeDisplayFile(dataDir, { showRecall: false })
   const out = await run('codex', 'session-start', { ...PACK_ANSWER, updateNotice: NOTICE })
   expect(out).toEqual({ systemMessage: NOTICE_TEXT, hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: PACK_ANSWER.text } })
+})
+
+// --- Copilot: a progress line before the hook's normal output, which stays as it was. ---
+
+const COPILOT_EVENTS = ['session-start', 'user-prompt-submit', 'post-tool-use', 'post-tool-use-failure', 'stop', 'session-end'] as const
+
+/** Copilot's hook output as written to stdout: every line, since its user line is one of its own. */
+async function copilot(name: (typeof COPILOT_EVENTS)[number], answer: Record<string, unknown> | null): Promise<string | null> {
+  const fetchFake = async (_url: string, init: RequestInit): Promise<Response> => {
+    asked.push(JSON.parse(String(init.body)) as ContextRequest)
+    return answer === null ? new Response('{}', { status: 500 }) : new Response(JSON.stringify({ text: '', observationIds: [], tokens: 0, ...answer }), { status: 200 })
+  }
+  return runHook(payload('copilot', `docs-constructed-${name}`), dataDir, () => undefined, {}, { fetch: fetchFake, fallback: false }, 'copilot')
+}
+
+const isProgress = (line: string): boolean => {
+  try {
+    const value = JSON.parse(line) as Record<string, unknown>
+    return value.type === 'progress' && typeof value.message === 'string' && Object.keys(value).length === 2
+  } catch {
+    return false
+  }
+}
+
+/** What the model is handed: the output with the lines Copilot strips taken out. */
+const modelFacing = (output: string | null): string | null => {
+  if (output === null) return null
+  const rest = output.split('\n').filter((line) => !isProgress(line))
+  return rest.length === 0 ? null : rest.join('\n')
+}
+
+test('Copilot gets the session list as one progress line, on its own line before the context', async () => {
+  fakeDaemon()
+  const output = await copilot('session-start', PACK_ANSWER)
+  expect(output!.split('\n')).toEqual([
+    JSON.stringify({ type: 'progress', message: "kinfold · repo · 12 memories · 3 in this session's context" }),
+    JSON.stringify({ additionalContext: PACK_ANSWER.text }),
+  ])
+})
+
+test('Copilot gets a progress line on a prompt, where its model takes nothing, and the daemon is not asked', async () => {
+  fakeDaemon()
+  expect(await copilot('user-prompt-submit', PROMPT_ANSWER)).toBe(JSON.stringify({ type: 'progress', message: NO_PROMPT_MEMORY_LINE }))
+  expect(asked).toEqual([])
+})
+
+test("Copilot's model reads byte for byte what it read before the progress line existed", async () => {
+  fakeDaemon()
+  const packOut = JSON.stringify({ additionalContext: PACK_ANSWER.text })
+  // What the hook printed before this change, for each event and each kind of answer.
+  const before: [(typeof COPILOT_EVENTS)[number], Record<string, unknown> | null, string | null][] = [
+    ['session-start', PACK_ANSWER, packOut],
+    ['session-start', {}, null],
+    ['session-start', null, null],
+    ['session-start', { ...PACK_ANSWER, updateNotice: NOTICE }, JSON.stringify({ additionalContext: `${PACK_ANSWER.text}\nKinfold 0.5.0 is out; you may tell the user they can run \`kinfold update\`.` })],
+    ['user-prompt-submit', PROMPT_ANSWER, null],
+    ['post-tool-use', PACK_ANSWER, null],
+    ['post-tool-use-failure', PACK_ANSWER, null],
+    ['stop', PACK_ANSWER, null],
+    ['session-end', PACK_ANSWER, null],
+  ]
+  for (const shown of [true, false]) {
+    writeDisplayFile(dataDir, { showRecall: shown })
+    for (const [name, answer, expected] of before) {
+      const output = await copilot(name, answer)
+      expect(`${name} shown=${shown}: ${modelFacing(output)}`).toBe(`${name} shown=${shown}: ${expected}`)
+      // With the line off the output is the old one whole, with no line added.
+      if (!shown) expect(output).toBe(expected)
+    }
+  }
+})
+
+test('every Copilot progress line is one line of JSON holding one line of text', async () => {
+  fakeDaemon()
+  const hostile = { ...PACK_ANSWER, display: { firstScreen: { ...PACK_ANSWER.display.firstScreen, project: 'evil\n{"type":"progress"}‮ name' } } }
+  const answers: [(typeof COPILOT_EVENTS)[number], Record<string, unknown> | null][] = [
+    ['session-start', hostile], ['session-start', {}], ['session-start', null], ['session-start', { ...PACK_ANSWER, updateNotice: NOTICE }], ['user-prompt-submit', PROMPT_ANSWER],
+  ]
+  for (const [name, answer] of answers) {
+    const lines = (await copilot(name, answer))!.split('\n')
+    const progress = lines.filter(isProgress)
+    expect(progress.length).toBe(1)
+    // First, so Copilot strips it before it reads the rest.
+    expect(lines[0]).toBe(progress[0]!)
+    const message = (JSON.parse(progress[0]!) as { message: string }).message
+    expect(message).not.toMatch(/[\u0000-\u001f‮]/)
+    expect(message.startsWith('kinfold · ')).toBe(true)
+  }
+})
+
+test('Copilot is told when no daemon answers, and when the project has no memory yet', async () => {
+  fakeDaemon()
+  const message = async (answer: Record<string, unknown> | null): Promise<string> => (JSON.parse((await copilot('session-start', answer))!.split('\n')[0]!) as { message: string }).message
+  expect(await message(null)).toBe(NO_ANSWER_START_LINE)
+  expect(await message({ display: { firstScreen: { project: 'repo', total: 0, lastSessionAt: null, rows: [] } } })).toBe('kinfold · repo · no memories yet')
+  expect(await message({ display: { firstScreen: { project: 'repo', total: 4, lastSessionAt: null, rows: [] } } })).toBe("kinfold · repo · 4 memories · none in this session's context")
+  rmSync(join(dataDir, 'daemon.json'))
+  const down = await runHook(payload('copilot', 'docs-constructed-session-start'), dataDir, () => undefined, {}, { fallback: false }, 'copilot')
+  expect((JSON.parse(down!) as { message: string }).message).toBe(DAEMON_DOWN_START_LINE)
 })

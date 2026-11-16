@@ -108,6 +108,7 @@ export const USAGE = [
   '             shows what it would delete and asks before deleting; --yes skips the question, and is needed where there is no terminal',
   '  backup     <file>   write the memory to one file, still encrypted; capture keeps running',
   '  restore    <file>   replace the memory with a backup; asks for its recovery code (typed, or on stdin)',
+  '  restore    --undo   switch back to the memory the last restore replaced and kept; needs no recovery code',
   '  encrypt    convert memory.db to an encrypted file; shows a recovery code to keep',
   '  decrypt    store memory.db in plaintext again and delete its key',
   '  rekey      give memory.db a new key and a new recovery code',
@@ -239,15 +240,19 @@ function purgeArgs(flags: readonly DataFlag[]): Parsed<DataArgs> {
 // Asks the daemon for a one-time login code and opens (or prints) the login
 // link. Its only flag is --print.
 
-export interface BackupArgs {
-  command: 'backup' | 'restore'
-  file: string
-}
+export type BackupArgs = { command: 'backup' | 'restore'; file: string } | { command: 'restore'; undo: true }
 
-/** Null when argv is not `backup` or `restore`, so every other command parses exactly as before. Each takes one file and no flags. */
+/**
+ * Null when argv is not `backup` or `restore`, so every other command parses
+ * exactly as before. Each takes one file and no flags; `restore --undo` is the
+ * one other form, and takes nothing else.
+ */
 export function parseBackupArgs(argv: readonly string[]): Parsed<BackupArgs> | null {
   const [command, file, ...rest] = argv
   if (command !== 'backup' && command !== 'restore') return null
+  if (command === 'restore' && argv.includes('--undo')) {
+    return argv.length === 2 ? { ok: true, value: { command, undo: true } } : { ok: false, error: `restore --undo takes no file and no other flag\n${USAGE}` }
+  }
   if (file === undefined || file === '' || file.startsWith('--') || rest.length > 0) return { ok: false, error: `${command} takes one file\n${USAGE}` }
   return { ok: true, value: { command, file } }
 }

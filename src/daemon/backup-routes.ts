@@ -4,7 +4,9 @@
 //   GET  /backup          the backup file, as a download
 //   POST /restore/upload  a backup file, streamed to <dataDir>/restore-incoming/
 //   POST /restore         {"upload": "<id>", "code": "<recovery code>"}: restore it
-//   GET  /restore/status  how the restore is going, and how it ended
+//   POST /restore/undo    switch back to the store the last restore kept
+//   GET  /restore/status  how the restore or the switch is going, how it ended,
+//                         and whether a kept store is here
 //
 // One of them runs at a time; the others answer 409 meanwhile. The upload is
 // the only request whose body may pass 16 KB: it is written to disk a chunk
@@ -25,6 +27,7 @@ import { join } from 'node:path'
 import { type ArchiveHeader, BACKUP_FILE_EXTENSION, BackupError } from '../backup/archive'
 import { BACKUP_TMP_DIR, createBackup, privateTmpDir } from '../backup/create'
 import { type RestoreStep, type Staged, applyRestore, checkRestore, discardStaged, inspectBackup, stageSnapshot } from '../backup/restore'
+import { applyUndo, checkUndo, keptStore } from '../backup/undo'
 import type { Parsed } from '../context/types'
 import { isRecord } from '../contract/event'
 import type { KeyStore } from '../secrets/key-store'
@@ -41,6 +44,8 @@ export interface BackupRoutes {
   download(): Promise<Response>
   upload(request: Request): Promise<RouteAnswer>
   start(readBody: () => Promise<Parsed<unknown>>): Promise<RouteAnswer>
+  /** Makes the kept store and the store in use change places; takes no body. */
+  undo(): RouteAnswer
   status(): RouteAnswer
 }
 
@@ -297,5 +302,56 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
     return { status: 202, body: { started: true } }
   }
 
-  return { download, upload, start, status: () => ({ status: 200, body: status }) }
+  /** The switch back, after its checks passed: runs past the request that started it, and reports through /restore/status. */
+  async function runUndo(): Promise<void> {
+    try {
+      let lines: string[] = []
+      await deps.restart(async () => {
+        const outcome = await applyUndo({
+          dataDir: deps.dataDir,
+          keyStore: deps.keyStore(),
+          log: deps.log,
+          sleep: deps.sleep,
+          now: deps.now,
+          onStep: (step) => {
+            status = { ...status, step }
+          },
+          ...(deps.lockAttempts !== undefined ? { lockAttempts: deps.lockAttempts } : {}),
+        })
+        lines = outcome.lines
+        status = { ...status, step: 'reopen' }
+      })
+      status = { state: 'done', step: null, lines, error: null }
+      deps.log('restore undo finished')
+    } catch (error: unknown) {
+      deps.log(`restore undo failed: ${error instanceof BackupError ? error.kind : errorName(error)}`)
+      status = { state: 'failed', step: null, lines: [], error: error instanceof BackupError ? error.message : `switching back failed (${errorName(error)})` }
+    } finally {
+      busy = false
+    }
+  }
+
+  function undo(): RouteAnswer {
+    if (busy) return BUSY
+    try {
+      // Everything that can refuse runs here, while the store is still open and untouched.
+      checkUndo({ dataDir: deps.dataDir, keyStore: deps.keyStore() })
+    } catch (error: unknown) {
+      deps.log(`restore undo refused: ${error instanceof BackupError ? error.kind : errorName(error)}`)
+      return error instanceof BackupError ? { status: 400, body: { error: error.message } } : { status: 500, body: { error: `the switch back could not start (${errorName(error)})` } }
+    }
+    busy = true
+    status = { state: 'running', step: 'check', lines: [], error: null }
+    deps.log('restore undo started')
+    void runUndo()
+    return { status: 202, body: { started: true } }
+  }
+
+  /** The date only: where the kept store lies is not the page's business. */
+  const kept = (): { replacedAt: number } | null => {
+    const store = keptStore(deps.dataDir)
+    return store === null ? null : { replacedAt: store.replacedAt }
+  }
+
+  return { download, upload, start, undo, status: () => ({ status: 200, body: { ...status, kept: kept() } }) }
 }

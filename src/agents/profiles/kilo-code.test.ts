@@ -12,6 +12,7 @@ import { profileOf } from '../install-profiles'
 import { capabilityLine } from '../profile'
 import { agentWiringActions } from '../../install/install'
 import { KILO_CODE_PROFILE, KILO_MCP_FILE } from './kilo-code'
+import { shimContent } from '../families/plugin-file'
 
 let worlds: FakeWorld[] = []
 afterEach(async () => {
@@ -30,10 +31,27 @@ const apply = (actions: readonly Action[]): void => {
   }
 }
 const writes = (actions: readonly Action[]): string[] => actions.flatMap((a) => (a.kind === 'write' ? [a.path] : []))
+/** The plugin file, then the toast's file and its tui.json entry. */
+const WITH_TOAST = (w: FakeWorld): string[] => [join(w.env.homeDir, '.config/kilo/plugin/kinfold.js'), join(w.env.homeDir, '.config/kilo/kinfold-recall/tui.js'), join(w.env.homeDir, '.config/kilo/tui.json')]
+const TOAST_FILES = (w: FakeWorld): string[] => [join(w.env.homeDir, '.config/kilo/kinfold-recall/tui.js'), join(w.env.homeDir, '.config/kilo/kinfold-recall')]
 
-test('kilo-code is registered, built from the docs, and detected by its binary', () => {
+test('an install over the plugin file Kinfold 0.4 wrote, which Kilo rejects, replaces it with the one Kilo loads', async () => {
+  const w = world()
+  const path = join(w.env.homeDir, '.config/kilo/plugin/kinfold.js')
+  mkdirSync(join(w.env.homeDir, '.config/kilo/plugin'), { recursive: true })
+  writeFileSync(path, shimContent(join(w.projectRoot, 'src/plugins/opencode.ts'), w.env.dataDir, 'kilo-code', 'Kilo Code'))
+  expect(KILO_CODE_PROFILE.wiring.line(w.env)).toContain('plugin stale path')
+  apply(await KILO_CODE_PROFILE.wiring.install(w.env))
+  expect(readFileSync(path, 'utf8')).toMatch(/src[\\/]+plugins[\\/]+kilo\.ts/)
+  expect(readFileSync(path, 'utf8')).not.toMatch(/plugins[\\/]+opencode\.ts/)
+  expect(KILO_CODE_PROFILE.wiring.state(w.env)).toBe('yes')
+})
+
+test('kilo-code is registered, checked live, and detected by its binary', () => {
   expect(profileOf('kilo-code')).toBe(KILO_CODE_PROFILE)
-  expect(KILO_CODE_PROFILE.verification).toBe('docs')
+  expect(KILO_CODE_PROFILE.verification).toBe('live')
+  expect(readdirSync(join(import.meta.dir, '../../../test/fixtures/kilo-code')).length).toBeGreaterThan(0)
+  expect(KILO_CODE_PROFILE.capabilities('macos').context).toEqual({ sessionStart: true, prompt: true })
   expect(KILO_CODE_PROFILE.detection).toEqual({ binaries: ['kilo'] })
   // No observer provider runs through Kilo; a new agent falls back to OpenRouter auto.
   expect(KILO_CODE_PROFILE.capabilities('macos').observer).toBe(false)
@@ -57,9 +75,11 @@ test('the MCP entry in kilo.json meets the writer contract and names its host', 
 test('install writes the plugin under ~/.config/kilo/plugin and the MCP entry in kilo.json', async () => {
   const w = world()
   const actions = await KILO_CODE_PROFILE.wiring.install(w.env)
-  expect(writes(actions)).toEqual([join(w.env.homeDir, '.config/kilo/plugin/kinfold.js'), join(w.env.homeDir, '.config/kilo/kilo.json')])
+  expect(writes(actions)).toEqual([...WITH_TOAST(w), join(w.env.homeDir, '.config/kilo/kilo.json')])
   apply(actions)
   expect(readFileSync(join(w.env.homeDir, '.config/kilo/plugin/kinfold.js'), 'utf8')).toContain('globalThis.KINFOLD_HOST = "kilo-code";')
+  expect(readFileSync(join(w.env.homeDir, '.config/kilo/plugin/kinfold.js'), 'utf8')).toMatch(/src[\\/]+plugins[\\/]+kilo\.ts/)
+  expect(KILO_CODE_PROFILE.wiring.line(w.env)).toContain('recall toast yes')
   expect(KILO_CODE_PROFILE.wiring.state(w.env)).toBe('yes')
   expect(await KILO_CODE_PROFILE.wiring.install(w.env)).toEqual([])
   expect(KILO_CODE_PROFILE.wiring.line(w.env)).toContain('MCP yes in')
@@ -69,7 +89,7 @@ test('Kilo gets its own MCP entry even when opencode.json already has Kinfold\'s
   const w = world()
   apply(opencodeMcpInstallActions(w.env))
   const actions = await KILO_CODE_PROFILE.wiring.install(w.env)
-  expect(writes(actions)).toEqual([join(w.env.homeDir, '.config/kilo/plugin/kinfold.js'), join(w.env.homeDir, '.config/kilo/kilo.json')])
+  expect(writes(actions)).toEqual([...WITH_TOAST(w), join(w.env.homeDir, '.config/kilo/kilo.json')])
   apply(actions)
   expect(await KILO_CODE_PROFILE.wiring.install(w.env)).toEqual([])
   expect(KILO_CODE_PROFILE.wiring.line(w.env)).toContain('MCP yes in')
@@ -80,7 +100,7 @@ test('with a kilo.jsonc present, no kilo.json is created and the reason is print
   mkdirSync(join(w.env.homeDir, '.config/kilo'), { recursive: true })
   writeFileSync(join(w.env.homeDir, '.config/kilo/kilo.jsonc'), '{ // mine\n}\n')
   const actions = await KILO_CODE_PROFILE.wiring.install(w.env)
-  expect(writes(actions)).toEqual([join(w.env.homeDir, '.config/kilo/plugin/kinfold.js')])
+  expect(writes(actions)).toEqual(WITH_TOAST(w))
   expect(w.out.some((line) => line.includes('kilo.jsonc found; add the kinfold MCP entry there by hand'))).toBe(true)
   expect(KILO_CODE_PROFILE.wiring.line(w.env)).toContain('kilo.jsonc found')
 })
@@ -94,9 +114,9 @@ test('uninstall removes only the plugin file and mcp.kinfold, keeping other entr
   expect(JSON.parse(readFileSync(cfg, 'utf8')).mcp[MCP_SERVER_NAME]).toBeDefined()
   const plugin = join(w.env.homeDir, '.config/kilo/plugin/kinfold.js')
   const actions = KILO_CODE_PROFILE.wiring.uninstall(w.env)
-  expect(actions.flatMap((a) => (a.kind === 'remove' ? [a.path] : []))).toEqual([plugin])
+  expect(actions.flatMap((a) => (a.kind === 'remove' ? [a.path] : []))).toEqual([plugin, join(w.env.homeDir, '.config/kilo/tui.json'), ...TOAST_FILES(w)])
   for (const a of actions) {
-    if (a.kind === 'remove') rmSync(a.path)
+    if (a.kind === 'remove') rmSync(a.path, { recursive: true, force: true })
     if (a.kind === 'write') writeFileSync(a.path, a.content)
   }
   expect(existsSync(plugin)).toBe(false)
@@ -112,10 +132,11 @@ test('uninstall beside a kilo.jsonc creates nothing and leaves kilo.jsonc as it 
   writeFileSync(jsonc, mine)
   apply(await KILO_CODE_PROFILE.wiring.install(w.env))
   const actions = KILO_CODE_PROFILE.wiring.uninstall(w.env)
-  // Only the plugin file install wrote goes; no step writes, creates or backs up anything.
-  expect(actions.map((a) => a.kind)).toEqual(['remove'])
-  expect(actions.flatMap((a) => (a.kind === 'remove' ? [a.path] : []))).toEqual([join(dir, 'plugin/kinfold.js')])
-  for (const a of actions) if (a.kind === 'remove') rmSync(a.path)
+  // Only what install wrote goes: tui.json is Kinfold's own file here, so it goes with no backup. kilo.jsonc is not touched.
+  expect(actions.map((a) => a.kind)).toEqual(['remove', 'remove', 'remove', 'remove'])
+  expect(actions.some((a) => a.kind === 'backup' && a.from === jsonc)).toBe(false)
+  expect(actions.flatMap((a) => (a.kind === 'remove' ? [a.path] : []))).toEqual([join(dir, 'plugin/kinfold.js'), join(dir, 'tui.json'), ...TOAST_FILES(w)])
+  for (const a of actions) if (a.kind === 'remove') rmSync(a.path, { recursive: true, force: true })
   expect(readFileSync(jsonc, 'utf8')).toBe(mine)
   expect(existsSync(join(dir, 'kilo.json'))).toBe(false)
   // With no plugin file left either, a second uninstall plans nothing at all.
@@ -129,6 +150,7 @@ test('a kinfold.js in Kilo\'s plugin folder that is not ours skips Kilo\'s plugi
   mkdirSync(join(w.env.homeDir, '.config/kilo/plugin'), { recursive: true })
   writeFileSync(plugin, 'export default {}\n')
   const actions = await KILO_CODE_PROFILE.wiring.install(w.env)
+  // No plugin of ours: no toast either, since it would have nothing to show.
   expect(writes(actions)).toEqual([join(w.env.homeDir, '.config/kilo/kilo.json')])
   expect(w.out.some((line) => line.startsWith('kilo-code: plugin skipped;') && line.includes('is not a Kinfold plugin file'))).toBe(true)
   expect(readFileSync(plugin, 'utf8')).toBe('export default {}\n')

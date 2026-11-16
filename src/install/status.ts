@@ -5,6 +5,7 @@
 // not even the data dir.
 
 import { readBackupRecord } from '../backup/record'
+import { keptStore } from '../backup/undo'
 import { readDisplayFile } from '../context/display-file'
 import { HOLDOUT_HOSTS } from '../context/holdout'
 import type { EffectiveSettings } from '../daemon/settings-route'
@@ -180,6 +181,12 @@ export function backupLine(env: InstallEnv): string | null {
   return record === null ? null : `backup: last made ${new Date(record.lastBackupAt).toISOString()}`
 }
 
+/** The store a restore replaced and kept, with the command that switches back to it; null when none is kept. */
+export function keptStoreLine(env: InstallEnv): string | null {
+  const kept = keptStore(env.dataDir)
+  return kept === null ? null : `kept store: the store replaced on ${new Date(kept.replacedAt).toISOString()} is kept as ${kept.path}; kinfold restore --undo switches back to it`
+}
+
 /** Whether patch releases install themselves, the last one that did, and the last attempt that failed. Reads only. */
 export function autoUpdateLines(env: InstallEnv, running: string, blocker: string | null): string[] {
   const vars = env.envVars ?? {}
@@ -341,7 +348,7 @@ export async function status(env: InstallEnv, running: string = VERSION, profile
     ...credentials,
     ...hmacStatusLines(env),
     ...(await dataDirAccessFor(env).statusLines(env.dataDir)),
-    ...[backupLine(env)].filter((line) => line !== null),
+    ...[backupLine(env), keptStoreLine(env)].filter((line) => line !== null),
   ]
   const update = updateLine(env, running, blocker)
   const updates = [update, ...autoUpdateLines(env, running, blocker)]

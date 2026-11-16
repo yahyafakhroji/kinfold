@@ -10,6 +10,10 @@
 //   docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers
 //     (~/.copilot/mcp-config.json, mcpServers with type local, command, args,
 //     env and tools)
+// What Kinfold recalled is shown through a progress line (hook-specs.ts): a
+// stdout line {"type":"progress","message":...} at sessionStart and
+// userPromptSubmitted, which Copilot CLI takes out before the model and shows
+// as an info row. Built from Copilot's source (1.0.60), not tested live.
 // Both pages name only the repository's .claude/settings*.json, not the
 // user's ~/.claude/settings.json, so Claude Code's user hooks never fire in
 // Copilot and Copilot gets its own file. The reference gives type shapes, not

@@ -74,6 +74,7 @@ function daemon(options: { manifest?: Record<string, unknown>; start?: () => unk
     send: async (method, path, body) => {
       calls.push([method, path, body])
       if (path === '/restore') return (options.start ?? (() => ({ started: true })))()
+      if (path === '/restore/undo') return { started: true }
       if (path === '/restore/status') return statuses.length > 1 ? statuses.shift() : statuses[0]
       throw new Error(`unexpected ${method} ${path}`)
     },
@@ -178,7 +179,9 @@ test('Restore sends the upload and the code in one body, clears the field, and s
   // Cleared before the request even answers.
   expect((named(page, 'code') as FakeElement & { value?: string }).value).toBe('')
   await settle()
-  expect(recorded.calls[0]).toEqual(['POST', '/restore', { upload: UPLOAD, code: CODE }])
+  // The page's opening read of /restore/status comes first.
+  expect(recorded.calls[0]).toEqual(['GET', '/restore/status', undefined])
+  expect(recorded.calls[1]).toEqual(['POST', '/restore', { upload: UPLOAD, code: CODE }])
   expect(recorded.calls.filter(([, path]) => path === '/restore')).toHaveLength(1)
   expect(recorded.calls.filter(([, path]) => path === '/restore/status').length).toBeGreaterThanOrEqual(2)
   const shown = textOf(page)
@@ -190,7 +193,7 @@ test('Restore sends the upload and the code in one body, clears the field, and s
   // The code is in no text node, no attribute and no request but the one.
   expect(shown).not.toContain(CODE)
   for (const element of elements(page)) for (const value of element.attributes.values()) expect(value).not.toContain(CODE)
-  expect(JSON.stringify(recorded.calls.slice(1))).not.toContain(CODE)
+  expect(JSON.stringify(recorded.calls.filter(([, path]) => path !== '/restore'))).not.toContain(CODE)
   expect(recorded.calls.every(([, path]) => !path.includes(CODE) && !path.includes('?'))).toBe(true)
 })
 
@@ -226,7 +229,7 @@ test('an unencrypted backup asks for no code and says the file is readable', asy
   type(page, '', true)
   fire(named(page, 'restore'), 'click')
   await settle()
-  expect(recorded.calls[0]).toEqual(['POST', '/restore', { upload: UPLOAD }])
+  expect(recorded.calls.find(([method]) => method === 'POST')).toEqual(['POST', '/restore', { upload: UPLOAD }])
 })
 
 test('a restore that fails shows why', async () => {
@@ -254,4 +257,123 @@ test('uploadFile posts the file itself with our header and never as JSON', async
   expect(seen[0]!.init.headers).toEqual({ 'x-sam-request': '1', 'content-type': 'application/octet-stream' })
   ;(globalThis as Record<string, unknown>).fetch = async () => new Response(JSON.stringify({ error: 'this file is not a Kinfold backup' }), { status: 400 })
   await expect((await load<ApiModule>('api.js')).uploadFile('/restore/upload', file)).rejects.toThrow('not a Kinfold backup')
+})
+
+const KEPT = { replacedAt: Date.UTC(2026, 10, 15, 8, 5) }
+const IDLE = { state: 'idle', step: null, lines: [], error: null }
+
+/** The page as it opens on a machine whose last restore kept a store: the first status answer says so. */
+async function keptPage(recorded: Recorded): Promise<FakeElement> {
+  const page = await (await load<PageModule>('page-backup.js')).renderBackup({ page: 'backup', params: {} }, {}, recorded.deps)
+  await settle()
+  return page
+}
+
+test('with no kept store the page offers no switch back', async () => {
+  const recorded = daemon({ statuses: [{ ...IDLE, kept: null }] })
+  const page = await keptPage(recorded)
+  expect(named(page, 'undo-block').getAttribute('hidden')).not.toBeNull()
+  expect(textOf(page)).not.toContain('Switch back to the store')
+})
+
+test('a daemon too old to report a kept store offers no switch back', async () => {
+  const page = await keptPage(daemon({ statuses: [IDLE] }))
+  expect(named(page, 'undo-block').getAttribute('hidden')).not.toBeNull()
+})
+
+test('a kept store is offered by the date it was replaced, behind a confirmation', async () => {
+  const recorded = daemon({ statuses: [{ ...IDLE, kept: KEPT }] })
+  const page = await keptPage(recorded)
+  expect(named(page, 'undo-block').getAttribute('hidden')).toBeNull()
+  expect(textOf(page)).toContain('Switch back to the store replaced on 2026-11-15 08:05')
+  const button = named(page, 'undo')
+  expect(button.getAttribute('disabled')).not.toBeNull()
+  fire(button, 'click')
+  await settle()
+  expect(recorded.calls.some(([method]) => method === 'POST')).toBe(false)
+  const confirm = named(page, 'undo-confirm') as FakeElement & { checked?: boolean }
+  confirm.checked = true
+  fire(confirm, 'change')
+  expect(button.getAttribute('disabled')).toBeNull()
+})
+
+test('switching back posts once with no body, shows the steps, then the result as text and the new date', async () => {
+  const done = { state: 'done', step: null, lines: ['switched back to the store that was replaced on 2026-11-15', HOSTILE], error: null, kept: { replacedAt: Date.UTC(2026, 10, 16, 10, 0) } }
+  const recorded = daemon({ statuses: [{ ...IDLE, kept: KEPT }, { state: 'running', step: 'close', lines: [], error: null, kept: KEPT }, done] })
+  const waits: number[] = []
+  recorded.deps.wait = async (ms) => void waits.push(ms)
+  const seen: string[] = []
+  const page = await keptPage(recorded)
+  const inner = recorded.deps.send
+  recorded.deps.send = async (method, path, body) => {
+    const answer = await inner(method, path, body)
+    seen.push(textOf(page))
+    return answer
+  }
+  const confirm = named(page, 'undo-confirm') as FakeElement & { checked?: boolean }
+  confirm.checked = true
+  fire(confirm, 'change')
+  fire(named(page, 'undo'), 'click')
+  await settle()
+  expect(recorded.calls.filter(([method]) => method === 'POST')).toEqual([['POST', '/restore/undo', undefined]])
+  expect(waits.length).toBeGreaterThanOrEqual(1)
+  expect(seen.join('\n')).toContain('agent sessions')
+  const shown = textOf(page)
+  expect(shown).toContain('switched back to the store that was replaced on 2026-11-15')
+  expect(shown).toContain(HOSTILE)
+  // What is offered now is the store that was just put aside, and it needs a fresh confirmation.
+  expect(shown).toContain('Switch back to the store replaced on 2026-11-16 10:00')
+  expect(confirm.checked).toBe(false)
+  expect(named(page, 'undo').getAttribute('disabled')).not.toBeNull()
+})
+
+test('a switch back the daemon refuses, or one that fails, shows why and can be tried again', async () => {
+  const refused = daemon({ statuses: [{ ...IDLE, kept: KEPT }] })
+  const inner = refused.deps.send
+  refused.deps.send = async (method, path, body) => {
+    if (path === '/restore/undo') {
+      refused.calls.push([method, path, body])
+      throw new Error('a backup or restore is running; try again when it finishes')
+    }
+    return inner(method, path, body)
+  }
+  const page = await keptPage(refused)
+  const confirm = named(page, 'undo-confirm') as FakeElement & { checked?: boolean }
+  confirm.checked = true
+  fire(confirm, 'change')
+  fire(named(page, 'undo'), 'click')
+  await settle()
+  expect(textOf(page)).toContain('a backup or restore is running')
+  expect(named(page, 'undo-block').getAttribute('hidden')).toBeNull()
+
+  const failed = daemon({ statuses: [{ ...IDLE, kept: KEPT }, { state: 'failed', step: null, lines: [], error: 'another process is using memory.db', kept: KEPT }] })
+  const second = await keptPage(failed)
+  const again = named(second, 'undo-confirm') as FakeElement & { checked?: boolean }
+  again.checked = true
+  fire(again, 'change')
+  fire(named(second, 'undo'), 'click')
+  await settle()
+  expect(textOf(second)).toContain('another process is using memory.db')
+})
+
+test('a restore that kept the store it replaced makes the switch back appear', async () => {
+  const done = { state: 'done', step: null, lines: ['restored the backup made 2026-11-14'], error: null, kept: KEPT }
+  const recorded = daemon({ statuses: [{ ...IDLE, kept: null }, done] })
+  const page = await uploadedPage(recorded)
+  expect(named(page, 'undo-block').getAttribute('hidden')).not.toBeNull()
+  type(page, CODE, true)
+  fire(named(page, 'restore'), 'click')
+  await settle()
+  expect(named(page, 'undo-block').getAttribute('hidden')).toBeNull()
+  expect(textOf(page)).toContain('Switch back to the store replaced on 2026-11-15 08:05')
+})
+
+test('the page still opens when the first status read fails', async () => {
+  const recorded = daemon()
+  recorded.deps.send = async () => {
+    throw new Error('the daemon is restarting')
+  }
+  const page = await keptPage(recorded)
+  expect(named(page, 'undo-block').getAttribute('hidden')).not.toBeNull()
+  expect(named(page, 'restore').getAttribute('disabled')).not.toBeNull()
 })
