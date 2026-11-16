@@ -123,3 +123,11 @@ test('update --staged names the staged release the dashboard installs', () => {
   expect(parseArgs(['update', '--staged', '../x'])).toEqual({ ok: false, error: '--staged takes a version' })
   expect(parseArgs(['install', '--staged', '0.6.0'])).toEqual({ ok: false, error: '--staged does not apply to install' })
 })
+
+test('--central names a hub to offer after install, and --central-code gives its code', () => {
+  expect(parseArgs(['install', '--central', 'mini'])).toMatchObject({ ok: true, value: { central: 'mini', centralCode: null } })
+  expect(parseArgs(['install', '--central=mini:40000', '--central-code', 'KF-4821-9TQX'])).toMatchObject({ ok: true, value: { central: 'mini:40000', centralCode: 'KF-4821-9TQX' } })
+  expect(parseArgs(['install', '--central-code', 'KF-4821-9TQX'])).toEqual({ ok: false, error: '--central-code needs --central <hub>' })
+  expect(parseArgs(['status', '--central', 'mini'])).toEqual({ ok: false, error: '--central does not apply to status' })
+  expect(USAGE).toContain('--central <hub>')
+})

@@ -49,6 +49,8 @@ export interface ContextDisplay {
   firstScreen?: FirstScreen
   /** Prompt channel: recall was skipped for the impact test, so `text` is empty. */
   heldOut?: true
+  /** A central device whose hub could not answer: the one line to show instead of a recall line. */
+  unavailable?: string
 }
 
 /** A newer release than the running one; the channel picks the command the user is told to run. */
@@ -189,7 +191,18 @@ function parseDisplay(value: unknown): ContextDisplay | null {
   if (!isRecord(value)) return null
   const recalled = value.recalled === undefined ? null : parseRecalled(value.recalled)
   const firstScreen = value.firstScreen === undefined ? null : parseFirstScreen(value.firstScreen)
-  return { ...(recalled !== null ? { recalled } : {}), ...(firstScreen !== null ? { firstScreen } : {}), ...(value.heldOut === true ? { heldOut: true as const } : {}) }
+  const unavailable = parseUnavailable(value.unavailable)
+  return {
+    ...(recalled !== null ? { recalled } : {}), ...(firstScreen !== null ? { firstScreen } : {}), ...(value.heldOut === true ? { heldOut: true as const } : {}),
+    ...(unavailable !== null ? { unavailable } : {}),
+  }
+}
+
+const MAX_UNAVAILABLE_CHARS = 300
+/** Only a line in Kinfold's own shape and on one line is shown; anything else is dropped. */
+function parseUnavailable(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.startsWith('kinfold · ') || value.length > MAX_UNAVAILABLE_CHARS || /[\u0000-\u001f\u007f]/.test(value)) return null
+  return value
 }
 
 /** Checks a daemon reply before the hook or plugin trusts it. */

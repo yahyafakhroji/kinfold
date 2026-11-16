@@ -49,6 +49,7 @@ test('before install: hosts detected but not wired, daemon down, nothing created
     'service (LaunchAgent): config missing; running: no',
     'daemon /health: down (nothing answers on 127.0.0.1:37811 (TypeError))',
     'semantic search: off (no pinned sqlite-vec build for darwin-test-arch)',
+    'memory: local (this machine\'s own)',
     'database: not created yet (keychain db-key missing)',
     'key store: keychain (not recorded yet; the next install records it)',
     'disk encryption: could not check (fdesetup exit 127)',

@@ -82,7 +82,7 @@ export function shownBudgetMs(host: string): number {
   return host === 'opencode' ? DAEMON_ONLY_TIMEOUT_MS : PROMPT_SERVE_BUDGET_MS
 }
 
-function updateNoticeFor(updates: ContextRouteDeps['updates'], request: ContextRequest, durationMs: number, at: number): UpdateNotice | null {
+export function updateNoticeFor(updates: ContextRouteDeps['updates'], request: ContextRequest, durationMs: number, at: number): UpdateNotice | null {
   if (updates === undefined || request.channel === 'prompt') return null
   try {
     const env = updates.envVars?.() ?? process.env
@@ -94,7 +94,7 @@ function updateNoticeFor(updates: ContextRouteDeps['updates'], request: ContextR
 }
 
 /** A release to install rides on the key every hook and plugin has always read; the newer kinds get their own, which an older reader ignores. */
-function noticeField(notice: UpdateNotice | null): Pick<ContextResult, 'updateNotice' | 'selfNotice'> {
+export function noticeField(notice: UpdateNotice | null): Pick<ContextResult, 'updateNotice' | 'selfNotice'> {
   if (notice === null) return {}
   return notice.kind === undefined || notice.kind === 'available' ? { updateNotice: notice } : { selfNotice: notice }
 }
@@ -143,7 +143,22 @@ function traceLater(deps: ContextRouteDeps, trace: TraceBuffer, answered: Answer
   }, 0)
 }
 
-export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest) => Promise<ContextResult> {
+/** A hub answering a paired device: the key the device resolved, and none of the hub's own update notices. */
+export interface CentralAsk {
+  projectKey: string
+  /**
+   * How long the device still waits for this answer, after its own share of
+   * the hook's wait and the trip over the tailnet. The semantic half gets
+   * that long, and an answer past it is recorded late: the device gave up on
+   * it, so its memory is offered again with the next prompt.
+   */
+  budgetMs?: number
+}
+
+/** What the prompt path keeps for itself after the semantic half: the delta, the write and the answer. */
+const CENTRAL_SEMANTIC_MARGIN_MS = 20
+
+export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest, central?: CentralAsk) => Promise<ContextResult> {
   const now = deps.now ?? Date.now
   const clock = deps.clock ?? (() => performance.now())
   const prompt: PromptContextDeps = {
@@ -157,30 +172,30 @@ export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest
     ...(deps.gate !== undefined ? { gate: deps.gate } : {}),
     ...(deps.semanticDeadlineMs !== undefined ? { deadlineMs: deps.semanticDeadlineMs } : {}),
   }
-  const prepare = async (request: ContextRequest, projectKey: string, at: number, startedAt: number): Promise<Prepared> => {
+  const prepare = async (request: ContextRequest, projectKey: string, at: number, startedAt: number, budgetMs?: number): Promise<Prepared> => {
     if (request.channel !== 'prompt' || request.prompt === undefined) return { ...prepareContext(deps.db, request, projectKey, at), promptDetail: '', relatedText: '', relatedServed: [], explain: NO_SEARCH }
-    const answer = await preparePromptContext(prompt, request, projectKey, at, startedAt)
+    const answer = await preparePromptContext(prompt, request, projectKey, at, startedAt, budgetMs === undefined ? undefined : Math.max(0, budgetMs - CENTRAL_SEMANTIC_MARGIN_MS))
     return { text: answer.text, observationIds: answer.observationIds, tokens: answer.tokens, rebuilt: false, relatedText: answer.relatedText, relatedServed: answer.relatedServed, explain: answer.explain,
       promptDetail: ` related=${answer.related} semantic=${answer.semantic} delta_ms=${answer.deltaMs} related_ms=${answer.relatedMs}` }
   }
-  return async (request) => {
+  return async (request, central) => {
     const startedAt = clock()
     const at = now()
-    const projectKey = deps.projectKeyFor(request.cwd).key
+    const projectKey = central?.projectKey ?? deps.projectKeyFor(request.cwd).key
     const keyMs = Math.round(clock() - startedAt)
     // Held out before anything is matched: the delta is not computed, so its cursor stays where it was and the
     // same memory arrives with the next prompt that is not held out; parked late hits wait for that prompt too.
     const heldOut = request.channel === 'prompt' && HOLDOUT_HOSTS.includes(request.host) && deps.holdout?.on() === true
       && (deps.holdout.pick ?? (() => Math.random() < HOLDOUT_RATE))()
-    const prepared = heldOut || request.displayOnly === true ? NOTHING : await prepare(request, projectKey, at, startedAt)
+    const prepared = heldOut || request.displayOnly === true ? NOTHING : await prepare(request, projectKey, at, startedAt, central?.budgetMs)
     const durationMs = Math.round(clock() - startedAt)
-    const late = request.prompt !== undefined && durationMs > shownBudgetMs(request.host) && prepared.observationIds.length > 0
+    const late = request.prompt !== undefined && durationMs > (central?.budgetMs ?? shownBudgetMs(request.host)) && prepared.observationIds.length > 0
     const injectionId = recordServed(deps.db, request, projectKey, prepared, at, durationMs, { relatedCount: prepared.relatedServed.length, heldOut, late })
     // Labels only for lines the host got: an answer past its wait was never shown.
     if (injectionId !== null && !late) recordRelatedServed(deps.db, prepared.relatedServed, { projectKey, host: request.host, occurredAt: at })
     deps.log(`context host=${request.host} channel=${request.channel} injection=${injectionId ?? 'none'}${late ? ' late=1' : ''} ids=${prepared.observationIds.length}`
       + ` tokens=${prepared.tokens} rebuilt=${prepared.rebuilt}${prepared.promptDetail}${heldOut ? ' held_out=1' : ''} key_ms=${keyMs} ms=${durationMs}`)
-    const notice = updateNoticeFor(deps.updates, request, durationMs, at)
+    const notice = central === undefined ? updateNoticeFor(deps.updates, request, durationMs, at) : null
     // A watcher starts from now, so with none connected an event could never be shown: none is built.
     if (deps.trace !== undefined && request.displayOnly !== true && deps.trace.watching(Date.now())) traceLater(deps, deps.trace, { request, projectKey, prepared, at, durationMs, late, heldOut })
     return {

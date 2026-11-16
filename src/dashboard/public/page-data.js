@@ -11,6 +11,7 @@ import { canConfirm, confirmBody, describeCounts, dryRunBody, idleFlow, previewe
 import { loadDisplayBlock } from './display-block.js'
 import { loadUpdatesBlock } from './updates-block.js'
 import { canSave, describePreview, idleRetention, previewBody, previewedRetention, saveBody } from './retention-flow.js'
+import { hubOnly } from './central-mark.js'
 
 export const RETENTION_TABLES = ['events', 'prompts', 'observations', 'summaries']
 const RETENTION_NOTES = { events: 'payload text', prompts: 'prompt text', observations: 'whole rows', summaries: 'whole rows, by last use' }
@@ -203,5 +204,5 @@ export async function renderData(_state, ctx) {
   return h('section', { class: 'page', 'aria-labelledby': 'page-title' },
     h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '04'), h('h1', { id: 'page-title' }, 'Data control'),
       h('p', { class: 'lede' }, 'What stays, for how long, and what goes.')),
-    sizeBlock(size), retentionBlock(settings), findingsBlock(ctx.now), purgeBlock(size.projects), updates, display)
+    sizeBlock(size), hubOnly(retentionBlock(settings)), hubOnly(findingsBlock(ctx.now)), hubOnly(purgeBlock(size.projects)), updates, display)
 }

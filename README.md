@@ -216,7 +216,7 @@ Each embedding space has a [sqlite-vec](https://github.com/asg017/sqlite-vec) `v
 - **Encrypted at rest.** The store is encrypted with [SQLite3 Multiple Ciphers](https://github.com/utelle/SQLite3MultipleCiphers). The key lives in the macOS Keychain, Windows Credential Manager or libsecret on Linux. On Linux without a working libsecret, Kinfold keeps it in a 0600 file under the XDG config folder, outside the memory folder, so copying or syncing that folder never carries the key.
 - **A recovery code.** Encrypting a store prints a recovery code. It restores the key on another machine, or if the key store loses it. `kinfold key show-recovery` prints it again, `rekey` changes the key and issues a new code, and `decrypt` goes back to plaintext.
 - **Redaction before storage.** API keys, tokens, private keys and similar secrets become typed markers before an event is written. Each marker carries a short reference derived from an HMAC of the value, so two mentions of one secret match without the secret being stored. Redacting an observation later also drops the vector embedded from its old text.
-- **Loopback only.** The daemon listens on 127.0.0.1. Every route except `/health` needs its token, and a Host check blocks DNS rebinding.
+- **Loopback only.** The daemon listens on 127.0.0.1. Every route except `/health` needs its token, and a Host check blocks DNS rebinding. A hub for [central memory](#one-memory-for-all-your-devices) also listens on its Tailscale address, where only paired devices of your own Tailscale user get an answer.
 - **No elevation.** Install, update and uninstall run as you.
 - **Two runtime dependencies.** The program bundles [`@clack/prompts`](https://github.com/bombshell-dev/clack) to draw the CLI's output on a terminal, and [`onnxruntime-web`](https://www.npmjs.com/package/onnxruntime-web) to run the local embedding model. Both are pinned to an exact version. The hook, the MCP server and the daemon do not load clack, and a test enforces that. Only the daemon's embedding worker loads ONNX Runtime.
 - **Checked downloads.** The curl and PowerShell installers, `kinfold install` and `kinfold update` refuse a program whose SHA-256 doesn't match the release's `SHA256SUMS`. The npm packages carry the same programs, published from CI with [npm provenance](https://docs.npmjs.com/generating-provenance-statements).
@@ -250,6 +250,32 @@ Restore asks for the recovery code and checks that it opens the backup before it
 - **If a restore or a switch back is cut short,** `kinfold key resume` finishes it or puts things back as they were.
 
 The dashboard's Backup page downloads the same file and restores from one: choose the file, check its date and version, type the recovery code and confirm. When a store is kept, the page offers to switch back to it, with the date it was replaced. Once you have made a backup, `kinfold status` shows when.
+
+## One memory for all your devices
+
+If your machines are on one [Tailscale](https://tailscale.com) tailnet, one of them can hold the memory for all of them. Pick a machine that is usually on, such as a Mac mini, and make it the hub:
+
+```sh
+kinfold central serve
+```
+
+It shows a code, valid for 10 minutes and for one device, and the command to run on that device:
+
+```sh
+kinfold central join mini.tail1234.ts.net KF-4821-9TQX
+```
+
+From then on the device's agents capture into the hub's memory and recall from it. `kinfold central invite` on the hub gives a code for the next device. A fresh device can join while it installs with `kinfold install --central <hub>`.
+
+- **Your projects when you join.** Joining copies each project the hub has never seen from the device's own memory: sessions, prompts and replies, observations and summaries. The hub embeds the copied observations itself. A project the hub already has keeps the hub's version. Joining leaves the device's own memory as it was, and `kinfold central import --project <key>` copies a kept project in later, adding only what the hub doesn't have yet.
+- **Project identity.** A project with a git remote is the same project on every device. A folder without one, such as `~/scratch`, belongs to the device it is on, so two devices' scratch folders never mix.
+- **When the hub is away.** Captures wait on the device, which sends them when the hub is back. Recall says `kinfold · central memory unreachable; this prompt is saved and will be sent when it's back` instead of making the prompt wait.
+- **What a device can do.** Read and capture: recall, search, MCP reads, and the dashboard's Sessions, Memory and Metrics pages, all showing the hub's memory. Anything that changes or removes stored memory runs on the hub only: purge, retention, findings, backup, restore, encrypt, decrypt, rekey, key recover and observer settings. The device's dashboard shows those controls disabled with "run this on the hub".
+- **Where things run.** The device redacts and strips `<private>` before anything leaves it, and works out project keys itself. The hub runs the observer with its own settings, embeds recall queries, and never reads a device's files. Keys, recovery codes and provider keys stay on their own machine.
+- **Versions.** The hub and its devices must run the same major.minor version. When they don't, recall says which side to update, and captures wait until they match.
+- **Managing devices.** `kinfold central devices` lists them on the hub and `kinfold central remove <device>` revokes one at once. `kinfold central leave` on a device returns it to its own memory; what it captured centrally stays on the hub. `kinfold central serve --off` stops being the hub. `kinfold status` shows which mode a machine is in, whether the hub answers and how many captures are waiting.
+
+How Kinfold keeps it private: the hub listens on its Tailscale address only, on port 37812, never on a LAN or public address. Only nodes owned by the hub's own Tailscale user can pair; shared-in and tagged nodes are refused. Pairing proves the code on both sides without sending it, and gives the device its own Ed25519 key. The device signs every request with that key, the hub checks it against the node the device paired from, and the hub signs every answer. Tailscale encrypts the traffic.
 
 ## WSL (preview)
 

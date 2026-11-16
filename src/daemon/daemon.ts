@@ -76,7 +76,14 @@ import { updateRouteHandlers } from './update-routes'
 import { bannerNotice, userMessage } from '../update/notice'
 import { setAutoUpdate } from '../install/setup/record'
 import { type OsName, currentPlatform } from '../platform/platform'
-import { MAX_UPLOAD_BYTES, type ServerDeps, startServer } from './server'
+import { LOOPBACK_HOST, MAX_UPLOAD_BYTES, type ServerDeps, handleRequest, startServer } from './server'
+import { type CentralStatus, centralStatus, deviceEndpoint, hubCore } from '../central/daemon-central'
+import { type HubDaemon, startHubWhenReady } from '../central/hub-daemon'
+import type { CentralCore } from '../central/hub-routes'
+import { type CentralMode, centralModeOf } from '../central/mode'
+import { type Relay, createRelay } from '../central/relay'
+import { type Tailscale, systemTailscale } from '../central/tailscale'
+import { noticeField, updateNoticeFor } from './context-route'
 import { type BackupRoutes, backupRoutes, uploadLimitFor } from './backup-routes'
 import { snapshotInWorker, snapshotInto } from '../backup/snapshot'
 import type { KeyStore } from '../secrets/key-store'
@@ -133,6 +140,17 @@ export interface DaemonOptions {
   keyStore?: KeyStore | null
   /** Test seams for the backup and restore routes. */
   backup?: DaemonBackupOptions
+  /** Central memory: the mode (default: install.json's) and, for tests, the Tailscale lookups and a loopback hub listener. */
+  central?: DaemonCentralOptions
+}
+
+export interface DaemonCentralOptions {
+  /** Overrides install.json; null is local. */
+  mode?: CentralMode | null
+  tailscale?: Tailscale
+  /** Tests only: the hub listener may bind loopback, standing in for the tailnet. */
+  allowLoopback?: boolean
+  hubRetryMs?: number
 }
 
 export interface DaemonBackupOptions {
@@ -239,6 +257,19 @@ function startVectors(store: Store, dataDir: string, dbKeys: DbKeyStore, options
   return { indexer, support, search, timer, queries, spaces, close: async () => set.close?.() }
 }
 
+/** A central device's vectors: none searched, none written, and the store's spaces left as they are for the day it leaves. */
+function deviceVectors(db: Database): Vectors {
+  return {
+    indexer: null,
+    support: VECTORS_OFF,
+    search: async () => ({ status: 'unavailable', reason: 'this device uses central memory; the hub searches it' }),
+    timer: null,
+    queries: inlineVectorQueries(db),
+    spaces: { step: () => {}, searchSpace: () => null, written: () => {}, status: () => ({ active: null, building: null }) },
+    close: async () => {},
+  }
+}
+
 export interface DaemonObserverOptions {
   runnerFor: RunnerFactory
   /** Builds a CLI login runner, for listing the installed CLI's models. Without it /observer/models answers 503. */
@@ -272,6 +303,8 @@ export interface RunningDaemon {
   hmacKeys: HmacKeyState
   /** Null without an embedder. */
   readonly vectors: VectorIndexer | null
+  /** The hub listener on a hub, the relay on a central device; both null when local. */
+  central: { hub: HubDaemon | null; relay: Relay | null; status: () => CentralStatus }
   stop: () => Promise<void>
 }
 
@@ -281,6 +314,8 @@ type CoreRoutes = Pick<ServerDeps, 'schemaVersion' | 'vectorSearch' | 'semanticS
 /** Everything that holds memory.db open. */
 interface Core {
   routes: CoreRoutes
+  /** What paired devices may ask of this store; null unless this daemon is a hub. */
+  central: CentralCore | null
   scheduler: DrainScheduler
   observer: ObserverScheduler | null
   indexer: VectorIndexer | null
@@ -468,6 +503,17 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const token = readOrCreateSecret(join(dataDir, TOKEN_FILE))
   const hmacKeys = createHmacKeys({ dataDir, keychain: options.keychain ?? NO_CREDENTIALS, now: options.hmac?.now ?? Date.now, log })
   const projectKeyFor = createProjectKeyResolver(gitRunnerWithTimeout(DAEMON_GIT_TIMEOUT_MS))
+  const mode = options.central?.mode !== undefined ? options.central.mode : centralModeOf(dataDir)
+  const deviceMode = mode?.role === 'device' ? mode : null
+  // A central device keeps its own store closed to writes: captures, recall and reads go to the hub.
+  const relay = deviceMode === null ? null : createRelay({
+    spoolDir: join(dataDir, SPOOL_DIR),
+    endpoint: () => deviceEndpoint(dataDir, deviceMode, version),
+    hubName: deviceMode.hubName,
+    projectKeyFor,
+    prepare: () => hmacKeys.marker(),
+    log,
+  })
   // In memory only, and kept across a core restart (a restore), so a debug watcher keeps its cursor.
   const trace = createTraceBuffer()
 
@@ -480,12 +526,22 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     // Decrypted pages stay here between requests; with SQLite's 2 MB default every prompt decrypted its pages again.
     store.db.run(`PRAGMA cache_size = -${DAEMON_CACHE_KIB}`)
     warnIfPlaintextBesideKey(store.path, log, dbKeys)
-    const vectors = startVectors(store, dataDir, dbKeys, options.vectors, log)
+    // A device's recall queries are embedded on the hub, and its own store is kept as it was: nothing here touches its vectors.
+    const vectors = relay === null ? startVectors(store, dataDir, dbKeys, options.vectors, log) : deviceVectors(store.db)
     const reads = daemonReads(dataDir, dbKeys, projectKeyFor, vectors)
     const drainOptions = (): DrainOptions => ({ spoolDir: join(dataDir, SPOOL_DIR), ...hmacKeys.marker(), projectKeyFor })
 
     let observer: ObserverScheduler | null = null
+    const forward = (target: Relay): void => {
+      target.forward().then(
+        (result) => {
+          if (result.sent > 0) log(`relay sent=${result.sent}`)
+        },
+        (error: unknown) => log(`relay failed: ${errorMessage(error)}`),
+      )
+    }
     const drain = (): void => {
+      if (relay !== null) return forward(relay)
       const result = drainSpool(store.db, drainOptions())
       const line = describeDrain(result)
       if (line !== null) log(line)
@@ -512,9 +568,9 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     const scheduler = createDrainScheduler(drain, (error) => log(`drain failed: ${errorMessage(error)}`), options.debounceMs)
     drain()
     const interval = setInterval(() => scheduler.request(), options.fallbackDrainMs ?? FALLBACK_DRAIN_MS)
-    const observing = options.observer !== undefined ? startObserver(store.db, options.observer, hmacKeys, () => vectors.indexer?.tick(), log, trace) : null
+    const observing = options.observer !== undefined && relay === null ? startObserver(store.db, options.observer, hmacKeys, () => vectors.indexer?.tick(), log, trace) : null
     observer = observing?.observer ?? null
-    const dataTicks = startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, exclusive: vectors.queries.exclusive, ...options.dataControl })
+    const dataTicks = relay !== null ? { stop: () => {} } : startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, exclusive: vectors.queries.exclusive, ...options.dataControl })
 
     // The hooks cannot open the store, so they read the display switches from a file this daemon keeps in step.
     const publishDisplay = (settings: DisplaySettings): void => {
@@ -531,13 +587,20 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       holdout: { on: () => readDisplaySettings(store.db).holdout },
       trace,
     })
+    // The device's own update notice rides on the hub's answer; the hub never sends its own to a device.
+    const deviceContext = (target: Relay) => async (request: Parameters<typeof context>[0]) => {
+      const startedAt = performance.now()
+      const answer = await target.context(request)
+      const notice = updateNoticeFor({ dataDir, version, envVars, canAutoUpdate, ...stagePlace }, request, Math.round(performance.now() - startedAt), Date.now())
+      return { ...answer, ...noticeField(notice) }
+    }
     const routes: CoreRoutes = {
       schemaVersion: store.schemaVersion,
       vectorSearch: vectors.support.ok ? 'on' : 'off',
       semanticSearch: vectors.search,
       onNudge: () => scheduler.request(),
       listSessions: (projectKey) => listRecentSessions(store.db, projectKey),
-      context,
+      context: relay === null ? context : deviceContext(relay),
       retryFailed: (target) => retryFailed(store.db, target, observer, log),
       observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? []),
       data: dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log, holdoutHosts: HOLDOUT_HOSTS, onDisplay: publishDisplay }),
@@ -577,7 +640,11 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       await vectors.close()
       store.db.close()
     }
-    return { routes, scheduler, observer, indexer: vectors.indexer, snapshot, stop }
+    const central = mode?.role !== 'hub' ? null : hubCore({
+      db: store.db, marker: () => hmacKeys.marker(), onStored: () => observer?.tick(), context, reads: reads.deps,
+      semantic: vectors.search, mcpRead: routes.mcpRead, now: Date.now,
+    })
+    return { routes, central, scheduler, observer, indexer: vectors.indexer, snapshot, stop }
   }
 
   let core = startCore()
@@ -647,6 +714,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       return null
     }
   }
+  let hub: HubDaemon | null = null
   const deps: ServerDeps = {
     onActivity: agentEvent,
     port: options.port,
@@ -684,6 +752,11 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     backup,
     unavailable: () => (restarter.down() ? RESTORING : null),
     log,
+    ...(relay !== null && deviceMode !== null ? { device: { relay, hubName: deviceMode.hubName, watchUpdate } } : {}),
+    centralStatus: async (check) => {
+      if (check && relay !== null) await relay.hello()
+      return centralStatus(dataDir, mode, hub, relay)
+    },
     ...core.routes,
     // kinfold watch and the OpenCode toast read /watch, so the update the user is owed rides along there; reading it marks nothing.
     watch: (method, url) => {
@@ -693,6 +766,21 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     },
   }
   const server = startServer(deps)
+  // A dashboard view a device asks for runs through this daemon's own loopback routes, with its token.
+  const view = async (path: string): Promise<{ status: number; body: unknown }> => {
+    const response = await handleRequest(new Request(`http://${LOOPBACK_HOST}:${server.port}${path}`, { headers: { host: `${LOOPBACK_HOST}:${server.port}`, authorization: `Bearer ${token}` } }), server.port, deps)
+    return { status: response.status, body: await response.json().catch(() => null) }
+  }
+  hub = mode?.role !== 'hub' ? null : startHubWhenReady({
+    dataDir, version, port: mode.port, tailscale: options.central?.tailscale ?? systemTailscale(),
+    core: () => {
+      if (core.central === null) throw new Error('the store is not open')
+      return core.central
+    },
+    view, log,
+    ...(options.central?.allowLoopback === true ? { allowLoopback: true } : {}),
+    ...(options.central?.hubRetryMs !== undefined ? { retryMs: options.central.hubRetryMs } : {}),
+  })
   const infoPath = join(dataDir, DAEMON_INFO_FILE)
   const info: DaemonInfo = { pid: process.pid, port: server.port }
   writePrivateFile(infoPath, JSON.stringify(info), false)
@@ -740,6 +828,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     // could not open the store until someone ran kinfold key resume. It ends on its own: the wait
     // for the store is bounded, and then it finishes or puts the old store back.
     await restarter.inFlight()?.catch(() => {})
+    await hub?.stop()
     await server.stop()
     // A core a restore already closed, and could not replace, has nothing left to stop.
     if (!restarter.down()) await core.stop()
@@ -758,6 +847,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     get vectors() {
       return core.indexer
     },
+    central: { hub, relay, status: () => centralStatus(dataDir, mode, hub, relay) },
     stop,
   }
 }

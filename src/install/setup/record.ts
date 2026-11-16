@@ -10,6 +10,7 @@ import { writeFileAtomic } from '../../fs/atomic'
 import { DATA_FILE_MODE } from '../../store/data-dir'
 import type { InstallEnv } from '../env'
 import type { Action } from '../plan'
+import { type CentralMode, parseCentralMode } from '../../central/mode'
 
 export const INSTALL_RECORD_FILE = 'install.json'
 
@@ -104,6 +105,8 @@ export interface InstallRecord {
   pathLink?: string
   /** The shell startup files that were given the marked PATH block. */
   pathFiles?: readonly string[]
+  /** Central memory: this machine is the hub, or a device using one. Absent: local. Changed only by setCentralMode. */
+  central?: CentralMode
 }
 
 export const UPDATE_LEVELS = ['off', 'notify', 'patch'] as const
@@ -129,6 +132,17 @@ export function switchesFor(level: UpdateLevel, autoUpdate: boolean): Pick<Insta
   return level === 'off' ? { updateCheck: false, autoUpdate } : { updateCheck: true, autoUpdate: level === 'patch' }
 }
 
+function savedCentral(value: unknown): Pick<InstallRecord, 'central'> {
+  const central = parseCentralMode(value)
+  return central === null ? {} : { central }
+}
+
+/** The record with the mode the file already holds: only setCentralMode changes it, so an install or an update never turns a hub or a device back to local. */
+function withSavedCentral(record: InstallRecord, current: InstallRecord | null): InstallRecord {
+  const { central: _given, ...rest } = record
+  return current?.central !== undefined ? { ...rest, central: current.central } : rest
+}
+
 function savedPath(value: Record<string, unknown>): Pick<InstallRecord, 'pathSetup' | 'pathLink' | 'pathFiles'> {
   const setup = PATH_SETUPS.find((known) => known === value.pathSetup)
   if (setup === undefined) return {}
@@ -152,10 +166,10 @@ export function readInstallRecord(dataDir: string): InstallRecord | null {
   try {
     const value: unknown = JSON.parse(readFileSync(path, 'utf8'))
     if (typeof value !== 'object' || value === null) return null
-    const { channel, updates, updateCheck, autoUpdate, autoUpdateIntro, autoUpdateAt, beta, agentHomes, firstInstalledAt } = value as Record<string, unknown>
+    const { channel, updates, updateCheck, autoUpdate, autoUpdateIntro, autoUpdateAt, beta, agentHomes, firstInstalledAt, central } = value as Record<string, unknown>
     if (!isChannel(channel) || typeof updateCheck !== 'boolean') return null
     if (typeof firstInstalledAt !== 'number' || !Number.isFinite(firstInstalledAt)) return null
-    const rest = { ...(beta === true ? { beta: true as const } : {}), agentHomes: savedHomes(agentHomes), ...(typeof autoUpdateAt === 'number' && Number.isFinite(autoUpdateAt) ? { autoUpdateAt } : {}), firstInstalledAt, ...savedPath(value as Record<string, unknown>) }
+    const rest = { ...(beta === true ? { beta: true as const } : {}), agentHomes: savedHomes(agentHomes), ...(typeof autoUpdateAt === 'number' && Number.isFinite(autoUpdateAt) ? { autoUpdateAt } : {}), firstInstalledAt, ...savedPath(value as Record<string, unknown>), ...savedCentral(central) }
     // No autoUpdate key: written before the field existed, so it is on and its user has not been told yet.
     if (autoUpdate === undefined) return { channel, ...levelOver(updates, updateCheck, true), autoUpdateIntro: true, ...rest }
     if (typeof autoUpdate !== 'boolean') return null
@@ -180,6 +194,7 @@ function recordContent(record: InstallRecord): string {
     ...(record.pathSetup !== undefined ? { pathSetup: record.pathSetup } : {}),
     ...(record.pathSetup !== undefined && record.pathLink !== undefined ? { pathLink: record.pathLink } : {}),
     ...(record.pathSetup !== undefined && record.pathFiles !== undefined && record.pathFiles.length > 0 ? { pathFiles: record.pathFiles } : {}),
+    ...(record.central !== undefined ? { central: record.central } : {}),
   }
   return `${JSON.stringify(fields, null, 2)}\n`
 }
@@ -194,7 +209,7 @@ export function writeInstallRecord(dataDir: string, record: InstallRecord): void
   const current = readInstallRecord(dataDir)
   const newer = current !== null && current.autoUpdateAt !== undefined && current.autoUpdateAt > (record.autoUpdateAt ?? 0)
   const merged = newer ? { ...withBeta(record, current.beta === true), updateCheck: current.updateCheck, autoUpdate: current.autoUpdate, autoUpdateAt: current.autoUpdateAt } : record
-  writeFileAtomic(join(dataDir, INSTALL_RECORD_FILE), recordContent(merged), DATA_FILE_MODE)
+  writeFileAtomic(join(dataDir, INSTALL_RECORD_FILE), recordContent(withSavedCentral(merged, current)), DATA_FILE_MODE)
 }
 
 /** The plan step that writes the record (writeInstallRecord). */
@@ -222,6 +237,15 @@ export function setAutoUpdate(dataDir: string, enabled: boolean, now: number = D
   const record = readInstallRecord(dataDir)
   if (record === null) return false
   writeFileAtomic(join(dataDir, INSTALL_RECORD_FILE), recordContent({ ...record, autoUpdate: enabled, autoUpdateAt: now }), DATA_FILE_MODE)
+  return true
+}
+
+/** Turns this data folder into a hub, a device, or back to local (null). False when there is no install record to hold it. */
+export function setCentralMode(dataDir: string, mode: CentralMode | null): boolean {
+  const record = readInstallRecord(dataDir)
+  if (record === null) return false
+  const { central: _old, ...rest } = record
+  writeFileAtomic(join(dataDir, INSTALL_RECORD_FILE), recordContent(mode === null ? rest : { ...rest, central: mode }), DATA_FILE_MODE)
   return true
 }
 

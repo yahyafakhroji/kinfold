@@ -15,7 +15,7 @@ import {
   rmSync,
   writeSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { RedactedEvent } from '../capture/prepare'
 import { type NormalizedEvent, validateEvent } from '../contract/event'
 
@@ -105,6 +105,17 @@ export function readSpool(dir: string, limit: number = Number.POSITIVE_INFINITY)
     else quarantined.push({ path: quarantine(dir, name), reason: parsed.reason })
   }
   return { entries, quarantined }
+}
+
+/** Moves one entry into quarantine, beside the ones readSpool set aside; it is never read again. */
+export function quarantineSpoolEntry(path: string): string {
+  return quarantine(dirname(path), basename(path))
+}
+
+/** How many entries wait, by file name alone: nothing is read or parsed. */
+export function countSpool(dir: string): number {
+  if (!existsSync(dir)) return 0
+  return readdirSync(dir).filter((file) => ENTRY_NAME.test(file)).length
 }
 
 export function removeSpoolEntry(path: string): void {

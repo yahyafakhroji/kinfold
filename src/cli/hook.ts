@@ -104,6 +104,7 @@ function recallMessage(channel: ContextChannel, fetched: ContextFetch, takesPack
     if (fetched.daemonDown) return start ? DAEMON_DOWN_START_LINE : DAEMON_DOWN_LINE
     return start ? NO_ANSWER_START_LINE : NO_ANSWER_LINE
   }
+  if (result.display?.unavailable !== undefined) return result.display.unavailable
   if (result.display?.heldOut === true) return HELD_OUT_LINE
   const ids = result.text === '' ? [] : result.observationIds
   const screen = result.display?.firstScreen ?? null

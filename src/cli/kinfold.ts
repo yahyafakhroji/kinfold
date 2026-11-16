@@ -169,6 +169,17 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       process.off('SIGINT', onInterrupt)
     }
   }
+  const central = await import('../central/cli')
+  const centralArgs = central.parseCentralArgs(args)
+  if (centralArgs !== null) {
+    if (!centralArgs.ok) {
+      effective.out(centralArgs.error)
+      return EXIT_USAGE
+    }
+    return runFramed(effective, 'central', (env) => central.runCentralCommand(env, centralArgs.value))
+  }
+  const hubOnly = await hubOnlyRefusal(effective, args)
+  if (hubOnly !== null) return hubOnly
   const key = parseKeyArgs(args)
   if (key !== null) {
     if (!key.ok) {
@@ -217,7 +228,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
   const { install } = await import('../install/install')
   const { displayChangeOf } = await import('../install/args')
   try {
-    return await install(effective, {
+    const installed = await install(effective, {
       dryRun: installArgs.dryRun,
       yes: installArgs.yes,
       skipCheck: installArgs.skipCheck,
@@ -239,6 +250,9 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       path: installArgs.path,
       verbose: installArgs.verbose,
     })
+    if (installed !== 0 || installArgs.central === null) return installed
+    const { offerCentral } = await import('../central/wizard')
+    return await offerCentral(effective, { hub: installArgs.central, code: installArgs.centralCode, yes: installArgs.yes, dryRun: installArgs.dryRun })
   } catch (error: unknown) {
     // Ctrl-C or a closed stdin at a question; install has said so and written nothing.
     if (error instanceof Error && error.name === 'PromptCancelled') return EXIT_CANCELLED
@@ -251,6 +265,19 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
  * resolveDataDir inside it selects this store and nothing else. Restored
  * afterwards because callers such as tests run more than one command.
  */
+/** The commands that change or remove stored memory on this machine; on a central device they belong to the hub. */
+const HUB_ONLY_COMMANDS = new Set(['backup', 'restore', 'encrypt', 'decrypt', 'rekey', 'key'])
+
+async function hubOnlyRefusal(env: InstallEnv, args: readonly string[]): Promise<number | null> {
+  const name = args[0] ?? ''
+  if (!HUB_ONLY_COMMANDS.has(name) || (name === 'key' && (args[1] === 'show-recovery' || args[1] === 'resume'))) return null
+  const { centralModeOf } = await import('../central/mode')
+  const mode = centralModeOf(env.dataDir)
+  if (mode?.role !== 'device') return null
+  env.out(`run this on the hub (${mode.hubName}): this device uses central memory. kinfold central leave returns it to its own memory.`)
+  return EXIT_FAILED
+}
+
 async function withDataDir(dataDir: string | null, run: () => Promise<void>): Promise<void> {
   if (dataDir === null) {
     await run()

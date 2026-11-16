@@ -60,6 +60,10 @@ export interface CliArgs {
   noHoldout: boolean
   /** --embeddings: the embedding provider, sent to the daemon. null: left as it is, or asked. */
   embeddings: EmbeddingSettings | null
+  /** --central: a hub whose memory to offer once install is done. null: none. */
+  central: string | null
+  /** --central-code: the hub's code, so the offer needs no question. */
+  centralCode: string | null
 }
 
 type BooleanFlag = 'addPath' | 'noPath' | 'verbose' | 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck' | 'noAutoUpdate' | 'autoUpdate' | 'auto' | 'beta' | 'noBeta'
@@ -99,7 +103,7 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
 }
 
 export const USAGE = [
-  'usage: kinfold <install|uninstall|status|update|size|retention|scan|findings|purge|dashboard|watch|backup|restore|encrypt|decrypt|rekey|key|hook|mcp|daemon|observe> [--data-dir <path>] [--version] [flags]',
+  'usage: kinfold <install|uninstall|status|update|size|retention|scan|findings|purge|dashboard|watch|backup|restore|encrypt|decrypt|rekey|key|central|hook|mcp|daemon|observe> [--data-dir <path>] [--version] [flags]',
   '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>|off]...',
   '             [--observer-endpoint <url>] (the address for qwen-api or openai-compatible: https, or http on this machine)',
   '             [--skip-check] [--replace-credential] [--credential-stdin] [--takeover]',
@@ -113,6 +117,7 @@ export const USAGE = [
   '             local model (default, on this machine), OpenRouter (uses the OpenRouter key), or a local LLM server on loopback',
   '             --path puts the kinfold command on your PATH without asking; --no-path adds nothing and takes out what an earlier install added;',
   '             --verbose shows every step on a terminal (the full list is always in <data-dir>/logs/install.log)',
+  '             [--central <hub>[:<port>] [--central-code <code>]]   once installed, offer to use that hub\'s memory (kinfold central join)',
   '  update     [--dry-run]',
   '  uninstall  [--dry-run] [--verbose] [--remove-credentials] [--remove-hmac-keys]',
   '             --remove-hmac-keys deletes the stored hmac-master and hmac-legacy keys and hmac.d/: stored refs can no longer',
@@ -135,6 +140,8 @@ export const USAGE = [
   '  rekey      give memory.db a new key and a new recovery code',
   '  key show-recovery | key recover   show the recovery code, or put the key back from one (on stdin or typed)',
   '  key resume finish or undo a kinfold encrypt, decrypt, rekey or restore that was cut short',
+  '  central    serve [--port <n>] | serve --off | invite | devices | remove <device>   on the hub: share its memory over Tailscale',
+  '             join <hub>[:<port>] <code> | leave | import --project <key>   on a device: use the hub\'s memory, or go back to its own',
   '  hook       [--host codex|cursor]   record one host hook payload from stdin, Claude Code by default',
   '  mcp        answer the MCP stdio protocol on stdin and stdout',
   '  daemon     run the local daemon on loopback',
@@ -409,7 +416,7 @@ export function parseObserverFlag(value: string): Parsed<ObserverFlag> {
 }
 
 function initial(command: Command): CliArgs {
-  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], observerEndpoint: null, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, updates: null, beta: false, noBeta: false, staged: null, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false, embeddings: null }
+  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], observerEndpoint: null, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, updates: null, beta: false, noBeta: false, staged: null, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false, embeddings: null, central: null, centralCode: null }
 }
 
 /** `--flag value` or `--flag=value`; returns the value and how many argv slots it used. */
@@ -460,6 +467,8 @@ function applyValueFlag(args: CliArgs, name: string, value: string): Parsed<CliA
     if (parseVersion(value) === null) return { ok: false, error: '--staged takes a version' }
     return { ok: true, value: { ...args, staged: value } }
   }
+  if (name === '--central') return { ok: true, value: { ...args, central: value } }
+  if (name === '--central-code') return { ok: true, value: { ...args, centralCode: value } }
   if (name === '--hosts') {
     const hosts = parseHosts(value)
     return hosts.ok ? { ok: true, value: { ...args, hosts: hosts.value } } : hosts
@@ -487,7 +496,7 @@ export function parseArgs(argv: readonly string[]): Parsed<CliArgs> {
       index += 1
       continue
     }
-    const name = ['--hosts', '--observer-endpoint', '--observer', '--port', '--embeddings', '--updates', '--staged'].find((flag) => arg === flag || arg.startsWith(`${flag}=`))
+    const name = ['--hosts', '--observer-endpoint', '--observer', '--port', '--embeddings', '--updates', '--staged', '--central-code', '--central'].find((flag) => arg === flag || arg.startsWith(`${flag}=`))
     if (name === undefined) return { ok: false, error: `unknown argument ${JSON.stringify(arg)}\n${USAGE}` }
     if (args.command !== (name === '--staged' ? 'update' : 'install')) return { ok: false, error: `${name} does not apply to ${args.command}` }
     const found = valueOf(argv, index, name)
@@ -503,6 +512,7 @@ export function parseArgs(argv: readonly string[]): Parsed<CliArgs> {
   if (args.addPath && args.noPath) return { ok: false, error: '--path and --no-path cannot be given together' }
   if (args.showRecall && args.noShowRecall) return { ok: false, error: '--show-recall and --no-show-recall cannot be given together' }
   if (args.holdout && args.noHoldout) return { ok: false, error: '--holdout and --no-holdout cannot be given together' }
+  if (args.centralCode !== null && args.central === null) return { ok: false, error: '--central-code needs --central <hub>' }
   const observers = withObserverEndpoint(args.observers, args.observerEndpoint)
   if (!observers.ok) return observers
   return { ok: true, value: { ...args, observers: observers.value, path: args.addPath ? 'path' : args.noPath ? 'no-path' : null } }

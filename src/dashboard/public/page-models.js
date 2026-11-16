@@ -5,6 +5,7 @@
 
 import { api, errorText } from './api.js'
 import { h, notice, replaceContent } from './dom.js'
+import { hubOnly } from './central-mark.js'
 import { loadEmbeddingsBlock } from './embeddings-block.js'
 
 // The daemon's OBSERVER_PROVIDERS, in its order (a test holds them equal).
@@ -255,9 +256,9 @@ export function loopbackObserverEndpoint(view) {
 export async function renderModels() {
   const view = await api('GET', '/observer/settings')
   const embeddings = await loadEmbeddingsBlock(loopbackObserverEndpoint(view))
-  return h('section', { class: 'page', 'aria-labelledby': 'page-title' },
+  return hubOnly(h('section', { class: 'page', 'aria-labelledby': 'page-title' },
     h('header', { class: 'page-head' }, h('p', { class: 'kicker' }, '01'), h('h1', { id: 'page-title' }, 'Model settings'),
       h('p', { class: 'lede' }, 'Which observer model turns each host\'s events into memory. There is no silent fallback: a failing model keeps events queued.')),
     h('div', { class: 'host-forms' }, hostForms(view)),
-    embeddings)
+    embeddings))
 }

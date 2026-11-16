@@ -7,6 +7,7 @@
 // install before anything changes, so there are never two writers; under
 // --takeover the install waits for the user to stop it and never kills it.
 
+import { centralModeOf } from '../central/mode'
 import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { deprecationLines, envName, legacyName, readEnv } from '../env-names'
@@ -330,7 +331,13 @@ function sameSettings(row: ObserverSettingsRow | undefined, input: ObserverSetti
  * gets none, since its row came from memory.db itself, so the PUT could only
  * repeat it or, from a read that missed newer rows, put an older one back.
  */
-async function settingsActions(env: InstallEnv, choices: readonly ObserverChoice[], stored: Pick<SetupState, 'failedProviders'>): Promise<Action[]> {
+export async function settingsActions(env: InstallEnv, choices: readonly ObserverChoice[], stored: Pick<SetupState, 'failedProviders'>): Promise<Action[]> {
+  const hub = centralHubName(env)
+  if (hub !== null) {
+    // The observer runs on the hub with the hub's settings; this device's daemon would refuse the change.
+    if (choices.length > 0) noticeOf(env)(`observer settings: kept on the hub (${hub}); this device uses central memory`)
+    return []
+  }
   const read = await getObserverSettings(env)
   if (!read.ok) {
     const failedInStore = new Set(stored.failedProviders)
@@ -366,11 +373,22 @@ export function displayActions(env: InstallEnv, change: DisplayChange, noDaemon:
   return []
 }
 
+/** The hub's name when this data folder is a central device: its observer and embeddings are the hub's. */
+function centralHubName(env: InstallEnv): string | null {
+  const mode = centralModeOf(env.dataDir)
+  return mode?.role === 'device' ? mode.hubName : null
+}
+
 export const EMBEDDINGS_NOT_SENT_LINE = 'embedding choice: not sent, since no daemon is running; run kinfold install again once it runs'
 
 /** The embedding provider the flag or the question chose, sent once the daemon answers. */
 export function embeddingActions(env: InstallEnv, answers: SetupAnswers, noDaemon: boolean): Action[] {
   if (answers.embeddings === undefined) return []
+  const hub = centralHubName(env)
+  if (hub !== null) {
+    noticeOf(env)(`embedding choice: kept on the hub (${hub}); this device uses central memory`)
+    return []
+  }
   if (!noDaemon) return [{ kind: 'embedding-put', settings: answers.embeddings }]
   noticeOf(env)(EMBEDDINGS_NOT_SENT_LINE)
   return []

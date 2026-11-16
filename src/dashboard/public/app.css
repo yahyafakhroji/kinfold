@@ -383,3 +383,14 @@ body.login { min-height: 100vh; display: grid; place-items: center; padding: var
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* A block that changes stored memory, on a device that uses a hub's memory. */
+fieldset.hub-only {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+fieldset.hub-only:disabled > :not(.notice) {
+  opacity: 0.55;
+}
