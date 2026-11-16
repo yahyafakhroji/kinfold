@@ -28,7 +28,7 @@ test('--yes, --hosts and repeated --observer parse into one value', () => {
   expect(parsed).toEqual({
     ok: true,
     value: {
-      command: 'install', dryRun: false, yes: true, skipCheck: true, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false,
+      command: 'install', dryRun: false, yes: true, skipCheck: true, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false, embeddings: null,
       hosts: ['claude-code', 'opencode'],
       observerEndpoint: null,
       observers: [
@@ -165,6 +165,11 @@ test('hook, mcp, daemon and observe get the argv after the subcommand', async ()
     { name: 'daemon', argv: [] },
     { name: 'observe', argv: ['42'] },
   ])
+})
+
+test('embed-check runs the bundled model check and returns its exit code', async () => {
+  world = createWorld()
+  expect(await runKinfold(['embed-check'], world.env, { embedCheck: async () => 7 })).toBe(7)
 })
 
 test('usage names every way to run the program, including the subcommands', () => {

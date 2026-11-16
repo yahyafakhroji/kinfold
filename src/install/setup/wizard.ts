@@ -13,7 +13,8 @@ import { readDisplayFile } from '../../context/display-file'
 import { HOLDOUT_HOSTS } from '../../context/holdout'
 import { encodeRecoveryCode } from '../../sqlite/recovery'
 import { newDbKey } from '../../sqlite/keys'
-import { checkHealth, readDaemonInfo } from '../daemon-client'
+import { checkHealth, getEmbeddingSettings, readDaemonInfo } from '../daemon-client'
+import { type EmbeddingProvider, type EmbeddingSettings, LOCAL_SETTINGS, isLoopbackUrl } from '../../vectors/embedding-settings'
 import { STALE_DB_KEY, staleDbKey, storedDbKey } from '../db-encryption'
 import { encryptKeyExists, isProcessAlive } from '../encrypt'
 import { INSTALL_PROFILES } from '../../agents/install-profiles'
@@ -70,6 +71,8 @@ export interface SetupFlags {
   path?: PathFlag
   /** --holdout or --no-holdout: the impact test question answered up front. */
   holdout?: boolean
+  /** --embeddings: the embedding question answered up front. */
+  embeddings?: EmbeddingSettings
 }
 
 export type EncryptionAnswer =
@@ -91,6 +94,8 @@ export interface SetupAnswers {
   path?: PathAnswer | null
   /** The answer to "Run the impact test?"; absent when it was not asked, and the setting then stays as it is. */
   holdout?: boolean
+  /** The embedding provider, from --embeddings or the question; absent: the setting stays as it is. */
+  embeddings?: EmbeddingSettings
 }
 
 export const NO_TTY_ENCRYPTION_CHANGE = 'changing encryption on an existing store needs a terminal; run kinfold encrypt or kinfold decrypt'
@@ -280,8 +285,10 @@ async function askModel(env: InstallEnv, ask: Prompts, host: InstallHost, provid
   return model.trim()
 }
 
-async function askEndpoint(ask: Prompts, host: InstallHost, provider: EndpointProvider, current: Candidate, saved: ChoiceOptions['saved']): Promise<string> {
-  const fallback = current.input.provider === provider && current.input.endpoint !== undefined ? current.input.endpoint : defaultEndpoint(provider, host, saved)
+async function askEndpoint(ask: Prompts, host: InstallHost, provider: EndpointProvider, current: Candidate, saved: ChoiceOptions['saved'], embeddingUrl: ChoiceOptions['embeddingUrl']): Promise<string> {
+  const fallback = current.input.provider === provider && current.input.endpoint !== undefined
+    ? current.input.endpoint
+    : defaultEndpoint(provider, host, saved, provider === 'openai-compatible' ? await embeddingUrl?.() : null)
   const check = (value: string): string | null => {
     const checked = checkEndpoint(provider, value.trim() === '' ? fallback : value)
     return checked.ok ? null : checked.error
@@ -320,14 +327,14 @@ function observerChoices(current: Candidate, missing: MissingClis): { choices: C
   return { choices: [first, ...providers, ...unproven, ...off], initial: stale === undefined || pickable === undefined ? 'current' : pickable.value }
 }
 
-async function askCandidate(env: InstallEnv, ask: Prompts, host: InstallHost, current: Candidate, missing: MissingClis, saved: ChoiceOptions['saved']): Promise<Candidate> {
+async function askCandidate(env: InstallEnv, ask: Prompts, host: InstallHost, current: Candidate, missing: MissingClis, saved: ChoiceOptions['saved'], embeddingUrl?: ChoiceOptions['embeddingUrl']): Promise<Candidate> {
   const { choices, initial } = observerChoices(current, missing)
   const picked = await ask.select(`Observer for ${host}:`, choices, initial)
   if (picked === 'current') return current
   if (picked === 'off') return { input: offInput(current.input), origin: 'prompt' }
   if (picked === 'unproven') throw new ChoiceError('an unproven provider cannot be picked')
   const model = await askModel(env, ask, host, picked, current)
-  const endpoint = isEndpointProvider(picked) ? await askEndpoint(ask, host, picked, current, saved) : undefined
+  const endpoint = isEndpointProvider(picked) ? await askEndpoint(ask, host, picked, current, saved, embeddingUrl) : undefined
   return { input: settingsInputFor(host, picked, model, endpoint), origin: 'prompt' }
 }
 
@@ -339,7 +346,7 @@ async function observerFor(env: InstallEnv, ask: Prompts, host: InstallHost, fla
   const note = choice.observerNote?.(host) ?? null
   if (note !== null && flag === undefined) ask.say(note)
   for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
-    const candidate: Candidate = attempt === 0 && flag !== undefined ? { input: flagInput(host, flag, row), origin: 'flag' } : await askCandidate(env, ask, host, current, await clis(), saved)
+    const candidate: Candidate = attempt === 0 && flag !== undefined ? { input: flagInput(host, flag, row), origin: 'flag' } : await askCandidate(env, ask, host, current, await clis(), saved, choice.embeddingUrl)
     const result = await chooseObserverWith(env, host, candidate, choice, session)
     if (!('failed' in result)) return result
   }
@@ -353,7 +360,9 @@ async function observersStep(env: InstallEnv, ask: Prompts | null, state: SetupS
   let found: Promise<MissingClis> | null = null
   const clis = (): Promise<MissingClis> => (found ??= missingClis(env, agents.detections, profiles))
   const observerNote = (host: InstallHost): string | null => selfObserverNote(profiles[host])
-  const options: ChoiceOptions = { ...choice, yes: choice.yes || flags.yes, flags: flags.observers, ...(saved === undefined ? {} : { saved }), missingClis: clis, observerNote }
+  let embeddings: Promise<string | null> | null = null
+  const embeddingUrl = (): Promise<string | null> => (embeddings ??= getEmbeddingSettings(env).then((settings) => (settings?.provider === 'local-llm' ? settings.llmUrl : null)))
+  const options: ChoiceOptions = { ...choice, yes: choice.yes || flags.yes, flags: flags.observers, ...(saved === undefined ? {} : { saved }), missingClis: clis, observerNote, embeddingUrl }
   if (ask === null) return chooseObservers(env, hosts, options)
   const choices: ObserverChoice[] = []
   for (const host of hosts) choices.push(await observerFor(env, ask, host, flags, options, saved, clis))
@@ -463,7 +472,7 @@ function commandRow(env: InstallEnv, answers: SetupAnswers, flags: SetupFlags): 
   return summary === null ? null : summary.startsWith(COMMAND_PREFIX) ? summary.slice(COMMAND_PREFIX.length) : summary
 }
 
-async function summaryStep(env: InstallEnv, ask: Prompts, answers: SetupAnswers, flags: SetupFlags, profiles: ProfileTable): Promise<void> {
+async function summaryStep(env: InstallEnv, ask: Prompts, answers: SetupAnswers, flags: SetupFlags, profiles: ProfileTable, embeddings: EmbeddingSettings | null = null): Promise<void> {
   const command = commandRow(env, answers, flags)
   const rows = [
     `Memory folder   ${tildeHome(env, answers.dataDir)}`,
@@ -474,6 +483,7 @@ async function summaryStep(env: InstallEnv, ask: Prompts, answers: SetupAnswers,
     `Update check    ${answers.updateCheck ? 'daily' : 'off'}`,
     `Auto-update     ${!answers.updateCheck ? 'off (the update check is off)' : answers.autoUpdate ? 'patch releases' : 'off'}`,
     ...(answers.holdout === undefined ? [] : [`Impact test     ${answers.holdout ? `on for ${impactAgents(profiles)}` : 'off'}`]),
+    ...(embeddings === null ? [] : [`Embeddings      ${describeEmbeddings(embeddings)}`]),
     ...(command === null ? [] : [`kinfold command ${command}`]),
   ]
   ask.section('Your choices', rows.map((text) => ({ mark: 'none' as const, text })))
@@ -526,6 +536,65 @@ async function holdoutStep(env: InstallEnv, ask: Prompts | null, flags: SetupFla
   return ask.confirm(`Run the impact test? Kinfold skips memory on about 1 in 10 ${agents} prompts and compares token use, to measure what memory saves.`, readDisplayFile(env.dataDir).holdout)
 }
 
+// ---- embeddings ----------------------------------------------------------------
+
+export const DEFAULT_LLM_URL = 'http://127.0.0.1:11434/v1'
+export const DEFAULT_LLM_MODEL = 'nomic-embed-text'
+
+const EMBEDDING_CHOICES: readonly Choice<EmbeddingProvider>[] = [
+  { value: 'local', label: 'Local model', hint: 'runs on this machine, free, nothing leaves it' },
+  { value: 'openrouter', label: 'OpenRouter', hint: 'uses the OpenRouter key and sends memory text to OpenRouter' },
+  { value: 'local-llm', label: 'Local LLM server', hint: 'Ollama, LM Studio or another /embeddings server on this machine' },
+]
+
+export function describeEmbeddings(settings: EmbeddingSettings): string {
+  if (settings.provider === 'local') return 'local model (on this machine)'
+  if (settings.provider === 'openrouter') return 'OpenRouter'
+  return `local LLM ${settings.llmModel ?? ''} at ${settings.llmUrl ?? ''}`
+}
+
+const loopbackOnly = (value: string): string | null => (isLoopbackUrl(value.trim()) ? null : 'an http address on this machine (127.0.0.1, localhost or ::1)')
+
+const sameEmbeddings = (a: EmbeddingSettings, b: EmbeddingSettings): boolean => a.provider === b.provider && a.llmUrl === b.llmUrl && a.llmModel === b.llmModel
+
+interface EmbeddingsAnswer {
+  /** What the summary shows; null when nothing was asked. */
+  shown: EmbeddingSettings | null
+  /** What to send: the flag, or an answer that differs from what is saved. */
+  send: EmbeddingSettings | undefined
+}
+
+/**
+ * Which embedder makes the vectors. Asked on a terminal only; a flag answers
+ * it. The default is what the running daemon has saved, else the local model,
+ * which is what a store with no saved choice gets anyway.
+ */
+/**
+ * The local LLM address offered for embeddings: the saved one, then an
+ * OpenAI-compatible observer's address on this machine (a separate setting;
+ * this only saves typing it twice), then Ollama's. A remote observer address
+ * is never offered, since embeddings stay on this machine.
+ */
+export function embeddingUrlDefault(saved: string | null, observers: readonly ObserverChoice[]): string {
+  if (saved !== null) return saved
+  const local = observers.find((choice) => choice.input.provider === 'openai-compatible' && choice.input.endpoint !== undefined && isLoopbackUrl(choice.input.endpoint))
+  return local?.input.endpoint ?? DEFAULT_LLM_URL
+}
+
+async function embeddingsStep(env: InstallEnv, ask: Prompts | null, flags: SetupFlags, observers: readonly ObserverChoice[] = []): Promise<EmbeddingsAnswer> {
+  if (flags.embeddings !== undefined) return { shown: flags.embeddings, send: flags.embeddings }
+  if (ask === null) return { shown: null, send: undefined }
+  const saved = (await getEmbeddingSettings(env)) ?? LOCAL_SETTINGS
+  const provider = await ask.select('Embeddings for semantic search:', EMBEDDING_CHOICES, saved.provider)
+  let picked: EmbeddingSettings = { ...LOCAL_SETTINGS, provider }
+  if (provider === 'local-llm') {
+    const llmUrl = (await ask.text('Local LLM address:', embeddingUrlDefault(saved.llmUrl, observers), loopbackOnly)).trim()
+    const llmModel = (await ask.text('Embedding model:', saved.llmModel ?? DEFAULT_LLM_MODEL, (value) => (value.trim() === '' ? 'a model name is needed' : null))).trim()
+    picked = { provider, llmUrl, llmModel, llmDims: null }
+  }
+  return { shown: picked, send: sameEmbeddings(picked, saved) ? undefined : picked }
+}
+
 /** The machine as seen from another folder: the env aimed there and the state read from it. */
 export interface FolderTarget {
   env: InstallEnv
@@ -559,8 +628,11 @@ export async function runWizard(
   const port = await portStep(env, ask, state, flags)
   const { updateCheck, autoUpdate } = await updatesStep(ask, state, flags)
   const holdout = await holdoutStep(env, ask, flags, hosts, profiles)
+  const embeddings = await embeddingsStep(env, ask, flags, observers)
   const path = await pathStep(env, ask, flags)
-  const answers: SetupAnswers = { dataDir, hosts, observers, encryption, port, updateCheck, autoUpdate, path, ...(holdout !== undefined ? { holdout } : {}) }
-  if (ask !== null) await summaryStep(env, ask, answers, flags, profiles)
+  const answers: SetupAnswers = {
+    dataDir, hosts, observers, encryption, port, updateCheck, autoUpdate, path, ...(holdout !== undefined ? { holdout } : {}), ...(embeddings.send !== undefined ? { embeddings: embeddings.send } : {}),
+  }
+  if (ask !== null) await summaryStep(env, ask, answers, flags, profiles, embeddings.shown)
   return answers
 }

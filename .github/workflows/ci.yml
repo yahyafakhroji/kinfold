@@ -59,6 +59,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bun tools/fetch-vec0.ts
 
+      # Exports KINFOLD_TEST_MODEL_DIR, so the tokenizer, model and embed
+      # worker tests run the real bundled model instead of skipping.
+      - name: Fetch the pinned embedding model
+        timeout-minutes: 5
+        run: bun tools/fetch-model.ts
+
       # 20 s per test: the 5 s default trips timing-sensitive daemon tests on
       # shared runners. Windows never delivers the 5 ms abort that
       # src/mcp/semantic-client.test.ts and src/vectors/embedder.test.ts await,

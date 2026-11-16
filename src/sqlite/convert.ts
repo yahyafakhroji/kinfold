@@ -58,9 +58,16 @@ function open(input: ConvertInput, key: string | null): Database {
   return key === null ? openPlain(input.path, options, input.env) : openEncrypted(input.path, key, options, input.env)
 }
 
-/** Row counts per table, FTS shadow tables included: the comparison that proves nothing was lost. */
+/**
+ * Row counts per table, FTS shadow tables included: the comparison that proves
+ * nothing was lost. A sqlite-vec index is left out: only the daemon loads its
+ * module, so reading the virtual table here would fail, and its shadow tables,
+ * counted like any other, hold its rows.
+ */
 export function rowCounts(db: Database): Map<string, number> {
-  const tables = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()
+  const tables = db.query<{ name: string }, []>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND NOT (sql LIKE 'CREATE VIRTUAL TABLE%' AND sql LIKE '%USING vec0%') ORDER BY name",
+  ).all()
   return new Map(tables.map(({ name }) => [name, db.query<{ n: number }, []>(`SELECT count(*) AS n FROM "${name.replace(/"/g, '""')}"`).get()!.n]))
 }
 

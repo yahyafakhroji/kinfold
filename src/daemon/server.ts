@@ -29,6 +29,7 @@ import type { HmacMode } from './hmac-rotation'
 import { type MemoryHandlers, memoryRoute } from './memory-routes'
 import type { ObserverModelsRoute } from './observer-models-route'
 import type { ObserverTestRoute } from './observer-test'
+import type { EmbeddingRoute } from './embedding-route'
 import { type ObserverSettingsHandlers, parseRecheck, parseSettingsPut } from './settings-route'
 import { type SemanticAnswer, type SemanticRequest, parseSemanticRequest } from '../vectors/search'
 import type { Exclusive } from '../vectors/vector-worker'
@@ -80,6 +81,8 @@ export interface ServerDeps {
   mcpRead: (read: McpRead) => number
   /** POST /observer/test: one fixed prompt through the chosen runner. */
   observerTest: ObserverTestRoute
+  /** GET and PUT /embedding/settings; absent in a daemon built without it. */
+  embeddingSettings?: EmbeddingRoute
   /** GET /observer/models: the installed CLI's model names, cached for ten minutes. */
   observerModels: ObserverModelsRoute
   /** Login codes and session cookies for the dashboard; in memory only. */
@@ -214,6 +217,10 @@ async function route(request: Request, url: URL, deps: ServerDeps, via: Credenti
     return postJson(request, parseRecheck, (provider) => json(200, { ok: true, cleared: deps.observerSettings.recheck(provider) }))
   }
   if (url.pathname === '/search/semantic') return semanticRoute(request, deps)
+  if (url.pathname === '/embedding/settings' && deps.embeddingSettings !== undefined) {
+    const answered = await deps.embeddingSettings(request.method, () => readJson(request))
+    return json(answered.status, answered.body)
+  }
   if (url.pathname === '/context') return postJson(request, parseContextRequest, async (value) => json(200, await deps.context(value)))
   if (url.pathname === '/metrics/mcp-read') return postJson(request, parseMcpRead, (value) => json(201, { id: deps.mcpRead(value) }))
   if (url.pathname === '/observer/retry') {

@@ -29,6 +29,7 @@ import { describeTextChange, readTextOrNull } from './files'
 import { isAgentLoaded, legacyPrintArgv } from './launch-agent'
 import { readDisplayFile } from '../context/display-file'
 import type { DisplayChange } from '../store/display-settings'
+import type { EmbeddingSettings } from '../vectors/embedding-settings'
 import { ChoiceError, type ChoiceOptions, type ObserverChoice } from './observer-choice'
 import { hmacMigrationActions } from './hmac-migration'
 import { hostVersionActions } from './host-wiring'
@@ -84,6 +85,8 @@ export interface InstallOptions extends ChoiceOptions {
   autoUpdate?: boolean
   /** --show-recall, --holdout and their opposites: only the switches a flag named. */
   display?: DisplayChange
+  /** --embeddings: the embedding provider to save. */
+  embeddings?: EmbeddingSettings
   /** Test seam for the update lock: its pid and liveness check, and the pid of the process that started this install. */
   lock?: UpdateLockDeps & { parentPid?: number }
   /** --path or --no-path: the answer to the PATH question, given up front. */
@@ -359,6 +362,16 @@ export function displayActions(env: InstallEnv, change: DisplayChange, noDaemon:
   return []
 }
 
+export const EMBEDDINGS_NOT_SENT_LINE = 'embedding choice: not sent, since no daemon is running; run kinfold install again once it runs'
+
+/** The embedding provider the flag or the question chose, sent once the daemon answers. */
+export function embeddingActions(env: InstallEnv, answers: SetupAnswers, noDaemon: boolean): Action[] {
+  if (answers.embeddings === undefined) return []
+  if (!noDaemon) return [{ kind: 'embedding-put', settings: answers.embeddings }]
+  noticeOf(env)(EMBEDDINGS_NOT_SENT_LINE)
+  return []
+}
+
 /** The switches to send: the ones a flag named, and the impact test when the wizard's answer differs from what is saved. */
 function displayChange(env: InstallEnv, options: InstallOptions, answers: SetupAnswers): DisplayChange {
   const flagged = options.display ?? {}
@@ -452,6 +465,7 @@ export async function buildPlan(
     [null, serviceActions(env, service, plannedSituation, options.takeover, hmac.restartDaemon || sqlite3mc.restartDaemon || vec0.restartDaemon, answers.port)],
     [null, await plannedSettingsActions(env, choices, state, manual && !situation.health.up)],
     [null, displayActions(env, displayChange(env, options, answers), manual && !situation.health.up)],
+    [null, embeddingActions(env, answers, manual && !situation.health.up)],
     [null, hmac.cleanup],
     [null, recordActions(env, state, answers, saved, path)],
   ]
@@ -579,6 +593,7 @@ function setupFlags(options: InstallOptions, envVars: Readonly<Record<string, st
     yes: options.yes,
     path: options.path ?? null,
     ...(options.display?.holdout !== undefined ? { holdout: options.display.holdout } : {}),
+    ...(options.embeddings !== undefined ? { embeddings: options.embeddings } : {}),
   }
 }
 

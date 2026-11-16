@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { parseProviderModel, settingsInputFor } from './observer-choice'
+import { LOCAL_ENDPOINT, defaultEndpoint, parseProviderModel, settingsInputFor } from './observer-choice'
 
 
 test('settingsInputFor gives a CLI-login provider no credential ref', () => {
@@ -244,4 +244,13 @@ test('a built-in object name is not taken for an unproven provider', async () =>
   world = createWorld({ interactive: true, answers: ['constructor', ''] })
   await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: async () => new Map() })
   expect(world.out.some((line) => line.startsWith('constructor cannot be picked'))).toBe(false)
+})
+
+test('the OpenAI-compatible observer offers the local LLM embedding address when no observer has one saved', () => {
+  const embeddingUrl = 'http://127.0.0.1:1234/v1'
+  expect(defaultEndpoint('openai-compatible', 'codex', undefined, embeddingUrl)).toBe(embeddingUrl)
+  expect(defaultEndpoint('openai-compatible', 'codex', undefined, null)).toBe(LOCAL_ENDPOINT)
+  const saved = new Map([['codex', { host: 'codex', provider: 'openai-compatible', model: 'm', credentialRef: null, enabled: true, endpoint: 'http://127.0.0.1:9/v1' }]]) as Parameters<typeof defaultEndpoint>[2]
+  expect(defaultEndpoint('openai-compatible', 'codex', saved, embeddingUrl)).toBe('http://127.0.0.1:9/v1')
+  expect(defaultEndpoint('qwen-api', 'codex', undefined, embeddingUrl)).not.toBe(embeddingUrl)
 })

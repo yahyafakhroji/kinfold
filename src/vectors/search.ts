@@ -1,6 +1,6 @@
 // The vector half of hybrid search, served by the daemon on
 // POST /search/semantic: embed the query, then the nearest observations of
-// the project. The embed is the slow part (a round trip to OpenRouter), so
+// the project. The embed is the slow part (a model run or a round trip), so
 // it runs under the caller's deadline and recent query vectors stay in an
 // in-memory LRU: an agent paging through results, or retrying, pays once.
 // Query text lives only in that map and the embed call; it is never logged
@@ -46,8 +46,14 @@ export type SemanticAnswer =
 
 export interface SemanticSearchDeps {
   db: Database
-  /** Null without an OpenRouter key. */
+  /** The embedder of the space search uses; null when there is none. */
   embedder: Embedder | null
+  /**
+   * Asked at every search instead of `embedder` when set: the daemon's space
+   * can change under a running search route (a switch completes). reason says
+   * why there is none.
+   */
+  embedderFor?: () => { embedder: Embedder | null; reason: string }
   /** Whether sqlite-vec loaded into db, and why not. */
   support: Support
   /** Where the vector reads run; default db on the caller's thread. The daemon passes its search worker. */
@@ -118,11 +124,13 @@ function createQueryCache(size: number): QueryCache {
 type Embedded = { ok: true; vector: Float32Array; cached: boolean } | { ok: false; answer: SemanticAnswer }
 
 async function queryVector(embedder: Embedder, cache: QueryCache, request: SemanticRequest, elapsed: () => number): Promise<Embedded> {
-  const hit = cache.get(request.query)
+  // Keyed by space too: after a switch the old space's vectors mean nothing.
+  const key = `${embedder.dims}:${embedder.model}\n${request.query}`
+  const hit = cache.get(key)
   if (hit !== undefined) return { ok: true, vector: hit, cached: true }
   try {
-    const [vector] = await embedder.embed([request.query], AbortSignal.timeout(request.deadlineMs))
-    cache.set(request.query, vector!)
+    const [vector] = await embedder.embed([request.query], AbortSignal.timeout(request.deadlineMs), 'query')
+    cache.set(key, vector!)
     return { ok: true, vector: vector!, cached: false }
   } catch (error: unknown) {
     if (error instanceof EmbedError && error.kind === 'timeout') return { ok: false, answer: { status: 'timeout', ms: Math.round(elapsed()) } }
@@ -137,8 +145,9 @@ export function createSemanticSearch(deps: SemanticSearchDeps): (request: Semant
   const queries = deps.queries ?? inlineVectorQueries(deps.db)
   return async (request) => {
     if (!deps.support.ok) return { status: 'unavailable', reason: deps.support.reason }
-    const embedder = deps.embedder
-    if (embedder === null) return { status: 'unavailable', reason: 'no OpenRouter key in the keychain for embeddings' }
+    const chosen = deps.embedderFor?.() ?? { embedder: deps.embedder, reason: 'no OpenRouter key in the keychain for embeddings' }
+    const embedder = chosen.embedder
+    if (embedder === null) return { status: 'unavailable', reason: chosen.reason }
     const startedAt = now()
     const embedded = await queryVector(embedder, cache, request, () => now() - startedAt)
     if (!embedded.ok) return embedded.answer

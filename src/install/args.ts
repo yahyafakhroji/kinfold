@@ -10,6 +10,7 @@ import type { DataSettingsChange } from '../store/data-settings-store'
 import { builtProfiles } from '../agents/install-profiles'
 import { INSTALL_HOSTS, type InstallHost } from './detect'
 import type { DisplayChange } from '../store/display-settings'
+import { type EmbeddingSettings, parseEmbeddingSettings } from '../vectors/embedding-settings'
 import { type ObserverFlag, defaultInput, parseProviderModel, withObserverEndpoint } from './observer-choice'
 
 export const COMMANDS = ['install', 'uninstall', 'status', 'update'] as const
@@ -48,6 +49,8 @@ export interface CliArgs {
   /** --holdout / --no-holdout: the opt-in impact test. Neither: left as it is. */
   holdout: boolean
   noHoldout: boolean
+  /** --embeddings: the embedding provider, sent to the daemon. null: left as it is, or asked. */
+  embeddings: EmbeddingSettings | null
 }
 
 type BooleanFlag = 'addPath' | 'noPath' | 'verbose' | 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck' | 'noAutoUpdate' | 'autoUpdate' | 'auto'
@@ -93,6 +96,8 @@ export const USAGE = [
   '             [--path | --no-path] [--verbose] [--show-recall|--no-show-recall] [--holdout|--no-holdout]',
   '             --no-show-recall hides the line and list agents show for what Kinfold recalled; --holdout turns on the impact test, which',
   '             holds recall back on about 1 prompt in 10 (Claude Code only, and says so each time) to measure what memory changes',
+  '             [--embeddings local|openrouter|local-llm:<model>@<url>]   what makes the vectors for semantic search: the bundled',
+  '             local model (default, on this machine), OpenRouter (uses the OpenRouter key), or a local LLM server on loopback',
   '             --path puts the kinfold command on your PATH without asking; --no-path adds nothing and takes out what an earlier install added;',
   '             --verbose shows every step on a terminal (the full list is always in <data-dir>/logs/install.log)',
   '  update     [--dry-run]',
@@ -379,7 +384,7 @@ export function parseObserverFlag(value: string): Parsed<ObserverFlag> {
 }
 
 function initial(command: Command): CliArgs {
-  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], observerEndpoint: null, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false }
+  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], observerEndpoint: null, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false, embeddings: null }
 }
 
 /** `--flag value` or `--flag=value`; returns the value and how many argv slots it used. */
@@ -399,7 +404,24 @@ function parsePort(value: string): Parsed<number> {
   return { ok: true, value: port }
 }
 
+const EMBEDDINGS_USAGE = '--embeddings takes local, openrouter or local-llm:<model>@<url>'
+
+/** local, openrouter, or local-llm:<model>@<url>; the URL is split at the last @, since a model name has none. */
+export function parseEmbeddingsFlag(value: string): Parsed<EmbeddingSettings> {
+  if (value === 'local' || value === 'openrouter') return parseEmbeddingSettings({ provider: value })
+  if (!value.startsWith('local-llm:')) return { ok: false, error: EMBEDDINGS_USAGE }
+  const rest = value.slice('local-llm:'.length)
+  const at = rest.lastIndexOf('@')
+  if (at <= 0) return { ok: false, error: EMBEDDINGS_USAGE }
+  const parsed = parseEmbeddingSettings({ provider: 'local-llm', llmModel: rest.slice(0, at), llmUrl: rest.slice(at + 1) })
+  return parsed.ok ? parsed : { ok: false, error: `--embeddings: ${parsed.error}` }
+}
+
 function applyValueFlag(args: CliArgs, name: string, value: string): Parsed<CliArgs> {
+  if (name === '--embeddings') {
+    const embeddings = parseEmbeddingsFlag(value)
+    return embeddings.ok ? { ok: true, value: { ...args, embeddings: embeddings.value } } : embeddings
+  }
   if (name === '--port') {
     const port = parsePort(value)
     return port.ok ? { ok: true, value: { ...args, port: port.value } } : port
@@ -431,7 +453,7 @@ export function parseArgs(argv: readonly string[]): Parsed<CliArgs> {
       index += 1
       continue
     }
-    const name = ['--hosts', '--observer-endpoint', '--observer', '--port'].find((flag) => arg === flag || arg.startsWith(`${flag}=`))
+    const name = ['--hosts', '--observer-endpoint', '--observer', '--port', '--embeddings'].find((flag) => arg === flag || arg.startsWith(`${flag}=`))
     if (name === undefined) return { ok: false, error: `unknown argument ${JSON.stringify(arg)}\n${USAGE}` }
     if (args.command !== 'install') return { ok: false, error: `${name} does not apply to ${args.command}` }
     const found = valueOf(argv, index, name)

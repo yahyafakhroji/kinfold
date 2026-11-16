@@ -91,3 +91,16 @@ test('--observer-endpoint gives the OpenAI-compatible observer its address, in e
   expect(parseArgs(['status', '--observer-endpoint', 'https://x.example.com'])).toEqual({ ok: false, error: '--observer-endpoint does not apply to status' })
   expect(USAGE).toContain('--observer-endpoint <url>')
 })
+
+test('--embeddings picks the provider; a local LLM takes its model and loopback address', () => {
+  expect(parseArgs(['install'])).toMatchObject({ ok: true, value: { embeddings: null } })
+  expect(parseArgs(['install', '--embeddings', 'local'])).toMatchObject({ ok: true, value: { embeddings: { provider: 'local', llmUrl: null, llmModel: null, llmDims: null } } })
+  expect(parseArgs(['install', '--embeddings=openrouter'])).toMatchObject({ ok: true, value: { embeddings: { provider: 'openrouter' } } })
+  expect(parseArgs(['install', '--embeddings', 'local-llm:nomic-embed-text@http://127.0.0.1:11434/v1'])).toMatchObject({
+    ok: true, value: { embeddings: { provider: 'local-llm', llmModel: 'nomic-embed-text', llmUrl: 'http://127.0.0.1:11434/v1', llmDims: null } },
+  })
+  expect(parseArgs(['install', '--embeddings', 'local-llm:m@http://10.0.0.1:11434'])).toMatchObject({ ok: false, error: expect.stringContaining('on this machine') })
+  expect(parseArgs(['install', '--embeddings', 'agent'])).toMatchObject({ ok: false, error: expect.stringContaining('--embeddings takes local, openrouter or local-llm:<model>@<url>') })
+  expect(parseArgs(['status', '--embeddings', 'local'])).toEqual({ ok: false, error: '--embeddings does not apply to status' })
+  expect(USAGE).toContain('--embeddings local|openrouter|local-llm:<model>@<url>')
+})

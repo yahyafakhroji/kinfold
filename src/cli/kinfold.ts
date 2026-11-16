@@ -103,7 +103,10 @@ export function parseGlobalArgs(argv: readonly string[]): Parsed<GlobalArgs> {
  * `env` is the caller's already-built environment (tests); the real CLI leaves
  * it out, so the modules behind an installer command load only when one runs.
  */
-export async function runKinfold(argv: readonly string[], env?: InstallEnv, runners: Partial<SubcommandRunners> = {}): Promise<number> {
+/** `embed-check` loads the bundled model and embeds fixed texts; the release smoke runs it on every target. */
+export type ExtraRunners = { embedCheck?: () => Promise<number> }
+
+export async function runKinfold(argv: readonly string[], env?: InstallEnv, runners: Partial<SubcommandRunners> & ExtraRunners = {}): Promise<number> {
   const write = env?.out ?? ((line: string): void => {
     process.stdout.write(`${line}\n`)
   })
@@ -123,6 +126,9 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     const { USAGE } = await import('../install/args')
     write(USAGE)
     return 0
+  }
+  if (name === 'embed-check' && args.length === 1) {
+    return (runners.embedCheck ?? (await import('../vectors/embed-check')).runEmbedCheck)()
   }
   if (isSubcommand(name)) {
     const run = runners[name] ?? (await loadSubcommand(name))
@@ -225,6 +231,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       noAutoUpdate: installArgs.noAutoUpdate,
       autoUpdate: installArgs.autoUpdate,
       display: displayChangeOf(installArgs),
+      ...(installArgs.embeddings !== null ? { embeddings: installArgs.embeddings } : {}),
       path: installArgs.path,
       verbose: installArgs.verbose,
     })

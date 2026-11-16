@@ -463,11 +463,67 @@ const V14_OBSERVER_ENDPOINT = `
 ALTER TABLE observer_settings ADD COLUMN endpoint TEXT;
 `
 
+// v15: embedding spaces side by side. observation_vectors is keyed by
+// (model, dims, observation_id), so a switch of embedder builds the new space
+// while search keeps using the old one. The rebuild copies every row; the
+// unique index keeps the name the backlog queries are planned against.
+//   vector_spaces: the space search uses ('active') and the one being built
+//     ('building'). Each space's vec0 index is vec_space_<id>, made by the
+//     daemon, since only it loads sqlite-vec. The space with the most rows
+//     starts active, so an existing store searches as before.
+//   embedding_settings: the provider the user chose; no row until a choice
+//     or the daemon's first-start default.
+const V15_EMBEDDING_SPACES = `
+CREATE TABLE observation_vectors_v14 (
+  id INTEGER PRIMARY KEY,
+  observation_id INTEGER NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+  model TEXT NOT NULL,
+  dims INTEGER NOT NULL CHECK (dims > 0),
+  embedding BLOB NOT NULL CHECK (length(embedding) = dims * 4),
+  created_at INTEGER NOT NULL
+);
+INSERT INTO observation_vectors_v14 (observation_id, model, dims, embedding, created_at)
+  SELECT observation_id, model, dims, embedding, created_at FROM observation_vectors ORDER BY observation_id;
+DROP TABLE observation_vectors;
+ALTER TABLE observation_vectors_v14 RENAME TO observation_vectors;
+CREATE UNIQUE INDEX observation_vectors_by_space ON observation_vectors(model, dims, observation_id);
+CREATE INDEX observation_vectors_by_observation ON observation_vectors(observation_id);
+
+CREATE TABLE vector_spaces (
+  id INTEGER PRIMARY KEY,
+  model TEXT NOT NULL,
+  dims INTEGER NOT NULL CHECK (dims > 0),
+  state TEXT NOT NULL CHECK (state IN ('active', 'building')),
+  -- 1 once vec_space_<id> holds every vector of the space; until then search scans.
+  vec_ready INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  UNIQUE (model, dims)
+);
+CREATE UNIQUE INDEX vector_spaces_one_per_state ON vector_spaces(state);
+-- A vector deleted anywhere (purge, redaction, retention) leaves its copy in
+-- the space's vec0 index, which only the daemon can write. Marking the space
+-- not ready sends search back to the scan and the daemon to reconcile at once.
+CREATE TRIGGER observation_vectors_deleted AFTER DELETE ON observation_vectors BEGIN
+  UPDATE vector_spaces SET vec_ready = 0 WHERE model = OLD.model AND dims = OLD.dims AND vec_ready = 1;
+END;
+INSERT INTO vector_spaces (model, dims, state, created_at)
+  SELECT model, dims, 'active', 0 FROM observation_vectors GROUP BY model, dims ORDER BY count(*) DESC LIMIT 1;
+
+CREATE TABLE embedding_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  provider TEXT NOT NULL CHECK (provider IN ('local', 'openrouter', 'local-llm')),
+  llm_url TEXT,
+  llm_model TEXT,
+  llm_dims INTEGER CHECK (llm_dims IS NULL OR llm_dims > 0),
+  updated_at INTEGER NOT NULL
+);
+`
+
 /** Index i holds the migration that takes user_version from i to i + 1. */
 export const MIGRATIONS: readonly string[] = [
   V1_CORE + V1_MEMORY + V1_DELIVERY, V2_OBSERVER, V3_CONTEXT, V4_DATA_CONTROL, V5_LINKS, V6_USAGE, V7_SHARED_SUMMARIES, V8_VECTORS, V9_RELATED_SERVED,
   V10_OBSERVER_SAFETY, V11_VECTOR_SPACE_INDEX, V12_VISIBLE, V13_LATE_AND_INDEXES,
-  V14_OBSERVER_ENDPOINT,
+  V14_OBSERVER_ENDPOINT, V15_EMBEDDING_SPACES,
 ]
 
 /**

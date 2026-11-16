@@ -23,14 +23,28 @@ afterEach(() => temp.cleanup())
 const seed = (title: string): number => seedObservation(temp.store, { sessionId: session, projectKey: PROJECT, host: 'claude-code', title, at: T0 })
 const indexer = (batchSize = 2) => createVectorIndexer({ db: temp.store.db, embedder, batchSize, maxBatchesPerTick: 3, now: () => clock, log: (line) => logs.push(line) })
 
-test('each batch reports the ids it embedded, so the search worker can re-read them', async () => {
+test('each batch reports the rows it wrote with their vectors, so the daemon can index them', async () => {
   const ids = ['a', 'b', 'c'].map(seed)
-  const written: number[][] = []
+  const written: { id: number; vector: Float32Array }[][] = []
   const vectors = createVectorIndexer({ db: temp.store.db, embedder, batchSize: 2, maxBatchesPerTick: 3, now: () => clock, log: () => {}, onWritten: (batch) => written.push([...batch]) })
   vectors.tick()
   await vectors.whenIdle()
   expect(written.map((batch) => batch.length)).toEqual([2, 1])
-  expect(written.flat().sort((a, b) => a - b)).toEqual([...ids].sort((a, b) => a - b))
+  expect(written.flat().map((row) => row.id).sort((a, b) => a - b)).toEqual([...ids].sort((a, b) => a - b))
+  expect(written.flat().every((row) => row.vector.length === embedder.dims)).toBe(true)
+})
+
+test('the batch cap is read at each tick, so the daemon can slow indexing down', async () => {
+  for (const title of ['a', 'b', 'c', 'd', 'e']) seed(title)
+  let cap = 1
+  const vectors = createVectorIndexer({ db: temp.store.db, embedder, batchSize: 1, maxBatchesPerTick: () => cap, now: () => clock, log: () => {} })
+  vectors.tick()
+  await vectors.whenIdle()
+  expect(vectors.status().indexed).toBe(1)
+  cap = 3
+  vectors.tick()
+  await vectors.whenIdle()
+  expect(vectors.status().indexed).toBe(4)
 })
 
 test('backoff doubles from the base and stops at the cap', () => {

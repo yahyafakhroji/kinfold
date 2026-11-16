@@ -82,11 +82,16 @@ import { type MemoryReader, openMemoryReader } from '../mcp/reader'
 import { MCP_SEMANTIC_TIMEOUT_MS, type SemanticClient } from '../mcp/semantic-client'
 import { settingsHandlers } from './settings-route'
 import type { Embedder } from '../vectors/embedder'
+import { type EmbedderSet, NO_OPENROUTER_KEY } from '../vectors/embedders'
+import { probeLocalLlmDims } from '../vectors/local-llm-embedder'
+import { embeddingSettingsRoute } from './embedding-route'
 import { type Support, loadVec0 } from '../vectors/extension'
 import { DEFAULT_INDEX_TICK_MS, type VectorIndexer, createVectorIndexer } from '../vectors/indexer'
 import { type SemanticAnswer, type SemanticRequest, createSemanticSearch } from '../vectors/search'
 import { createRestarter } from './restart'
 import { type VectorQueries, inlineVectorQueries, startVectorWorker, workerOrInline } from '../vectors/vector-worker'
+import { type SpaceManager, createSpaceManager } from '../vectors/space-manager'
+import { LOCAL_MODEL_ID } from '../vectors/local-model'
 
 export const DEFAULT_PORT = 37_811
 export const FALLBACK_DRAIN_MS = 2_000
@@ -137,8 +142,10 @@ export interface DaemonBackupOptions {
 }
 
 export interface DaemonVectorOptions {
-  /** Null without an OpenRouter key: nothing is embedded. */
-  embedder: Embedder | null
+  /** The embedder of the configured space; null: none, so nothing is embedded. Tests pass this. */
+  embedder?: Embedder | null
+  /** Built from the store's embedding settings at each core start (main.ts); wins over embedder. */
+  embedders?: (db: Database) => EmbedderSet
   tickMs?: number
 }
 
@@ -149,9 +156,13 @@ interface Vectors {
   timer: Timer | null
   /** Closed on stop: ends the search worker when there is one. */
   queries: VectorQueries
+  spaces: SpaceManager
+  close: () => Promise<void>
 }
 
 const VECTORS_OFF: Support = { ok: false, reason: 'semantic search is not configured in this daemon' }
+/** The local model runs on this machine's CPU: two batches of 32 per tick keep it to a fraction of one core. */
+export const LOCAL_BATCHES_PER_TICK = 2
 
 /**
  * The same embedder, with each call it makes counted for the Metrics page.
@@ -163,40 +174,65 @@ export function countedEmbedder(db: Database, embedder: Embedder, log: (line: st
   return {
     model: embedder.model,
     dims: embedder.dims,
-    embed: (texts, signal) => {
+    embed: (texts, signal, purpose) => {
       try {
         countEmbeddingCall(db, texts.length, Date.now())
       } catch (error: unknown) {
         log(`embedding call not counted: ${error instanceof Error ? error.name : 'error'}`)
       }
-      return embedder.embed(texts, signal)
+      return embedder.embed(texts, signal, purpose)
     },
   }
 }
 
+/** The embedder whose space search reads now, or why there is none. */
+function searchEmbedder(spaces: SpaceManager, embedders: readonly Embedder[], reason: string): { embedder: Embedder | null; reason: string } {
+  const space = spaces.searchSpace()
+  if (space === null) return { embedder: null, reason: embedders.length === 0 ? reason : 'no embedding space yet' }
+  const embedder = embedders.find((candidate) => candidate.model === space.model && candidate.dims === space.dims) ?? null
+  return { embedder, reason: embedder === null ? `the embedder for ${space.model} is not available; search returns once the new space is built` : '' }
+}
+
 /**
- * Loads sqlite-vec, starts the indexer when there is an embedder, and builds the
- * search. Indexing works without the extension. The nearest-vector scan runs in
- * a worker on its own read-only connection, so a slow search never holds the
- * thread that answers /health and hooks.
+ * Loads sqlite-vec, keeps the embedding spaces and their vec0 indexes, starts
+ * the indexer when there is an embedder, and builds the search. Indexing works
+ * without the extension. The nearest-vector reads run in a worker on its own
+ * read-only connection, so a slow search never holds the thread that answers
+ * /health and hooks.
  */
 function startVectors(store: Store, dataDir: string, dbKeys: DbKeyStore, options: DaemonVectorOptions | undefined, log: (line: string) => void): Vectors {
   const db = store.db
   const support = options === undefined ? VECTORS_OFF : loadVec0(db, dataDir)
-  const embedder = options?.embedder === undefined || options.embedder === null ? null : countedEmbedder(db, options.embedder, log)
-  log(`vectors search=${support.ok ? `on (${support.detail})` : `off (${support.reason})`} embedder=${embedder === null ? 'none' : embedder.model}`)
+  const set: EmbedderSet = options?.embedders?.(db) ?? { target: options?.embedder ?? null, others: [], reason: NO_OPENROUTER_KEY }
+  const embedder = set.target === null ? null : countedEmbedder(db, set.target, log)
+  const all = [...(embedder === null ? [] : [embedder]), ...set.others.map((other) => countedEmbedder(db, other, log))]
+  log(`vectors search=${support.ok ? `on (${support.detail})` : `off (${support.reason})`} embedder=${embedder === null ? `none (${set.reason})` : embedder.model}`)
+  const spaces = createSpaceManager({ db, vec0: support.ok, target: embedder === null ? null : { model: embedder.model, dims: embedder.dims }, now: Date.now, log })
+  const step = (): void => {
+    try {
+      spaces.step()
+    } catch (error: unknown) {
+      log(`vectors upkeep failed (${error instanceof Error ? error.message.slice(0, 120) : 'error'})`)
+    }
+  }
+  step()
   const inline = inlineVectorQueries(db)
-  // The worker loads the embedder's vectors into memory at start, so the first search after a restart is quick too.
-  const queries = support.ok && embedder !== null
+  const queries = support.ok && all.length > 0
     ? workerOrInline(startVectorWorker({
       dbPath: store.path, dataDir, key: dbKeys.read(), libraryOverride: readEnv(process.env, 'SQLITE3MC_LIB') ?? null, cacheKib: DAEMON_CACHE_KIB,
-      prewarm: { model: embedder.model, dims: embedder.dims }, log,
     }), inline, log)
     : inline
-  const indexer = embedder === null ? null : createVectorIndexer({ db, embedder, log, onWritten: (ids) => queries.changed(ids) })
-  const timer = indexer === null ? null : setInterval(() => indexer.tick(), options?.tickMs ?? DEFAULT_INDEX_TICK_MS)
+  const indexer = embedder === null ? null : createVectorIndexer({
+    db, embedder, log, onWritten: (rows) => spaces.written(rows),
+    ...(embedder.model === LOCAL_MODEL_ID ? { maxBatchesPerTick: LOCAL_BATCHES_PER_TICK } : {}),
+  })
+  const timer = indexer === null && all.length === 0 ? null : setInterval(() => {
+    step()
+    indexer?.tick()
+  }, options?.tickMs ?? DEFAULT_INDEX_TICK_MS)
   indexer?.tick()
-  return { indexer, support, search: createSemanticSearch({ db, embedder, support, queries }), timer, queries }
+  const search = createSemanticSearch({ db, embedder, embedderFor: () => searchEmbedder(spaces, all, set.reason), support, queries })
+  return { indexer, support, search, timer, queries, spaces, close: async () => set.close?.() }
 }
 
 export interface DaemonObserverOptions {
@@ -236,7 +272,7 @@ export interface RunningDaemon {
 }
 
 /** The routes that read or write memory.db; a restore swaps them for the new store's. */
-type CoreRoutes = Pick<ServerDeps, 'schemaVersion' | 'vectorSearch' | 'semanticSearch' | 'onNudge' | 'listSessions' | 'context' | 'retryFailed' | 'observerSettings' | 'data' | 'exclusive' | 'memory' | 'metrics' | 'watch' | 'sessions' | 'mcpRead' | 'reads'>
+type CoreRoutes = Pick<ServerDeps, 'schemaVersion' | 'vectorSearch' | 'semanticSearch' | 'onNudge' | 'listSessions' | 'context' | 'retryFailed' | 'observerSettings' | 'data' | 'exclusive' | 'memory' | 'metrics' | 'watch' | 'sessions' | 'mcpRead' | 'reads' | 'embeddingSettings'>
 
 /** Everything that holds memory.db open. */
 interface Core {
@@ -414,6 +450,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const hmacKeys = createHmacKeys({ dataDir, keychain: options.keychain ?? NO_CREDENTIALS, now: options.hmac?.now ?? Date.now, log })
   const projectKeyFor = createProjectKeyResolver(gitRunnerWithTimeout(DAEMON_GIT_TIMEOUT_MS))
 
+  /** Bound once the restarter exists; a change saved before that has nothing to restart. */
+  let applyEmbedding = (): void => {}
   function startCore(): Core {
     // One key lookup for the writer and the /read/ reader alike; a new core asks again, since a restore changes the key.
     const dbKeys = rememberedDbKeys(options.dbKeys ?? dbKeyStoreFor(dataDir))
@@ -481,6 +519,13 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       sessions: (method, url) => sessionRoute(method, url, store.db, log),
       mcpRead: mcpReadHandler(store.db, log),
       reads: reads.deps,
+      embeddingSettings: embeddingSettingsRoute({
+        db: store.db,
+        status: () => ({ ...vectors.spaces.status(), lastError: vectors.indexer?.status().lastError ?? null }),
+        probe: (probe) => probeLocalLlmDims(probe),
+        now: Date.now,
+        apply: () => applyEmbedding(),
+      }),
     }
     // Off the thread that answers hooks; on this connection if the worker cannot start.
     const snapshot = (dest: string): Promise<number> =>
@@ -499,6 +544,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       reads.close()
       // Before the store closes: a retention tick queued behind the worker would otherwise run on a closed db.
       await vectors.queries.close()
+      await vectors.close()
       store.db.close()
     }
     return { routes, scheduler, observer, indexer: vectors.indexer, snapshot, stop }
@@ -519,6 +565,32 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     onFatal,
   })
   const restart = (between: () => Promise<void>): Promise<void> => restarter.restart(between)
+  // One restart at a time, after the answer is out (the restart closes the store
+  // the answer was read from). Changes saved while one runs collapse into one
+  // more, which starts from what is saved by then: two restarts at once would
+  // each stop the same core and start a core of their own.
+  let embeddingRestart: Promise<void> | null = null
+  let restartAgain = false
+  applyEmbedding = () => {
+    if (embeddingRestart !== null) {
+      restartAgain = true
+      return
+    }
+    embeddingRestart = new Promise<void>((resolve) => setTimeout(resolve, 0))
+      .then(() => restarter.inFlight()?.catch(() => {}))
+      .then(() => {
+        log('embedding settings changed; restarting the store core')
+        return restart(async () => {})
+      })
+      .catch((error: unknown) => log(`embedding restart failed: ${errorMessage(error)}`))
+      .finally(() => {
+        embeddingRestart = null
+        if (restartAgain) {
+          restartAgain = false
+          applyEmbedding()
+        }
+      })
+  }
 
   const backup: BackupRoutes = backupRoutes({
     dataDir,

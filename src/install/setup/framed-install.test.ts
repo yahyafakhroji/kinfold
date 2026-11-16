@@ -20,8 +20,10 @@ import { createClackPrompts } from '../prompt/clack'
 import { fakeTerminal } from '../prompt/fake-terminal'
 import { type FakeWorld, YES, createWorld, fakeService, snapshotTree } from '../test-support'
 import { INSTALL_RECORD_FILE, readInstallRecord } from './record'
+import type { EmbeddingSettings } from '../../vectors/embedding-settings'
 
 const ENTER = '\r'
+const DOWN = '\u001b[B'
 /** The log as the summary names it: under ~, in this OS's own separators. */
 const TILDE_LOG = join('~', '.kinfold', 'logs', 'install.log')
 const ESCAPE = '\u001b'
@@ -67,12 +69,12 @@ const tilde = (made: Made, path: string): string => path.replace(made.w.home, '~
 const logOf = (w: FakeWorld): string[] => readFileSync(installLogPath(w.dataDir), 'utf8').split('\n')
 const numbered = (lines: readonly string[]): string[] => lines.filter((line) => /^ {2}\d+\. /.test(line))
 
-// folder, agents, observer, port, updates, impact test, PATH, summary
-const EIGHT_ENTERS = Array(8).fill(ENTER)
+// folder, agents, observer, port, updates, impact test, embeddings, PATH, summary
+const NINE_ENTERS = Array(9).fill(ENTER)
 
 posixOnly('POSIX paths')('a terminal install shows the bar and a summary, and keeps every line in logs/install.log', async () => {
   const made = program()
-  const term = onTerminal(made, EIGHT_ENTERS)
+  const term = onTerminal(made, NINE_ENTERS)
   expect(await install(made.w.env, { ...made.options, yes: false })).toBe(EXIT_OK)
 
   // Nothing went to the plain output, and no numbered step reached the screen.
@@ -112,7 +114,7 @@ posixOnly('POSIX paths')('a terminal install shows the bar and a summary, and ke
 
 posixOnly('POSIX paths')('--verbose shows each numbered step above the bar, as it ends', async () => {
   const made = program()
-  const term = onTerminal(made, EIGHT_ENTERS)
+  const term = onTerminal(made, NINE_ENTERS)
   expect(await install(made.w.env, { ...made.options, yes: false, verbose: true })).toBe(EXIT_OK)
   const shown = screenLines(term.output()).filter((line) => /^\| {4}\d+\. .* {2}\[done\]$/.test(line))
   expect(shown).toHaveLength(numbered(logOf(made.w)).length)
@@ -121,13 +123,13 @@ posixOnly('POSIX paths')('--verbose shows each numbered step above the bar, as i
 
 posixOnly('POSIX paths')('answering no to the PATH question links the command and leaves the startup file alone', async () => {
   const made = program()
-  onTerminal(made, [ENTER, ENTER, ENTER, ENTER, ENTER, ENTER, 'n', ENTER])
+  onTerminal(made, [ENTER, ENTER, ENTER, ENTER, ENTER, ENTER, ENTER, 'n', ENTER])
   expect(await install(made.w.env, { ...made.options, yes: false })).toBe(EXIT_OK)
   expect(lstatSync(made.link).isSymbolicLink()).toBe(true)
   expect(readFileSync(made.zshrc, 'utf8')).toBe('export A=1\n')
   expect(readInstallRecord(made.w.dataDir)).toMatchObject({ pathSetup: 'declined', pathLink: made.link })
   // And it stays declined: the next install neither asks nor adds.
-  const again = onTerminal(made, Array(7).fill(ENTER))
+  const again = onTerminal(made, Array(8).fill(ENTER))
   expect(await install(made.w.env, { ...made.options, yes: false })).toBe(EXIT_OK)
   expect(again.output()).not.toContain('Add kinfold to your PATH?')
   expect(await install({ ...made.w.env, terminal: null }, made.options)).toBe(EXIT_OK)
@@ -138,7 +140,7 @@ posixOnly('POSIX paths')('answering no to the PATH question links the command an
 test('a step that fails stops the bar and shows its line, the reason and the log, which holds every step up to it', async () => {
   const made = program()
   made.w.env = { ...made.w.env, service: fakeService({ running: false, startError: new Error('the service manager said no') }) }
-  const term = onTerminal(made, EIGHT_ENTERS)
+  const term = onTerminal(made, NINE_ENTERS)
   expect(await install(made.w.env, { ...made.options, yes: false })).toBe(EXIT_FAILED)
   const screen = screenLines(term.output())
   const stopped = screen.findIndex((line) => /^x {2}stopped at step \d+ of \d+: starting the daemon$/.test(line))
@@ -167,7 +169,7 @@ test('Ctrl-C at a question ends the frame, exits 130 and writes nothing, not eve
 
 test('a dry run on a terminal lists the whole plan, PATH steps included, and changes nothing', async () => {
   const made = program()
-  const term = onTerminal(made, EIGHT_ENTERS)
+  const term = onTerminal(made, NINE_ENTERS)
   const before = snapshotTree(made.w.home)
   expect(await install(made.w.env, { ...made.options, yes: false, dryRun: true })).toBe(EXIT_OK)
   const screen = screenLines(term.output())
@@ -192,22 +194,39 @@ test('the impact test answer is sent to the daemon only when it changes what is 
     world = null
     return lines.map((line) => line.replace(/^\s*\d+\. /, ''))
   }
-  const yes = [ENTER, ENTER, ENTER, ENTER, ENTER, 'y', ENTER, ENTER]
+  const yes = [ENTER, ENTER, ENTER, ENTER, ENTER, 'y', ENTER, ENTER, ENTER]
   // Yes on a machine where it is off: sent. Enter keeps the default, no: nothing to send.
   expect(await sent(yes)).toEqual(['PUT /data/display holdout=true'])
-  expect(await sent(EIGHT_ENTERS)).toEqual([])
+  expect(await sent(NINE_ENTERS)).toEqual([])
   // A saved yes is the default: Enter keeps it and sends nothing; no turns it off.
-  expect(await sent(EIGHT_ENTERS, true)).toEqual([])
-  expect(await sent([ENTER, ENTER, ENTER, ENTER, ENTER, 'n', ENTER, ENTER], true)).toEqual(['PUT /data/display holdout=false'])
+  expect(await sent(NINE_ENTERS, true)).toEqual([])
+  expect(await sent([ENTER, ENTER, ENTER, ENTER, ENTER, 'n', ENTER, ENTER, ENTER], true)).toEqual(['PUT /data/display holdout=false'])
   // A flag answers the question, so it is not asked and the flag is what is sent.
-  expect(await sent(Array(7).fill(ENTER), false, true)).toEqual(['PUT /data/display holdout=true'])
+  expect(await sent(Array(8).fill(ENTER), false, true)).toEqual(['PUT /data/display holdout=true'])
+})
+
+test('the embedding choice is sent to the daemon when it differs from the default or a flag names it', async () => {
+  const sent = async (keys: readonly string[], flag?: EmbeddingSettings): Promise<string[]> => {
+    const made = program()
+    const term = onTerminal(made, keys)
+    expect(await install(made.w.env, { ...made.options, yes: false, dryRun: true, ...(flag !== undefined ? { embeddings: flag } : {}) })).toBe(EXIT_OK)
+    const lines = screenLines(term.output()).filter((line) => line.includes('PUT /embedding/settings'))
+    await world?.cleanup()
+    world = null
+    return lines.map((line) => line.replace(/^\s*\d+\. /, ''))
+  }
+  // folder, agents, observer, port, updates, impact test, then OpenRouter, PATH, summary
+  expect(await sent([ENTER, ENTER, ENTER, ENTER, ENTER, ENTER, DOWN, ENTER, ENTER, ENTER])).toEqual(['PUT /embedding/settings provider=openrouter'])
+  expect(await sent(NINE_ENTERS)).toEqual([])
+  const llm: EmbeddingSettings = { provider: 'local-llm', llmUrl: 'http://127.0.0.1:1234/v1', llmModel: 'e5', llmDims: null }
+  expect(await sent(Array(8).fill(ENTER), llm)).toEqual(['PUT /embedding/settings provider=local-llm model=e5 url=http://127.0.0.1:1234/v1'])
 })
 
 test('a failure is said once on a terminal, in a dry run too', async () => {
   // A build with no OpenCode plugin cannot wire OpenCode: the plan fails before any step.
   for (const dryRun of [true, false]) {
     const made = program({ opencodeVersion: 'opencode v2.1.4' })
-    const term = onTerminal(made, Array(9).fill(ENTER))
+    const term = onTerminal(made, Array(10).fill(ENTER))
     expect(await install(made.w.env, { ...made.options, yes: false, dryRun })).toBe(EXIT_FAILED)
     const said = screenLines(term.output()).filter((line) => line.includes('install failed: this build carries no OpenCode plugin'))
     expect(said).toEqual(['x install failed: this build carries no OpenCode plugin; reinstall from a release build'])
@@ -218,8 +237,8 @@ test('a failure is said once on a terminal, in a dry run too', async () => {
 
 test('a note the person has to act on shows above the bar: Codex asks for its hooks to be trusted', async () => {
   const made = program({ codexVersion: 'codex-cli 0.50.0' })
-  // folder, agents, observer x2, port, updates, impact test, PATH, summary
-  const term = onTerminal(made, Array(9).fill(ENTER))
+  // folder, agents, observer x2, port, updates, impact test, embeddings, PATH, summary
+  const term = onTerminal(made, Array(10).fill(ENTER))
   expect(await install(made.w.env, { ...made.options, yes: false })).toBe(EXIT_OK)
   expect(screenLines(term.output())).toContain(`! ${CODEX_TRUST_NOTE}`)
   expect(logOf(made.w)).toContain(CODEX_TRUST_NOTE)
@@ -338,8 +357,8 @@ posixOnly('POSIX paths')('the next interactive install asks, and after a yes lat
   const made = program()
   installedBefore(made)
   expect(await install(made.w.env, made.options)).toBe(EXIT_OK)
-  // The folder is locked on a re-run, so there is no folder question: agents, observer, port, updates, PATH, summary.
-  const term = onTerminal(made, Array(6).fill(ENTER))
+  // The folder is locked on a re-run, so there is no folder question: agents, observer, port, updates, embeddings, PATH, summary.
+  const term = onTerminal(made, Array(7).fill(ENTER))
   expect(await install(made.w.env, { ...made.options, yes: false })).toBe(EXIT_OK)
   expect(term.output()).toContain('Add kinfold to your PATH?')
   expect(readInstallRecord(made.w.dataDir)?.pathSetup).toBe('added')
@@ -380,12 +399,14 @@ posixOnly('POSIX paths')('the whole wizard runs on clack: 22 agent rows, the bar
     ['Port for the daemon:', [ENTER]],
     ['Updates:', [ENTER]],
     ['Run the impact test?', [ENTER]],
+    ['Embeddings for semantic search:', [ENTER]],
     ['Add kinfold to your PATH?', [ENTER]],
     ['Install with these choices?', [ENTER]],
   ])
   made.w.env = { ...made.w.env, terminal: fakeTerminal([]), promptsFor: () => session.prompts, io: { ...made.w.env.io, interactive: true } }
   expect(await install(made.w.env, { ...made.options, yes: false })).toBe(EXIT_OK)
-  expect(session.asked()).toBe(8)
+  expect(session.asked()).toBe(9)
+  expect(session.text()).toContain('Embeddings      local model (on this machine)')
   const text = session.text()
   expect(text).toMatch(/^┌ {2}Kinfold \S+ setup\n/)
   expect(text).toContain('◼ Claude Code (2.1.311 · capture, context, search)')

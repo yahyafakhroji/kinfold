@@ -20,7 +20,7 @@ export const REREAD_COOLDOWN_MS = 60_000
 
 export type FetchFn = (url: string, init: RequestInit) => Promise<Response>
 
-export type EmbedErrorKind = 'timeout' | 'http_error' | 'bad_response'
+export type EmbedErrorKind = 'timeout' | 'http_error' | 'bad_response' | 'unavailable'
 
 export class EmbedError extends Error {
   constructor(readonly kind: EmbedErrorKind, message: string) {
@@ -32,8 +32,12 @@ export class EmbedError extends Error {
 export interface Embedder {
   model: string
   dims: number
-  /** One vector per input, in input order. A caller's signal cuts the call short (the search deadline). */
-  embed(texts: readonly string[], signal?: AbortSignal): Promise<Float32Array[]>
+  /**
+   * One vector per input, in input order. A caller's signal cuts the call
+   * short (the search deadline). purpose 'query' lets a local model put a
+   * search ahead of indexing; a remote provider ignores it.
+   */
+  embed(texts: readonly string[], signal?: AbortSignal, purpose?: 'query' | 'index'): Promise<Float32Array[]>
 }
 
 export interface OpenRouterEmbedderOptions {

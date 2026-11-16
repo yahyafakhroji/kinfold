@@ -35,6 +35,7 @@ afterAll(() => {
 const load = async () => (await import(join(PUBLIC_DIR, 'page-models.js'))) as {
   renderModels(): Promise<FakeElement>
   stoppedClass(safety: unknown[], provider: string): string | null
+  loopbackObserverEndpoint(view: { rows: { provider: string; endpoint?: string }[] }): string | null
 }
 const textOf = (root: FakeElement): string => textNodes(root).map((node) => node.textContent).join('|')
 
@@ -157,4 +158,12 @@ test('settingsBody sends the endpoint only when one is typed', async () => {
   expect(settingsBody('codex', data)).toEqual({ host: 'codex', provider: 'openai-compatible', model: 'llama3.2', enabled: false, credentialRef: null, endpoint: 'http://127.0.0.1:11434/v1' })
   data.set('endpoint', '')
   expect(settingsBody('codex', data)).not.toHaveProperty('endpoint')
+})
+
+test('an OpenAI-compatible observer on this machine is offered to the embeddings block; a remote one is not', async () => {
+  const { loopbackObserverEndpoint } = await load()
+  expect(loopbackObserverEndpoint({ rows: [{ provider: 'openai-compatible', endpoint: 'http://127.0.0.1:1234/v1' }] })).toBe('http://127.0.0.1:1234/v1')
+  expect(loopbackObserverEndpoint({ rows: [{ provider: 'openai-compatible', endpoint: 'https://api.groq.com/openai/v1' }] })).toBeNull()
+  expect(loopbackObserverEndpoint({ rows: [{ provider: 'openai-compatible', endpoint: 'http://127.0.0.1.example.com/v1' }] })).toBeNull()
+  expect(loopbackObserverEndpoint({ rows: [{ provider: 'openrouter' }] })).toBeNull()
 })
