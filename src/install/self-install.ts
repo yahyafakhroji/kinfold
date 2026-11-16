@@ -114,7 +114,7 @@ function readSumsFile(url: string): string {
   }
 }
 
-async function fetchSums(env: InstallEnv, url: string): Promise<string> {
+async function fetchSums(env: Pick<InstallEnv, 'fetch'>, url: string): Promise<string> {
   let protocol: string
   try {
     protocol = new URL(url).protocol
@@ -138,7 +138,7 @@ async function fetchSums(env: InstallEnv, url: string): Promise<string> {
 }
 
 /** The checksum list of a release, through releaseSumsUrl so a candidate's override still applies. */
-export async function fetchReleaseSums(env: InstallEnv, version: string): Promise<string> {
+export async function fetchReleaseSums(env: Pick<InstallEnv, 'fetch' | 'envVars'>, version: string): Promise<string> {
   return fetchSums(env, releaseSumsUrl(env.envVars ?? {}, version))
 }
 

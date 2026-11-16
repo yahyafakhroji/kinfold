@@ -542,3 +542,14 @@ test('an update refuses to start while an install holds the lock', async () => {
   expect(await install(w.env, YES)).toBe(EXIT_OK)
   expect(during).toBe(process.pid)
 })
+
+test('install records --updates and --beta, and a later plain run keeps them', async () => {
+  const w = both()
+  const record = (): unknown => JSON.parse(readFileSync(join(w.dataDir, 'install.json'), 'utf8'))
+  expect(await install(w.env, { ...YES, updates: 'notify', beta: true })).toBe(EXIT_OK)
+  expect(record()).toMatchObject({ updates: 'notify', updateCheck: true, autoUpdate: false, beta: true })
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(record()).toMatchObject({ updates: 'notify', beta: true })
+  expect(await install(w.env, { ...YES, beta: false })).toBe(EXIT_OK)
+  expect(record()).not.toHaveProperty('beta')
+})

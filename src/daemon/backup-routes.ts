@@ -48,6 +48,8 @@ export interface BackupRoutes {
   /** Makes the kept store and the store in use change places; takes no body. */
   undo(): RouteAnswer
   status(): RouteAnswer
+  /** A backup, an upload or a restore is under way. */
+  busy(): boolean
 }
 
 export interface BackupRouteDeps {
@@ -368,5 +370,5 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
     return store === null ? null : { replacedAt: store.replacedAt }
   }
 
-  return { download, upload, start, undo, status: () => ({ status: 200, body: { ...status, kept: kept() } }) }
+  return { download, upload, start, undo, status: () => ({ status: 200, body: { ...status, kept: kept() } }), busy: () => busy }
 }

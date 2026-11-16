@@ -265,7 +265,7 @@ describe('a restore that succeeds', () => {
     const target = makeTarget()
     writeFileSync(join(target.dataDir, 'install.json'), JSON.stringify({ channel: 'curl', updateCheck: true, autoUpdate: false, firstInstalledAt: 9 }))
     await restore(target, { archive, key })
-    expect(JSON.parse(readFileSync(join(target.dataDir, 'install.json'), 'utf8'))).toEqual({ channel: 'curl', updateCheck: false, autoUpdate: false, firstInstalledAt: 9 })
+    expect(JSON.parse(readFileSync(join(target.dataDir, 'install.json'), 'utf8'))).toEqual({ channel: 'curl', updates: 'off', updateCheck: false, autoUpdate: false, firstInstalledAt: 9 })
   })
 })
 

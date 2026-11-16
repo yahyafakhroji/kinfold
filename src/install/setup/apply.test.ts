@@ -52,7 +52,7 @@ function keeping(state: SetupState, over: Partial<SetupAnswers> = {}): SetupAnsw
     const input = state.observers.get(host)
     return input === undefined ? [] : [{ input, origin: 'saved' as const, credential: null, credentialNote: 'no key needed', check: 'unchanged' as const }]
   })
-  return { dataDir: state.dataDir, hosts: state.wiredHosts, observers, encryption: { kind: 'keep' }, port: state.port, updateCheck: state.updateCheck, autoUpdate: state.autoUpdate, ...over }
+  return { dataDir: state.dataDir, hosts: state.wiredHosts, observers, encryption: { kind: 'keep' }, port: state.port, updateCheck: state.updateCheck, autoUpdate: state.autoUpdate, beta: state.beta, ...over }
 }
 
 /** The real LaunchAgent service over the world's launchctl, recording what the encrypt and decrypt flows ask of it. */

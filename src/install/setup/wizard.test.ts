@@ -521,18 +521,17 @@ test('one Updates question sets the daily check and automatic patch updates, wit
   const flags = flagsOf({ hosts: [], noEncrypt: true })
   const kept = setup([ENTER, ENTER, ENTER, ENTER])
   expect(await runWizard(kept.w.env, ask(kept.w), await readSetupState(kept.w.env), flags, NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: true })
-  expect(kept.term.output()).toContain('Check daily and install patch releases')
-  expect(kept.term.output()).toContain('Auto-update     patch releases')
+  expect(kept.term.output()).toContain('Check daily, install patch releases')
   await kept.w.cleanup()
 
-  const notify = setup([ENTER, ENTER, DOWN, ENTER, ENTER])
+  const notify = setup([ENTER, ENTER, DOWN, DOWN, ENTER, ENTER])
   expect(await runWizard(notify.w.env, ask(notify.w), await readSetupState(notify.w.env), flags, NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: false })
-  expect(notify.term.output()).toContain('Auto-update     off')
+  expect(notify.term.output()).toContain('Updates         checked daily; nothing installs by itself')
   await notify.w.cleanup()
 
-  const off = setup([ENTER, ENTER, DOWN, DOWN, ENTER, ENTER])
+  const off = setup([ENTER, ENTER, DOWN, DOWN, DOWN, DOWN, ENTER, ENTER])
   expect(await runWizard(off.w.env, ask(off.w), await readSetupState(off.w.env), flags, NO_CHOICE)).toMatchObject({ updateCheck: false, autoUpdate: true })
-  expect(off.term.output()).toContain('Auto-update     off (the update check is off)')
+  expect(off.term.output()).toContain('Updates         off')
 })
 
 test('a saved choice is where the Updates question starts, and --no-auto-update takes that option away', async () => {
@@ -872,4 +871,49 @@ test('a local LLM embedding address defaults to the saved one, then to an OpenAI
   expect(embeddingUrlDefault('http://127.0.0.1:5/v1', [observer('http://127.0.0.1:1234/v1')])).toBe('http://127.0.0.1:5/v1')
   // A remote observer endpoint is never offered: embeddings stay on this machine.
   expect(embeddingUrlDefault(null, [observer('https://api.groq.com/openai/v1')])).toBe('http://127.0.0.1:11434/v1')
+})
+
+test('the Updates question offers patch, notify and off, each level with or without betas, which are off by default', async () => {
+  const flags = flagsOf({ hosts: [], noEncrypt: true })
+  const kept = setup([ENTER, ENTER, ENTER, ENTER])
+  expect(await runWizard(kept.w.env, ask(kept.w), await readSetupState(kept.w.env), flags, NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: true, beta: false })
+  const output = kept.term.output()
+  expect(output).toContain('Check daily, install patch releases, and download larger ones for your yes')
+  expect(output).toContain('Updates         patch releases install themselves; larger ones wait for your yes')
+  expect(output).toContain('Beta releases   no')
+  await kept.w.cleanup()
+
+  const beta = setup([ENTER, ENTER, DOWN, ENTER, ENTER])
+  expect(await runWizard(beta.w.env, ask(beta.w), await readSetupState(beta.w.env), flags, NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: true, beta: true })
+  expect(beta.term.output()).toContain('Beta releases   offered, each waiting for your yes')
+  await beta.w.cleanup()
+
+  const notifyBeta = setup([ENTER, ENTER, DOWN, DOWN, DOWN, ENTER, ENTER])
+  expect(await runWizard(notifyBeta.w.env, ask(notifyBeta.w), await readSetupState(notifyBeta.w.env), flags, NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: false, beta: true })
+})
+
+test('turning updates off keeps the saved beta choice, and the summary leaves betas out', async () => {
+  const flags = flagsOf({ hosts: [], noEncrypt: true })
+  // The saved choice, patch with betas, is where the cursor starts: off is three rows down.
+  const off = setup([ENTER, ENTER, DOWN, DOWN, DOWN, ENTER, ENTER])
+  const state = { ...(await readSetupState(off.w.env)), beta: true }
+  expect(await runWizard(off.w.env, ask(off.w), state, flags, NO_CHOICE)).toMatchObject({ updateCheck: false, beta: true })
+  expect(off.term.output()).not.toContain('Beta releases')
+})
+
+test('--updates and --beta answer the question, with or without a terminal', async () => {
+  const quiet = setup([], { interactive: false, terminal: null, claudeVersion: '2.0.0', codexVersion: '1.0.0', keychainRefs: ['openrouter'] })
+  const state = await readSetupState(quiet.w.env)
+  const yes = { ...NO_CHOICE, yes: true }
+  expect(await runWizard(quiet.w.env, null, state, flagsOf({ yes: true, updates: 'notify', beta: true }), yes)).toMatchObject({ updateCheck: true, autoUpdate: false, beta: true })
+  expect(await runWizard(quiet.w.env, null, { ...state, beta: true }, flagsOf({ yes: true, beta: false }), yes)).toMatchObject({ beta: false })
+  expect(await runWizard(quiet.w.env, null, { ...state, beta: true }, flagsOf({ yes: true }), yes)).toMatchObject({ beta: true })
+  await quiet.w.cleanup()
+  const typed = setup([ENTER, ENTER, ENTER])
+  expect(await runWizard(typed.w.env, ask(typed.w), await readSetupState(typed.w.env), flagsOf({ hosts: [], noEncrypt: true, updates: 'off', beta: true }), NO_CHOICE)).toMatchObject({ updateCheck: false, beta: true })
+  expect(typed.term.output()).not.toContain('Updates:')
+  await typed.w.cleanup()
+  const betaOnly = setup([ENTER, ENTER, ENTER, ENTER])
+  expect(await runWizard(betaOnly.w.env, ask(betaOnly.w), await readSetupState(betaOnly.w.env), flagsOf({ hosts: [], noEncrypt: true, beta: true }), NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: true, beta: true })
+  expect(betaOnly.term.output()).toContain('Check daily and tell me, betas included')
 })

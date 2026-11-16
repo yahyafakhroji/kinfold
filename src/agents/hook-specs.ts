@@ -12,19 +12,13 @@ import { contextModificationOutput, normalizeCline } from '../adapters/cline'
 import { normalizeKimiCode } from '../adapters/kimi-code'
 import { normalizeKiroWith } from '../adapters/kiro'
 import { normalizeCursor } from '../adapters/cursor'
-import type { UpdateNotice } from '../context/types'
 import { normalizeClaudeStyle } from './families/claude-style-parse'
 import { GEMINI_CLI_EVENTS, normalizeGeminiStyle } from './families/gemini-style-parse'
-import { agentLine, userMessage } from '../update/notice-text'
 import type { HookHostSpec } from './hook-spec'
 import type { AgentId } from './profile'
 
 /** Claude Code and Codex share the hookSpecificOutput shape; Cursor's sessionStart reads additional_context. */
 const hookSpecific = (text: string): string => JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } })
-
-/** Claude Code shows `systemMessage` to the user, so the notice never enters the model's context; the pack may be empty. */
-const claudeWithNotice = (text: string, notice: UpdateNotice): string =>
-  JSON.stringify({ systemMessage: userMessage(notice), ...(text !== '' ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {}) })
 
 /**
  * `systemMessage` beside whatever the hook already prints. Claude Code, Codex,
@@ -35,9 +29,6 @@ const claudeWithNotice = (text: string, notice: UpdateNotice): string =>
  */
 const withSystemMessage = (output: string | null, message: string): string =>
   JSON.stringify({ systemMessage: message, ...(output === null ? {} : (JSON.parse(output) as Record<string, unknown>)) })
-
-/** Hosts with no user channel get one agent line as the last line of Kinfold's block. */
-const withAgentLine = (text: string, notice: UpdateNotice): string => [text.replace(/\n$/, ''), agentLine(notice)].filter((part) => part !== '').join('\n')
 
 /**
  * Devin runs Claude Code's user hooks too, and sets DEVIN_PROJECT_DIR for every
@@ -58,7 +49,6 @@ const claudeCaller = (payload: unknown, env: NodeJS.ProcessEnv): AgentId | null 
 const CLAUDE_CODE_SPEC: HookHostSpec = {
   normalize: normalizeClaudeCode,
   sessionContext: hookSpecific,
-  sessionContextWithNotice: claudeWithNotice,
   promptContext: userPromptContextOutput,
   userMessage: withSystemMessage,
   callerOf: claudeCaller,
@@ -66,14 +56,13 @@ const CLAUDE_CODE_SPEC: HookHostSpec = {
 
 // Codex documents the same UserPromptSubmit hookSpecificOutput shape as Claude Code.
 const CODEX_SPEC: HookHostSpec = {
-  normalize: normalizeCodex, sessionContext: hookSpecific, sessionContextWithNotice: (text, notice) => hookSpecific(withAgentLine(text, notice)),
+  normalize: normalizeCodex, sessionContext: hookSpecific,
   promptContext: userPromptContextOutput, userMessage: withSystemMessage,
 }
 
 const CURSOR_SPEC: HookHostSpec = {
   normalize: normalizeCursor,
   sessionContext: (text) => JSON.stringify({ additional_context: text }),
-  sessionContextWithNotice: (text, notice) => JSON.stringify({ additional_context: withAgentLine(text, notice) }),
 }
 
 // The Claude-style agents below are built from their docs (2026-11-13); each
@@ -91,7 +80,7 @@ const { PostToolUseFailure: _noFailureEvent, ...WITHOUT_FAILURE_EVENT } = CLAUDE
  */
 function claudeShapedSpec(normalize: HookHostSpec['normalize'], userChannel: boolean): HookHostSpec {
   return {
-    normalize, sessionContext: hookSpecific, sessionContextWithNotice: (text, notice) => hookSpecific(withAgentLine(text, notice)), promptContext: userPromptContextOutput,
+    normalize, sessionContext: hookSpecific, promptContext: userPromptContextOutput,
     ...(userChannel ? { userMessage: withSystemMessage } : {}),
   }
 }
@@ -103,7 +92,6 @@ const topLevelContext = (text: string): string => JSON.stringify({ additionalCon
 const JUNIE_SPEC: HookHostSpec = {
   normalize: normalizeClaudeStyle(WITHOUT_FAILURE_EVENT, 'junie'),
   sessionContext: topLevelContext,
-  sessionContextWithNotice: (text, notice) => topLevelContext(withAgentLine(text, notice)),
   sessionContextIgnored: true,
   promptContext: topLevelContext,
   userMessage: withSystemMessage,
@@ -119,7 +107,6 @@ const JUNIE_SPEC: HookHostSpec = {
 const COPILOT_SPEC: HookHostSpec = {
   normalize: normalizeClaudeStyle(CLAUDE_STYLE_EVENTS, 'copilot'),
   sessionContext: topLevelContext,
-  sessionContextWithNotice: (text, notice) => topLevelContext(withAgentLine(text, notice)),
   progressLine: (message) => JSON.stringify({ type: 'progress', message }),
 }
 
@@ -128,7 +115,6 @@ const COPILOT_SPEC: HookHostSpec = {
 const GEMINI_CLI_SPEC: HookHostSpec = {
   normalize: normalizeGeminiStyle(GEMINI_CLI_EVENTS, 'gemini-cli'),
   sessionContext: hookSpecific,
-  sessionContextWithNotice: (text, notice) => hookSpecific(withAgentLine(text, notice)),
   promptContext: (text) => JSON.stringify({ hookSpecificOutput: { hookEventName: 'BeforeAgent', additionalContext: text } }),
   userMessage: withSystemMessage,
 }
@@ -139,7 +125,6 @@ const GEMINI_CLI_SPEC: HookHostSpec = {
 const ANTIGRAVITY_SPEC: HookHostSpec = {
   normalize: normalizeAntigravity,
   sessionContext: injectStepsOutput,
-  sessionContextWithNotice: (text, notice) => injectStepsOutput(withAgentLine(text, notice)),
 }
 
 // Cline's VS Code extension reads contextModification on UserPromptSubmit.
@@ -148,7 +133,6 @@ const ANTIGRAVITY_SPEC: HookHostSpec = {
 const CLINE_SPEC: HookHostSpec = {
   normalize: normalizeCline,
   sessionContext: contextModificationOutput,
-  sessionContextWithNotice: (text, notice) => contextModificationOutput(withAgentLine(text, notice)),
   sessionContextIgnored: true,
   promptContext: contextModificationOutput,
 }
@@ -159,7 +143,6 @@ const CLINE_SPEC: HookHostSpec = {
 const KIRO_SPEC: HookHostSpec = {
   normalize: normalizeKiroWith(() => process.env.USER_PROMPT),
   sessionContext: (text) => text,
-  sessionContextWithNotice: (text, notice) => withAgentLine(text, notice),
   sessionContextIgnored: true,
 }
 
@@ -168,7 +151,6 @@ const KIRO_SPEC: HookHostSpec = {
 const AMP_SPEC: HookHostSpec = {
   normalize: normalizeAmp,
   sessionContext: ampMessageOutput,
-  sessionContextWithNotice: (text, notice) => ampMessageOutput(withAgentLine(text, notice)),
   promptContext: ampMessageOutput,
   // The plugin hands `notify` to ctx.ui.notify, a notification Amp shows the user and keeps out of the thread.
   userMessage: (output, message) => JSON.stringify({ ...(output === null ? {} : (JSON.parse(output) as Record<string, unknown>)), notify: message }),
@@ -179,7 +161,6 @@ const AMP_SPEC: HookHostSpec = {
 const KIMI_CODE_SPEC: HookHostSpec = {
   normalize: normalizeKimiCode,
   sessionContext: (text) => text,
-  sessionContextWithNotice: (text, notice) => withAgentLine(text, notice),
   sessionContextIgnored: true,
   promptContext: (text) => text,
 }
@@ -190,7 +171,7 @@ const KIMI_CODE_SPEC: HookHostSpec = {
 // it alone prints one.
 function captureOnlySpec(normalize: HookHostSpec['normalize'], userChannel = false): HookHostSpec {
   return {
-    normalize, sessionContext: (text) => text, sessionContextWithNotice: (text, notice) => withAgentLine(text, notice), sessionContextIgnored: true,
+    normalize, sessionContext: (text) => text, sessionContextIgnored: true,
     ...(userChannel ? { userMessage: withSystemMessage } : {}),
   }
 }

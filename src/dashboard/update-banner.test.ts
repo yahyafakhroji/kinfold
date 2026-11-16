@@ -48,3 +48,22 @@ test('no notice, a failed request or a missing slot leaves the banner empty', as
   }
   await banner.showUpdateBanner(null)
 })
+
+test('the banner shows the release on offer under the notice, with its changes and the Install button', async () => {
+  answer = () => new Response(JSON.stringify({
+    notice: { version: '0.6.0', message: 'Kinfold 0.6.0 is ready · 1 change · kinfold update to install' },
+    release: { version: '0.6.0', changes: ['A new page.'], breaking: [], staged: true, installable: true },
+  }))
+  const slot = new FakeElement('div')
+  await (await load()).showUpdateBanner(slot)
+  expect(shown(slot)).toContain('A new page.')
+  expect(elements(slot).some((element) => element.tagName === 'BUTTON')).toBe(true)
+})
+
+test('a malformed release is left out and the notice still shows', async () => {
+  answer = () => new Response(JSON.stringify({ notice: { version: '0.6.0', message: 'Kinfold 0.6.0 is available.' }, release: { version: '0.6.0', changes: 'x' } }))
+  const slot = new FakeElement('div')
+  await (await load()).showUpdateBanner(slot)
+  expect(shown(slot)).toBe('Kinfold 0.6.0 is available.')
+  expect(elements(slot).some((element) => element.tagName === 'BUTTON')).toBe(false)
+})

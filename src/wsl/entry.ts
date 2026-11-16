@@ -18,7 +18,7 @@ import { EXIT_FAILED, EXIT_OK, agentWiringActions } from '../install/install'
 import type { InstallOptions } from '../install/install'
 import { type Action, runPlan } from '../install/plan'
 import { programInstallActions } from '../install/self-install'
-import { currentChannel, installRecordAction, readInstallRecord } from '../install/setup/record'
+import { currentChannel, installRecordAction, readInstallRecord, switchesFor } from '../install/setup/record'
 import { hostStatusLines } from '../install/status'
 import { hostUnwireActions } from '../install/uninstall'
 import type { UninstallOptions } from '../install/uninstall'
@@ -81,16 +81,19 @@ async function hookActions(env: InstallEnv, hosts: readonly InstallHost[], optio
 
 function recordActions(env: InstallEnv, wslHome: string, options: InstallOptions): Action[] {
   const saved = readInstallRecord(wslHome)
+  const autoUpdate = options.noAutoUpdate === true ? false : options.autoUpdate === true ? true : (saved?.autoUpdate ?? true)
+  const switches = options.updates !== undefined ? switchesFor(options.updates, autoUpdate) : { updateCheck: options.noUpdateCheck === true ? false : (saved?.updateCheck ?? true), autoUpdate }
+  const beta = options.beta ?? saved?.beta === true
   const record = {
     channel: currentChannel(env, saved),
-    updateCheck: options.noUpdateCheck === true ? false : (saved?.updateCheck ?? true),
-    autoUpdate: options.noAutoUpdate === true ? false : options.autoUpdate === true ? true : (saved?.autoUpdate ?? true),
+    ...switches,
     autoUpdateIntro: saved?.autoUpdateIntro ?? false,
+    ...(beta ? { beta: true as const } : {}),
     agentHomes: saved?.agentHomes ?? {},
     ...(saved?.autoUpdateAt !== undefined ? { autoUpdateAt: saved.autoUpdateAt } : {}),
     firstInstalledAt: saved?.firstInstalledAt ?? env.now(),
   }
-  const same = saved !== null && saved.channel === record.channel && saved.updateCheck === record.updateCheck && saved.autoUpdate === record.autoUpdate
+  const same = saved !== null && saved.channel === record.channel && saved.updateCheck === record.updateCheck && saved.autoUpdate === record.autoUpdate && (saved.beta === true) === beta
   return same ? [] : [installRecordAction(wslHome, record)]
 }
 

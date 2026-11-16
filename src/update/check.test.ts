@@ -3,8 +3,8 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type RunningDaemon, startDaemon } from '../daemon/daemon'
-import { CHECK_INTERVAL_MS, LATEST_RELEASE_URL, MAX_RELEASE_BYTES, type UpdateCheckDeps, latestFromRelease, runUpdateCheck } from './check'
-import { UPDATE_STATE_FILE, readUpdateState, writeUpdateState } from './state'
+import { CHECK_INTERVAL_MS, LATEST_RELEASE_URL, MAX_RELEASE_BYTES, RELEASES_URL, type UpdateCheckDeps, runUpdateCheck } from './check'
+import { UPDATE_STATE_FILE, knownRelease, readUpdateState, writeUpdateState } from './state'
 import { posixOnly } from '../../test/platform-guards'
 
 const HOUR = 3_600_000
@@ -126,16 +126,15 @@ test('install.json can turn the check off, and a checkout never checks', async (
   expect(await runUpdateCheck({ ...deps(), version: '0.0.0-dev' })).toBe('disabled')
 })
 
-test('drafts and prereleases are skipped', () => {
-  expect(latestFromRelease({ tag_name: 'v0.3.0', draft: true })).toBeNull()
-  expect(latestFromRelease({ tag_name: 'v0.3.0-rc.1', prerelease: true })).toBeNull()
-  expect(latestFromRelease({ tag_name: 'nightly' })).toBeNull()
-  expect(latestFromRelease({ tag_name: 'v0.3.0' })).toBe('0.3.0')
+test('without the beta channel, a prerelease answer is not a usable release', async () => {
+  respond = async () => new Response(JSON.stringify({ tag_name: 'v0.3.0-rc.1', draft: false, prerelease: true }))
+  expect(await runUpdateCheck(deps())).toBe('failed')
+  expect(readUpdateState(dir).latestVersion).toBeNull()
 })
 
 test('a damaged state file reads as empty and keeps notices it can parse', () => {
   writeFileSync(join(dir, UPDATE_STATE_FILE), '{oops')
-  expect(readUpdateState(dir)).toEqual({ lastAttemptAt: null, latestVersion: null, checkedAt: null, notified: {} })
+  expect(readUpdateState(dir)).toEqual({ lastAttemptAt: null, latestVersion: null, checkedAt: null, notified: {}, beta: null, release: null })
   writeUpdateState(dir, { lastAttemptAt: 1, latestVersion: '0.2.0', checkedAt: 1, notified: { cli: '0.2.0' } })
   expect(readUpdateState(dir).notified).toEqual({ cli: '0.2.0' })
   expect(JSON.parse(readFileSync(join(dir, UPDATE_STATE_FILE), 'utf8')).latestVersion).toBe('0.2.0')
@@ -167,4 +166,52 @@ test('startup is not delayed', async () => {
   } finally {
     await daemon?.stop()
   }
+})
+
+const writeRecord = (fields: Record<string, unknown>): void => {
+  writeFileSync(join(dir, 'install.json'), JSON.stringify({ channel: 'curl', updateCheck: true, autoUpdate: true, firstInstalledAt: 1, ...fields }))
+}
+
+test('the beta channel reads the release list and keeps the newest prerelease', async () => {
+  writeRecord({ beta: true })
+  respond = async () => new Response(JSON.stringify([
+    { tag_name: 'v0.3.0-beta.1', draft: false, prerelease: true, body: '## Changes\n\n### Minor Changes\n\n- abcdef1: Beta thing.\n' },
+    { tag_name: 'v0.2.0', draft: false, prerelease: false, body: '' },
+    { tag_name: 'v0.4.0', draft: false, prerelease: true, body: '' },
+  ]))
+  expect(await runUpdateCheck(deps())).toBe('checked')
+  expect(calls[0]!.url).toBe(RELEASES_URL)
+  expect(readUpdateState(dir)).toMatchObject({ latestVersion: '0.3.0-beta.1', beta: true, release: { version: '0.3.0-beta.1', prerelease: true, changes: ['Beta thing.'], breaking: [] } })
+})
+
+test('a check keeps the release change lines next to the version', async () => {
+  respond = async () => new Response(JSON.stringify({ tag_name: 'v0.3.0', draft: false, prerelease: false, body: '## Changes\n\n### Major Changes\n\n- abcdef1: Gone.\n- abcdef2: BREAKING: moved.\n' }))
+  await runUpdateCheck(deps())
+  expect(readUpdateState(dir).release).toEqual({ version: '0.3.0', prerelease: false, changes: ['Gone.', 'BREAKING: moved.'], breaking: ['Gone.', 'BREAKING: moved.'] })
+})
+
+test('a release list with nothing usable is a failed check', async () => {
+  writeRecord({ beta: true })
+  respond = async () => new Response(JSON.stringify([{ tag_name: 'v0.4.0', draft: false, prerelease: true }]))
+  expect(await runUpdateCheck(deps())).toBe('failed')
+})
+
+test('changing the beta channel makes the check due again at once', async () => {
+  await runUpdateCheck(deps())
+  clock += HOUR
+  writeRecord({ beta: true })
+  respond = async () => new Response(JSON.stringify([{ tag_name: 'v0.3.0-beta.1', draft: false, prerelease: true }]))
+  expect(await runUpdateCheck(deps())).toBe('checked')
+  expect(readUpdateState(dir).latestVersion).toBe('0.3.0-beta.1')
+})
+
+test('a saved prerelease is not offered once the beta channel is off', () => {
+  writeUpdateState(dir, { ...readUpdateState(dir), latestVersion: '0.3.0-beta.1', checkedAt: T0, lastAttemptAt: T0, beta: true, release: { version: '0.3.0-beta.1', prerelease: true, changes: [], breaking: [] } })
+  expect(knownRelease(readUpdateState(dir), false)).toBeNull()
+  expect(knownRelease(readUpdateState(dir), true)?.version).toBe('0.3.0-beta.1')
+})
+
+test('a state from before release lines knows the version alone', () => {
+  writeFileSync(join(dir, UPDATE_STATE_FILE), JSON.stringify({ lastAttemptAt: T0, latestVersion: '0.3.0', checkedAt: T0, notified: {} }))
+  expect(knownRelease(readUpdateState(dir), false)).toEqual({ version: '0.3.0', prerelease: false, changes: [], breaking: [] })
 })

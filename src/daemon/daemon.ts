@@ -69,9 +69,11 @@ import { startDataTicks } from './data-ticks'
 import { VERSION } from '../version'
 import { type UpdateCheckDeps, startUpdateChecks } from '../update/check'
 import { type AutoUpdateDeps, autoUpdateView, startAutoUpdates } from '../update/auto'
+import { startStaging } from '../update/stage'
+import { updateRouteHandlers } from './update-routes'
 import { bannerNotice, userMessage } from '../update/notice'
 import { setAutoUpdate } from '../install/setup/record'
-import type { OsName } from '../platform/platform'
+import { type OsName, currentPlatform } from '../platform/platform'
 import { MAX_UPLOAD_BYTES, type ServerDeps, startServer } from './server'
 import { type BackupRoutes, backupRoutes, uploadLimitFor } from './backup-routes'
 import { snapshotInWorker, snapshotInto } from '../backup/snapshot'
@@ -124,7 +126,7 @@ export interface DaemonOptions {
    * then applied by starting that program's `update --auto` detached. Absent
    * (a checkout, a copy run from elsewhere, the tests) nothing is ever started.
    */
-  autoUpdate?: { program: string; os: OsName; tickMs?: number } & Pick<AutoUpdateDeps, 'spawn' | 'exists'>
+  autoUpdate?: { program: string; os: OsName; tickMs?: number; platform?: NodeJS.Platform; arch?: string } & Pick<AutoUpdateDeps, 'spawn' | 'exists'>
   /** Where a restored store's key is written; null: none. Default: the store key-store.json names, read when a restore needs it. */
   keyStore?: KeyStore | null
   /** Test seams for the backup and restore routes. */
@@ -439,6 +441,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const envVars = options.updateCheck?.envVars ?? (() => process.env)
   const updateNow = options.updateCheck?.now ?? Date.now
   const canAutoUpdate = options.autoUpdate !== undefined
+  // Notices look for a staged program where this daemon stages it.
+  const stagePlace = { platform: options.autoUpdate?.platform ?? currentPlatform().node, arch: options.autoUpdate?.arch ?? process.arch }
   // When anything last reached the daemon: a hook's event, a context request, an MCP read or the dashboard.
   // An update waits for a quiet spell after it. The start counts, so a daemon restarted by an update never
   // restarts again at once.
@@ -498,7 +502,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     }
     publishDisplay(readDisplaySettings(store.db))
     const context = contextHandler({
-      db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, updates: { dataDir, version, envVars, canAutoUpdate },
+      db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, updates: { dataDir, version, envVars, canAutoUpdate, ...stagePlace },
       // Read per prompt, so a change from the dashboard or a restored store applies to the next one.
       holdout: { on: () => readDisplaySettings(store.db).holdout },
     })
@@ -608,6 +612,15 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   // A restore in progress is the user at work on the store: it counts as activity until it ends.
   const quietSince = (): number => (restarter.down() || restarter.inFlight() !== null ? updateNow() : lastEventAt)
 
+  // Polled once a second by every watcher: an update state that cannot be read costs the line, never the rows.
+  const watchUpdate = (): { version: string; message: string } | null => {
+    try {
+      const notice = bannerNotice(dataDir, version, envVars(), { capable: canAutoUpdate, now: updateNow(), ...stagePlace }, false)
+      return notice === null ? null : { version: notice.version, message: userMessage(notice) }
+    } catch {
+      return null
+    }
+  }
   const deps: ServerDeps = {
     onActivity: agentEvent,
     port: options.port,
@@ -616,7 +629,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     hmacMode: () => hmacKeys.mode(),
     update: {
       banner: (markShown) => {
-        const notice = bannerNotice(dataDir, version, envVars(), { capable: canAutoUpdate, now: updateNow() }, markShown)
+        const notice = bannerNotice(dataDir, version, envVars(), { capable: canAutoUpdate, now: updateNow(), ...stagePlace }, markShown)
         return notice === null ? null : { version: notice.version, message: userMessage(notice) }
       },
       auto: () => autoUpdateView(dataDir, version, envVars(), updateNow()),
@@ -626,6 +639,18 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
         if (saved) log(`auto-update turned ${enabled ? 'on' : 'off'} from the dashboard`)
         return saved
       },
+      ...updateRouteHandlers({
+        dataDir,
+        version,
+        platform: options.autoUpdate?.platform ?? currentPlatform().node,
+        envVars,
+        now: updateNow,
+        log,
+        storeBusy: () => (restarter.down() || restarter.inFlight() !== null || backup.busy() ? 'a backup or restore is running; try again when it finishes' : null),
+        program: options.autoUpdate === undefined ? null : { path: options.autoUpdate.program, os: options.autoUpdate.os },
+        ...(options.autoUpdate?.spawn !== undefined ? { spawn: options.autoUpdate.spawn } : {}),
+        ...(options.autoUpdate?.exists !== undefined ? { exists: options.autoUpdate.exists } : {}),
+      }),
     },
     observerModels: observerModelsRoute(options.observer?.cliRunnerFor ?? null, log, Date.now),
     observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log)),
@@ -634,6 +659,12 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     unavailable: () => (restarter.down() ? RESTORING : null),
     log,
     ...core.routes,
+    // kinfold watch and the OpenCode toast read /watch, so the update the user is owed rides along there; reading it marks nothing.
+    watch: (method, url) => {
+      const answer = core.routes.watch?.(method, url) ?? { status: 404, body: { error: 'not found' } }
+      if (answer.status !== 200) return answer
+      return { ...answer, body: { ...(answer.body as Record<string, unknown>), update: watchUpdate() } }
+    },
   }
   const server = startServer(deps)
   const infoPath = join(dataDir, DAEMON_INFO_FILE)
@@ -661,12 +692,24 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     ...(options.autoUpdate.spawn !== undefined ? { spawn: options.autoUpdate.spawn } : {}),
     ...(options.autoUpdate.exists !== undefined ? { exists: options.autoUpdate.exists } : {}),
   }, options.autoUpdate.tickMs)
+  // Releases that wait for a yes are downloaded where an installed program could take them.
+  const staging = options.autoUpdate === undefined ? null : startStaging({
+    dataDir,
+    version,
+    platform: options.autoUpdate.platform ?? currentPlatform().node,
+    arch: options.autoUpdate.arch ?? process.arch,
+    fetch: options.updateCheck?.fetch ?? ((url, init) => fetch(url, init)),
+    envVars,
+    now: updateNow,
+    log,
+  }, options.autoUpdate.tickMs)
   log(`listening on 127.0.0.1:${server.port} schema=${core.routes.schemaVersion} observer=${core.observer !== null ? 'on' : 'off'}`)
 
   const stop = async (): Promise<void> => {
     clearInterval(rotation)
     updateChecks.stop()
     autoUpdates?.stop()
+    staging?.stop()
     // A restore between its journal and its last step would leave the marker, and the next daemon
     // could not open the store until someone ran kinfold key resume. It ends on its own: the wait
     // for the store is bounded, and then it finishes or puts the old store back.

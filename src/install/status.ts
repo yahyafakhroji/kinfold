@@ -30,9 +30,9 @@ import { QUIET_MS, autoUpdateView } from '../update/auto'
 import { readAutoState } from '../update/auto-state'
 import { detachPlan } from '../update/detach'
 import { autoUpdateSetting, updatesEnabled } from '../update/enabled'
-import { availableMessage, pendingNotice } from '../update/notice'
-import { readUpdateState } from '../update/state'
-import { isPatchUpdate } from '../update/version-order'
+import { pendingNotice, userMessage } from '../update/notice'
+import { knownRelease, readUpdateState } from '../update/state'
+import { compareVersions, isPatchUpdate, parseVersion } from '../update/version-order'
 import { VERSION } from '../version'
 import { readInstallRecord } from './setup/record'
 import { type WslStatus, wslStatus } from '../wsl/entry'
@@ -170,8 +170,14 @@ export function updateLine(env: InstallEnv, running: string = VERSION, blocker: 
   const state = readUpdateState(env.dataDir)
   // Held back only where the patch will install itself; elsewhere it is offered by hand like any release.
   const hold = blocker === null ? { auto: readAutoState(env.dataDir), now: env.now() } : undefined
-  const notice = pendingNotice(state, record, running, vars, hold)
-  if (notice !== null) return `update: ${availableMessage(notice)}`
+  // Staging runs where an automatic update could: the same daemon, the same service.
+  const stage = { dataDir: env.dataDir, platform: env.platform, arch: env.arch ?? process.arch, capable: blocker === null, now: env.now() }
+  const notice = pendingNotice(state, record, running, vars, hold, stage)
+  if (notice !== null) return `update: ${userMessage(notice)}`
+  const offered = knownRelease(state, record?.beta === true)
+  if (offered !== null && parseVersion(running) !== null && compareVersions(offered.version, running) > 0 && !isPatchUpdate(running, offered.version) && autoUpdateSetting(running, record, vars).on && blocker === null) {
+    return `update: downloading Kinfold ${offered.version} so it is ready to install`
+  }
   const latest = state.latestVersion
   if (hold !== undefined && latest !== null && isPatchUpdate(running, latest) && autoUpdateSetting(running, record, vars).on) {
     return `update: Kinfold ${latest} will install itself once no agent has been active for ${QUIET_MS / 60_000} minutes`
@@ -203,6 +209,7 @@ export function autoUpdateLines(env: InstallEnv, running: string, blocker: strin
   const homes = Object.entries(readInstallRecord(env.dataDir)?.agentHomes ?? {})
   return [
     `auto-update: ${state}${note}`,
+    ...(readInstallRecord(env.dataDir)?.beta === true ? ['beta releases: on (each one waits for your yes)'] : []),
     ...(view.lastUpdate === null ? [] : [`  last update: ${view.lastUpdate.version} (was ${view.lastUpdate.previous}) on ${date(view.lastUpdate.at)}`]),
     ...(view.lastError === null ? [] : [`  last error: ${view.lastError.version} on ${date(view.lastError.at)}: ${view.lastError.reason}. ${view.lastError.blocked === true ? 'It is tried again when the daemon restarts or the install changes.' : 'It is tried again after the next daily check.'}`]),
     ...(homes.length === 0 ? [] : [`  agent homes used by an automatic update: ${homes.map(([name, value]) => `${name}=${value}`).join(', ')}`]),

@@ -7,7 +7,7 @@ import { parseContextResult } from '../context/types'
 import { posixOnly } from '../../test/platform-guards'
 import { runUpdateCheck } from './check'
 import { mergeAutoState, readAutoState } from './auto-state'
-import { STALE_ATTEMPT_MS, agentLine, availableMessage, bannerNotice, peekNotice, pendingNotice, takeNotice, updateCommand, userMessage } from './notice'
+import { STALE_ATTEMPT_MS, availableMessage, bannerNotice, peekNotice, pendingNotice, takeNotice, updateCommand, userMessage } from './notice'
 import { UPDATE_STATE_FILE, markNotified, readUpdateState, writeUpdateState } from './state'
 
 let dir: string
@@ -26,8 +26,6 @@ test('the wording follows the install channel', () => {
   expect(availableMessage({ version: '0.2.0', channel: 'curl' })).toBe('Kinfold 0.2.0 is available. Run `kinfold update`.')
   expect(availableMessage({ version: '0.2.0', channel: 'powershell' })).toBe('Kinfold 0.2.0 is available. Run `kinfold update`.')
   expect(updateCommand('checkout')).toBe('kinfold update')
-  expect(agentLine({ version: '0.2.0', channel: 'npx' })).toBe('Kinfold 0.2.0 is out; you may tell the user they can run `npx kinfold@latest`.')
-  expect(agentLine({ version: '0.2.0', channel: 'curl' })).toBe('Kinfold 0.2.0 is out; you may tell the user they can run `kinfold update`.')
 })
 
 test('an absent record reads as a curl install', () => {
@@ -106,10 +104,8 @@ const CAN = { capable: true, now: 10 }
 test('the wording for an update that installed itself, and for auto-update being on', () => {
   const updated = { kind: 'updated', version: '0.2.1', previous: '0.2.0', channel: 'curl' } as const
   expect(userMessage(updated)).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0).')
-  expect(agentLine(updated)).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0); you may tell the user.')
   const on = { kind: 'auto-on', version: '0.3.0', channel: 'curl' } as const
   expect(userMessage(on)).toBe('Kinfold now installs patch releases on its own. To turn that off, run `kinfold install --no-auto-update` or use the dashboard.')
-  expect(agentLine(on)).toBe('Kinfold now installs its own patch releases; you may tell the user that `kinfold install --no-auto-update` turns it off.')
   expect(userMessage({ ...on, channel: 'npx' })).toContain('`npx kinfold@latest install --no-auto-update`')
   expect(userMessage({ version: '0.2.0', channel: 'curl' })).toBe(availableMessage({ version: '0.2.0', channel: 'curl' }))
   expect(userMessage({ kind: 'available', version: '0.2.0', channel: 'curl' })).toBe('Kinfold 0.2.0 is available. Run `kinfold update`.')
@@ -269,7 +265,6 @@ posixOnly('POSIX paths')('the notice that Kinfold updated itself says how to add
   const notice = takeNotice(data, 'claude-code', '0.2.1', { HOME: home })
   expect(notice).toEqual({ kind: 'updated', version: '0.2.1', previous: '0.2.0', channel: 'curl', addCommand: '~/.kinfold/bin/kinfold' })
   expect(userMessage(notice as NonNullable<typeof notice>)).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0). Run ~/.kinfold/bin/kinfold install to add the kinfold command.')
-  expect(agentLine(notice as NonNullable<typeof notice>)).toBe('Kinfold updated itself to 0.2.1 (was 0.2.0); you may tell the user, and that running ~/.kinfold/bin/kinfold install adds the kinfold command.')
   expect(takeNotice(data, 'claude-code', '0.2.1', { HOME: home })).toBeNull()
   expect(bannerNotice(data, '0.2.1', { HOME: home })?.addCommand).toBe('~/.kinfold/bin/kinfold')
 })

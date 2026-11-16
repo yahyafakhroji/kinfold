@@ -205,7 +205,7 @@ test("a prompt's related block is shown until the next prompt's answer replaces 
   expect(await texts()).toEqual([PACK.text, 'D1', 'D3', 'R2'])
 })
 
-test('OpenCode shows the line once per version per host, and later sessions and compaction show nothing', async () => {
+test('an update notice never reaches the model: the pack goes in as it is', async () => {
   const requests: ContextRequest[] = []
   let told = false
   const injector = createContextInjector({
@@ -223,16 +223,15 @@ test('OpenCode shows the line once per version per host, and later sessions and 
     await injector.onContext({ sessionID: session, system })
     return system.map((part) => part.text ?? '')
   }
-  const line = 'Kinfold 0.2.0 is out; you may tell the user they can run `npx kinfold@latest`.'
-  expect(await texts('s1')).toEqual([`${PACK.text}\n${line}`])
-  expect(await texts('s1')).toEqual([`${PACK.text}\n${line}`])
+  expect(await texts('s1')).toEqual([PACK.text])
+  expect(await texts('s1')).toEqual([PACK.text])
   expect(requests.filter((request) => request.channel === 'request')).toHaveLength(1)
   expect(await texts('s2')).toEqual([PACK.text])
   injector.onCompaction({ sessionID: 's1' })
   expect(await texts('s1')).toEqual([PACK.text])
 })
 
-test('an empty pack still carries the line alone, and a prompt delta never does', async () => {
+test('an empty pack with a notice adds nothing', async () => {
   const injector = createContextInjector({
     host: 'opencode', cwd: '/work/repo', log: () => {}, now: () => 1_000_000,
     fetch: async (request) => (request.channel === 'request'
@@ -241,5 +240,5 @@ test('an empty pack still carries the line alone, and a prompt delta never does'
   })
   const system: { type: string; text?: string }[] = []
   await injector.onContext({ sessionID: 's1', system })
-  expect(system.map((part) => part.text)).toEqual(['Kinfold 0.2.0 is out; you may tell the user they can run `kinfold update`.'])
+  expect(system.map((part) => part.text)).toEqual([])
 })

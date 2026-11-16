@@ -10,11 +10,13 @@ import { type FakeService, type FakeWorld, countingService, createWorld, fakeSer
 import type { ServiceControl } from '../install/service/control'
 import { StubService } from '../install/service/stub-service'
 import { mergeAutoState, readAutoState } from './auto-state'
-import { LATEST_RELEASE_URL } from './check'
+import { LATEST_RELEASE_URL, RELEASES_URL } from './check'
+import { readInstallRun } from './install-run'
+import { STAGE_DIR } from './stage'
 import { UPDATE_LOCK_FILE, acquireUpdateLock, updateLockHolder } from './lock'
 import { writeUpdateState } from './state'
 import { QUIET_MS } from './auto'
-import { AUTO_INSTALL_TIMEOUT_MS, AUTO_LOG_KEEP_BYTES, AUTO_LOG_MAX_BYTES, QUIET_WAIT_CAP_MS, programUrl, runUpdate , captureProgram } from './update'
+import { AUTO_INSTALL_TIMEOUT_MS, AUTO_LOG_KEEP_BYTES, AUTO_LOG_MAX_BYTES, NOT_RUN_BY_SERVICE, QUIET_WAIT_CAP_MS, programUrl, runUpdate , captureProgram } from './update'
 import { posixOnly } from '../../test/platform-guards'
 
 const ARCH = 'arm64'
@@ -696,4 +698,87 @@ test("the new program's own output is kept off a terminal run and handed back fo
   writeFileSync(script, "console.log('applying 2 actions'); console.error('step 2 failed'); process.exit(3)\n")
   const result = await captureProgram(process.execPath, [script], { PATH: process.env.PATH ?? '' })
   expect(result).toEqual({ code: 3, lines: ['applying 2 actions', 'step 2 failed'] })
+})
+
+/** A staged 0.2.0, as the daemon leaves one: the file and its record. */
+function stageProgram(w: FakeWorld, bytes: string = NEW_PROGRAM, version: string = '0.2.0'): string {
+  const dir = join(w.dataDir, STAGE_DIR)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const path = join(dir, `kinfold-${version}`)
+  writeFileSync(path, bytes, { mode: 0o700 })
+  const stat = statSync(path)
+  writeFileSync(join(dir, 'staged.json'), JSON.stringify({ staged: { version, asset: ASSET, sha256: sha(NEW_PROGRAM), size: stat.size, mtimeMs: stat.mtimeMs, at: 1 }, failure: null }))
+  return path
+}
+
+test('kinfold update installs the staged program, checked again against SHA256SUMS, without downloading it', async () => {
+  const { w, fetched } = updateWorld()
+  stageProgram(w)
+  let ran = ''
+  const code = await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: async (path) => ((ran = readFileSync(path, 'utf8')), 0) })
+  expect(code).toBe(0)
+  expect(ran).toBe(NEW_PROGRAM)
+  expect(fetched).toEqual([LATEST_RELEASE_URL, SUMS_URL])
+  expect(w.out).toContain('kinfold updated to 0.2.0')
+})
+
+test('a staged program that no longer matches SHA256SUMS is deleted and nothing is installed', async () => {
+  const { w, binPath } = updateWorld()
+  const path = stageProgram(w, 'kinfold program v0.2.X\n')
+  const code = await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: noRun })
+  expect(code).toBe(1)
+  expect(w.out).toContain('kinfold update: the staged program does not match the release checksums; it was deleted and nothing was changed')
+  expect(existsSync(path)).toBe(false)
+  expect(readFileSync(binPath, 'utf8')).toBe(OLD_PROGRAM)
+})
+
+test('a staged program for another release is not used', async () => {
+  const { w, fetched } = updateWorld()
+  stageProgram(w, NEW_PROGRAM, '0.1.5')
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: ok })).toBe(0)
+  expect(fetched).toContain(PROGRAM_URL)
+})
+
+test('with the beta channel on, kinfold update installs the newest prerelease', async () => {
+  const { w, fetched } = updateWorld({ tag: 'v0.2.0-beta.1' })
+  writeFileSync(join(w.dataDir, 'install.json'), JSON.stringify({ channel: 'curl', updateCheck: true, autoUpdate: true, beta: true, firstInstalledAt: 1 }))
+  const base = w.env.fetch
+  w.env = { ...w.env, fetch: async (url, init) => (url === RELEASES_URL ? (fetched.push(url), new Response(JSON.stringify([{ tag_name: 'v0.2.0-beta.1', draft: false, prerelease: true }]))) : base(url, init)) }
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: ok })).toBe(0)
+  expect(fetched[0]).toBe(RELEASES_URL)
+  expect(w.out).toContain('kinfold updated to 0.2.0-beta.1')
+})
+
+test('a build from a checkout is never updated, whatever its install mode says', async () => {
+  const { w, fetched } = updateWorld()
+  expect(await runUpdate(w.env, { dryRun: false }, { version: '0.2.0-dev', runProgram: noRun })).toBe(1)
+  expect(w.out).toEqual(['kinfold update: this is a development build; update it with git pull'])
+  expect(fetched).toEqual([])
+})
+
+test('the dashboard run installs the staged release, logs to the file and records the result', async () => {
+  const { w } = updateWorld()
+  stageProgram(w)
+  expect(await runUpdate(w.env, { dryRun: false, staged: '0.2.0' }, { version: '0.1.0', runProgram: ok })).toBe(0)
+  expect(w.out).toEqual([])
+  expect(readInstallRun(w.dataDir)).toMatchObject({ version: '0.2.0', previous: '0.1.0', state: 'updated' })
+  expect(readFileSync(AUTO_LOG(w), 'utf8')).toContain('kinfold updated to 0.2.0')
+})
+
+test('the dashboard run refuses when nothing is staged for that release, or another is on offer now', async () => {
+  const { w, fetched } = updateWorld()
+  expect(await runUpdate(w.env, { dryRun: false, staged: '0.2.0' }, { version: '0.1.0', runProgram: noRun })).toBe(1)
+  expect(readInstallRun(w.dataDir)).toMatchObject({ version: '0.2.0', state: 'failed', message: 'no checked download of 0.2.0 is waiting; nothing was changed' })
+  expect(fetched).not.toContain(PROGRAM_URL)
+  stageProgram(w, NEW_PROGRAM, '0.1.5')
+  expect(await runUpdate(w.env, { dryRun: false, staged: '0.1.5' }, { version: '0.1.0', runProgram: noRun })).toBe(1)
+  expect(readInstallRun(w.dataDir)).toMatchObject({ version: '0.1.5', state: 'failed', message: '0.2.0 is the release on offer now; reload the dashboard; nothing was changed' })
+})
+
+test('the dashboard run refuses where no service runs the daemon, since nothing would restart it', async () => {
+  const { w } = updateWorld()
+  stageProgram(w)
+  w.env = { ...w.env, service: fakeService({ running: false }) }
+  expect(await runUpdate(w.env, { dryRun: false, staged: '0.2.0' }, { version: '0.1.0', runProgram: noRun })).toBe(1)
+  expect(readInstallRun(w.dataDir)).toMatchObject({ state: 'failed', message: NOT_RUN_BY_SERVICE })
 })

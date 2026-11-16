@@ -357,7 +357,8 @@ test("Copilot's model reads byte for byte what it read before the progress line 
     ['session-start', PACK_ANSWER, packOut],
     ['session-start', {}, null],
     ['session-start', null, null],
-    ['session-start', { ...PACK_ANSWER, updateNotice: NOTICE }, JSON.stringify({ additionalContext: `${PACK_ANSWER.text}\nKinfold 0.5.0 is out; you may tell the user they can run \`kinfold update\`.` })],
+    // An update notice no longer reaches the model at all: it moved to the progress line.
+    ['session-start', { ...PACK_ANSWER, updateNotice: NOTICE }, packOut],
     ['user-prompt-submit', PROMPT_ANSWER, null],
     ['post-tool-use', PACK_ANSWER, null],
     ['post-tool-use-failure', PACK_ANSWER, null],
@@ -370,7 +371,7 @@ test("Copilot's model reads byte for byte what it read before the progress line 
       const output = await copilot(name, answer)
       expect(`${name} shown=${shown}: ${modelFacing(output)}`).toBe(`${name} shown=${shown}: ${expected}`)
       // With the line off the output is the old one whole, with no line added.
-      if (!shown) expect(output).toBe(expected)
+      if (!shown && answer?.updateNotice === undefined) expect(output).toBe(expected)
     }
   }
 })
@@ -389,7 +390,8 @@ test('every Copilot progress line is one line of JSON holding one line of text',
     expect(lines[0]).toBe(progress[0]!)
     const message = (JSON.parse(progress[0]!) as { message: string }).message
     expect(message).not.toMatch(/[\u0000-\u001f‮]/)
-    expect(message.startsWith('kinfold · ')).toBe(true)
+    // An update notice, when there is one, leads the line; the recall follows it.
+    expect(message).toMatch(/^(kinfold · |Kinfold 0\.5\.0 is available\. Run `kinfold update`\. · kinfold · )/)
   }
 })
 
@@ -402,4 +404,15 @@ test('Copilot is told when no daemon answers, and when the project has no memory
   rmSync(join(dataDir, 'daemon.json'))
   const down = await runHook(payload('copilot', 'docs-constructed-session-start'), dataDir, () => undefined, {}, { fallback: false }, 'copilot')
   expect((JSON.parse(down!) as { message: string }).message).toBe(DAEMON_DOWN_START_LINE)
+})
+
+test('Copilot shows an update notice on a progress line, with the recall line on or off', async () => {
+  fakeDaemon()
+  const packOut = JSON.stringify({ additionalContext: PACK_ANSWER.text })
+  writeDisplayFile(dataDir, { showRecall: false })
+  expect((await copilot('session-start', { ...PACK_ANSWER, updateNotice: NOTICE }))!.split('\n')).toEqual([JSON.stringify({ type: 'progress', message: NOTICE_TEXT }), packOut])
+  writeDisplayFile(dataDir, { showRecall: true })
+  const [line, context] = (await copilot('session-start', { ...PACK_ANSWER, updateNotice: NOTICE }))!.split('\n')
+  expect(JSON.parse(line ?? '').message).toStartWith(`${NOTICE_TEXT} · kinfold · repo`)
+  expect(context).toBe(packOut)
 })

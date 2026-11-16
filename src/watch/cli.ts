@@ -54,7 +54,14 @@ function parseRow(value: unknown): ShownRow | null {
   return { id: id as number, at: at as number, host, project, ids: ids as number[], recalled: titles, heldOut: heldOut === true, late: late === true }
 }
 
-type Poll = { kind: 'rows'; cursor: number; rows: ShownRow[] } | { kind: 'old' } | { kind: 'down' }
+/** The update the user is owed, as the dashboard banner says it; null for none. */
+type Update = { version: string; message: string } | null
+type Poll = { kind: 'rows'; cursor: number; rows: ShownRow[]; update: Update } | { kind: 'old' } | { kind: 'down' }
+
+function parseUpdate(value: unknown): Update {
+  if (!isRecord(value) || typeof value.version !== 'string' || typeof value.message !== 'string') return null
+  return { version: value.version, message: cleanTitle(value.message) }
+}
 
 async function poll(env: WatchEnv, port: number, token: string, args: WatchArgs, cursor: number | null, stop?: AbortSignal): Promise<Poll> {
   const query = new URLSearchParams()
@@ -72,7 +79,7 @@ async function poll(env: WatchEnv, port: number, token: string, args: WatchArgs,
     if (response.status !== 200) return { kind: 'down' }
     const body: unknown = await response.json()
     if (!isRecord(body) || !Number.isSafeInteger(body.cursor) || !Array.isArray(body.rows)) return { kind: 'down' }
-    return { kind: 'rows', cursor: body.cursor as number, rows: body.rows.flatMap((row) => parseRow(row) ?? []) }
+    return { kind: 'rows', cursor: body.cursor as number, rows: body.rows.flatMap((row) => parseRow(row) ?? []), update: parseUpdate(body.update) }
   } catch {
     return { kind: 'down' }
   }
@@ -112,6 +119,14 @@ export async function runWatch(env: WatchEnv, args: WatchArgs, deps: WatchDeps =
 
   let cursor = first.cursor
   let waiting = false
+  // Each notice is printed once per watch, on its own line; a new one replaces it.
+  let shown: string | null = null
+  const showUpdate = (update: Update): void => {
+    if (update === null || update.message === shown) return
+    shown = update.message
+    env.out(update.message)
+  }
+  showUpdate(first.update)
   // A function, so the check after an await is not narrowed away by the one in the loop's condition.
   const stopped = (): boolean => deps.stop?.aborted === true
   while (!stopped()) {
@@ -122,6 +137,7 @@ export async function runWatch(env: WatchEnv, args: WatchArgs, deps: WatchDeps =
     if (answer.kind === 'rows') {
       if (waiting) env.out('the daemon is back')
       waiting = false
+      showUpdate(answer.update)
       for (const row of answer.rows) env.out(formatWatchLine(row))
       cursor = Math.max(cursor, answer.cursor)
     } else if (!waiting) {

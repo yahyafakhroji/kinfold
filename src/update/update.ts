@@ -8,7 +8,7 @@
 // service as they were. A run killed outright (SIGKILL, a crash, a power loss)
 // cannot clean up, so each run first removes the temp files of runs no longer alive.
 
-import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeSync } from 'node:fs'
+import { chmodSync, closeSync, constants, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { envName } from '../env-names'
 import { writeFileAtomic } from '../fs/atomic'
@@ -24,12 +24,16 @@ import { getQuietForMs } from '../install/daemon-client'
 import { HIDDEN_WINDOW } from '../install/system'
 import { QUIET_MS } from './auto'
 import { mergeAutoState } from './auto-state'
-import { UpdateCheckError, fetchLatestRelease } from './check'
+import { UpdateCheckError, fetchNewestRelease } from './check'
+import { writeInstallRun } from './install-run'
+import { isDevVersion } from './release'
 import { type UpdateLockDeps, acquireUpdateLock, updateLockHolder } from './lock'
+import { MAX_PROGRAM_BYTES, removeStaged, stagedProgram } from './stage'
 import { readUpdateState } from './state'
+
+export { MAX_PROGRAM_BYTES }
 import { compareVersions, isPatchUpdate, parseVersion } from './version-order'
 
-export const MAX_PROGRAM_BYTES = 300_000_000
 export const DOWNLOAD_TIMEOUT_MS = 300_000
 
 const EXIT_OK = 0
@@ -388,8 +392,29 @@ interface Applied {
 
 const failed = (latest: string | null): Applied => ({ code: EXIT_FAILED, outcome: 'failed', latest })
 
+interface StepOptions {
+  dryRun: boolean
+  patchOnly: boolean
+  /** The dashboard's run: install this staged release and nothing else. */
+  staged?: string
+  onInterrupt?: () => void
+}
+
+/** The staged program in place of a download: copied to the temp name, so the bytes checked next are the bytes run. */
+function copyStaged(source: string, temp: TempFile): void {
+  mkdirSync(dirname(temp.path), { recursive: true, mode: BIN_DIR_MODE })
+  try {
+    copyFileSync(source, temp.path, constants.COPYFILE_EXCL)
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    throw new UpdateStop(`${temp.path} already exists; remove it and run kinfold update again; nothing was changed`)
+  }
+  temp.created = true
+  chmodSync(temp.path, DOWNLOAD_MODE)
+}
+
 /** On a terminal the whole update runs under one spinner, which ends on the last line the update said. */
-async function applyUpdate(env: InstallEnv, options: { dryRun: boolean; patchOnly: boolean; onInterrupt?: () => void }, deps: UpdateDeps, run: NonNullable<UpdateDeps['runProgram']>): Promise<Applied> {
+async function applyUpdate(env: InstallEnv, options: StepOptions, deps: UpdateDeps, run: NonNullable<UpdateDeps['runProgram']>): Promise<Applied> {
   const busy = options.dryRun ? undefined : env.ui?.busy('looking for a newer release')
   try {
     const applied = await applyUpdateSteps(env, options, deps, run, busy)
@@ -402,13 +427,13 @@ async function applyUpdate(env: InstallEnv, options: { dryRun: boolean; patchOnl
   }
 }
 
-async function applyUpdateSteps(env: InstallEnv, options: { dryRun: boolean; patchOnly: boolean; onInterrupt?: () => void }, deps: UpdateDeps, run: NonNullable<UpdateDeps['runProgram']>, busy: CommandBusy | undefined): Promise<Applied> {
+async function applyUpdateSteps(env: InstallEnv, options: StepOptions, deps: UpdateDeps, run: NonNullable<UpdateDeps['runProgram']>, busy: CommandBusy | undefined): Promise<Applied> {
   // A dry run only lists these (describeDryRun); it removes nothing.
   if (!options.dryRun) sweepLeftovers(env)
   const running = deps.version ?? VERSION
   let latest: string
   try {
-    latest = (await fetchLatestRelease(env.fetch, env.now)).latestVersion
+    latest = (await fetchNewestRelease(env.fetch, env.now, readInstallRecord(env.dataDir)?.beta === true)).release.version
   } catch (error: unknown) {
     env.out(`${PREFIX} could not ask GitHub for the latest release (${error instanceof UpdateCheckError ? error.label : 'error'})`)
     return failed(null)
@@ -422,10 +447,21 @@ async function applyUpdateSteps(env: InstallEnv, options: { dryRun: boolean; pat
     env.out(`${PREFIX} ${latest} is not a patch release of ${running}; it is left for kinfold update`)
     return { code: EXIT_OK, outcome: 'skipped', latest }
   }
+  // The dashboard offered one release; a newer one since is a new offer, not something to install unseen.
+  if (options.staged !== undefined && options.staged !== latest) {
+    env.out(`${PREFIX} ${latest} is the release on offer now; reload the dashboard; nothing was changed`)
+    return failed(options.staged)
+  }
   const arch = env.arch ?? process.arch
   const assetName = releaseAssetName(env.platform, arch)
   if (assetName === null) {
     env.out(`${PREFIX} no release build for ${env.platform}-${arch}`)
+    return failed(latest)
+  }
+  const found = options.dryRun ? null : stagedProgram(env.dataDir, env.platform)
+  const staged = found !== null && found.version === latest && found.asset === assetName ? found : null
+  if (options.staged !== undefined && staged === null) {
+    env.out(`${PREFIX} no checked download of ${latest} is waiting; nothing was changed`)
     return failed(latest)
   }
   const temp: TempFile = { path: tempPath(env), created: false }
@@ -437,8 +473,13 @@ async function applyUpdateSteps(env: InstallEnv, options: { dryRun: boolean; pat
   try {
     busy?.label(`downloading Kinfold ${latest}`)
     const expected = await fetchExpectedHash(env, latest, assetName)
-    await download(env, programUrl(latest, assetName), temp, deps.maxProgramBytes ?? MAX_PROGRAM_BYTES)
-    if ((await fileSha256(temp.path)) !== expected) throw new UpdateStop('the downloaded program does not match the release checksums; nothing was changed')
+    if (staged !== null) copyStaged(staged.path, temp)
+    else await download(env, programUrl(latest, assetName), temp, deps.maxProgramBytes ?? MAX_PROGRAM_BYTES)
+    if ((await fileSha256(temp.path)) !== expected) {
+      if (staged === null) throw new UpdateStop('the downloaded program does not match the release checksums; nothing was changed')
+      removeStaged(env.dataDir)
+      throw new UpdateStop('the staged program does not match the release checksums; it was deleted and nothing was changed')
+    }
     chmodSync(temp.path, VERIFIED_MODE)
     // The daemon waited for quiet before it started this run, but the download took time: an agent may have begun since.
     if (options.patchOnly && !(await quietAgain(env, deps))) throw new UpdateStop(`agents were still active ${QUIET_WAIT_CAP_MS / 60_000} minutes after the download; nothing was changed`)
@@ -540,7 +581,14 @@ function boundedInstall(deps: UpdateDeps, output: number | 'ignore'): NonNullabl
  * new program's install writes there too, and the outcome is saved for the
  * notice, `kinfold status` and the dashboard. Only a patch release is applied.
  */
-async function runAuto(env: InstallEnv, deps: UpdateDeps, onInterrupt: () => void): Promise<number> {
+interface AutoLog {
+  logged: InstallEnv
+  lines: string[]
+  fd: number | null
+}
+
+/** An environment whose every line goes to logs/auto-update.log, and is kept for the outcome. */
+function autoLog(env: InstallEnv): AutoLog {
   const fd = openAutoLog(env.dataDir)
   const lines: string[] = []
   const out = (line: string): void => {
@@ -549,10 +597,15 @@ async function runAuto(env: InstallEnv, deps: UpdateDeps, onInterrupt: () => voi
     try {
       writeSync(fd, `${new Date(env.now()).toISOString()} ${line}\n`)
     } catch {
-      // The outcome is still saved below.
+      // The outcome is still saved by the caller.
     }
   }
-  const logged = { ...env, out }
+  return { logged: { ...env, out }, lines, fd }
+}
+
+async function runAuto(env: InstallEnv, deps: UpdateDeps, onInterrupt: () => void): Promise<number> {
+  const { logged, lines, fd } = autoLog(env)
+  const out = logged.out
   const running = deps.version ?? VERSION
   const fail = (version: string, reason: string, blocked: boolean = false): number => {
     mergeAutoState(env.dataDir, { failure: { version, at: env.now(), reason, ...(blocked ? { blocked: true as const, running } : {}) } })
@@ -575,9 +628,37 @@ async function runAuto(env: InstallEnv, deps: UpdateDeps, onInterrupt: () => voi
   }
 }
 
-export async function runUpdate(env: InstallEnv, options: { dryRun: boolean; auto?: boolean }, deps: UpdateDeps = {}): Promise<number> {
+/**
+ * The run the dashboard's Install button starts, detached like the automatic
+ * one: the staged release only, logged to the same file, its result saved in
+ * updates/run.json for the page, which waits through the daemon's restart.
+ */
+async function runStaged(env: InstallEnv, deps: UpdateDeps, onInterrupt: () => void, version: string): Promise<number> {
+  const { logged, lines, fd } = autoLog(env)
+  const running = deps.version ?? VERSION
+  const record = (state: 'updated' | 'failed', message: string | null): void => writeInstallRun(env.dataDir, { version, previous: running, state, message, at: env.now() })
+  try {
+    if (!(await serviceRunsDaemon(env))) {
+      logged.out(`${PREFIX} ${NOT_RUN_BY_SERVICE}`)
+      record('failed', NOT_RUN_BY_SERVICE)
+      return EXIT_FAILED
+    }
+    const applied = await applyUpdate(logged, { dryRun: false, patchOnly: false, staged: version, onInterrupt }, deps, boundedInstall(deps, fd ?? 'ignore'))
+    if (applied.outcome === 'updated') record('updated', null)
+    else record('failed', (lines.at(-1) ?? 'the update failed').replace(`${PREFIX} `, ''))
+    return applied.code
+  } finally {
+    if (fd !== null) closeSync(fd)
+  }
+}
+
+export async function runUpdate(env: InstallEnv, options: { dryRun: boolean; auto?: boolean; staged?: string }, deps: UpdateDeps = {}): Promise<number> {
   if (env.mode.kind === 'checkout') {
     env.out(`${PREFIX} this is a checkout install; update it with git pull and bun src/cli/kinfold.ts install`)
+    return EXIT_FAILED
+  }
+  if (isDevVersion(deps.version ?? VERSION)) {
+    env.out(`${PREFIX} this is a development build; update it with git pull`)
     return EXIT_FAILED
   }
   if (options.dryRun) return (await applyUpdate(env, { dryRun: true, patchOnly: false }, deps, runnerFor(env, deps))).code
@@ -586,12 +667,17 @@ export async function runUpdate(env: InstallEnv, options: { dryRun: boolean; aut
   if (lock === null) {
     // The daemon's own run finds the user's update in progress and has nothing to add.
     if (options.auto === true) return EXIT_OK
+    if (options.staged !== undefined) {
+      writeInstallRun(env.dataDir, { version: options.staged, previous: deps.version ?? VERSION, state: 'failed', message: 'another update is running; nothing was changed', at: env.now() })
+      return EXIT_FAILED
+    }
     const holder = updateLockHolder(env.dataDir, deps.lock?.alive)
     env.out(`${PREFIX} another update is running${holder === null ? '' : ` (pid ${holder})`}; nothing was changed`)
     return EXIT_FAILED
   }
   try {
     if (options.auto === true) return await runAuto(env, deps, lock.release)
+    if (options.staged !== undefined) return await runStaged(env, deps, lock.release, options.staged)
     return (await applyUpdate(env, { dryRun: false, patchOnly: false, onInterrupt: lock.release }, deps, runnerFor(env, deps))).code
   } finally {
     lock.release()

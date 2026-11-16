@@ -160,6 +160,8 @@ function startRecallToasts(show) {
   let startCursor = null;
   let busy = false;
   let stopped = false;
+  // The update notice last shown: each one is toasted once for as long as this TUI runs.
+  let updateShown = null;
   // When the next toast may go up without wiping a list that has not had its time.
   let freeAt = 0;
   const waiting = new Set();
@@ -206,7 +208,14 @@ function startRecallToasts(show) {
       cursor = body.cursor;
       // A daemon from before session starts sends no start cursor; it is asked again each time, at no cost.
       if (Number.isSafeInteger(body.startCursor)) startCursor = body.startCursor;
-      if (stopped || !shown()) return;
+      if (stopped) return;
+      // An update notice is news for the user, not recall, so the recall setting does not hide it.
+      const update = typeof body.update?.message === 'string' ? body.update.message : null;
+      if (update !== null && update !== '' && update !== updateShown) {
+        updateShown = update;
+        put(update, null, TOAST_MS, 0);
+      }
+      if (!shown()) return;
       // The list before the line: a session starts before its first prompt is answered.
       for (const start of !firstStarts && Array.isArray(body.starts) ? body.starts : []) {
         if (typeof start?.list !== 'string' || start.list === '') continue;

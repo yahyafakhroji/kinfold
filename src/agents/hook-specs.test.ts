@@ -3,11 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { hostFromArgs } from '../cli/hook'
-import type { UpdateNotice } from '../context/types'
 import { KNOWN_HOSTS } from '../contract/event'
 import { HOOK_SPECS, hookSpecFor } from './hook-specs'
 
-const NOTICE: UpdateNotice = { version: '1.1.0', channel: 'npx' }
 
 describe('HOOK_SPECS', () => {
   test('has an entry for every KNOWN_HOSTS id', () => {
@@ -29,7 +27,6 @@ describe('HOOK_SPECS', () => {
       { id: 'codex', session: '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"x"}}', prompt: '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"x"}}' },
       { id: 'cursor', session: '{"additional_context":"x"}', prompt: null },
     ])
-    expect(hookSpecFor('claude-code')?.sessionContextWithNotice('x', NOTICE)).toContain('systemMessage')
   })
 })
 

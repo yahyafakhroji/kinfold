@@ -3,7 +3,8 @@
 // the authenticated route and prints. Nothing here reaches a model.
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { readUpdateState, writeUpdateState } from '../update/state'
 import { join } from 'node:path'
 import { seedObservation } from '../context/test-support'
 import { type RunningDaemon, startDaemon } from '../daemon/daemon'
@@ -106,8 +107,8 @@ test('GET /watch needs the token, starts from now, and then hands over what sett
   const token = readFileSync(join(temp.dataDir, 'daemon.token'), 'utf8').trim()
   const get = (query: string, auth = true): Promise<Response> => fetch(`http://127.0.0.1:${daemon!.port}/watch${query}`, auth ? { headers: { authorization: `Bearer ${token}` } } : {})
   expect((await get('', false)).status).toBe(401)
-  const start = (await (await get('')).json()) as { cursor: number; rows: unknown[] }
-  expect(start).toEqual({ cursor: latestPromptId(temp.store.db), rows: [] })
+  const start = (await (await get('')).json()) as { cursor: number; rows: unknown[]; update: unknown }
+  expect(start).toEqual({ cursor: latestPromptId(temp.store.db), rows: [], update: null })
 
   prompt(claude, 2, Date.now() - WATCH_SETTLE_MS - 500)
   prompt(claude, 3, Date.now())
@@ -285,9 +286,9 @@ test('GET /watch hands over session starts only to a watcher that asks, from now
     const response = await fetch(`http://127.0.0.1:${daemon!.port}/watch${query}`, { headers: { authorization: `Bearer ${token}` } })
     return { status: response.status, body: (await response.json()) as Record<string, any> }
   }
-  // A watcher that does not ask (kinfold watch, an older plugin) gets what it always got.
-  expect(Object.keys((await get('')).body).sort()).toEqual(['cursor', 'rows'])
-  expect(Object.keys((await get('?after=0')).body).sort()).toEqual(['cursor', 'rows'])
+  // A watcher that does not ask (kinfold watch, an older plugin) gets what it always got, and the update line every watcher gets.
+  expect(Object.keys((await get('')).body).sort()).toEqual(['cursor', 'rows', 'update'])
+  expect(Object.keys((await get('?after=0')).body).sort()).toEqual(['cursor', 'rows', 'update'])
 
   const first = (await get('?startsAfter=now')).body
   expect(first).toMatchObject({ rows: [], starts: [], startCursor: before })
@@ -316,4 +317,33 @@ test('a watcher whose cursors are past the store (a restore put a smaller one in
   const fresh = pack('opencode', 'ses_b', [memory], Date.now())
   const next = await get(`?after=${far.cursor}&startsAfter=${far.startCursor}`)
   expect(next.starts.map((row: { id: number }) => row.id)).toEqual([fresh])
+})
+
+test('the watch prints an update notice once, on its own line, and again only for another one', async () => {
+  daemon = startDaemon({ dataDir: temp.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
+  const stop = new AbortController()
+  const update = { version: '0.6.0', message: 'Kinfold 0.6.0 is available. Run `kinfold update`.' }
+  const fake = fakeWatch([
+    Response.json({ cursor: 4, rows: [], update }),
+    Response.json({ cursor: 4, rows: [], update }),
+    Response.json({ cursor: 5, rows: [rowAt(5, T0)], update: { version: '0.7.0', message: 'Kinfold 0.7.0 is ready' } }),
+    Response.json({ cursor: 5, rows: [], update: null }),
+  ], stop)
+  expect(await runWatch(fake.env, { command: 'watch', host: null, project: null }, { stop: stop.signal })).toBe(0)
+  expect(fake.out).toEqual([
+    'watching every agent; one line per prompt, Ctrl-C to stop',
+    'Kinfold 0.6.0 is available. Run `kinfold update`.',
+    'Kinfold 0.7.0 is ready',
+    `${hhmm(T0)}  codex · repo · nothing recalled`,
+  ])
+})
+
+test('GET /watch carries the update the user is owed, without using up a notice', async () => {
+  writeFileSync(join(temp.dataDir, 'install.json'), JSON.stringify({ channel: 'curl', updateCheck: true, autoUpdate: true, firstInstalledAt: 1 }))
+  writeUpdateState(temp.dataDir, { lastAttemptAt: T0, latestVersion: '0.6.0', checkedAt: T0, notified: {} })
+  daemon = startDaemon({ dataDir: temp.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {}, version: '0.5.0', updateCheck: { fetch: () => new Promise<Response>(() => undefined), envVars: () => ({}) } })
+  const token = readFileSync(join(temp.dataDir, 'daemon.token'), 'utf8').trim()
+  const body = (await (await fetch(`http://127.0.0.1:${daemon.port}/watch`, { headers: { authorization: `Bearer ${token}` } })).json()) as { update: unknown }
+  expect(body.update).toEqual({ version: '0.6.0', message: 'Kinfold 0.6.0 is available. Run `kinfold update`.' })
+  expect(readUpdateState(temp.dataDir).notified).toEqual({})
 })

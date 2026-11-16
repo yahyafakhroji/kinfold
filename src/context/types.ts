@@ -58,7 +58,7 @@ export const NOTICE_CHANNELS = ['npx', 'bunx', 'curl', 'powershell'] as const
  * absent kind reads as it always did), an update Kinfold installed itself, or
  * that automatic patch updates are now on for an install that predates them.
  */
-export const NOTICE_KINDS = ['available', 'updated', 'auto-on'] as const
+export const NOTICE_KINDS = ['available', 'updated', 'auto-on', 'offer'] as const
 export interface UpdateNotice {
   kind?: (typeof NOTICE_KINDS)[number]
   /** The release on offer, the one just installed, or the running one for `auto-on`. */
@@ -72,6 +72,11 @@ export interface UpdateNotice {
    */
   addCommand?: string
   channel: (typeof NOTICE_CHANNELS)[number]
+  /** `available` and `offer`: how many change lines the release lists, and how many of them are breaking. Absent: not known. */
+  changes?: number
+  breaking?: number
+  /** The release is a beta: a launcher fetches it from npm's next tag. */
+  prerelease?: true
 }
 
 export interface ContextResult {
@@ -206,7 +211,17 @@ function parseAvailableNotice(value: unknown): UpdateNotice | null {
   if (!isRecord(value)) return null
   const { version, channel } = value
   const known = NOTICE_CHANNELS.find((name) => name === channel)
-  return isPrintableVersion(version) && known !== undefined ? { version, channel: known } : null
+  return isPrintableVersion(version) && known !== undefined ? { version, channel: known, ...releaseFields(value) } : null
+}
+
+const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 1000
+
+/** The counts travel as a pair or not at all, so a line never says "3 changes" beside a made-up breaking count. */
+function releaseFields(value: Record<string, unknown>): Pick<UpdateNotice, 'changes' | 'breaking' | 'prerelease'> {
+  return {
+    ...(isCount(value.changes) && isCount(value.breaking) ? { changes: value.changes, breaking: value.breaking } : {}),
+    ...(value.prerelease === true ? { prerelease: true as const } : {}),
+  }
 }
 
 /** A kind this build does not know has no wording here, so it is dropped rather than shown as the wrong thing. */
@@ -216,6 +231,7 @@ function parseSelfNotice(value: unknown): UpdateNotice | null {
   const known = NOTICE_CHANNELS.find((name) => name === channel)
   if (!isPrintableVersion(version) || known === undefined) return null
   if (kind === 'auto-on') return { kind, version, channel: known }
+  if (kind === 'offer') return { kind, version, channel: known, ...releaseFields(value) }
   if (kind === 'updated' && isPrintableVersion(previous)) return { kind, version, previous, channel: known, ...(isPlainPath(value.addCommand) ? { addCommand: value.addCommand } : {}) }
   return null
 }

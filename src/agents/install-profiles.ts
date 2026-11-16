@@ -31,7 +31,13 @@ import { CONTINUE_PROFILE } from './profiles/continue'
 import { WARP_PROFILE } from './profiles/warp'
 import { ZED_PROFILE } from './profiles/zed'
 
-export const INSTALL_PROFILES: ProfileTable = {
+/** An agent whose hooks have no user message and no progress line is marked, so the wizard and status say where its update news goes. */
+function withUpdateNews(profile: AgentProfile): AgentProfile {
+  const spec = HOOK_SPECS[profile.id]
+  return spec === null || spec.userMessage !== undefined || spec.progressLine !== undefined ? profile : { ...profile, updateNewsElsewhere: true }
+}
+
+const RAW_PROFILES: ProfileTable = {
   'claude-code': CLAUDE_CODE_PROFILE,
   opencode: OPENCODE_PROFILE,
   codex: CODEX_PROFILE,
@@ -55,6 +61,8 @@ export const INSTALL_PROFILES: ProfileTable = {
   continue: CONTINUE_PROFILE,
   warp: WARP_PROFILE,
 }
+
+export const INSTALL_PROFILES: ProfileTable = Object.fromEntries(Object.entries(RAW_PROFILES).map(([id, profile]) => [id, withUpdateNews(profile)])) as ProfileTable
 
 export function profileOf(id: AgentId): AgentProfile {
   return INSTALL_PROFILES[id]

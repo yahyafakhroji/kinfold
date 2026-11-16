@@ -233,3 +233,23 @@ test('a toast still waiting behind a list is dropped when the TUI part stops', a
     await server.stop(true)
   }
 })
+
+test('the TUI part toasts an update notice once, with the recall line on or off, and a new one again', async () => {
+  const dataDir = join(world.root, 'data-update')
+  mkdirSync(dataDir, { recursive: true })
+  const update = { version: '0.6.0', message: 'Kinfold 0.6.0 is ready · 3 changes · kinfold update to install' }
+  const answers: unknown[] = [{ cursor: 1, rows: [], update }, { cursor: 1, rows: [], update }, { cursor: 1, rows: [], update: { version: '0.7.0', message: 'Kinfold 0.7.0 is ready' } }]
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json(answers.shift() ?? { cursor: 1, rows: [], update: null }) })
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: server.port }))
+  writeFileSync(join(dataDir, 'daemon.token'), 'tok\n')
+  writeFileSync(join(dataDir, 'display.json'), JSON.stringify({ showRecall: false }))
+  try {
+    const part = await loadPart(dataDir, 'part-update')
+    for (let waited = 0; part.toasts.length < 2 && waited < 5_000; waited += 10) await settle(10)
+    await settle(80)
+    part.stop()
+    expect(part.toasts.map((toast) => toast.message)).toEqual([update.message, 'Kinfold 0.7.0 is ready'])
+  } finally {
+    await server.stop(true)
+  }
+})

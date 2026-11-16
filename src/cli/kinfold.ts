@@ -206,7 +206,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
   }
   if (installArgs.command === 'update') {
     const { runUpdate } = await import('../update/update')
-    return runFramed(effective, 'update', (env) => runUpdate(env, { dryRun: installArgs.dryRun, auto: installArgs.auto }))
+    return runFramed(effective, 'update', (env) => runUpdate(env, { dryRun: installArgs.dryRun, auto: installArgs.auto, ...(installArgs.staged !== null ? { staged: installArgs.staged } : {}) }))
   }
   if (installArgs.command === 'uninstall') {
     const { uninstall } = await import('../install/uninstall')
@@ -230,6 +230,8 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       noUpdateCheck: installArgs.noUpdateCheck,
       noAutoUpdate: installArgs.noAutoUpdate,
       autoUpdate: installArgs.autoUpdate,
+      ...(installArgs.updates !== null ? { updates: installArgs.updates } : {}),
+      ...(installArgs.beta ? { beta: true } : installArgs.noBeta ? { beta: false } : {}),
       display: displayChangeOf(installArgs),
       ...(installArgs.embeddings !== null ? { embeddings: installArgs.embeddings } : {}),
       path: installArgs.path,

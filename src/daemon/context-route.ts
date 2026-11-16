@@ -44,7 +44,7 @@ export interface ContextRouteDeps {
    */
   holdout?: { on: () => boolean; pick?: () => boolean }
   /** Where update-check.json lives and which version is running; absent means no update notice. */
-  updates?: { dataDir: string; version: string; envVars?: () => Readonly<Record<string, string | undefined>>; /** This daemon applies patch releases itself, so their notice is held back. */ canAutoUpdate?: boolean }
+  updates?: { dataDir: string; version: string; envVars?: () => Readonly<Record<string, string | undefined>>; /** This daemon applies patch releases itself, so their notice is held back. */ canAutoUpdate?: boolean; platform?: NodeJS.Platform; arch?: string }
 }
 
 /** Past this the hook has likely aborted (it waits DAEMON_SHARE_MS, connection included). */
@@ -82,7 +82,7 @@ function updateNoticeFor(updates: ContextRouteDeps['updates'], request: ContextR
   if (updates === undefined || request.channel === 'prompt') return null
   try {
     const env = updates.envVars?.() ?? process.env
-    const context = { capable: updates.canAutoUpdate === true, now: at }
+    const context = { capable: updates.canAutoUpdate === true, now: at, ...(updates.platform !== undefined ? { platform: updates.platform } : {}), ...(updates.arch !== undefined ? { arch: updates.arch } : {}) }
     return durationMs <= shownBudgetMs(request.host) ? takeNotice(updates.dataDir, request.host, updates.version, env, context) : peekNotice(updates.dataDir, request.host, updates.version, env, context)
   } catch {
     return null
