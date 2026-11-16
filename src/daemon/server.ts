@@ -37,6 +37,7 @@ import type { AutoUpdateView } from '../update/auto'
 import type { InstallRun } from '../update/install-run'
 import { parseVersion } from '../update/version-order'
 import { type UpdateLevel, isUpdateLevel } from '../install/setup/record'
+import { type DeviceRouting, deviceRoute } from '../central/device-routes'
 
 export interface ServerDeps {
   /** 0 picks a free port. */
@@ -98,6 +99,10 @@ export interface ServerDeps {
   backup?: BackupRoutes
   /** Why the store cannot be reached right now (a restore is replacing it), or null. Routes that read or write it answer 503 meanwhile. */
   unavailable?: () => string | null
+  /** A central device: reads and recall answer through the hub, and changes to stored memory are refused. Absent: local. */
+  device?: DeviceRouting
+  /** GET /central/status: this daemon's central mode and how it is going; `check` asks the hub first. Absent reads as local. */
+  centralStatus?: (check: boolean) => unknown
   /** Receives counts, ids and error messages only, never payloads. */
   log: (line: string) => void
 }
@@ -447,7 +452,13 @@ async function answer(request: Request, port: number, deps: ServerDeps): Promise
   // Every route but the upload keeps the 16 KB limit Bun's cap used to give it, body-reading or not.
   if (url.pathname !== UPLOAD_PATH && declaredLength(request) > MAX_BODY_BYTES) return json(413, { error: 'body too large' })
   const startedAt = performance.now()
-  const dashboard = url.pathname === '/dashboard' || url.pathname.startsWith('/dashboard/')
+  if (url.pathname === '/central/status') return request.method === 'GET' ? json(200, (await deps.centralStatus?.(url.searchParams.get('check') === '1')) ?? { role: 'local' }) : json(405, { error: 'method not allowed' })
+  const isDashboardPath = url.pathname === '/dashboard' || url.pathname.startsWith('/dashboard/')
+  if (deps.device !== undefined && !isDashboardPath) {
+    const routed = await deviceRoute(request.method, url, () => readJson(request), deps.device)
+    if (routed !== null) return json(routed.status, routed.body)
+  }
+  const dashboard = isDashboardPath
     ? await dashboardRoute(request, url.pathname, { port, auth: deps.auth, readBody: () => readJson(request), log: deps.log })
     : undefined
   const other = (): Promise<Response> => (BACKUP_PATHS.has(url.pathname) ? backupRoute(request, url.pathname, deps) : storeRoute(request, url, deps, checked.via))

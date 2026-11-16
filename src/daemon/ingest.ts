@@ -11,7 +11,7 @@ import type { Database } from '../sqlite/types'
 import { HOLDOUT_HOSTS } from '../context/holdout'
 import { stampInjectionPrompts } from '../store/context-store'
 import type { TurnEnd } from './transcript-usage'
-import type { ProjectKeyResolver } from '../store/project-key'
+import type { ProjectKey, ProjectKeyResolver } from '../store/project-key'
 import {
   eventExists,
   insertEvent,
@@ -164,6 +164,26 @@ function commitBatch(db: Database, entries: readonly SpoolEntry[], options: Drai
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** An event whose project another machine already resolved: what a hub stores for a device. */
+export interface ResolvedEvent {
+  event: NormalizedEvent
+  project: ProjectKey
+}
+
+/**
+ * Stores events whose project keys were resolved elsewhere, all in one
+ * transaction. A transcript path names a file on the device, which this
+ * machine must never read, so it is dropped before the event is stored.
+ */
+export function ingestResolved(db: Database, items: readonly ResolvedEvent[], options: PrepareOptions & { now?: () => number }): { inserted: number; duplicates: number } {
+  const now = (options.now ?? Date.now)()
+  const inserted = db.transaction(() => items.filter((item) => {
+    const { transcriptPath: _local, ...event } = item.event
+    return ingestEvent(db, event, { ...options, spoolDir: '', projectKeyFor: () => item.project }, now, [])
+  }).length)()
+  return { inserted, duplicates: items.length - inserted }
 }
 
 /** Drains until the spool is empty or a batch fails. Quarantined entries are reported, never ingested. */

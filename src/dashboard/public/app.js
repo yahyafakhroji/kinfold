@@ -4,6 +4,7 @@
 // navigation started meanwhile, so a slow answer never overwrites a fast one.
 
 import { api, errorText } from './api.js'
+import { applyHubOnly, loadCentral, markBrand } from './central-mark.js'
 import { h, notice, replaceContent } from './dom.js'
 import { formatHash, parseHash } from './hash.js'
 import { renderBackup } from './page-backup.js'
@@ -16,6 +17,8 @@ import { showUpdateBanner } from './update-banner.js'
 
 const PAGES = { models: renderModels, sessions: renderSessions, memory: renderMemory, data: renderData, metrics: renderMetrics, backup: renderBackup }
 let generation = 0
+/** What central memory this daemon serves or uses; asked once per load. */
+const central = loadCentral()
 
 /** @param {import('./hash.js').HashState} state */
 function navigate(state) {
@@ -45,6 +48,8 @@ async function render() {
     content = h('section', { class: 'page' }, notice(errorText(error), 'error'))
   }
   if (mine !== generation) return
+  applyHubOnly(content, await central)
+  if (mine !== generation) return
   replaceContent(main, content)
   main.removeAttribute('aria-busy')
 }
@@ -60,3 +65,4 @@ window.addEventListener('hashchange', () => { render() })
 document.getElementById('sign-out')?.addEventListener('click', signOut)
 render()
 showUpdateBanner(document.getElementById('update-banner'))
+central.then((state) => markBrand(document.querySelector('.brand-where'), state))

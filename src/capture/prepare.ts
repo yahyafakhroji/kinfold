@@ -76,7 +76,7 @@ function capJsonStrings(value: unknown, field: string, maxChars: number): Redact
 }
 
 /** Private spans first, then secrets, then the size cap: capping first could split a secret past its pattern. */
-function cleanText(text: string, field: string, options: PrepareOptions): Redacted<string> {
+export function cleanText(text: string, field: string, options: PrepareOptions): Redacted<string> {
   let privateSpans = 0
   const withoutPrivate = text.replace(PRIVATE_SPAN, () => {
     privateSpans += 1

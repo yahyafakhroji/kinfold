@@ -4,6 +4,7 @@
 // the time of the last backup, whether `kinfold` resolves on PATH and to which program, and duplicate project wiring. It creates nothing,
 // not even the data dir.
 
+import { centralStatusLines } from '../central/status'
 import { readBackupRecord } from '../backup/record'
 import { keptStore } from '../backup/undo'
 import { readDisplayFile } from '../context/display-file'
@@ -352,7 +353,7 @@ export async function status(env: InstallEnv, running: string = VERSION, profile
   const duplicates = findDuplicateWiring(env.cwd, [installPaths(env).claudeSettings])
   const situation = await daemonSituation(env)
   const blocker = autoUpdateBlocker(env, situation.loaded)
-  const daemon = daemonLines(env, situation)
+  const daemon = [...daemonLines(env, situation), ...(await centralStatusLines({ dataDir: env.dataDir, fetch: (url, init) => env.fetch(url, init ?? {}) }))]
   const database = await databaseLines(env)
   const credentials = keyStoreLines(env, observer.refs)
   const keys = [

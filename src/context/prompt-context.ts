@@ -136,7 +136,8 @@ function errorName(error: unknown): string {
  * request arrived: the semantic deadline counts from there. A failure in the
  * related half keeps the delta and is logged by error name only.
  */
-export async function preparePromptContext(deps: PromptContextDeps, request: ContextRequest, projectKey: string, now: number, startedAt?: number): Promise<PromptContext> {
+/** `deadlineMs`, when given, wins over deps.deadlineMs: a hub answering a device has only what the device still waits. */
+export async function preparePromptContext(deps: PromptContextDeps, request: ContextRequest, projectKey: string, now: number, startedAt?: number, deadlineMs?: number): Promise<PromptContext> {
   const clock = deps.clock ?? (() => performance.now())
   const began = startedAt ?? clock()
   const deltaStart = performance.now()
@@ -148,7 +149,7 @@ export async function preparePromptContext(deps: PromptContextDeps, request: Con
   if (projectName === null || prompt === '') return { ...delta, relatedText: '', related: 0, semantic: 'no_prompt', deltaMs, relatedMs: 0, relatedServed: [], explain: NO_SEARCH }
   const relatedStart = performance.now()
   try {
-    const related = await relatedFor(deps, { request, projectKey, projectName, prompt, delta, now, deadlineAt: began + (deps.deadlineMs ?? PROMPT_SEMANTIC_DEADLINE_MS), clock })
+    const related = await relatedFor(deps, { request, projectKey, projectName, prompt, delta, now, deadlineAt: began + (deadlineMs ?? deps.deadlineMs ?? PROMPT_SEMANTIC_DEADLINE_MS), clock })
     return { ...joinContext(delta, related.result), relatedText: related.result.text, related: related.result.observationIds.length, semantic: related.semantic,
       deltaMs, relatedMs: Math.round(performance.now() - relatedStart), relatedServed: related.served, explain: related.explain }
   } catch (error: unknown) {

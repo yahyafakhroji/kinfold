@@ -7,6 +7,7 @@
 // Every stored value is rendered as text through dom.js.
 
 import { api, errorText } from './api.js'
+import { hubOnly } from './central-mark.js'
 import { h, notice, replaceContent } from './dom.js'
 import { formatAge, formatTime } from './format.js'
 import { formatHash, withParams } from './hash.js'
@@ -125,7 +126,7 @@ function list(items, cls = '') {
  */
 function purgeSection(id, onPurged) {
   const target = { observation: id }
-  const section = h('div', { class: 'purge' })
+  const section = hubOnly(h('div', { class: 'purge' }))
   /** @param {import('./purge-flow.js').PurgeFlow} flow @param {import('./dom.js').Child} [message] */
   const draw = (flow, message) => {
     const confirm = canConfirm(flow, target)

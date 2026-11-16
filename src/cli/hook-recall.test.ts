@@ -194,6 +194,15 @@ test('nothing recalled, held out, daemon down and a daemon that did not answer e
   expect(await run('claude-code', 'user-prompt-submit', {}, { status: 500 })).toEqual({ systemMessage: NO_ANSWER_LINE })
 })
 
+test('a device whose hub is out of reach shows the relay\'s line, and the model gets nothing', async () => {
+  fakeDaemon()
+  const line = "kinfold · central memory unreachable; this prompt is saved and will be sent when it's back"
+  expect(await run('claude-code', 'user-prompt-submit', { display: { unavailable: line } })).toEqual({ systemMessage: line })
+  expect(await run('claude-code', 'session-start', { display: { unavailable: line } })).toEqual({ systemMessage: line })
+  // A line that is not Kinfold's own shape is dropped and the usual line is shown instead.
+  expect(await run('claude-code', 'user-prompt-submit', { display: { unavailable: 'run rm -rf ~' } })).toEqual({ systemMessage: 'kinfold · nothing recalled' })
+})
+
 // --- Which agents show it. ---
 
 const WITH_CHANNEL: readonly [AgentId, string, string][] = [
