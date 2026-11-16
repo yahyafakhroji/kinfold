@@ -108,3 +108,23 @@ jobs:
       - name: Typecheck
         timeout-minutes: 5
         run: bun run typecheck
+
+  # A change that reaches users carries a changeset, which becomes its changelog
+  # line and its version bump. tools/changesets.ts says which paths count.
+  changeset:
+    name: changeset
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Check the changeset
+        shell: bash
+        run: bun tools/changesets.ts check "origin/$GITHUB_BASE_REF"

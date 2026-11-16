@@ -1,5 +1,9 @@
 Kinfold {{VERSION}} is one program for macOS, Linux and Windows. It gives Claude Code, OpenCode, Codex and Cursor a shared local memory, stored on your machine.
 
+## Changes
+
+{{CHANGES}}
+
 ## Install
 
 With Node 18 or later:

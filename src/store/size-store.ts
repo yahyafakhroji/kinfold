@@ -60,6 +60,7 @@ const TEXT_ESTIMATES: readonly (readonly [string, string])[] = [
   ['observations', 'sum(length(title) + length(narrative) + length(facts) + length(files))'],
   ['summaries', "sum(length(coalesce(request, '')) + length(coalesce(learned, '')) + length(coalesce(completed, '')) + length(coalesce(next_steps, '')))"],
   ['context_packs', 'sum(length(body))'],
+  ['observation_vectors', 'sum(length(embedding))'],
 ]
 
 function estimatedBytes(db: Database): TableBytes[] {
@@ -88,4 +89,17 @@ export function projectBytes(db: Database, limit: number): ProjectBytes[] {
        (SELECT count(*) FROM observations o WHERE o.project_key = p.key) AS observations
      FROM projects p ORDER BY eventBytes + promptBytes + observationBytes DESC, p.key LIMIT $limit`,
   ).all({ limit })
+}
+
+export interface PromptTextBytes {
+  text: number
+  reply: number
+}
+
+/** Stored prompt text and reply text lengths, which split the prompts table between prompts and replies. */
+export function promptTextBytes(db: Database): PromptTextBytes {
+  const row = db.query<{ text: number | null; reply: number | null }, []>(
+    "SELECT sum(length(text)) AS text, sum(length(coalesce(reply_text, ''))) AS reply FROM prompts",
+  ).get()
+  return { text: row?.text ?? 0, reply: row?.reply ?? 0 }
 }

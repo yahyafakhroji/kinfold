@@ -284,6 +284,30 @@ bun tools/build-release.ts darwin-arm64 0.1.0-local.1
 
 The build embeds the sqlite3mc and sqlite-vec files from `.cache`, so build on the platform you target. `.github/workflows/release-build.yml` shows the same steps CI runs for each target.
 
+## Changes and releases
+
+Every pull request that changes what users get (anything under `src/`, `scripts/`, `tools/` or `npm/`, or the packaging files) adds a changeset, and CI fails one that doesn't:
+
+```sh
+bunx changeset          # pick patch, minor or major, then write the changelog line
+bunx changeset --empty  # a docs or tests change with no release note
+```
+
+Start the line with `BREAKING:` for any change a script or user could notice, in 0.x too. `.changeset/README.md` has the details.
+
+Releases come from those files:
+
+1. Each merge to main opens or updates one pull request named `Version x.y.z`. It runs `changeset version`, which sets the version in `package.json` and writes `CHANGELOG.md`.
+2. The maintainer merges that pull request, and the merge tags `vx.y.z`. The release workflow builds every program, smoke-tests them on each OS against a GitHub prerelease, then promotes the Release and publishes to npm. The Release notes carry that version's `CHANGELOG.md` section.
+
+Nothing is published without the maintainer's approval. The jobs that create the GitHub Release, promote it and publish to npm run in the `release` environment, which has the maintainer as its required reviewer. A release pauses at each of those jobs until the maintainer clicks "Approve and deploy" on the run; the builds and the smoke run without waiting. npm's trusted publisher for each package is pinned to the `release` environment, so a publish from outside it is refused. Only admins and GitHub Actions can create `v*` tags, and no one can move or delete one.
+
+Betas come from the `beta` branch in changesets pre mode (`bunx changeset pre enter beta` there). Its versions look like `0.6.0-beta.1` and publish as GitHub prereleases and under npm's `next` tag. Main never enters pre mode, so patches keep shipping from main while a beta runs. A push to `beta` can publish a prerelease, so give `beta` the same ruleset as main before you create it. To end a beta, run `bunx changeset pre exit` on `beta` and merge it into main; its changesets then go into main's next Version PR.
+
+If a release never started after its tag was pushed, the next push to main starts it, or you can start it yourself with `gh workflow run release.yml --ref v<version>`.
+
+The version workflow uses the workflow's own token, so the repository needs "Allow GitHub Actions to create and approve pull requests" turned on (Settings, Actions, General). A pull request opened by that token gets no CI run of its own. The version pull request changes only `package.json`, `CHANGELOG.md` and `.changeset/`, and it needs the maintainer's merge.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

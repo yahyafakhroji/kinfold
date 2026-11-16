@@ -53,7 +53,7 @@ describe('ci workflow', () => {
     const text = workflow('ci.yml')
     const lines = text.split('\n')
     const gates = lines.filter((line) => line.trim() === 'continue-on-error: ${{ !matrix.required }}')
-    expect(lines.filter((line) => line.trim().startsWith('runs-on:')).length).toBe(2)
+    expect(lines.filter((line) => line.trim() === 'runs-on: ${{ matrix.os }}').length).toBe(2)
     expect(gates.length).toBe(2)
     let entries = 0
     lines.forEach((line, index) => {

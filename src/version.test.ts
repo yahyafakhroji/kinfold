@@ -27,9 +27,12 @@ async function healthVersion(version?: string): Promise<string> {
   }
 }
 
-test('package.json carries the development version', () => {
+test('a checkout reports the development version while package.json carries the released one', () => {
+  // changesets writes the release version into package.json; only a release build stamps it into the program.
   const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../package.json'), 'utf8')) as { version: string }
-  expect(pkg.version).toBe(VERSION)
+  expect(VERSION).toBe('0.0.0-dev')
+  expect(pkg.version).toMatch(/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/)
+  expect(pkg.version).not.toBe(VERSION)
 })
 
 test('health and --version agree', async () => {
