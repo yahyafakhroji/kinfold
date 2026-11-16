@@ -78,3 +78,16 @@ test('USAGE lists the PATH flags and --verbose', () => {
   for (const text of ['[--path | --no-path]', '[--verbose]']) expect(USAGE).toContain(text)
   expect(USAGE).toMatch(/uninstall\s+\[--dry-run\] \[--verbose\]/)
 })
+
+test('--observer-endpoint gives the OpenAI-compatible observer its address, in either order', () => {
+  for (const argv of [
+    ['install', '--observer', 'codex=openai-compatible:llama3.2', '--observer-endpoint', 'http://127.0.0.1:11434/v1'],
+    ['install', '--observer-endpoint=http://127.0.0.1:11434/v1/', '--observer', 'codex=openai-compatible:llama3.2'],
+  ]) {
+    expect(parseArgs(argv)).toMatchObject({ ok: true, value: { observers: [{ host: 'codex', provider: 'openai-compatible', model: 'llama3.2', endpoint: 'http://127.0.0.1:11434/v1' }] } })
+  }
+  expect(parseArgs(['install', '--observer', 'codex=openai-compatible:m'])).toEqual({ ok: false, error: '--observer codex=openai-compatible:... needs --observer-endpoint <url>' })
+  expect(parseArgs(['install', '--observer-endpoint', 'https://api.groq.com/openai/v1'])).toEqual({ ok: false, error: '--observer-endpoint is only for an --observer naming qwen-api or openai-compatible' })
+  expect(parseArgs(['status', '--observer-endpoint', 'https://x.example.com'])).toEqual({ ok: false, error: '--observer-endpoint does not apply to status' })
+  expect(USAGE).toContain('--observer-endpoint <url>')
+})

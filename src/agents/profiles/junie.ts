@@ -22,7 +22,7 @@ import { join } from 'node:path'
 import { resolveAgentHome } from '../../install/codex-home'
 import type { InstallEnv } from '../../install/env'
 import { AGENT_HOOK_TIMEOUT_S, type AgentHome, type JsonAgentFile, jsonAgentWiring, mcpServersFile } from '../families/json-agent'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, NO_TOOLS_OFF } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: false, prompt: true }, search: true, observer: false }
 
@@ -60,6 +60,7 @@ export const JUNIE_FILES: readonly JsonAgentFile[] = [
 export const JUNIE_PROFILE: AgentProfile = {
   id: 'junie',
   name: 'Junie',
+  observerLogin: { out: NO_TOOLS_OFF },
   family: 'claude-style',
   verification: 'docs',
   capabilities: () => CAPABILITIES,

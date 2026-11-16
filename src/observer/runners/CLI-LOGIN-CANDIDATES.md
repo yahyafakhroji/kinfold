@@ -16,8 +16,14 @@ when its official docs confirm all three:
 A provider also needs a documented (or captured) output format that shows tool
 calls, because the shared core rejects a run on any tool event.
 
-Docs were read on 2026-11-14. None of these CLIs was run; every entry is from
-the docs alone.
+Docs were read on 2026-11-14 and again on 2026-11-16. Goose is the only CLI in
+this file that was run; every other entry is from the docs alone. A CLI that
+could not be run stays out of `CLI_LOGIN_PROVIDERS` even when its docs pass:
+it is listed in `UNPROVEN_CLI_PROVIDERS`, shown in setup, and cannot be picked.
+
+Agents with no CLI fit for the observer can still use any API provider
+(`anthropic-api`, `openai-api`, `gemini-api`, `qwen-api`, `openai-compatible`,
+`openrouter`). Those send no tools, so the tools-off test does not apply.
 
 ## In
 
@@ -25,12 +31,35 @@ the docs alone.
 |---|---|---|
 | `codex-cli` | Codex | codex 0.166 docs and source (see `codex-cli.ts`) |
 | `opencode-cli` | OpenCode | opencode 2.1.4 docs and source (see `opencode-cli.ts`) |
+| `goose-cli` | Goose | goose 1.59.2 source and a live run of the planted-instruction check (see `goose-cli.ts` and `goose-cli.live.test.ts`) |
+
+### Goose
+
+- Headless: `goose run -i - -q --no-session --no-profile --output-format json`
+  takes the prompt on stdin and prints one JSON object: `messages[]` with
+  typed content items (`text`, `toolRequest`, `toolResponse` and others) and
+  run `metadata` with token counts and a `status`.
+- All tools off: `--no-profile` loads none of the user's extensions, and
+  `GOOSE_PATH_ROOT` moves goose's config, data, state and plugin (hook)
+  folders into the run folder. One built-in tool, `load_skill`, is still
+  offered; with `GOOSE_MODE=chat` goose answers any call to it with a fixed
+  text and never runs it (`crates/goose/src/agents/state_machine/ops_skills.rs`).
+  Any tool request in the output still rejects the run, and so does any
+  advertised tool beyond `load_skill`.
+- Login reuse: provider keys live in the system keyring, which the moved
+  config folder does not change. The model names the goose provider
+  (`ollama/qwen2.5:1.5b`); only providers that call a model API are allowed,
+  since `claude-code`, `codex`, `gemini-cli`, `cursor-agent` and the ACP
+  providers run another agent whose tools goose cannot show.
+- Live run (2026-11-16): goose 1.59.2 in a throwaway HOME against a local
+  Ollama passed the planted-instruction check, ran no tool and left nothing
+  in HOME.
 
 ## Out
 
 | Agent | Headless | All tools off | Login reuse | Fails on |
 |---|---|---|---|---|
-| Auggie | yes | yes, by reading two flags together | yes | undocumented output format |
+| Auggie | yes | yes, by reading two flags together | yes | not run: needs an Augment account; undocumented output format |
 | Gemini CLI | yes | no single switch | yes | all tools off |
 | Copilot CLI | yes | no | yes | all tools off |
 | Kiro | yes | not documented | no | login reuse |
@@ -39,9 +68,18 @@ the docs alone.
 | Qwen Code | yes | no | no | login reuse, all tools off |
 | Kimi Code | yes | not documented | not stated | all tools off, login reuse |
 
+Checked on 2026-11-16 from the docs, each also failing **all tools off**:
+Devin, Kilo Code, Junie, Antigravity, Continue, Warp and Crush (whose
+`permissions deny` takes tools by name, with no catch-all). Cline, Cursor
+(`cursor-agent`), Kimi Code and Factory Droid run tools on their own in
+headless mode. Zed is an editor with no headless CLI. Each profile's
+`observerLogin` carries its reason, and setup shows it.
+
 ### Auggie
 
-Passes the three tests on paper. Blocked on the output format.
+Passes the three tests on paper. Listed as `auggie-cli` in
+`UNPROVEN_CLI_PROVIDERS` and never pickable: a live run needs an Augment
+account, and the output format is undocumented.
 
 - Headless: `auggie --print --mode json`, "Output structured JSON events for
   automation workflows". Stdin is read as context.

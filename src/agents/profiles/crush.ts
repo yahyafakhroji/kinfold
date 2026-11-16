@@ -30,7 +30,7 @@ import { MCP_HOST_ENV } from '../../mcp/read-reporter'
 import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, stdioMcpEntry } from '../families/json-agent'
 import { hookTarget, shellCommand } from '../families/json-hooks'
 import { mcpEntryState } from '../families/mcp-entry'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, NO_TOOLS_OFF } from '../profile'
 
 const HOST = 'crush'
 
@@ -83,6 +83,7 @@ function crushrcSteps(env: InstallEnv): string {
 export const CRUSH_PROFILE: AgentProfile = {
   id: HOST,
   name: 'Crush',
+  observerLogin: { out: NO_TOOLS_OFF },
   family: 'custom',
   verification: 'docs',
   capabilities: () => CAPABILITIES,

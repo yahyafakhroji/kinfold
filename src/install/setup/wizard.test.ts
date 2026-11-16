@@ -443,7 +443,8 @@ test('a detected live agent starts ticked', async () => {
   expect(answers.hosts).toEqual(['claude-code'])
   expect(term.output()).toContain('Claude Code')
   expect(term.output()).toContain('2.0.0 · capture, context, search')
-  expect(term.output()).not.toContain(DOCS_NOTE)
+  // The agent step only: the observer step lists an unproven provider with its own reason.
+  expect(term.output().split('Observer for ')[0]).not.toContain(DOCS_NOTE)
 })
 
 test('--yes installs detected live agents and leaves detected docs agents out unless --hosts names them', async () => {
@@ -614,8 +615,8 @@ posixOnly('POSIX paths')('a block already in the startup file does not stop the 
 // ---- off: capture only --------------------------------------------------------
 
 test('the observer question ends with off, and picking it saves the agent as capture only with no key and no check', async () => {
-  // Agents, then down from the current row past the two providers this machine can run (the cursor skips the others) to "off".
-  const { w, term } = setup([ENTER, ENTER, DOWN, DOWN, DOWN, ENTER, ENTER, ENTER, ENTER, ENTER], { claudeVersion: '2.0.0' })
+  // Agents, then down from the current row past the seven providers this machine can run (the cursor skips the others) to "off".
+  const { w, term } = setup([ENTER, ENTER, ...Array(8).fill(DOWN), ENTER, ENTER, ENTER, ENTER, ENTER], { claudeVersion: '2.0.0' })
   const state = await readSetupState(w.env)
   const answers = await runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)
   const plain = term.output().replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '')
@@ -704,7 +705,7 @@ test('--plain on a terminal gets the same rules as plain lines', async () => {
   w.env.io.ask = async (question) => (asked.push(question), plainAsk(question))
   const state = await readSetupState(w.env)
   const answers = await runWizard(w.env, null, state, flagsOf({ hosts: ['claude-code'], noEncrypt: true }), { ...NO_CHOICE, skipCheck: true })
-  expect(asked[0]).toContain('codex-cli (codex not installed), opencode-cli (opencode not installed).')
+  expect(asked[0]).toContain('codex-cli (codex not installed), opencode-cli (opencode not installed), goose-cli (goose not installed),')
   expect(w.out).toContain('codex-cli cannot be picked: codex not installed')
   expect(answers.observers[0]?.origin).toBe('default')
 })
@@ -781,4 +782,47 @@ test('--yes and a run with no terminal keep the saved impact test choice by aski
   expect(term.output()).toBe('')
   const quiet = await runWizard(w.env, null, await readSetupState(w.env), flagsOf(), NO_CHOICE).catch(() => null)
   expect(quiet?.holdout).toBeUndefined()
+})
+
+// ---- API providers, endpoints, goose and auggie -------------------------------
+
+test('the observer question lists the API providers with what each needs, and auggie-cli as not pickable', async () => {
+  const { w, term } = setup([ENTER, ENTER], { claudeVersion: '2.0.0', opencodeVersion: '2.1.0' })
+  const state = await readSetupState(w.env)
+  await expect(runWizard(w.env, ask(w), state, flagsOf({ noEncrypt: true }), NO_CHOICE)).rejects.toBeInstanceOf(PromptCancelled)
+  const rows = observerRows(term.output())
+  expect(rows.slice(5, 12)).toEqual([
+    'goose-cli (goose not installed)',
+    'anthropic-api  your Anthropic API key',
+    'openai-api  your OpenAI API key',
+    'gemini-api  your Google AI Studio key',
+    'qwen-api  your DashScope key and its region\'s address',
+    'openai-compatible  any OpenAI-style server: Ollama, LM Studio, Groq, DeepSeek…',
+    expect.stringMatching(/^auggie-cli \(built from the docs, not proven/) as unknown as string,
+  ])
+})
+
+test('picking an API provider offers its cheap default model and saves its key ref', async () => {
+  // claude installed only: pickable rows are current, claude-cli, openrouter, then the API providers.
+  const keys = [ENTER, ...Array(3).fill(DOWN), ENTER, ENTER, ENTER, ENTER, ENTER, ENTER, ENTER]
+  const { w } = setup(keys, { claudeVersion: '2.0.0', keychainRefs: ['anthropic'] })
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ hosts: ['claude-code'], noEncrypt: true }), { ...NO_CHOICE, skipCheck: true })
+  expect(answers.observers[0]?.input).toEqual({ host: 'claude-code', provider: 'anthropic-api', model: 'claude-haiku-5-5', credentialRef: 'anthropic', enabled: true })
+})
+
+test('picking the OpenAI-compatible provider asks for the model, then the address, and a local one needs no key', async () => {
+  const keys = [ENTER, ...Array(7).fill(DOWN), ENTER, 'llama3.2\r', ENTER, ENTER, ENTER, ENTER, ENTER, ENTER]
+  const { w, term } = setup(keys, { claudeVersion: '2.0.0' })
+  const state = await readSetupState(w.env)
+  const answers = await runWizard(w.env, ask(w), state, flagsOf({ hosts: ['claude-code'], noEncrypt: true }), { ...NO_CHOICE, skipCheck: true })
+  expect(answers.observers[0]?.input).toEqual({ host: 'claude-code', provider: 'openai-compatible', model: 'llama3.2', credentialRef: null, enabled: true, endpoint: 'http://127.0.0.1:11434/v1' })
+  expect(term.output()).toContain('Endpoint for openai-compatible on claude-code (https, or http on this machine; Enter for http://127.0.0.1:11434/v1)')
+})
+
+test('an agent whose own CLI cannot observe is told why at its observer question', async () => {
+  const { w, term } = setup([ENTER], { claudeVersion: '2.0.0' })
+  const state = await readSetupState(w.env)
+  await expect(runWizard(w.env, ask(w), state, flagsOf({ hosts: ['gemini-cli'], noEncrypt: true }), NO_CHOICE)).rejects.toBeInstanceOf(PromptCancelled)
+  expect(term.output().replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '')).toContain('Gemini CLI cannot summarise through its own CLI')
 })

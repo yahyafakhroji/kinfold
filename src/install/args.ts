@@ -10,7 +10,7 @@ import type { DataSettingsChange } from '../store/data-settings-store'
 import { builtProfiles } from '../agents/install-profiles'
 import { INSTALL_HOSTS, type InstallHost } from './detect'
 import type { DisplayChange } from '../store/display-settings'
-import { type ObserverFlag, defaultInput, parseProviderModel } from './observer-choice'
+import { type ObserverFlag, defaultInput, parseProviderModel, withObserverEndpoint } from './observer-choice'
 
 export const COMMANDS = ['install', 'uninstall', 'status', 'update'] as const
 export type Command = (typeof COMMANDS)[number]
@@ -27,6 +27,8 @@ export interface CliArgs {
   removeHmacKeys: boolean
   hosts: InstallHost[] | null
   observers: ObserverFlag[]
+  /** --observer-endpoint as typed; parseArgs puts it on the --observer flags it applies to. */
+  observerEndpoint: string | null
   noEncrypt: boolean
   noUpdateCheck: boolean
   noAutoUpdate: boolean
@@ -85,6 +87,7 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
 export const USAGE = [
   'usage: kinfold <install|uninstall|status|update|size|retention|scan|findings|purge|dashboard|watch|backup|restore|encrypt|decrypt|rekey|key|hook|mcp|daemon|observe> [--data-dir <path>] [--version] [flags]',
   '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>|off]...',
+  '             [--observer-endpoint <url>] (the address for qwen-api or openai-compatible: https, or http on this machine)',
   '             [--skip-check] [--replace-credential] [--credential-stdin] [--takeover]',
   '             [--no-encrypt] [--port <1024-65535>] [--no-update-check] [--auto-update | --no-auto-update]',
   '             [--path | --no-path] [--verbose] [--show-recall|--no-show-recall] [--holdout|--no-holdout]',
@@ -376,7 +379,7 @@ export function parseObserverFlag(value: string): Parsed<ObserverFlag> {
 }
 
 function initial(command: Command): CliArgs {
-  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false }
+  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], observerEndpoint: null, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false }
 }
 
 /** `--flag value` or `--flag=value`; returns the value and how many argv slots it used. */
@@ -405,6 +408,10 @@ function applyValueFlag(args: CliArgs, name: string, value: string): Parsed<CliA
     const hosts = parseHosts(value)
     return hosts.ok ? { ok: true, value: { ...args, hosts: hosts.value } } : hosts
   }
+  if (name === '--observer-endpoint') {
+    if (args.observerEndpoint !== null) return { ok: false, error: '--observer-endpoint given twice' }
+    return { ok: true, value: { ...args, observerEndpoint: value } }
+  }
   const flag = parseObserverFlag(value)
   if (!flag.ok) return flag
   if (args.observers.some((entry) => entry.host === flag.value.host)) return { ok: false, error: `--observer given twice for ${flag.value.host}` }
@@ -424,7 +431,7 @@ export function parseArgs(argv: readonly string[]): Parsed<CliArgs> {
       index += 1
       continue
     }
-    const name = ['--hosts', '--observer', '--port'].find((flag) => arg === flag || arg.startsWith(`${flag}=`))
+    const name = ['--hosts', '--observer-endpoint', '--observer', '--port'].find((flag) => arg === flag || arg.startsWith(`${flag}=`))
     if (name === undefined) return { ok: false, error: `unknown argument ${JSON.stringify(arg)}\n${USAGE}` }
     if (args.command !== 'install') return { ok: false, error: `${name} does not apply to ${args.command}` }
     const found = valueOf(argv, index, name)
@@ -438,5 +445,7 @@ export function parseArgs(argv: readonly string[]): Parsed<CliArgs> {
   if (args.addPath && args.noPath) return { ok: false, error: '--path and --no-path cannot be given together' }
   if (args.showRecall && args.noShowRecall) return { ok: false, error: '--show-recall and --no-show-recall cannot be given together' }
   if (args.holdout && args.noHoldout) return { ok: false, error: '--holdout and --no-holdout cannot be given together' }
-  return { ok: true, value: { ...args, path: args.addPath ? 'path' : args.noPath ? 'no-path' : null } }
+  const observers = withObserverEndpoint(args.observers, args.observerEndpoint)
+  if (!observers.ok) return observers
+  return { ok: true, value: { ...args, observers: observers.value, path: args.addPath ? 'path' : args.noPath ? 'no-path' : null } }
 }

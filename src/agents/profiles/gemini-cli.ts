@@ -28,7 +28,7 @@ import { resolveAgentHome } from '../../install/codex-home'
 import type { InstallEnv } from '../../install/env'
 import { AGENT_HOOK_TIMEOUT_S, type AgentHome, type JsonAgentFile, jsonAgentWiring, stdioMcpEntry } from '../families/json-agent'
 import type { McpEntrySpec } from '../families/mcp-entry'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, NO_TOOLS_OFF } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: true }, search: true, observer: false }
 
@@ -65,6 +65,7 @@ export const GEMINI_CLI_FILES: readonly JsonAgentFile[] = [
 export const GEMINI_CLI_PROFILE: AgentProfile = {
   id: 'gemini-cli',
   name: 'Gemini CLI',
+  observerLogin: { out: NO_TOOLS_OFF },
   family: 'gemini-style',
   verification: 'docs',
   capabilities: () => CAPABILITIES,

@@ -8,9 +8,23 @@
 import { type CredentialProvider, NO_CREDENTIALS, assertStorableValue, isSystemCredentialRef } from '../secrets/credentials'
 import { type KeyStore, credentialProviderOf } from '../secrets/key-store'
 import { CHECK_PROMPT } from '../observer/check-prompt'
-import { OPENROUTER_CREDENTIAL_REF, builtInSettings, credentialRefFor, providerTakesKey } from '../observer/settings'
+import type { AgentProfile } from '../agents/profile'
+import type { Parsed } from '../context/types'
+import { DASHSCOPE_DEFAULT_ENDPOINT, checkEndpoint, isLoopbackEndpoint } from '../observer/endpoint'
+import { parseGooseModel } from '../observer/runners/goose-cli'
+import { DEFAULT_CREDENTIAL_REFS, OPENAI_COMPATIBLE_CREDENTIAL_REF, builtInSettings, credentialRefFor, isEndpointProvider } from '../observer/settings'
 import { runPlantedCheck } from '../observer/planted-check'
-import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
+import {
+  CLI_LOGIN_PROVIDERS,
+  type CliLoginProvider,
+  ENDPOINT_PROVIDERS,
+  type EndpointProvider,
+  OBSERVER_PROVIDERS,
+  type ObserverProvider,
+  type ObserverSettings,
+  UNPROVEN_CLI_PROVIDERS,
+  toObserverError,
+} from '../observer/types'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import type { InstallHost } from './detect'
 import type { InstallEnv } from './env'
@@ -28,6 +42,8 @@ export interface ObserverFlag {
   host: InstallHost
   provider: ObserverProvider
   model: string
+  /** From --observer-endpoint, for an endpoint provider (withObserverEndpoint). */
+  endpoint?: string
   /** `--observer <host>=off`: capture only. The provider and model are then the built-in ones, used when the agent has no saved row to keep. */
   off?: true
 }
@@ -46,6 +62,12 @@ export interface ChoiceOptions {
   saved?: ReadonlyMap<InstallHost, ObserverSettingsInput>
   /** The providers whose CLI is not on this machine; read only when a question is asked, so a run that asks nothing looks for no CLI. Absent: every provider is offered. */
   missingClis?: () => Promise<MissingClis>
+  /**
+   * What the question says first about the agent's own CLI (selfObserverNote).
+   * Passed in by the caller, which holds the profile table: importing it here
+   * would load the profiles from inside a profile's own imports.
+   */
+  observerNote?: (host: InstallHost) => string | null
 }
 
 export interface PendingCredential {
@@ -67,12 +89,19 @@ export class ChoiceError extends Error {
   override readonly name = 'ChoiceError'
 }
 
-export function settingsInputFor(host: string, provider: ObserverProvider, model: string): ObserverSettingsInput {
-  return { host, provider, model, credentialRef: providerTakesKey(provider) ? OPENROUTER_CREDENTIAL_REF : null, enabled: true }
+/** A server on this machine needs no key; one across the network gets the OpenAI-compatible key-store entry. */
+function defaultRef(provider: ObserverProvider, endpoint: string | undefined): string | null {
+  if (provider === 'openai-compatible') return endpoint !== undefined && isLoopbackEndpoint(endpoint) ? null : OPENAI_COMPATIBLE_CREDENTIAL_REF
+  return DEFAULT_CREDENTIAL_REFS[provider] ?? null
+}
+
+export function settingsInputFor(host: string, provider: ObserverProvider, model: string, endpoint?: string): ObserverSettingsInput {
+  const withEndpoint = endpoint !== undefined && isEndpointProvider(provider) ? { endpoint } : {}
+  return { host, provider, model, credentialRef: defaultRef(provider, endpoint), enabled: true, ...withEndpoint }
 }
 
 export function asSettings(input: ObserverSettingsInput): ObserverSettings {
-  return { provider: input.provider, model: input.model, credentialRef: input.credentialRef, enabled: input.enabled, source: 'host' }
+  return { provider: input.provider, model: input.model, credentialRef: input.credentialRef, enabled: input.enabled, source: 'host', ...(input.endpoint === undefined ? {} : { endpoint: input.endpoint }) }
 }
 
 export function defaultInput(host: InstallHost): ObserverSettingsInput {
@@ -91,7 +120,67 @@ export function parseProviderModel(value: string): { provider: ObserverProvider;
 }
 
 export function describeInput(input: ObserverSettingsInput): string {
-  return input.enabled ? `${input.provider}/${input.model}` : 'off (capture only)'
+  if (!input.enabled) return 'off (capture only)'
+  return `${input.provider}/${input.model}${input.endpoint === undefined ? '' : ` at ${input.endpoint}`}`
+}
+
+/** The address offered for an endpoint provider: this agent's saved one, then another agent's, then the usual local or regional one. */
+export function defaultEndpoint(provider: EndpointProvider, host: string, saved?: ReadonlyMap<InstallHost, ObserverSettingsInput>): string {
+  const rows = [...(saved?.values() ?? [])].filter((row) => row.provider === provider && row.endpoint !== undefined)
+  const own = rows.find((row) => row.host === host) ?? rows[0]
+  if (own?.endpoint !== undefined) return own.endpoint
+  return provider === 'qwen-api' ? DASHSCOPE_DEFAULT_ENDPOINT : LOCAL_ENDPOINT
+}
+
+/** Ollama's address; LM Studio's is http://127.0.0.1:1234/v1. */
+export const LOCAL_ENDPOINT = 'http://127.0.0.1:11434/v1'
+
+const ENDPOINT_RULE: Readonly<Record<EndpointProvider, string>> = {
+  'openai-compatible': 'https, or http on this machine',
+  'qwen-api': 'an https DashScope URL',
+}
+
+export function endpointQuestion(provider: EndpointProvider, host: string, fallback: string): string {
+  return `Endpoint for ${provider} on ${host} (${ENDPOINT_RULE[provider]}; Enter for ${fallback})`
+}
+
+/** Why the agent's own CLI cannot run its summaries, said before the question; null when it can. */
+export function selfObserverNote(profile: AgentProfile): string | null {
+  const login = profile.observerLogin
+  return 'out' in login ? `${profile.name} cannot summarise through its own CLI: ${login.out}. Any provider below can.` : null
+}
+
+/** The rule a model breaks for its provider, or null; only goose-cli has a format of its own. */
+export function modelProblem(provider: ObserverProvider, model: string): string | null {
+  if (provider !== 'goose-cli') return null
+  const parsed = parseGooseModel(model)
+  return parsed.ok ? null : parsed.error
+}
+
+/**
+ * Puts --observer-endpoint on each --observer naming an endpoint provider.
+ * Qwen without one takes the Singapore DashScope URL; the OpenAI-compatible
+ * provider has no default, since only the user knows their server.
+ */
+export function withObserverEndpoint(flags: readonly ObserverFlag[], endpoint: string | null): Parsed<ObserverFlag[]> {
+  const out: ObserverFlag[] = []
+  let used = false
+  for (const flag of flags) {
+    const problem = flag.off === true ? null : modelProblem(flag.provider, flag.model)
+    if (problem !== null) return { ok: false, error: `--observer ${flag.host}=${flag.provider}:...: ${problem}` }
+    if (flag.off === true || !isEndpointProvider(flag.provider)) {
+      out.push(flag)
+      continue
+    }
+    used = true
+    const raw = endpoint ?? (flag.provider === 'qwen-api' ? DASHSCOPE_DEFAULT_ENDPOINT : null)
+    if (raw === null) return { ok: false, error: `--observer ${flag.host}=${flag.provider}:... needs --observer-endpoint <url>` }
+    const checked = checkEndpoint(flag.provider, raw)
+    if (!checked.ok) return { ok: false, error: `--observer-endpoint: ${checked.error}` }
+    out.push({ ...flag, endpoint: checked.value })
+  }
+  if (endpoint !== null && !used) return { ok: false, error: `--observer-endpoint is only for an --observer naming ${ENDPOINT_PROVIDERS.join(' or ')}` }
+  return { ok: true, value: out }
 }
 
 /**
@@ -105,7 +194,7 @@ export function offInput(current: ObserverSettingsInput): ObserverSettingsInput 
 
 /** What a flag names: a provider and model, or off, which keeps the agent's saved provider and model when it has one. */
 export function flagInput(host: InstallHost, flag: ObserverFlag, saved?: ObserverSettingsInput): ObserverSettingsInput {
-  return flag.off === true ? offInput(saved ?? settingsInputFor(host, flag.provider, flag.model)) : settingsInputFor(host, flag.provider, flag.model)
+  return flag.off === true ? offInput(saved ?? settingsInputFor(host, flag.provider, flag.model)) : settingsInputFor(host, flag.provider, flag.model, flag.endpoint)
 }
 
 export interface Candidate {
@@ -140,12 +229,18 @@ export async function listModelsFor(env: InstallEnv, provider: CliLoginProvider)
   }
 }
 
-/** The provider was named without a model: show that CLI's models, then ask for the name. */
+/** What the model question adds for goose-cli, whose model names a goose provider. */
+export const GOOSE_MODEL_HINT = 'as <goose provider>/<model> such as ollama/qwen2.5:7b'
+
+/** The provider was named without a model: show that CLI's models where it can list them, then ask for the name. */
 async function askModel(env: InstallEnv, host: InstallHost, provider: CliLoginProvider): Promise<string> {
-  showModels(env, provider, await listModelsFor(env, provider))
+  if (LISTING_PROVIDERS.includes(provider)) showModels(env, provider, await listModelsFor(env, provider))
+  const hint = provider === 'goose-cli' ? `, ${GOOSE_MODEL_HINT}` : ''
   for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
-    const model = (await env.io.ask(`Model for ${provider} on ${host} > `)).trim()
-    if (model !== '') return model
+    const model = (await env.io.ask(`Model for ${provider} on ${host}${hint} > `)).trim()
+    const problem = model === '' ? null : modelProblem(provider, model)
+    if (problem !== null) env.out(problem)
+    else if (model !== '') return model
   }
   throw new ChoiceError(`no model named for the ${host} observer`)
 }
@@ -153,11 +248,17 @@ async function askModel(env: InstallEnv, host: InstallHost, provider: CliLoginPr
 /** What a default that cannot run here says, on a row and as a line. */
 export const pickAnother = (reason: string): string => `${reason}; pick another`
 
+/** CLI providers that can list their models; goose has no command for it. */
+export const LISTING_PROVIDERS: readonly CliLoginProvider[] = CLI_LOGIN_PROVIDERS.filter((provider) => provider !== 'goose-cli')
+
 /** The plain question: the wizard's list as two lines, each provider that cannot run here with its reason. */
 function candidateQuestion(host: InstallHost, fallback: ObserverSettingsInput, missing: MissingClis): string {
   const stale = missing.get(fallback.provider)
-  const providers = OBSERVER_PROVIDERS.map((provider) => (missing.has(provider) ? `${provider} (${missing.get(provider)})` : provider))
-  const listing = CLI_LOGIN_PROVIDERS.filter((provider) => !missing.has(provider))
+  const providers = [
+    ...OBSERVER_PROVIDERS.map((provider) => (missing.has(provider) ? `${provider} (${missing.get(provider)})` : provider)),
+    ...Object.entries(UNPROVEN_CLI_PROVIDERS).map(([provider, reason]) => `${provider} (${reason})`),
+  ]
+  const listing = LISTING_PROVIDERS.filter((provider) => !missing.has(provider))
   const bare = listing.length === 0 ? '' : ` (a bare ${listing.join(' or ')} lists that CLI's models)`
   return (
     `Observer for ${host}: default ${describeInput(fallback)}${stale === undefined ? '' : ` (${pickAnother(stale)})`}. Providers: ${providers.join(', ')}.\n` +
@@ -165,10 +266,30 @@ function candidateQuestion(host: InstallHost, fallback: ObserverSettingsInput, m
   )
 }
 
+/** The address for an endpoint provider, asked until it passes the rules. */
+async function askEndpoint(env: InstallEnv, host: InstallHost, provider: EndpointProvider, options: ChoiceOptions): Promise<string> {
+  const fallback = defaultEndpoint(provider, host, options.saved)
+  for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
+    const answer = (await env.io.ask(`${endpointQuestion(provider, host, fallback)} > `)).trim()
+    const checked = checkEndpoint(provider, answer === '' ? fallback : answer)
+    if (checked.ok) return checked.value
+    env.out(checked.error)
+  }
+  throw new ChoiceError(`no valid endpoint for the ${host} observer`)
+}
+
+/** The unproven provider an answer names, as "auggie-cli" or "auggie-cli:model". */
+function unprovenNamed(answer: string): string | null {
+  const name = answer.split(':')[0]!.trim()
+  return Object.hasOwn(UNPROVEN_CLI_PROVIDERS, name) ? name : null
+}
+
 async function promptCandidate(env: InstallEnv, host: InstallHost, options: ChoiceOptions): Promise<Candidate> {
   const fallback = defaultInput(host)
   const missing: MissingClis = (await options.missingClis?.()) ?? new Map()
   const stale = missing.get(fallback.provider)
+  const note = options.observerNote?.(host) ?? null
+  if (note !== null) env.out(note)
   for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
     const answer = (await env.io.ask(candidateQuestion(host, fallback, missing))).trim()
     if (answer === '' && stale === undefined) return { input: fallback, origin: 'default' }
@@ -176,9 +297,15 @@ async function promptCandidate(env: InstallEnv, host: InstallHost, options: Choi
     const parsed = parseProviderModel(answer)
     const named = parsed?.provider ?? (isCliLoginProvider(answer) ? answer : null)
     const reason = named === null ? undefined : missing.get(named)
+    const unproven = unprovenNamed(answer)
+    const problem = parsed === null ? null : modelProblem(parsed.provider, parsed.model)
     if (answer === '' && stale !== undefined) env.out(pickAnother(stale))
+    else if (unproven !== null) env.out(`${unproven} cannot be picked: ${UNPROVEN_CLI_PROVIDERS[unproven]}`)
     else if (named !== null && reason !== undefined) env.out(`${named} cannot be picked: ${reason}`)
-    else if (parsed !== null) return { input: settingsInputFor(host, parsed.provider, parsed.model), origin: 'prompt' }
+    else if (problem !== null) env.out(problem)
+    else if (parsed !== null && isEndpointProvider(parsed.provider)) {
+      return { input: settingsInputFor(host, parsed.provider, parsed.model, await askEndpoint(env, host, parsed.provider, options)), origin: 'prompt' }
+    } else if (parsed !== null) return { input: settingsInputFor(host, parsed.provider, parsed.model), origin: 'prompt' }
     else if (isCliLoginProvider(answer)) return { input: settingsInputFor(host, answer, await askModel(env, host, answer)), origin: 'prompt' }
     else env.out(`"provider:model" or "off" expected, with provider one of ${OBSERVER_PROVIDERS.join(', ')}`)
   }

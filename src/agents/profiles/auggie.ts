@@ -19,6 +19,7 @@
 // full. The docs don't say PromptSubmit's output reaches the agent, so no
 // context is claimed: the hook prints nothing. Hooks are written with `args`,
 // so no shell quoting is involved and Windows gets them as well.
+import { UNPROVEN_CLI_PROVIDERS } from '../../observer/types'
 
 import { join } from 'node:path'
 import { AUGGIE_EVENTS } from '../../adapters/auggie'
@@ -50,6 +51,7 @@ export const AUGGIE_FILE: JsonAgentFile = {
 export const AUGGIE_PROFILE: AgentProfile = {
   id: HOST,
   name: 'Auggie',
+  observerLogin: { out: UNPROVEN_CLI_PROVIDERS['auggie-cli']! },
   family: 'claude-style',
   verification: 'docs',
   capabilities: () => CAPABILITIES,

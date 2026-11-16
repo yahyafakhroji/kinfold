@@ -6,12 +6,21 @@
 import { api, errorText } from './api.js'
 import { h, notice, replaceContent } from './dom.js'
 
-export const PROVIDERS = ['claude-cli', 'openrouter', 'codex-cli', 'opencode-cli']
+// The daemon's OBSERVER_PROVIDERS, in its order (a test holds them equal).
+export const PROVIDERS = ['claude-cli', 'openrouter', 'codex-cli', 'opencode-cli', 'goose-cli', 'anthropic-api', 'openai-api', 'gemini-api', 'qwen-api', 'openai-compatible']
+/** CLI providers that can list their models; goose has no command for it. */
 const CLI_PROVIDERS = ['codex-cli', 'opencode-cli']
+/** The key-store entry each key provider reads when the field is empty; the OpenAI-compatible endpoint reads none then. */
+const KEY_PLACEHOLDERS = { openrouter: 'openrouter', 'anthropic-api': 'anthropic', 'openai-api': 'openai', 'gemini-api': 'gemini', 'qwen-api': 'dashscope', 'openai-compatible': 'none (a local server)' }
+const ENDPOINT_PLACEHOLDERS = { 'qwen-api': 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', 'openai-compatible': 'http://127.0.0.1:11434/v1' }
+/** @param {string} provider */
+const takesKey = (provider) => Object.hasOwn(KEY_PLACEHOLDERS, provider)
+/** @param {string} provider */
+const takesEndpoint = (provider) => Object.hasOwn(ENDPOINT_PLACEHOLDERS, provider)
 const SOURCES = { host: 'saved for this host', 'default-row': 'from the * default row', 'built-in': 'built-in default' }
 
 /**
- * @typedef {{ provider: string, model: string, credentialRef: string | null, enabled: boolean, source?: string }} Choice
+ * @typedef {{ provider: string, model: string, credentialRef: string | null, enabled: boolean, source?: string, endpoint?: string }} Choice
  */
 
 /**
@@ -21,12 +30,14 @@ const SOURCES = { host: 'saved for this host', 'default-row': 'from the * defaul
  */
 export function settingsBody(host, data) {
   const credentialRef = String(data.get('credentialRef') ?? '').trim()
+  const endpoint = String(data.get('endpoint') ?? '').trim()
   return {
     host,
     provider: String(data.get('provider') ?? ''),
     model: String(data.get('model') ?? '').trim(),
     enabled: data.get('enabled') === 'on',
     credentialRef: credentialRef === '' ? null : credentialRef,
+    ...(endpoint === '' ? {} : { endpoint }),
   }
 }
 
@@ -153,8 +164,10 @@ function hostForm(host, choice, problem, safety = [], probe = []) {
         h('select', { id: id('provider'), name: 'provider' }, PROVIDERS.map((provider) => h('option', { value: provider, selected: provider === current.provider }, provider)))),
       h('label', { class: 'field field-wide', for: id('model') }, h('span', { class: 'field-label' }, 'Model'),
         h('input', { id: id('model'), name: 'model', value: current.model, required: true, maxlength: 200, class: 'mono', autocomplete: 'off', spellcheck: 'false', list: id('models') }), models),
-      h('label', { class: 'field', for: id('credential'), 'data-credential': '1', hidden: current.provider !== 'openrouter' }, h('span', { class: 'field-label' }, 'Keychain entry'),
-        h('input', { id: id('credential'), name: 'credentialRef', value: current.credentialRef ?? '', placeholder: 'openrouter', maxlength: 64, class: 'mono', autocomplete: 'off', spellcheck: 'false' })),
+      h('label', { class: 'field field-wide', for: id('endpoint'), 'data-endpoint': '1', hidden: !takesEndpoint(current.provider) }, h('span', { class: 'field-label' }, 'Endpoint'),
+        h('input', { id: id('endpoint'), name: 'endpoint', value: current.endpoint ?? '', placeholder: ENDPOINT_PLACEHOLDERS[current.provider] ?? '', maxlength: 500, class: 'mono', autocomplete: 'off', spellcheck: 'false', inputmode: 'url' })),
+      h('label', { class: 'field', for: id('credential'), 'data-credential': '1', hidden: !takesKey(current.provider) }, h('span', { class: 'field-label' }, 'Keychain entry'),
+        h('input', { id: id('credential'), name: 'credentialRef', value: current.credentialRef ?? '', placeholder: KEY_PLACEHOLDERS[current.provider] ?? '', maxlength: 64, class: 'mono', autocomplete: 'off', spellcheck: 'false' })),
       h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'enabled', checked: current.enabled }), ' Observer enabled')),
     h('div', { class: 'actions' },
       h('button', { type: 'submit', class: 'primary' }, 'Save'),
@@ -169,9 +182,16 @@ function hostForm(host, choice, problem, safety = [], probe = []) {
   })
   const providerSelect = form.querySelector('select[name="provider"]')
   const credentialField = form.querySelector('[data-credential]')
+  const endpointField = form.querySelector('[data-endpoint]')
+  const credentialInput = form.querySelector('input[name="credentialRef"]')
+  const endpointInput = form.querySelector('input[name="endpoint"]')
   providerSelect?.addEventListener('change', () => {
-    if (credentialField) credentialField.hidden = providerSelect.value !== 'openrouter'
-    loadModelNames(models, providerSelect.value)
+    const provider = providerSelect.value
+    if (credentialField) credentialField.hidden = !takesKey(provider)
+    if (endpointField) endpointField.hidden = !takesEndpoint(provider)
+    if (credentialInput) credentialInput.setAttribute('placeholder', KEY_PLACEHOLDERS[provider] ?? '')
+    if (endpointInput) endpointInput.setAttribute('placeholder', ENDPOINT_PLACEHOLDERS[provider] ?? '')
+    loadModelNames(models, provider)
   })
   loadModelNames(models, current.provider)
   const testButton = form.querySelector('[data-test]')

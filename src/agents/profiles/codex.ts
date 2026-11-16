@@ -11,6 +11,7 @@ const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: t
 export const CODEX_PROFILE: AgentProfile = {
   id: 'codex',
   name: 'Codex',
+  observerLogin: { provider: 'codex-cli' },
   family: 'command-hooks',
   verification: 'live',
   capabilities: () => CAPABILITIES,

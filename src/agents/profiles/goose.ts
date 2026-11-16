@@ -41,7 +41,7 @@ const FILE_MODE = 0o644
 const PLUGIN_NAME = 'kinfold'
 const MANIFEST_DESCRIPTION = 'Records goose sessions in Kinfold; written by `kinfold install`, removed by `kinfold uninstall`.'
 
-const CAPABILITIES: Capabilities = { capture: 'partial', context: { sessionStart: false, prompt: false }, search: false, observer: false }
+const CAPABILITIES: Capabilities = { capture: 'partial', context: { sessionStart: false, prompt: false }, search: false, observer: true }
 const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: false, observer: false }
 
 const LIMIT = 'Goose documents a working folder on tool events only and no hook output reaching the model, so only the tool events are registered: tool calls are recorded, with their output only if Goose sends it, and no context is injected; search needs the MCP server added to config.yaml by hand'
@@ -118,6 +118,7 @@ function mcpStep(env: InstallEnv): string {
 export const GOOSE_PROFILE: AgentProfile = {
   id: HOST,
   name: 'Goose',
+  observerLogin: { provider: 'goose-cli' },
   family: 'custom',
   verification: 'docs',
   capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),

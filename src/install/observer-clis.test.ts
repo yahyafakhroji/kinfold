@@ -16,22 +16,22 @@ const versionProbes = (w: FakeWorld, binary: string): number => w.commands.filte
 test('a CLI provider is missing when its CLI did not answer; openrouter never is', async () => {
   world = createWorld({ claudeVersion: '2.0.0' })
   const missing = await missingClis(world.env, await detectHosts(world.env, null))
-  expect([...missing]).toEqual([['codex-cli', notInstalled('codex')], ['opencode-cli', notInstalled('opencode')]])
+  expect([...missing]).toEqual([['codex-cli', notInstalled('codex')], ['opencode-cli', notInstalled('opencode')], ['goose-cli', notInstalled('goose')]])
   expect(notInstalled('codex')).toBe('codex not installed')
 })
 
 test('the agent step\'s detections are reused: no CLI is asked for its version twice', async () => {
   world = createWorld({ claudeVersion: '2.0.0', codexVersion: '0.9.0', opencodeVersion: '2.1.0' })
   const detections = await detectHosts(world.env, null)
-  expect((await missingClis(world.env, detections)).size).toBe(0)
-  for (const binary of ['claude', 'codex', 'opencode']) expect(versionProbes(world, binary)).toBe(1)
+  expect([...(await missingClis(world.env, detections)).keys()]).toEqual(['goose-cli'])
+  for (const binary of ['claude', 'codex', 'opencode', 'goose']) expect(versionProbes(world, binary)).toBe(1)
 })
 
 test('an agent --hosts left out was never probed, so its CLI is looked for once', async () => {
   world = createWorld({ claudeVersion: '2.0.0', codexVersion: '0.9.0' })
   const detections = await detectHosts(world.env, ['claude-code'])
   expect(versionProbes(world, 'codex')).toBe(0)
-  expect([...(await missingClis(world.env, detections)).keys()]).toEqual(['opencode-cli'])
+  expect([...(await missingClis(world.env, detections)).keys()]).toEqual(['opencode-cli', 'goose-cli'])
   expect(versionProbes(world, 'codex')).toBe(1)
   expect(versionProbes(world, 'claude')).toBe(1)
 })
@@ -47,7 +47,7 @@ test('an agent found only by its app or its config folder has no CLI to observe 
   mkdirSync(join(world.home, '.claude'), { recursive: true })
   mkdirSync(join(world.root, 'Applications', 'Codex.app'), { recursive: true })
   const missing = await missingClis(world.env, await detectHosts(world.env, null))
-  expect([...missing.keys()]).toEqual(['claude-cli', 'codex-cli', 'opencode-cli'])
+  expect([...missing.keys()]).toEqual(['claude-cli', 'codex-cli', 'opencode-cli', 'goose-cli'])
 })
 
 test('claude failing --version beside ~/.claude keeps the agent and says why its CLI cannot observe', async () => {
@@ -79,7 +79,7 @@ test('on Windows a CLI on PATH counts even when the version question could not s
   world = createWorld({ platform: 'win32' })
   const detections = await detectHosts(world.env, null)
   const which = (binary: string, path: string) => (binary === 'claude' && path === world?.env.pathEnv ? 'C:\\npm\\claude.cmd' : null)
-  expect([...(await missingClis(world.env, detections, undefined, which)).keys()]).toEqual(['codex-cli', 'opencode-cli'])
+  expect([...(await missingClis(world.env, detections, undefined, which)).keys()]).toEqual(['codex-cli', 'opencode-cli', 'goose-cli'])
   // Elsewhere the version question is the whole answer.
   world.env.platform = 'darwin'
   expect((await missingClis(world.env, detections, undefined, which)).has('claude-cli')).toBe(true)

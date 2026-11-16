@@ -29,7 +29,7 @@ import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstall
 import { hookTarget } from '../families/json-hooks'
 import { mcpEntryState } from '../families/mcp-entry'
 import { type PluginFileSpec, pluginFileActions, pluginFileLine, pluginFileState, pluginFileUninstallActions } from '../families/plugin-file'
-import type { AgentProfile, Capabilities } from '../profile'
+import { type AgentProfile, type Capabilities, NO_TOOLS_OFF } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: true }, search: true, observer: false }
 
@@ -73,6 +73,7 @@ function mcpLine(env: InstallEnv): string {
 export const AMP_PROFILE: AgentProfile = {
   id: HOST,
   name: 'Amp',
+  observerLogin: { out: NO_TOOLS_OFF },
   family: 'custom',
   verification: 'docs',
   capabilities: () => CAPABILITIES,

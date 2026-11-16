@@ -50,6 +50,11 @@ export interface CliAdapter {
    */
   isolatedEnv(runDir: string, baseEnv: Record<string, string>): Record<string, string>
   /**
+   * The CLI writes files even for --version (goose logs every start), so the
+   * probe runs in a run folder of its own with `isolatedEnv`, removed after.
+   */
+  probeInRunDir?: true
+  /**
    * Throws ObserverError('bad_response') on unreadable output. Also called on
    * failed runs to look for tool events. ObserverError details written here
    * must never quote CLI output.
@@ -255,11 +260,11 @@ export function createCliObserverRunner(adapter: CliAdapter, options: CliRunnerO
   const probeChecked = async (): Promise<CliProbe> => {
     const binaryPath = which(adapter.binary, env.PATH ?? '')
     if (binaryPath === null) throw new ObserverError('cli_missing', `${adapter.binary} not found on PATH`)
-    const result = await spawnChecked(
-      spawn,
-      { cmd: [binaryPath, '--version'], cwd: ensureObserverDir(options.dataDir), env, stdin: '', timeoutMs: PROBE_TIMEOUT_MS },
-      `${label} --version`,
-    )
+    const versionRun = (cwd: string, runEnv: Record<string, string>): Promise<SpawnResult> =>
+      spawnChecked(spawn, { cmd: [binaryPath, '--version'], cwd, env: runEnv, stdin: '', timeoutMs: PROBE_TIMEOUT_MS }, `${label} --version`)
+    const result = adapter.probeInRunDir === true
+      ? await inRunDir(options.dataDir, (runDir) => versionRun(runDir, isolated(runDir)), async () => {}, logCleanupFailure)
+      : await versionRun(ensureObserverDir(options.dataDir), env)
     const version = adapter.parseVersion(result.stdout)
     if (version === null) throw new ObserverError('bad_response', `${label} --version output has no version`)
     if (isBelow(version, adapter.minVersion)) {

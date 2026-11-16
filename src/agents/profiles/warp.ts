@@ -25,7 +25,7 @@ import type { InstallEnv } from '../../install/env'
 import { claudeMcpState } from '../../install/mcp-wiring'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpEntryText, mcpServersFile } from '../families/json-agent'
 import { mcpEntryState } from '../families/mcp-entry'
-import { type AgentProfile, type Capabilities, SHORT_NO_HOOKS } from '../profile'
+import { type AgentProfile, type Capabilities, NO_TOOLS_OFF, SHORT_NO_HOOKS } from '../profile'
 
 const HOST = 'warp'
 
@@ -43,6 +43,7 @@ const usesClaudeEntry = (env: InstallEnv): boolean => claudeMcpState(env) === 'y
 export const WARP_PROFILE: AgentProfile = {
   id: HOST,
   name: 'Warp',
+  observerLogin: { out: NO_TOOLS_OFF },
   family: 'mcp-only',
   verification: 'docs',
   capabilities: () => CAPABILITIES,

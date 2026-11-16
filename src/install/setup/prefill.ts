@@ -71,6 +71,7 @@ interface RowLike {
   model: string
   credentialRef: string | null
   enabled: boolean
+  endpoint?: string
 }
 
 function toMap(rows: readonly RowLike[]): Map<InstallHost, ObserverSettingsInput> {
@@ -79,7 +80,7 @@ function toMap(rows: readonly RowLike[]): Map<InstallHost, ObserverSettingsInput
     if (!isInstallHost(row.host)) continue
     const provider = OBSERVER_PROVIDERS.find((known) => known === row.provider)
     if (provider === undefined) continue
-    map.set(row.host, { host: row.host, provider, model: row.model, credentialRef: row.credentialRef, enabled: row.enabled })
+    map.set(row.host, { host: row.host, provider, model: row.model, credentialRef: row.credentialRef, enabled: row.enabled, ...(row.endpoint === undefined ? {} : { endpoint: row.endpoint }) })
   }
   return map
 }

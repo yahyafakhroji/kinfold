@@ -21,7 +21,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { KEYCHAIN_SERVICE, isSystemCredentialRef } from '../secrets/credentials'
 import type { KeyStore } from '../secrets/key-store'
-import { OPENROUTER_CREDENTIAL_REF } from '../observer/settings'
+import { DEFAULT_CREDENTIAL_REFS, OPENAI_COMPATIBLE_CREDENTIAL_REF } from '../observer/settings'
 import { getObserverSettings } from './daemon-client'
 import { type InstallEnv, errorMessage, platformOf } from './env'
 import { EXIT_BLOCKED, EXIT_FAILED, EXIT_OK, type InstallOptions, takeInstallLock } from './install'
@@ -83,11 +83,11 @@ export function hostUnwireActions(env: InstallEnv, host: InstallHost): Action[] 
   return profileOf(host).wiring.uninstall(env)
 }
 
-/** The default ref plus any ref a stored setting names. A dry run asks the daemon nothing (only /health is allowed). */
+/** Every ref setup can write, plus any ref a stored setting names; only those present are removed. A dry run asks the daemon nothing (only /health is allowed). */
 async function ourRefs(env: InstallEnv, dryRun: boolean): Promise<string[]> {
   const read = dryRun ? null : await getObserverSettings(env)
   const named = read?.ok === true ? read.view.rows.map((row) => row.credentialRef).filter((ref): ref is string => ref !== null) : []
-  return [...new Set([OPENROUTER_CREDENTIAL_REF, ...named])].filter((ref) => !isSystemCredentialRef(ref))
+  return [...new Set([...Object.values(DEFAULT_CREDENTIAL_REFS), OPENAI_COMPATIBLE_CREDENTIAL_REF, ...named])].filter((ref) => !isSystemCredentialRef(ref))
 }
 
 function credentialActions(store: KeyStore | null, refs: readonly string[]): Action[] {

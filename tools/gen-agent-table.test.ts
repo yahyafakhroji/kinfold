@@ -20,6 +20,7 @@ function fake(name: string, caps: PerOs<Capabilities>, limit: PerOs<string | nul
   return {
     id: 'claude-code',
     name,
+    observerLogin: { provider: 'claude-cli' },
     family: 'custom',
     verification: 'docs',
     capabilities: perOs(caps, FULL),

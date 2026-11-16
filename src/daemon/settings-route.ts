@@ -7,7 +7,9 @@
 import type { Parsed } from '../context/types'
 import type { ProbeFailure } from '../observer/safety-gate'
 import { KNOWN_HOSTS, isRecord } from '../contract/event'
-import { providerTakesKey, resolveObserverSettings } from '../observer/settings'
+import { checkEndpoint } from '../observer/endpoint'
+import { parseGooseModel } from '../observer/runners/goose-cli'
+import { credentialRefProblem, isEndpointProvider, providerTakesKey, resolveObserverSettings } from '../observer/settings'
 import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
 import { assertCredentialRef, isSystemCredentialRef } from '../secrets/credentials'
 import { type SafetyRow, clearFailedSafety, listSafety } from '../store/observer-safety-store'
@@ -78,8 +80,27 @@ export function parseSettingsPut(body: unknown): Parsed<ObserverSettingsInput> {
   if (enabled !== undefined && typeof enabled !== 'boolean') return { ok: false, error: 'enabled must be a boolean' }
   const ref = parseCredentialRef(body.credentialRef)
   if (!ref.ok) return ref
-  const credentialRef = providerTakesKey(provider as ObserverProvider) ? ref.value : null
-  return { ok: true, value: { host, provider: provider as ObserverProvider, model: model.trim(), credentialRef, enabled: enabled ?? true } }
+  const known = provider as ObserverProvider
+  if (known === 'goose-cli') {
+    const goose = parseGooseModel(model.trim())
+    if (!goose.ok) return goose
+  }
+  const endpoint = parseEndpoint(known, body.endpoint)
+  if (!endpoint.ok) return endpoint
+  const credentialRef = providerTakesKey(known) ? ref.value : null
+  const refProblem = credentialRef === null ? null : credentialRefProblem(known, credentialRef)
+  if (refProblem !== null) return { ok: false, error: `credentialRef ${refProblem}` }
+  const value: ObserverSettingsInput = { host, provider: known, model: model.trim(), credentialRef, enabled: enabled ?? true }
+  return { ok: true, value: endpoint.value === null ? value : { ...value, endpoint: endpoint.value } }
+}
+
+/** The checked endpoint of an endpoint provider; null for any other, whose endpoint is dropped. */
+function parseEndpoint(provider: ObserverProvider, value: unknown): Parsed<string | null> {
+  if (!isEndpointProvider(provider)) return { ok: true, value: null }
+  if (value === undefined || value === null || value === '') return { ok: false, error: `endpoint is needed for ${provider}` }
+  if (typeof value !== 'string') return { ok: false, error: 'endpoint must be a string' }
+  const checked = checkEndpoint(provider, value)
+  return checked.ok ? checked : { ok: false, error: checked.error }
 }
 
 function effectiveFor(db: Database, host: string): EffectiveSettings {

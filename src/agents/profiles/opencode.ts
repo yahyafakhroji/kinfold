@@ -15,6 +15,7 @@ const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: f
 export const OPENCODE_PROFILE: AgentProfile = {
   id: 'opencode',
   name: 'OpenCode',
+  observerLogin: { provider: 'opencode-cli' },
   family: 'opencode-plugin',
   verification: 'live',
   capabilities: () => CAPABILITIES,

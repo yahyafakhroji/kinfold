@@ -320,3 +320,11 @@ test('the saved auto-update choice, and whether its notice is owed, come from in
   await runPlan(world.env, [installRecordAction(world.dataDir, { ...RECORD, autoUpdate: false })], false)
   expect(await readSetupState(world.env)).toMatchObject({ autoUpdate: false, autoUpdateIntro: false })
 })
+
+test('a saved endpoint comes back with its row, so a re-run keeps the address', async () => {
+  const w = make()
+  await markInstalled(w)
+  const local: ObserverSettingsInput = { host: 'codex', provider: 'openai-compatible', model: 'llama3.2', credentialRef: null, enabled: true, endpoint: 'http://127.0.0.1:11434/v1' }
+  seedPlainStore(w, local)
+  expect((await readSetupState(w.env)).observers.get('codex')).toEqual(local)
+})

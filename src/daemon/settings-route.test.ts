@@ -132,3 +132,35 @@ test('parseSettingsPut drops the credentialRef for codex-cli and still rejects a
   expect(bad.ok).toBe(false)
   if (!bad.ok) expect(bad.error).toContain('provider')
 })
+
+test('parseSettingsPut keeps a checked endpoint for an endpoint provider and drops one for any other', () => {
+  expect(parseSettingsPut({ host: 'codex', provider: 'openai-compatible', model: 'llama3.2', endpoint: 'http://127.0.0.1:11434/v1/', enabled: true })).toEqual({
+    ok: true,
+    value: { host: 'codex', provider: 'openai-compatible', model: 'llama3.2', credentialRef: null, enabled: true, endpoint: 'http://127.0.0.1:11434/v1' },
+  })
+  expect(parseSettingsPut({ host: 'codex', provider: 'anthropic-api', model: 'claude-haiku-5-5', credentialRef: 'anthropic', endpoint: 'https://x.example.com' })).toEqual({
+    ok: true,
+    value: { host: 'codex', provider: 'anthropic-api', model: 'claude-haiku-5-5', credentialRef: 'anthropic', enabled: true },
+  })
+})
+
+test('parseSettingsPut refuses what resolve or the runner would refuse, without echoing the value', () => {
+  expect(parseSettingsPut({ host: 'codex', provider: 'openai-compatible', model: 'm' })).toEqual({ ok: false, error: 'endpoint is needed for openai-compatible' })
+  expect(parseSettingsPut({ host: 'codex', provider: 'openai-compatible', model: 'm', endpoint: 7 })).toEqual({ ok: false, error: 'endpoint must be a string' })
+  expect(parseSettingsPut({ host: 'codex', provider: 'openai-compatible', model: 'm', endpoint: 'http://10.1.2.3/v1' })).toEqual({ ok: false, error: 'the endpoint must use https unless it is on this machine (127.0.0.1, ::1 or localhost)' })
+  expect(parseSettingsPut({ host: 'codex', provider: 'qwen-api', model: 'm', endpoint: 'https://api.example.com/v1' })).toEqual({ ok: false, error: 'the Qwen endpoint must be an https DashScope or Model Studio URL' })
+  expect(parseSettingsPut({ host: 'codex', provider: 'goose-cli', model: 'claude-code/sonnet' })).toEqual({ ok: false, error: 'goose-cli models are <provider>/<model>, provider one of anthropic, openai, google, openrouter, xai, ollama, tetrate' })
+})
+
+test('parseSettingsPut never pairs a provider with another provider\'s key', () => {
+  const put = (provider: string, credentialRef: string | null, endpoint?: string) => parseSettingsPut({ host: '*', provider, model: 'm', credentialRef, ...(endpoint === undefined ? {} : { endpoint }) })
+  const refused = { ok: false, error: 'credentialRef names the key of another provider' } as const
+  expect(put('openai-compatible', 'anthropic', 'https://evil.example/v1')).toEqual(refused)
+  expect(put('openai-compatible', 'openrouter', 'https://evil.example/v1')).toEqual(refused)
+  expect(put('qwen-api', 'openai', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1')).toEqual(refused)
+  expect(put('anthropic-api', 'gemini')).toEqual(refused)
+  expect(put('anthropic-api', 'anthropic')).toMatchObject({ ok: true })
+  expect(put('openai-compatible', 'openai-compatible', 'https://api.groq.com/openai/v1')).toMatchObject({ ok: true })
+  expect(put('openai-compatible', 'groq', 'https://api.groq.com/openai/v1')).toMatchObject({ ok: true })
+  expect(put('openrouter', 'openai-compatible')).toEqual(refused)
+})

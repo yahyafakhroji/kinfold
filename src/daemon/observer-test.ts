@@ -28,7 +28,7 @@ export function createObserverTester(runnerFor: RunnerFactory | null, log: (line
       const startedAt = performance.now()
       let result: ObserverTestResult
       try {
-        await runnerFor({ provider: input.provider, model: input.model, credentialRef: input.credentialRef, enabled: true, source: 'host' }).run(CHECK_PROMPT)
+        await runnerFor({ provider: input.provider, model: input.model, credentialRef: input.credentialRef, enabled: true, source: 'host', ...(input.endpoint === undefined ? {} : { endpoint: input.endpoint }) }).run(CHECK_PROMPT)
         result = { ok: true }
       } catch (error: unknown) {
         result = { ok: false, errorClass: toObserverError(error).errorClass }

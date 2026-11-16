@@ -12,6 +12,7 @@ function profile(name: string, caps: Capabilities, limit: string | null = null):
   return {
     id: 'zed',
     name,
+    observerLogin: { out: 'none' },
     family: 'mcp-only',
     verification: 'docs',
     capabilities: () => caps,

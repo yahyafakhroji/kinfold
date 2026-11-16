@@ -30,7 +30,7 @@ import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentFileInstallActions, 
 import { hookTarget, shellCommand } from '../families/json-hooks'
 import { mcpEntryState } from '../families/mcp-entry'
 import { type OwnedFileSpec, ownedFileActions, ownedFileState, ownedFileUninstallActions } from '../families/owned-file'
-import { type AgentProfile, type Capabilities, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
+import { type AgentProfile, type Capabilities, NO_TOOLS_OFF, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: false, prompt: false }, search: true, observer: false }
 const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false }
@@ -94,6 +94,7 @@ function hooksState(env: InstallEnv): 'yes' | 'no' | 'stale' {
 export const KIRO_PROFILE: AgentProfile = {
   id: HOST,
   name: 'Kiro',
+  observerLogin: { out: NO_TOOLS_OFF },
   family: 'custom',
   verification: 'docs',
   capabilities: (os) => (onWindows(os) ? WINDOWS_CAPABILITIES : CAPABILITIES),

@@ -83,8 +83,39 @@ export interface ObserverRunner {
   run(prompt: ObserverPrompt): Promise<RunnerResult>
 }
 
-export const OBSERVER_PROVIDERS = ['claude-cli', 'openrouter', 'codex-cli', 'opencode-cli'] as const
+export const OBSERVER_PROVIDERS = [
+  'claude-cli',
+  'openrouter',
+  'codex-cli',
+  'opencode-cli',
+  'goose-cli',
+  'anthropic-api',
+  'openai-api',
+  'gemini-api',
+  'qwen-api',
+  'openai-compatible',
+] as const
 export type ObserverProvider = (typeof OBSERVER_PROVIDERS)[number]
+
+/**
+ * Providers called over HTTP with no tools in the request, so no tool can run
+ * whatever the session text says. Each reads a key from the system key store;
+ * the OpenAI-compatible endpoint reads one only when its row names one.
+ */
+export const HTTP_API_PROVIDERS = ['openrouter', 'anthropic-api', 'openai-api', 'gemini-api', 'qwen-api', 'openai-compatible'] as const
+export type HttpApiProvider = (typeof HTTP_API_PROVIDERS)[number]
+
+/** Providers whose base URL is a setting of the row rather than fixed in the runner. */
+export const ENDPOINT_PROVIDERS = ['qwen-api', 'openai-compatible'] as const
+export type EndpointProvider = (typeof ENDPOINT_PROVIDERS)[number]
+
+/**
+ * CLI providers built from the docs that could not be run live, so they are
+ * listed but never pickable, with the reason shown beside them.
+ */
+export const UNPROVEN_CLI_PROVIDERS: Readonly<Record<string, string>> = {
+  'auggie-cli': 'built from the docs, not proven: a live run needs an Augment account, and the docs do not describe the --mode json events',
+}
 
 /**
  * Providers that borrow the user's own CLI login instead of a Keychain key.
@@ -93,7 +124,7 @@ export type ObserverProvider = (typeof OBSERVER_PROVIDERS)[number]
  * and left out, with the doc line for each, are in
  * runners/CLI-LOGIN-CANDIDATES.md.
  */
-export const CLI_LOGIN_PROVIDERS = ['codex-cli', 'opencode-cli'] as const
+export const CLI_LOGIN_PROVIDERS = ['codex-cli', 'opencode-cli', 'goose-cli'] as const
 export type CliLoginProvider = (typeof CLI_LOGIN_PROVIDERS)[number]
 
 export interface ObserverSettings {
@@ -102,6 +133,8 @@ export interface ObserverSettings {
   /** Keychain account name for the provider's key; null when the provider needs none. */
   credentialRef: string | null
   enabled: boolean
+  /** The base URL, for an endpoint provider only; checked by observer/endpoint.ts. */
+  endpoint?: string
   /** Where the setting came from: a host row, the '*' row, or the built-in default. */
   source: 'host' | 'default-row' | 'built-in'
 }
