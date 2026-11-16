@@ -118,3 +118,11 @@ jobs:
         env:
           SMOKE: ${{ matrix.smoke }}
         run: bash ".github/smoke/$SMOKE.sh" cleanup
+
+  # Windows with a WSL2 distro: tools/smoke-wsl.ts. Advice only here, so a
+  # failure shows on the run but never deletes a prerelease.
+  wsl:
+    name: wsl
+    uses: ./.github/workflows/wsl-smoke.yml
+    with:
+      required: false
