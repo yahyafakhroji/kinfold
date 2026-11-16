@@ -1,0 +1,76 @@
+name: Build a Kinfold program
+description: Builds dist/kinfold-<target> on a runner that matches the target, then checks its version and its embedded model.
+
+inputs:
+  target:
+    description: The release target, such as linux-x64 or windows-x64
+    required: true
+  version:
+    description: Version stamped into the program
+    required: true
+  github-token:
+    description: Lets the API asset fallbacks authenticate; anonymous calls hit a shared rate limit
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install the pinned Bun
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: bash tools/install-bun.sh
+
+    - name: Install development dependencies
+      shell: bash
+      run: bun install --frozen-lockfile
+
+    # Each runner matches its target, so the C compiler builds sqlite3mc for
+    # the platform the program will run on.
+    - name: Build sqlite3mc for this target
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: bun tools/build-sqlite3mc.ts
+
+    - name: Download the pinned sqlite-vec member
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: bun tools/fetch-vec0.ts
+
+    # The model, its vocabulary and the runtime's wasm, each checked against
+    # its pin; gen-embedded refuses a build whose added size passes 60 MB.
+    - name: Fetch the pinned embedding model
+      shell: bash
+      run: bun tools/fetch-model.ts
+
+    - name: Build the program
+      shell: bash
+      env:
+        KINFOLD_VERSION: ${{ inputs.version }}
+        TARGET: ${{ inputs.target }}
+      run: bun tools/build-release.ts "$TARGET" "$KINFOLD_VERSION"
+
+    - name: Confirm the build restored its source stubs
+      shell: bash
+      run: git diff --exit-code -- src/version.ts src/runtime/embedded.generated.ts
+
+    - name: Smoke-run the program
+      shell: bash
+      env:
+        KINFOLD_VERSION: ${{ inputs.version }}
+        TARGET: ${{ inputs.target }}
+      run: |
+        program="dist/kinfold-$TARGET"
+        if [ "$RUNNER_OS" = "Windows" ]; then program="$program.exe"; fi
+        actual=$("$program" --version)
+        if [ "$actual" != "$KINFOLD_VERSION" ]; then
+          echo "$program --version printed '$actual', expected '$KINFOLD_VERSION'"
+          exit 1
+        fi
+        echo "$program --version printed $actual"
+        ls -l "$program"
+        # The program must run its embedded model with the checkout's copy out of reach.
+        rm -rf "${GITHUB_WORKSPACE:?}/.cache/embed-model"
+        "$program" embed-check

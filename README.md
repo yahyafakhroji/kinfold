@@ -260,7 +260,9 @@ WSL reaches the Windows daemon only with mirrored networking. Under the default 
 networkingMode=mirrored
 ```
 
-`kinfold encrypt` and `decrypt` run from Windows only. A checkout under WSL is a different project from the same repository checked out on Windows.
+`kinfold encrypt` and `decrypt` run from Windows only. A checkout under WSL is a different project from the same repository checked out on Windows. A desktop app that runs on Windows reads its Windows settings, so wire it from the Windows install.
+
+What is tested: every agent's wiring in a linked distro, its hooks spooling into the Windows folder, and its recall channel, all against fakes. CI also runs the built programs on a Windows runner with an Ubuntu WSL2 distro: the distro finds the Windows install, install refuses under NAT, and a hook run in the distro lands in the Windows memory. The last hop, the distro reaching the Windows daemon over loopback, is checked only by fakes. GitHub's Windows Server 2025 runners refuse mirrored networking (WSL falls back with error 0x803b0015), so no CI run can cover it, and WSL stays in preview until it has run on a Windows 11 machine.
 
 ## Output
 

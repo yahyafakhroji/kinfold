@@ -1,0 +1,76 @@
+name: wsl-smoke
+
+# The built Windows program installed on a Windows runner, and the built Linux
+# program run inside an Ubuntu WSL2 distro there (tools/smoke-wsl.ts). The
+# runner's WSL refuses networkingMode=mirrored, so the distro runs under NAT:
+# the run covers everything short of the distro reaching the Windows daemon
+# over loopback. The caller's run must hold the kinfold-programs artifact.
+on:
+  workflow_call:
+    inputs:
+      # The release smoke runs it as advice only: WSL is a preview, and its
+      # setup downloads WSL and a distro, which must not stop a release.
+      required:
+        description: Whether a failure fails the caller
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  DISTRO: Ubuntu-24.04
+
+jobs:
+  wsl:
+    name: wsl (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    continue-on-error: ${{ !inputs.required }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the pinned Bun
+        shell: bash
+        env:
+          # Anonymous API calls share a rate limit per runner address and answer 403.
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/install-bun.sh
+
+      - name: Install development dependencies
+        timeout-minutes: 5
+        run: bun install --frozen-lockfile
+
+      - name: Download the release programs
+        uses: actions/download-artifact@v8
+        with:
+          name: kinfold-programs
+          path: dist
+
+      - name: Set up WSL and the distro
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          wsl.exe --update --web-download
+          wsl.exe --set-default-version 2
+          wsl.exe --install --web-download -d $env:DISTRO --no-launch
+          wsl.exe -d $env:DISTRO -u root -- uname -r
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          wsl.exe -d $env:DISTRO -u root -- wslinfo --networking-mode
+
+      - name: Smoke Windows and the distro
+        timeout-minutes: 15
+        shell: bash
+        run: bun tools/smoke-wsl.ts dist/kinfold-windows-x64.exe dist/kinfold-linux-x64 "$DISTRO"
+
+      - name: Show the daemon log
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$HOME/.kinfold/logs/daemon.log" ]; then cat "$HOME/.kinfold/logs/daemon.log"; else echo "the daemon log is missing"; fi
+
+      - name: Clean up the runner
+        if: always()
+        shell: bash
+        run: bash .github/smoke/windows.sh cleanup

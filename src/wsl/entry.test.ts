@@ -10,79 +10,29 @@ import { NO_DB_KEYS } from '../sqlite/keys'
 import { maintenancePath } from '../sqlite/open'
 import { openStore } from '../store/db'
 import { upsertProject } from '../store/writes'
-import { stubDiskCheck } from '../install/disk/stub-check'
 import { runKeyCommand } from '../install/encrypt'
-import { type CommandResult, type InstallEnv, platformOf } from '../install/env'
-import { encodeText } from '../install/files'
-import { EXIT_FAILED, EXIT_OK, type InstallOptions } from '../install/install'
-import { DEVELOPMENT_VERSION } from '../install/self-install'
+import { type InstallEnv, platformOf } from '../install/env'
+import { EXIT_FAILED, EXIT_OK } from '../install/install'
 import { serviceFor } from '../install/service/control'
-import { taskXml } from '../install/service/scheduled-task-service'
 import { SystemdUserService } from '../install/service/systemd-service'
-import { YES, type FakeWorld, createWorld, recordingKeyStore, snapshotTree } from '../install/test-support'
+import { type FakeWorld, recordingKeyStore, snapshotTree } from '../install/test-support'
 import { NOT_LINKED_LINE, wslInstall, wslStatus, wslUninstall } from './entry'
 import { WSL_LINK_FILE, readWslLink, wslHomeDir } from './link'
 import { LINKED_SERVICE_LABEL, LINKED_SERVICE_REFUSAL, WslLinkedService } from './linked-service'
-import { WSLINFO, WSLPATH } from './windows-install'
+import { PORT, type Stand, type StandOptions, WIN_DATA_DIR, stand as makeStand } from './test-support'
 
 const worlds: FakeWorld[] = []
 afterEach(async () => {
   for (const world of worlds.splice(0)) await world.cleanup()
 })
 
-const WIN_APP_DATA = 'C:\\Users\\José\\AppData\\Local'
-const WIN_DATA_DIR = 'C:\\Users\\José\\.kinfold'
-/** Never the live daemon's 37811; the fake fetch answers it without any socket. */
-const PORT = 47_811
 const MIRRORED_ADVICE = 'WSL reaches it only with mirrored networking: add networkingMode=mirrored under [wsl2] in %UserProfile%\\.wslconfig, run wsl --shutdown, and install again'
 
-interface Stand {
-  world: FakeWorld
-  env: InstallEnv
-  /** The temp folder standing in for /mnt/c. */
-  driveC: string
-  dataDir: string
-  options: InstallOptions
-  daemon: 'up' | 'down'
-  mode: string
-}
-
-/** A linux-WSL world whose interop answers from a temp folder standing in for /mnt/c. */
-function stand(options: { daemonJson?: boolean } = {}): Stand {
-  const state = { daemon: 'up' as 'up' | 'down', mode: 'mirrored' }
-  let driveC = ''
-  const paths = (): Record<string, string> => ({ [WIN_APP_DATA]: join(driveC, 'Users', 'José', 'AppData', 'Local'), [WIN_DATA_DIR]: join(driveC, 'Users', 'José', '.kinfold') })
-  const answer = (argv: readonly string[]): CommandResult | undefined => {
-    const [binary] = argv
-    if (binary?.endsWith('powershell.exe') === true) return { exitCode: 0, stdout: `${WIN_APP_DATA}\r\n` }
-    if (binary === WSLPATH) {
-      const path = paths()[argv[2] ?? '']
-      return path === undefined ? { exitCode: 1, stdout: '' } : { exitCode: 0, stdout: `${path}\n` }
-    }
-    if (binary === WSLINFO) return { exitCode: 0, stdout: `${state.mode}\n` }
-    return undefined
-  }
-  const world = createWorld({ platform: 'linux', withLibrary: false, claudeVersion: '2.1.0', commandOverride: answer })
-  worlds.push(world)
-  driveC = join(world.root, 'mnt-c')
-  const appData = paths()[WIN_APP_DATA]!
-  const dataDir = paths()[WIN_DATA_DIR]!
-  mkdirSync(join(appData, 'Kinfold'), { recursive: true })
-  mkdirSync(dataDir, { recursive: true })
-  const xml = taskXml({ user: 'PC\\José', program: `${WIN_DATA_DIR}\\bin\\kinfold.exe`, dataDir: WIN_DATA_DIR, port: PORT, logFile: `${WIN_DATA_DIR}\\logs\\daemon.log` })
-  writeFileSync(join(appData, 'Kinfold', 'kinfold-daemon.xml'), encodeText(xml, 'utf16le'))
-  writeFileSync(join(dataDir, 'install.json'), '{"channel":"powershell","updateCheck":true,"firstInstalledAt":1}\n')
-  if (options.daemonJson ?? true) writeFileSync(join(dataDir, 'daemon.json'), `${JSON.stringify({ pid: 4242, port: PORT })}\n`)
-  const fetch: InstallEnv['fetch'] = async (url) => {
-    world.fetches.push(`GET ${new URL(url).pathname}`)
-    if (state.daemon !== 'up' || new URL(url).port !== String(PORT)) throw new TypeError('connection refused (test world)')
-    return Response.json({ ok: true, version: '1.2.3', schemaVersion: 7, pid: 4242 })
-  }
-  const env: InstallEnv = { ...world.env, platform: 'linux', wsl: true, fetch, unflaggedDataDir: world.dataDir, diskCheck: stubDiskCheck('test disk') }
-  const programSource = join(world.root, 'kinfold-build')
-  writeFileSync(programSource, 'the kinfold program stand-in')
-  const installOptions: InstallOptions = { ...YES, hosts: ['claude-code'], programSource, releaseVersion: DEVELOPMENT_VERSION }
-  return Object.assign(state, { world, env, driveC, dataDir, options: installOptions })
+/** A stand this file cleans up after each test. */
+function stand(options: StandOptions = {}): Stand {
+  const s = makeStand(options)
+  worlds.push(s.world)
+  return s
 }
 
 async function linked(): Promise<Stand> {

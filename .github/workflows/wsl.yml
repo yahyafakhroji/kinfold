@@ -1,0 +1,102 @@
+name: wsl
+
+# The WSL smoke for a pull request that changes the code WSL runs. A draft
+# pull request already gets it through release-build's smoke, so this one
+# builds only the two programs it needs, and only once the PR is ready.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    # The code the WSL path runs, from the hook and spool to the daemon that
+    # ingests, and everything that builds or drives the smoke.
+    paths:
+      - src/wsl/**
+      - src/install/**
+      - src/agents/**
+      - src/cli/**
+      - src/capture/**
+      - src/spool/**
+      - src/daemon/**
+      - src/store/**
+      - src/platform/**
+      - tools/smoke-wsl.ts
+      - tools/smoke/wsl.ts
+      - tools/smoke/platform.ts
+      - tools/smoke-sums-url.ts
+      - tools/build-*.ts
+      - tools/fetch-*.ts
+      - tools/install-bun.sh
+      - .github/smoke/windows.sh
+      - package.json
+      - bun.lock
+      - .bun-version
+      - .github/workflows/wsl.yml
+      - .github/workflows/wsl-smoke.yml
+      - .github/actions/build-program/**
+
+permissions:
+  contents: read
+
+env:
+  VERSION: 0.1.0-rc.1
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            os: ubuntu-latest
+          - target: windows-x64
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the program
+        timeout-minutes: 25
+        uses: ./.github/actions/build-program
+        with:
+          target: ${{ matrix.target }}
+          version: ${{ env.VERSION }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kinfold-${{ matrix.target }}
+          path: dist/kinfold-*
+          if-no-files-found: error
+
+  programs:
+    name: programs
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      # The format release-build's checksums job writes; install checks the
+      # program it copies against this list.
+      - name: Write SHA256SUMS
+        shell: bash
+        run: |
+          cd dist
+          sha256sum --text kinfold-* | sort -k2 > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kinfold-programs
+          path: dist/
+          if-no-files-found: error
+
+  smoke:
+    name: smoke
+    needs: programs
+    uses: ./.github/workflows/wsl-smoke.yml

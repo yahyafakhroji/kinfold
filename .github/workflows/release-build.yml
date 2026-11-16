@@ -61,13 +61,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install the pinned Bun
-        shell: bash
-        env:
-          # Anonymous API calls share a rate limit per runner address and answer 403.
-          GH_TOKEN: ${{ github.token }}
-        run: bash tools/install-bun.sh
-
       - name: Resolve the version
         id: version
         shell: bash
@@ -80,59 +73,15 @@ jobs:
             echo "value=$DRAFT_PR_VERSION" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Install development dependencies
-        timeout-minutes: 5
-        run: bun install --frozen-lockfile
-
-      - name: Build sqlite3mc for this target
-        timeout-minutes: 10
-        env:
-          # Lets the API asset fallback authenticate; anonymous calls hit a shared rate limit.
-          GH_TOKEN: ${{ github.token }}
-        run: bun tools/build-sqlite3mc.ts
-
-      - name: Download the pinned sqlite-vec member
-        timeout-minutes: 3
-        env:
-          # Lets the API asset fallback authenticate; anonymous calls hit a shared rate limit.
-          GH_TOKEN: ${{ github.token }}
-        run: bun tools/fetch-vec0.ts
-
-      # The model, its vocabulary and the runtime's wasm, each checked against
-      # its pin; gen-embedded refuses a build whose added size passes 60 MB.
-      - name: Fetch the pinned embedding model
-        timeout-minutes: 5
-        run: bun tools/fetch-model.ts
-
+      # The same steps build the WSL workflow's programs. A composite action's
+      # steps take no limit of their own, so this one bounds them all.
       - name: Build the program
-        timeout-minutes: 10
-        shell: bash
-        env:
-          KINFOLD_VERSION: ${{ steps.version.outputs.value }}
-        run: bun tools/build-release.ts "${{ matrix.target }}" "$KINFOLD_VERSION"
-
-      - name: Confirm the build restored its source stubs
-        shell: bash
-        run: git diff --exit-code -- src/version.ts src/runtime/embedded.generated.ts
-
-      - name: Smoke-run the program
-        timeout-minutes: 2
-        shell: bash
-        env:
-          KINFOLD_VERSION: ${{ steps.version.outputs.value }}
-        run: |
-          program=dist/kinfold-${{ matrix.target }}
-          if [ "$RUNNER_OS" = "Windows" ]; then program="$program.exe"; fi
-          actual=$("$program" --version)
-          if [ "$actual" != "$KINFOLD_VERSION" ]; then
-            echo "$program --version printed '$actual', expected '$KINFOLD_VERSION'"
-            exit 1
-          fi
-          echo "$program --version printed $actual"
-          ls -l "$program"
-          # The program must run its embedded model with the checkout's copy out of reach.
-          rm -rf "${GITHUB_WORKSPACE:?}/.cache/embed-model"
-          "$program" embed-check
+        timeout-minutes: 25
+        uses: ./.github/actions/build-program
+        with:
+          target: ${{ matrix.target }}
+          version: ${{ steps.version.outputs.value }}
+          github-token: ${{ github.token }}
 
       - uses: actions/upload-artifact@v7
         with:
