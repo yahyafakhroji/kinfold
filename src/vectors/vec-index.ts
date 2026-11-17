@@ -87,16 +87,23 @@ export function reconcileVecIndex(db: Database, space: IndexedSpace, limit: numb
     `SELECT observation_id AS id FROM ${table}
      WHERE observation_id NOT IN (SELECT observation_id FROM observation_vectors WHERE model = $model AND dims = $dims) LIMIT $limit`,
   ).all({ ...params, limit: removeLimit })
-  const missing = db.query<{ id: number; project: string; embedding: Uint8Array }, typeof params>(
-    `SELECT v.observation_id AS id, o.project_key AS project, v.embedding AS embedding
-     FROM observation_vectors v JOIN observations o ON o.id = v.observation_id
-     WHERE v.model = $model AND v.dims = $dims AND v.observation_id NOT IN (SELECT observation_id FROM ${table}) LIMIT $limit`,
-  ).all(params)
+  // A row filed under a project its observation has left (a project merge or split, store/project-merge.ts) goes out, and comes back in below under the right one.
+  const moved = db.query<{ id: number }, { limit: number }>(
+    `SELECT v.observation_id AS id FROM ${table} v JOIN observations o ON o.id = v.observation_id WHERE v.project_key <> o.project_key LIMIT $limit`,
+  ).all({ limit: removeLimit })
+  stale.push(...moved.filter((row) => !stale.some((known) => known.id === row.id)))
   const remove = db.prepare(`DELETE FROM ${table} WHERE observation_id = $id`)
   const insert = db.prepare(`INSERT INTO ${table} (observation_id, project_key, embedding) VALUES ($id, $project, $embedding)`)
-  db.transaction(() => {
+  // Read after the removals, so a row taken out for its project comes back in the same pass.
+  const missing = db.transaction(() => {
     for (const row of stale) remove.run({ id: row.id })
-    for (const row of missing) insert.run({ id: row.id, project: row.project, embedding: row.embedding })
+    const rows = db.query<{ id: number; project: string; embedding: Uint8Array }, typeof params>(
+      `SELECT v.observation_id AS id, o.project_key AS project, v.embedding AS embedding
+       FROM observation_vectors v JOIN observations o ON o.id = v.observation_id
+       WHERE v.model = $model AND v.dims = $dims AND v.observation_id NOT IN (SELECT observation_id FROM ${table}) LIMIT $limit`,
+    ).all(params)
+    for (const row of rows) insert.run({ id: row.id, project: row.project, embedding: row.embedding })
+    return rows
   })()
   return { added: missing.length, removed: stale.length, done: missing.length < limit && stale.length < removeLimit }
 }

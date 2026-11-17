@@ -74,6 +74,21 @@ test('pairing with nothing listening says the hub cannot be reached', async () =
   if (!result.ok) expect(result.error).toContain('could not reach the hub at 127.0.0.1:')
 })
 
+test('a pairing that times out points at the Mac firewall prompt and says the code still works', async () => {
+  const slow = async (): Promise<Response> => { throw new DOMException('The operation timed out.', 'TimeoutError') }
+  const result = await pairWithHub({ dataDir: deviceDir, hub: '127.0.0.1', port: hub.port, code: 'KF-0000-0000', deviceName: 'laptop', version: '0.6.0', fetch: slow })
+  expect(result).toEqual({ ok: false, error: "the hub didn't answer in time; on a Mac hub, check for a firewall prompt to allow kinfold, then run the same command again (the code is still valid until it expires)" })
+})
+
+test('a timeout after the hub answered the first request does not blame the firewall or promise the code', async () => {
+  const late = async (url: string): Promise<Response> => {
+    if (url.endsWith('/central/pair/start')) return Response.json({ salt: Buffer.alloc(16).toString('base64'), hubName: 'mini', version: '0.6.0' })
+    throw new DOMException('The operation timed out.', 'TimeoutError')
+  }
+  const result = await pairWithHub({ dataDir: deviceDir, hub: '127.0.0.1', port: hub.port, code: 'KF-0000-0000', deviceName: 'laptop', version: '0.6.0', fetch: late })
+  expect(result).toEqual({ ok: false, error: 'the hub took the code but did not answer in time; run the same command again, and if the hub says the code is not valid, run kinfold central invite on the hub for a new one' })
+})
+
 test('a hub that answers the pairing without proving the code is not trusted', async () => {
   const impostor = newKeyPair()
   const fake = async (url: string): Promise<Response> => url.endsWith('/central/pair/start')

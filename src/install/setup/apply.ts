@@ -37,6 +37,7 @@ import { managedServiceOf } from '../service/control'
 import { type ProgramCheck, checkProgram } from '../self-install'
 import type { SetupState } from './prefill'
 import type { EncryptionAnswer, SetupAnswers } from './wizard'
+import { mergePlanLines } from './prefill'
 
 /** What install already worked out before the questions; applySetup works it out itself when left out. */
 export interface ApplyContext {
@@ -127,6 +128,8 @@ export async function applySetup(env: InstallEnv, state: SetupState, answers: Se
     for (const choice of answers.observers) {
       env.out(`observer ${choice.input.host}: ${describeInput(choice.input)} (${choice.origin}); ${choice.credentialNote}; check ${choice.check}`)
     }
+    // The daemon merges these when it starts on the upgraded store: said here first.
+    for (const line of mergePlanLines(env, answers.dataDir)) env.out(line)
     const found = detections.filter((detection) => detection.selected && answers.hosts.includes(detection.host))
     const plan = await buildPlan(env, { hosts: answers.hosts, detections: found, situation, keyStore: given?.keyStore }, answers, state, options, check)
     const lock = takeInstallLock(env, options)

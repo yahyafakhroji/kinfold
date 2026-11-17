@@ -14,7 +14,8 @@ import { recordInjection } from '../store/context-store'
 import { insertPrompt, upsertProject, upsertSession } from '../store/writes'
 import { type WatchEnv, formatWatchLine, runWatch } from './cli'
 import { idsInLine } from '../context/recall-line'
-import { WATCH_SETTLE_MS, latestInjectionId, latestPromptId, watchRows, watchStarts } from './reads'
+import { WATCH_SETTLE_MS, latestInjectionId, latestPromptId, watchRoute, watchRows, watchStarts } from './reads'
+import { registerProject } from '../store/project-merge'
 
 const MINUTE = 60_000
 let temp: TempStore
@@ -346,4 +347,25 @@ test('GET /watch carries the update the user is owed, without using up a notice'
   const body = (await (await fetch(`http://127.0.0.1:${daemon.port}/watch`, { headers: { authorization: `Bearer ${token}` } })).json()) as { update: unknown }
   expect(body.update).toEqual({ version: '0.6.0', message: 'Kinfold 0.6.0 is available. Run `kinfold update`.' })
   expect(readUpdateState(temp.dataDir).notified).toEqual({})
+})
+
+test('a project merge is said once in the watch, whichever poll carries it', async () => {
+  daemon = startDaemon({ dataDir: temp.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
+  const stop = new AbortController()
+  const merge = { from: 'shared-agent-memory', into: 'kinfold', fromKey: 'a', intoKey: 'b', reason: 'same-repo', at: T0 }
+  const fake = fakeWatch([
+    Response.json({ cursor: 1, rows: [] }),
+    Response.json({ cursor: 1, rows: [], merges: [merge] }),
+    Response.json({ cursor: 1, rows: [], merges: [merge] }),
+  ], stop)
+  await runWatch(fake.env, { command: 'watch', host: null, project: null, debug: false, json: false }, { stop: stop.signal })
+  expect(fake.out.filter((line) => line.includes('merged'))).toEqual(['kinfold · merged shared-agent-memory into kinfold (same repo)'])
+})
+
+test('the watch route names the merges of the last day', () => {
+  const db = temp.store.db
+  registerProject(db, { key: 'github.com/me/sam', kind: 'git-remote', displayName: 'sam', rootCommit: 'e'.repeat(40) }, T0)
+  registerProject(db, { key: 'github.com/me/kinfold', kind: 'git-remote', displayName: 'kinfold', rootCommit: 'e'.repeat(40) }, T0 + 1)
+  const body = watchRoute(db, 'GET', new URL('http://x/watch?after=0'), T0 + 2).body as { merges: { from: string; into: string }[] }
+  expect(body.merges.map((merge) => [merge.from, merge.into])).toEqual([['sam', 'kinfold']])
 })

@@ -154,6 +154,9 @@ export const OBSERVER_ERROR_CLASSES = [
   'internal',
   'tool_attempt',
   'safety_check_failed',
+  'auth_expired',
+  'not_logged_in',
+  'rate_limited',
 ] as const
 export type ObserverErrorClass = (typeof OBSERVER_ERROR_CLASSES)[number]
 

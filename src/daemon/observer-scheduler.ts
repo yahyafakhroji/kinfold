@@ -59,13 +59,13 @@ const TURN_CLOSERS: ReadonlySet<DueReason> = new Set(['boundary', 'ended', 'quie
 export const DEFAULT_OBSERVER_TICK_MS = 5_000
 
 /**
- * A session whose batch came back blocked (safety gate) or disabled keeps its
+ * A session whose batch came back blocked (safety gate), backing off or disabled keeps its
  * events retryable, so it stays due. It is parked this long so stopped
  * sessions, which sort first by their oldest event, cannot hold every slot.
  */
 export const PARKED_MS = 60_000
 
-const PARKING_OUTCOMES: ReadonlySet<BatchOutcome['status']> = new Set(['blocked', 'disabled'])
+const PARKING_OUTCOMES: ReadonlySet<BatchOutcome['status']> = new Set(['blocked', 'backoff', 'disabled'])
 
 export interface ObserverSchedulerOptions {
   db: Database

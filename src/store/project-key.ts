@@ -10,6 +10,8 @@ export interface ProjectKey {
   key: string
   kind: ProjectKeyKind
   displayName: string
+  /** The repo's first commit, which names it across renames, forks and clones; absent outside git or when not asked. */
+  rootCommit?: string
 }
 
 /** Runs git with these args in `cwd`; returns trimmed stdout, or null when git fails or is missing. */
@@ -100,15 +102,46 @@ export function nativeTopLevel(output: string, normalizePath: (path: string) => 
   return normalizePath(output)
 }
 
-export function resolveProjectKey(cwd: string, git: GitRunner = runGit): ProjectKey {
+export interface ResolveOptions {
+  /** Also name the repo's first commit (one more git call): the daemon does, the hook's fallback does not. */
+  withRoot?: boolean
+}
+
+const COMMIT = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
+
+/**
+ * The repo's first commit: the same in every clone and fork, and through a
+ * renamed remote. A history with several roots (merged unrelated histories)
+ * is named by the smallest, so every clone picks the same one.
+ */
+export function rootCommitOf(cwd: string, git: GitRunner = runGit): string | null {
+  const out = git(cwd, ['rev-list', '--max-parents=0', 'HEAD'])
+  if (out === null) return null
+  const roots = out.split(/\s+/).filter((line) => COMMIT.test(line)).sort()
+  return roots[0] ?? null
+}
+
+/** The key with its repo's first commit added when git can say in time; a long history can outlast the timeout, and the key found already stands without it. */
+function withRootCommit(cwd: string, git: GitRunner, key: ProjectKey): ProjectKey {
+  try {
+    const root = rootCommitOf(cwd, git)
+    return root === null ? key : { ...key, rootCommit: root }
+  } catch (error: unknown) {
+    if (error instanceof GitTimeoutError) return key
+    throw error
+  }
+}
+
+export function resolveProjectKey(cwd: string, git: GitRunner = runGit, options: ResolveOptions = {}): ProjectKey {
+  const withRoot = (key: ProjectKey): ProjectKey => (options.withRoot === true ? withRootCommit(cwd, git, key) : key)
   const remote = git(cwd, ['config', '--get', 'remote.origin.url'])
   const slug = remote === null ? null : remoteSlug(remote)
-  if (slug !== null) return { key: slug, kind: 'git-remote', displayName: basename(slug) }
+  if (slug !== null) return withRoot({ key: slug, kind: 'git-remote', displayName: basename(slug) })
 
   const topLevel = git(cwd, ['rev-parse', '--show-toplevel'])
   if (topLevel !== null) {
     const root = nativeTopLevel(topLevel)
-    return { key: root, kind: 'git-root', displayName: basename(root) }
+    return withRoot({ key: root, kind: 'git-root', displayName: basename(root) })
   }
 
   return pathKey(cwd)
@@ -121,26 +154,50 @@ function pathKey(cwd: string): ProjectKey {
 }
 
 /**
- * One git lookup per cwd for the life of the resolver; the daemon keeps one.
+ * One git lookup per cwd per PROJECT_KEY_TTL_MS; the daemon keeps one.
  * A timeout is retried once; if git times out again the event gets the path
  * key, which is not cached, so the next event in that cwd asks git again.
  */
-export function createProjectKeyResolver(git: GitRunner = runGit): ProjectKeyResolver {
-  const cache = new Map<string, ProjectKey>()
+/** How long the daemon keeps a folder's key before asking git again: a remote renamed under a running daemon is seen within this. */
+export const PROJECT_KEY_TTL_MS = 5 * 60_000
+
+export interface ResolverOptions extends ResolveOptions {
+  now?: () => number
+}
+
+export function createProjectKeyResolver(git: GitRunner = runGit, options: ResolverOptions = {}): ProjectKeyResolver {
+  const now = options.now ?? Date.now
+  const cache = new Map<string, { key: ProjectKey; at: number }>()
+  // A folder's first commit never changes, and finding it walks the whole history: asked once per folder.
+  const roots = new Map<string, string>()
+  const rootFor = (cwd: string, key: ProjectKey): ProjectKey => {
+    if (options.withRoot !== true || key.kind === 'path') return key
+    const known = roots.get(cwd)
+    if (known !== undefined) return { ...key, rootCommit: known }
+    const found = withRootCommit(cwd, git, key)
+    if (found.rootCommit !== undefined) roots.set(cwd, found.rootCommit)
+    return found
+  }
   const attempt = (cwd: string): ProjectKey | null => {
     try {
-      return resolveProjectKey(cwd, git)
+      return rootFor(cwd, resolveProjectKey(cwd, git))
     } catch (error: unknown) {
       if (error instanceof GitTimeoutError) return null
       throw error
     }
   }
   return (cwd) => {
+    const at = now()
     const cached = cache.get(cwd)
-    if (cached !== undefined) return cached
+    if (cached !== undefined && at - cached.at < PROJECT_KEY_TTL_MS) return cached.key
     const resolved = attempt(cwd) ?? attempt(cwd)
-    if (resolved === null) return pathKey(cwd)
-    cache.set(cwd, resolved)
+    if (resolved === null) {
+      // A slow git keeps the key it had, and is not asked again until the next refresh.
+      if (cached === undefined) return pathKey(cwd)
+      cache.set(cwd, { key: cached.key, at })
+      return cached.key
+    }
+    cache.set(cwd, { key: resolved, at })
     return resolved
   }
 }

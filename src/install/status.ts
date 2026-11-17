@@ -12,7 +12,7 @@ import { HOLDOUT_HOSTS } from '../context/holdout'
 import type { EffectiveSettings } from '../daemon/settings-route'
 import { envName, readEnv } from '../env-names'
 import { OPENROUTER_CREDENTIAL_REF, credentialRefFor } from '../observer/settings'
-import { getObserverSettings } from './daemon-client'
+import { getObserverSettings, projectMergeLines } from './daemon-client'
 import { dbStatusLines } from './db-encryption'
 import { detectHosts } from './detect'
 import { isFoldedAbsent } from './detectors'
@@ -122,7 +122,9 @@ async function observerLines(env: InstallEnv): Promise<{ lines: string[]; refs: 
     const ref = 'settings' in entry && entry.settings.enabled ? credentialRefFor(entry.settings) : null
     return ref === null ? [] : [ref]
   })
-  return { lines: ['observer settings:', ...read.view.effective.map(effectiveLine)], refs: [...new Set([OPENROUTER_CREDENTIAL_REF, ...refs])] }
+  // An older daemon sends no backoff list.
+  const backoff = Array.isArray(read.view.backoff) ? read.view.backoff.map((entry) => `  observer backing off: ${entry.line}`) : []
+  return { lines: ['observer settings:', ...read.view.effective.map(effectiveLine), ...backoff], refs: [...new Set([OPENROUTER_CREDENTIAL_REF, ...refs])] }
 }
 
 function keyStoreLines(env: InstallEnv, refs: readonly string[]): string[] {
@@ -254,6 +256,7 @@ async function agentRows(env: InstallEnv, profiles: ProfileTable): Promise<{ row
 const MARK_RULES: readonly (readonly [RegExp, Mark])[] = [
   // A line that calls itself a warning is one, whatever else it names.
   [/^warning: /, 'warn'],
+  [/^observer backing off: /, 'warn'],
   [/^daemon \/health: up\b/, 'ok'],
   [/^daemon \/health: down\b/, 'fail'],
   [/^service \(.*running: yes/, 'ok'],
@@ -354,7 +357,7 @@ export async function status(env: InstallEnv, running: string = VERSION, profile
   const situation = await daemonSituation(env)
   const blocker = autoUpdateBlocker(env, situation.loaded)
   const daemon = [...daemonLines(env, situation), ...(await centralStatusLines({ dataDir: env.dataDir, fetch: (url, init) => env.fetch(url, init ?? {}) }))]
-  const database = await databaseLines(env)
+  const database = [...(await databaseLines(env)), ...(await projectMergeLines(env))]
   const credentials = keyStoreLines(env, observer.refs)
   const keys = [
     ...credentials,

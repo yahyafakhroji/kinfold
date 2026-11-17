@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { FRAME_CLOSE, FRAME_OPEN, buildPack, formatAge } from './pack'
+import { isStatusNote } from './status-notes'
 import { type PackObservation, estimateTokens } from './types'
 
 const NOW = 1_792_900_000_000
@@ -32,7 +33,7 @@ test('observations from every host are used, strongest evidence first, then newe
     obs(1, 'claude-code', 'Interpretation about routing', 'interpretation', 1),
     obs(2, 'opencode', 'User wants macOS first', 'user-stated', 2),
     obs(3, 'cursor', 'Spool drain order follows event time', 'tool-verified', 3),
-    obs(4, 'claude-code', 'Adapter tests run green', 'tool-verified', 1),
+    obs(4, 'claude-code', 'Adapter tests read fixtures from test/fixtures', 'tool-verified', 1),
   ])
   expect(pack.itemLines.map((line) => line.match(/\(#(\d+)\)/)![1])).toEqual(['4', '3', '2', '1'])
   expect(new Set(pack.itemLines.map((line) => line.slice(1, line.indexOf(' ·'))))).toEqual(new Set(['claude-code', 'opencode', 'cursor']))
@@ -119,4 +120,29 @@ test('stored text cannot close the frame early or add lines', () => {
 
 test('ages read in minutes, hours, then days', () => {
   expect([formatAge(0), formatAge(5 * 60_000), formatAge(3 * HOUR), formatAge(50 * HOUR)]).toEqual(['1m', '5m', '3h', '2d'])
+})
+
+test('a status note ranks below every lasting memory, whatever its evidence', () => {
+  const pack = build([
+    obs(1, 'claude-code', 'Task 9 commit pushed', 'tool-verified', 1),
+    obs(2, 'claude-code', 'CI run green on main', 'tool-verified', 1),
+    obs(3, 'opencode', 'Bun is pinned with .bun-version', 'interpretation', 30),
+  ])
+  expect(pack.observationIds).toEqual([3, 2, 1])
+})
+
+test('a status note leaves the pack after a day; a lasting memory of the same age stays', () => {
+  const pack = build([
+    obs(1, 'claude-code', 'PR #8 checks pass', 'tool-verified', 25),
+    obs(2, 'claude-code', 'Retention runs hourly in the daemon', 'tool-verified', 25),
+    obs(3, 'claude-code', 'Branch merged into main', 'tool-verified', 2),
+  ])
+  expect(pack.observationIds).toEqual([2, 3])
+})
+
+test('what counts as a status note', () => {
+  for (const title of ['Task 9 commit pushed', 'CI run green', 'PR #8 checks pass', 'All tests pass on Windows CI', 'Pushed fix to origin', 'PR #12 merged', 'Release build smoke green'])
+    expect(isStatusNote(title)).toBe(true)
+  for (const title of ['Bun is pinned with .bun-version', 'The hook must not import src/install', 'CI pins Bun with .bun-version', 'Merge rule: central wins for a project already on the hub', 'Tests fail when HOME is real; use temp dirs'])
+    expect(isStatusNote(title)).toBe(false)
 })

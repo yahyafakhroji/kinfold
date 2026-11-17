@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { createTraceBuffer } from '../debug/trace'
+import { finishRun, startRun } from '../store/observer-store'
 import { type TempStore, T0, openTempStore } from '../observer/test-support'
 import { recordInjection } from '../store/context-store'
 import { upsertProject, upsertSession } from '../store/writes'
@@ -30,6 +31,15 @@ test('a turn event carries the usage and the tokens Kinfold added to that prompt
 test('an observer outcome becomes an event; an idle look does not', () => {
   expect(observerTrace(temp.store.db, session, { status: 'skipped', events: 3 }, T0)).toMatchObject({ kind: 'observer', status: 'skipped', events: 3, written: 0, host: 'claude-code', project: 'repo' })
   expect(observerTrace(temp.store.db, session, { status: 'idle' }, T0)).toBeNull()
+})
+
+test('a failed run says what is wrong with its provider; a wait between tries is not an event', () => {
+  const id = startRun(temp.store.db, { sessionId: session, host: 'claude-code', provider: 'claude-cli', model: 'haiku', eventCount: 2, startedAt: T0 })
+  finishRun(temp.store.db, id, 'failed', 'auth_expired: claude exited 1: OAuth session expired', T0 + 1_000)
+  const failed = observerTrace(temp.store.db, session, { status: 'failed', runId: id, events: 2, errorClass: 'auth_expired' }, T0 + 2_000)
+  expect(failed).toMatchObject({ status: 'failed', events: 2 })
+  expect(failed?.note).toStartWith('claude-cli: the login Kinfold uses has expired; run `claude auth login` in a plain terminal')
+  expect(observerTrace(temp.store.db, session, { status: 'backoff', provider: 'claude-cli', errorClass: 'auth_expired', failures: 1, retryAt: T0 + 3_600_000 }, T0 + 3_000)).toBeNull()
 })
 
 test('GET /watch/debug answers from the buffer, validates its query and starts from now without a cursor', () => {

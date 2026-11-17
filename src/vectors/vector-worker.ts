@@ -46,6 +46,12 @@ export interface VectorQueries {
    * seconds.
    */
   exclusive: Exclusive
+  /**
+   * The gate of exclusive without the function: waits until no read is in the
+   * worker and keeps new reads back until the returned release is called, so
+   * the daemon can hold this worker and its store readers together.
+   */
+  hold(): Promise<() => void>
   /** Settles once the worker has closed its connection and ended; the same promise on every call. */
   close(): Promise<void>
 }
@@ -56,6 +62,7 @@ export function inlineVectorQueries(db: Database): VectorQueries {
     nearest: async (query) => nearestFor(db, query),
     distances: async (query) => distancesFor(db, query),
     exclusive: runNow,
+    hold: async () => () => {},
     close: async () => {},
   }
 }
@@ -110,6 +117,7 @@ export function workerOrInline(starting: Promise<VectorWorkerStart>, inline: Vec
     nearest: (query, giveUpMs) => read((queries) => queries.nearest(query, giveUpMs)),
     distances: (query, giveUpMs) => read((queries) => queries.distances(query, giveUpMs)),
     exclusive: async (fn) => (current ?? (await ready)).exclusive(fn),
+    hold: async () => (current ?? (await ready)).hold(),
     close: () => {
       closing ??= ready.then((queries) => queries.close())
       return closing
@@ -146,7 +154,6 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
   let idleWaiters: (() => void)[] = []
   // While an exclusive call waits or runs, new reads wait here instead of reaching the worker.
   let held: (() => void)[] = []
-  let gate: Promise<unknown> = Promise.resolve()
   let gated = false
   let exclusives = 0
 
@@ -239,25 +246,30 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
     })
   }
 
-  const exclusive: Exclusive = (fn) => {
-    // Closed now, not in the queued run: a read asked right after this call must wait for fn too.
+  const hold = async (): Promise<() => void> => {
+    // Closed now, not after the wait: a read asked right after this call must wait too.
     gated = true
     exclusives += 1
-    const run = async (): Promise<Awaited<ReturnType<typeof fn>>> => {
-      try {
-        if (inWorker > 0) await new Promise<void>((resolve) => idleWaiters.push(resolve))
-        return fn() as Awaited<ReturnType<typeof fn>>
-      } finally {
-        exclusives -= 1
-        if (exclusives === 0) {
-          gated = false
-          for (const post of held.splice(0)) post()
-        }
+    if (inWorker > 0) await new Promise<void>((resolve) => idleWaiters.push(resolve))
+    let done = false
+    return () => {
+      if (done) return
+      done = true
+      exclusives -= 1
+      if (exclusives === 0) {
+        gated = false
+        for (const post of held.splice(0)) post()
       }
     }
-    const result = gate.then(run, run)
-    gate = result.catch(() => {})
-    return result
+  }
+
+  const exclusive: Exclusive = async (fn) => {
+    const release = await hold()
+    try {
+      return fn()
+    } finally {
+      release()
+    }
   }
 
   return {
@@ -266,6 +278,7 @@ export async function startVectorWorker(options: VectorWorkerOptions): Promise<V
       nearest: (query, giveUpMs) => ask({ op: 'nearest', query }, giveUpMs),
       distances: (query, giveUpMs) => ask({ op: 'distances', query }, giveUpMs),
       exclusive,
+      hold,
       close: () => {
         if (closeDone !== null) return closeDone
         closing = true

@@ -23,6 +23,7 @@
 // replaced by the next prompt's: it matches one prompt, so it is not sticky.
 // Logs carry session ids, counts and durations only, never prompt text.
 
+import { promptForRecall } from '../context/prompt-text'
 import { type ContextRequest, type ContextResult, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
 
 export const MAX_CACHED_SESSIONS = 256
@@ -183,7 +184,7 @@ export function createContextInjector(options: ContextInjectorOptions): ContextI
   const onPrompt = (event: unknown): void => {
     const sessionId = sessionOf(event)
     if (sessionId === null || !isRecord(event) || !isRecord(event.prompt) || typeof event.prompt.text !== 'string') return
-    const text = event.prompt.text.slice(0, MAX_CONTEXT_PROMPT_CHARS)
+    const text = promptForRecall(event.prompt.text).slice(0, MAX_CONTEXT_PROMPT_CHARS)
     if (text.trim() === '') return
     pending.delete(sessionId)
     const oldest = pending.keys().next()

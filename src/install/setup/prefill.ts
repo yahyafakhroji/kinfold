@@ -14,6 +14,8 @@ import { dbKeyStoreOf } from '../../sqlite/keys'
 import { fileState, openStoreFile } from '../../sqlite/open'
 import { DB_FILE } from '../../store/data-dir'
 import { listSafety } from '../../store/observer-safety-store'
+import { rootCommitOf } from '../../store/project-key'
+import { type RootFor, planRootMerges } from '../../store/project-merge'
 import { type ObserverSettingsInput, listObserverSettings } from '../../store/observer-settings-store'
 import type { WiringState } from '../claude-hooks'
 import { getObserverSettings, readDaemonInfo } from '../daemon-client'
@@ -232,4 +234,35 @@ export function lockedFolderProblem(state: SetupState, requested: string | null)
 export function savedObserversForYes(state: SetupState, hosts: readonly InstallHost[], flags: readonly ObserverFlag[]): ReadonlyMap<InstallHost, ObserverSettingsInput> {
   if (state.observersError !== null && hosts.some((host) => !flags.some((flag) => flag.host === host))) throw new ChoiceError(state.observersError)
   return state.observers
+}
+
+/**
+ * What the daemon will merge when it starts on this store: one repo under
+ * two keys (a renamed remote, a fork), found by each key's first commit. The
+ * install output says it before it happens, with the command that undoes it.
+ * Read-only; empty for a new store, and when the store or git cannot say.
+ */
+export function mergePlanLines(env: InstallEnv, dataDir: string, rootFor: RootFor = (cwd) => rootCommitOfOrNull(cwd)): string[] {
+  try {
+    const path = join(dataDir, DB_FILE)
+    if (fileState(path) === 'new') return []
+    const keys = dbKeyStoreOf(keyStoreOf({ ...env, dataDir }))
+    const target = storeTarget(path)
+    const db = openStoreFile(path, { readonly: true, target, keys, ...(target === path ? { busyTimeoutMs: READ_BUSY_TIMEOUT_MS } : {}) })
+    try {
+      return planRootMerges(db, rootFor).map((merge) => `project: ${merge.from} will merge into ${merge.into} (same repo); kinfold project split ${merge.fromKey} undoes it`)
+    } finally {
+      db.close()
+    }
+  } catch {
+    return []
+  }
+}
+
+function rootCommitOfOrNull(cwd: string): string | null {
+  try {
+    return rootCommitOf(cwd)
+  } catch {
+    return null
+  }
 }

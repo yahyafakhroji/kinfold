@@ -76,7 +76,9 @@ export interface ServerDeps {
    */
   onActivity?: () => void
   /** GET /metrics/summary. */
-  metrics: (window: string | null) => RouteAnswer
+  metrics: (window: string | null) => Promise<RouteAnswer>
+  /** GET /projects, POST /projects/merge and /projects/split (`kinfold project`); null for any other path. Absent: 404. */
+  projects?: (method: string, url: URL, readBody: () => Promise<unknown>) => Promise<RouteAnswer | null>
   /** GET /memory/sessions and /memory/sessions/:id/turns (the dashboard's Sessions view); null for any other path. Absent: those paths are 404. */
   sessions?: (method: string, url: URL) => RouteAnswer | null
   /** GET /watch (token only): the prompts since a cursor with what was recalled for each, for `kinfold watch`. Absent: 404. */
@@ -270,6 +272,10 @@ async function panelRoute(request: Request, url: URL, deps: ServerDeps, via: Cre
   if (path === '/update/install') return installRoute(request, deps.update)
   if (path === '/update/auto') return autoUpdateRoute(request, deps.update)
   if (path === '/update/quiet' && deps.update !== undefined) return request.method === 'GET' ? { status: 200, body: { quietForMs: deps.update.quietForMs() } } : { status: 405, body: { error: 'method not allowed' } }
+  if (path.startsWith('/projects') && deps.projects !== undefined) {
+    const answer = await deps.projects(request.method, url, () => readJson(request))
+    if (answer !== null) return answer
+  }
   if (path === '/metrics/summary') return request.method === 'GET' ? deps.metrics(url.searchParams.get('window')) : { status: 405, body: { error: 'method not allowed' } }
   if (path.startsWith('/read/') && deps.reads !== undefined) return readRoute(request.method, path, () => readJson(request), deps.reads, deps.log)
   return null

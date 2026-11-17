@@ -1,7 +1,9 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { START_WAIT_MS, getQuietForMs, waitForStart } from './daemon-client'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { START_WAIT_MS, getQuietForMs, projectMergeLines, waitForStart } from './daemon-client'
 import type { InstallEnv } from './env'
 import { installPaths } from './env'
 import { applyAction } from './plan'
@@ -123,4 +125,16 @@ test('no daemon, an older daemon, or an answer that is not a time all read as no
     expect(await getQuietForMs(quietWorld(answer).env)).toBeNull()
     await world?.cleanup()
   }
+})
+
+test('project merge lines name each recent merge once, and say nothing when there is none or the daemon cannot say', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kinfold-merge-lines-'))
+  writeFileSync(join(dir, 'daemon.json'), JSON.stringify({ pid: 1, port: 40_123 }))
+  writeFileSync(join(dir, 'daemon.token'), 'a'.repeat(64))
+  const lines = (body: unknown, status = 200) => projectMergeLines({ dataDir: dir, fetch: async () => Response.json(body, { status }) } as never)
+  expect(await lines({ projects: [], merges: [{ from: 'shared-agent-memory', into: 'kinfold', fromKey: 'a', intoKey: 'b', reason: 'same-repo', at: 1 }, { from: 'rea', into: 'kinfold', fromKey: 'c', intoKey: 'b', reason: 'manual', at: 2 }] }))
+    .toEqual(['project: merged shared-agent-memory into kinfold (same repo)', 'project: merged rea into kinfold (kinfold project merge)'])
+  expect(await lines({ projects: [], merges: [] })).toEqual([])
+  expect(await lines({ error: 'x' }, 404)).toEqual([])
+  rmSync(dir, { recursive: true, force: true })
 })

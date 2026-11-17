@@ -10,6 +10,7 @@
 import { isRecord } from '../../contract/event'
 import { ObserverError, type RunnerUsage } from '../types'
 import type { CliAdapter, CliParsed, CliRunContext, Semver } from './cli-core'
+import { cliFailure } from './cli-error'
 import type { SpawnResult } from './claude-cli'
 
 export const CODEX_MIN_VERSION: Semver = [0, 166, 0]
@@ -175,7 +176,7 @@ async function listModels(ctx: Omit<CliRunContext, 'title' | 'sessionId'>): Prom
     throw new ObserverError(code === 'ENOENT' ? 'cli_missing' : 'internal', `${label} could not start (${code})`)
   }
   if (result.timedOut) throw new ObserverError('timeout', `${label} did not finish in ${LIST_MODELS_TIMEOUT_MS} ms`)
-  if (result.exitCode !== 0) throw new ObserverError('exit_nonzero', `exited ${result.exitCode}`)
+  if (result.exitCode !== 0) throw cliFailure(`exited ${result.exitCode}`, result.stderr ?? '')
   return modelSlugs(result.stdout)
 }
 

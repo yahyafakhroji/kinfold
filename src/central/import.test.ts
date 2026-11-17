@@ -132,3 +132,13 @@ test('an import cannot add to a session that belongs to another device\'s folder
   expect(importChunk(hub.db, chunk, 'dev-a', T0, PREPARE)).toEqual({ status: 200, body: { sessions: 0, prompts: 0, summaries: 0, observations: 0, skippedSessions: 1 } })
   expect(hub.db.query("SELECT COUNT(*) AS n FROM prompts WHERE text = 'INJECTED'").get()).toEqual({ n: 0 })
 })
+
+test('a project the hub merged into another is imported under the key it merged into', () => {
+  upsertProject(hub.db, { key: 'github.com/me/kinfold', kind: 'git-remote', displayName: 'kinfold' }, T0)
+  upsertProject(hub.db, { key: 'dev-a:/x', kind: 'path', displayName: 'x' }, T0)
+  hub.db.query('UPDATE projects SET merged_into = ? WHERE key = ?').run('github.com/me/kinfold', 'dev-a:/x')
+  const chunk = { project: { key: 'dev-a:/x', kind: 'path', displayName: 'x' }, observations: [],
+    sessions: [{ host: 'claude-code', hostSessionId: 'mine', cwd: '/x', hostVersion: null, startedAt: T0, endedAt: null, lastEventAt: T0, summaries: [], prompts: [] }] }
+  expect(importChunk(hub.db, chunk, 'dev-a', T0, PREPARE)).toMatchObject({ status: 200, body: { sessions: 1 } })
+  expect(hub.db.query("SELECT project_key AS key FROM sessions WHERE host_session_id = 'mine'").get()).toEqual({ key: 'github.com/me/kinfold' })
+})

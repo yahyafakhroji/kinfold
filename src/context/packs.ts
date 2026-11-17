@@ -21,8 +21,8 @@ import { computeDelta } from './delta'
 import { FRAME_OPEN, buildPack } from './pack'
 import { type ContextRequest, type ContextResult, EMPTY_CONTEXT, HOST_PROFILES, type HostProfile, PACK_BUDGETS, hostProfileFor } from './types'
 
-/** Candidates read per build; budgets fit about 80 lines, so this leaves room for merges. */
-export const PACK_CANDIDATES = 200
+/** Candidates read per build; budgets fit about 80 lines, so this leaves room for merges and for status notes, which leave a pack after a day. */
+export const PACK_CANDIDATES = 600
 /** Ages in a pack are relative to built_at; past this the daemon rebuilds before serving. */
 export const PACK_MAX_AGE_MS = 60 * 60_000
 

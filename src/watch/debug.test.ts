@@ -78,6 +78,10 @@ test('a session start, a turn end and an observer run each print their own block
   expect(formatDebugEvent({ ...base, kind: 'turn', promptNumber: 3, usage: null, kinfoldTokens: 0 })[1]).toBe('  usage     not readable from the transcript')
   expect(formatDebugEvent({ ...base, kind: 'observer', status: 'succeeded', events: 12, written: 3 })).toEqual([`${hhmm(T0)}  claude-code · repo · observer ran on 12 events, wrote 3`])
   expect(formatDebugEvent({ ...base, kind: 'observer', status: 'skipped', events: 2, written: 0 })).toEqual([`${hhmm(T0)}  claude-code · repo · observer skipped 2 events`])
+  expect(formatDebugEvent({ ...base, kind: 'observer', status: 'failed', events: 2, written: 0, note: 'claude-cli: the login Kinfold uses has expired\u001b[31m' })).toEqual([
+    `${hhmm(T0)}  claude-code · repo · observer failed on 2 events`,
+    '  why       claude-cli: the login Kinfold uses has expired [31m',
+  ])
 })
 
 test('titles and project names are cleaned to one line, as everywhere else', () => {

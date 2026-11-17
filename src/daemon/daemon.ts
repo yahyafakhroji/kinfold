@@ -34,9 +34,12 @@ import { plaintextBesideKey } from '../sqlite/open'
 import type { Database } from '../sqlite/types'
 import { DAEMON_INFO_FILE, SPOOL_DIR, TOKEN_FILE, ensureDataDir, readOrCreateSecret, writePrivateFile } from '../store/data-dir'
 import { type Store, openStore } from '../store/db'
-import { DAEMON_GIT_TIMEOUT_MS, createProjectKeyResolver, gitRunnerWithTimeout } from '../store/project-key'
+import { DAEMON_GIT_TIMEOUT_MS, type GitRunner, createProjectKeyResolver, gitRunnerWithTimeout, rootCommitOf } from '../store/project-key'
+import { backfillRoots } from '../store/project-merge'
+import { projectRoute } from './project-routes'
 import { listRecentSessions } from '../store/reads'
 import { rebuildProjectPacks } from '../context/packs'
+import { clearBackoff, ensureBackoffIndex } from '../observer/backoff'
 import { type BatchOutcome, processSessionBatch } from '../observer/process'
 import type { RunnerFactory } from '../observer/runners'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
@@ -100,7 +103,8 @@ import { type Support, loadVec0 } from '../vectors/extension'
 import { DEFAULT_INDEX_TICK_MS, type VectorIndexer, createVectorIndexer } from '../vectors/indexer'
 import { type SemanticAnswer, type SemanticRequest, createSemanticSearch } from '../vectors/search'
 import { createRestarter } from './restart'
-import { type VectorQueries, inlineVectorQueries, startVectorWorker, workerOrInline } from '../vectors/vector-worker'
+import { type Exclusive, type VectorQueries, inlineVectorQueries, startVectorWorker, workerOrInline } from '../vectors/vector-worker'
+import { type StoreReader, inlineStoreReader, readerOrInline, startStoreReader } from '../workers/store-reader'
 import { type SpaceManager, createSpaceManager } from '../vectors/space-manager'
 import { LOCAL_MODEL_ID } from '../vectors/local-model'
 
@@ -309,7 +313,7 @@ export interface RunningDaemon {
 }
 
 /** The routes that read or write memory.db; a restore swaps them for the new store's. */
-type CoreRoutes = Pick<ServerDeps, 'schemaVersion' | 'vectorSearch' | 'semanticSearch' | 'onNudge' | 'listSessions' | 'context' | 'retryFailed' | 'observerSettings' | 'data' | 'exclusive' | 'memory' | 'metrics' | 'watch' | 'debugWatch' | 'sessions' | 'mcpRead' | 'reads' | 'embeddingSettings'>
+type CoreRoutes = Pick<ServerDeps, 'schemaVersion' | 'vectorSearch' | 'semanticSearch' | 'onNudge' | 'listSessions' | 'context' | 'retryFailed' | 'observerSettings' | 'data' | 'exclusive' | 'memory' | 'metrics' | 'projects' | 'watch' | 'debugWatch' | 'sessions' | 'mcpRead' | 'reads' | 'embeddingSettings'>
 
 /** Everything that holds memory.db open. */
 interface Core {
@@ -321,6 +325,8 @@ interface Core {
   indexer: VectorIndexer | null
   /** Writes the store's snapshot to a new file and resolves with its schema version. */
   snapshot: (dest: string) => Promise<number>
+  /** A dashboard test of this provider passed. */
+  passedTest: (provider: string) => void
   /** Settles once every connection to memory.db is closed. */
   stop: () => Promise<void>
 }
@@ -395,8 +401,18 @@ function resetCheck(db: Database, options: DaemonObserverOptions, keys: HmacKeyS
   }
 }
 
+/** A passed dashboard test ends the provider's backoff, so its next batch runs without waiting out the hour. */
+function passedTest(db: Database, provider: string, log: (line: string) => void): void {
+  try {
+    clearBackoff(db, provider, Date.now())
+  } catch (error: unknown) {
+    log(`observer backoff clear failed: ${errorMessage(error)}`)
+  }
+}
+
 /** Recovers runs a crash left open, then ticks on an interval and after every drain that inserted rows. */
 function startObserver(db: Database, options: DaemonObserverOptions, keys: HmacKeyState, afterWrite: () => void, log: (line: string) => void, trace: TraceBuffer): Observing {
+  ensureBackoffIndex(db)
   const recovered = recoverInterrupted(db, Date.now())
   if (recovered.events > 0 || recovered.runs > 0) log(`observer recovered events=${recovered.events} runs=${recovered.runs}`)
   const safety = options.safety?.(db, log)
@@ -473,6 +489,67 @@ function removeOwnInfoFile(path: string): void {
   if (typeof info === 'object' && info !== null && 'pid' in info && info.pid === process.pid) rmSync(path, { force: true })
 }
 
+/**
+ * Keys stored before first commits were kept get one from their latest
+ * session's folder, and one repo under two keys merges (store/project-merge.ts).
+ * Counts only in the log.
+ */
+export function mergeSameRepos(db: Database, git: GitRunner, log: (line: string) => void): void {
+  try {
+    const rootFor = (cwd: string): string | null => {
+      try {
+        return rootCommitOf(cwd, git)
+      } catch {
+        return null
+      }
+    }
+    const merged = backfillRoots(db, rootFor, Date.now())
+    if (merged.length > 0) log(`projects merged count=${merged.length} reason=same-repo`)
+  } catch (error: unknown) {
+    log(`project merge check failed: ${error instanceof Error ? error.name : 'error'}`)
+  }
+}
+
+/** The store reader workers' connections: recall reads the same hot pages a prompt does; reports read every page once in a while. */
+export const RECALL_CACHE_KIB = 65_536
+export const REPORTS_CACHE_KIB = 16_384
+
+interface Readers {
+  /** The prompt path's reads (src/context/recall-reads.ts). */
+  recall: StoreReader
+  /** The dashboard's size, metrics, facets and browse reads, apart so a long one never queues ahead of a prompt. */
+  reports: StoreReader
+}
+
+/** Two store reader workers on their own read-only connections, each started by its first read. Until it is up, a recall read runs on the daemon connection and a report waits for it. */
+function startReaders(store: Store, dataDir: string, dbKeys: DbKeyStore, log: (line: string) => void): Readers {
+  const inline = inlineStoreReader(store.db, store.path)
+  const start = (cacheKib: number) => () => startStoreReader({ dbPath: store.path, dataDir, key: dbKeys.read(), libraryOverride: readEnv(process.env, 'SQLITE3MC_LIB') ?? null, cacheKib })
+  return { recall: readerOrInline('recall', start(RECALL_CACHE_KIB), inline, log), reports: readerOrInline('reports', start(REPORTS_CACHE_KIB), inline, log, { waitForStart: true }) }
+}
+
+/** A central device asks the hub for recall and reads its own kept store only for its dashboard's local pages: no workers. */
+function deviceReaders(store: Store): Readers {
+  const inline = inlineStoreReader(store.db, store.path)
+  return { recall: inline, reports: inline }
+}
+
+/**
+ * Purge, retention and resolve end with a TRUNCATE checkpoint, which waits
+ * for every reader to leave the WAL: the vector worker's and both store
+ * readers' reads are held back together while one runs.
+ */
+export function exclusiveOverAll(vectors: VectorQueries, readers: Readers): Exclusive {
+  return async (fn) => {
+    const releases = await Promise.all([readers.recall.hold(), readers.reports.hold()])
+    try {
+      return await vectors.exclusive(fn)
+    } finally {
+      for (const release of releases) release()
+    }
+  }
+}
+
 /** The daemon's page cache, in KiB: room for the hot pages of a store of a few hundred MB. */
 export const DAEMON_CACHE_KIB = 65_536
 
@@ -502,7 +579,9 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   }
   const token = readOrCreateSecret(join(dataDir, TOKEN_FILE))
   const hmacKeys = createHmacKeys({ dataDir, keychain: options.keychain ?? NO_CREDENTIALS, now: options.hmac?.now ?? Date.now, log })
-  const projectKeyFor = createProjectKeyResolver(gitRunnerWithTimeout(DAEMON_GIT_TIMEOUT_MS))
+  // With each folder's first commit, so one repo under two keys (a renamed remote, a fork) becomes one project.
+  const daemonGit = gitRunnerWithTimeout(DAEMON_GIT_TIMEOUT_MS)
+  const projectKeyFor = createProjectKeyResolver(daemonGit, { withRoot: true })
   const mode = options.central?.mode !== undefined ? options.central.mode : centralModeOf(dataDir)
   const deviceMode = mode?.role === 'device' ? mode : null
   // A central device keeps its own store closed to writes: captures, recall and reads go to the hub.
@@ -570,7 +649,11 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     const interval = setInterval(() => scheduler.request(), options.fallbackDrainMs ?? FALLBACK_DRAIN_MS)
     const observing = options.observer !== undefined && relay === null ? startObserver(store.db, options.observer, hmacKeys, () => vectors.indexer?.tick(), log, trace) : null
     observer = observing?.observer ?? null
-    const dataTicks = relay !== null ? { stop: () => {} } : startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, exclusive: vectors.queries.exclusive, ...options.dataControl })
+    const readers = relay === null ? startReaders(store, dataDir, dbKeys, log) : deviceReaders(store)
+    // Off the start path: one git call per project folder; a hub can only read its own folders, devices send theirs.
+    const backfill = relay !== null ? null : setTimeout(() => mergeSameRepos(store.db, daemonGit, log), 0)
+    const exclusive = exclusiveOverAll(vectors.queries, readers)
+    const dataTicks = relay !== null ? { stop: () => {} } : startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, exclusive, ...options.dataControl })
 
     // The hooks cannot open the store, so they read the display switches from a file this daemon keeps in step.
     const publishDisplay = (settings: DisplaySettings): void => {
@@ -582,7 +665,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     }
     publishDisplay(readDisplaySettings(store.db))
     const context = contextHandler({
-      db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, updates: { dataDir, version, envVars, canAutoUpdate, ...stagePlace },
+      db: store.db, projectKeyFor, log, semantic: vectors.support.ok ? vectors.search : null, reads: readers.recall, updates: { dataDir, version, envVars, canAutoUpdate, ...stagePlace },
       // Read per prompt, so a change from the dashboard or a restored store applies to the next one.
       holdout: { on: () => readDisplaySettings(store.db).holdout },
       trace,
@@ -603,10 +686,11 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       context: relay === null ? context : deviceContext(relay),
       retryFailed: (target) => retryFailed(store.db, target, observer, log),
       observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? []),
-      data: dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log, holdoutHosts: HOLDOUT_HOSTS, onDisplay: publishDisplay }),
-      exclusive: vectors.queries.exclusive,
-      memory: memoryHandlers(store.db, log),
-      metrics: (window) => metricsRoute(store.db, window),
+      data: dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log, holdoutHosts: HOLDOUT_HOSTS, onDisplay: publishDisplay, reports: readers.reports }),
+      exclusive,
+      memory: memoryHandlers(store.db, log, readers.reports),
+      metrics: (window) => metricsRoute(readers.reports, window),
+      projects: (method, url, readBody) => projectRoute(method, url, readBody, { db: store.db, now: Date.now, log, device: relay !== null }),
       watch: (method, url) => watchRoute(store.db, method, url, Date.now()),
       debugWatch: (method, url) => debugWatchRoute(trace, method, url, Date.now()),
       sessions: (method, url) => sessionRoute(method, url, store.db, log),
@@ -627,6 +711,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
         return snapshotInto(store.db, dest)
       })
     const stop = async (): Promise<void> => {
+      if (backfill !== null) clearTimeout(backfill)
       clearInterval(interval)
       dataTicks.stop()
       if (observing !== null) stopObserver(observing)
@@ -637,6 +722,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       reads.close()
       // Before the store closes: a retention tick queued behind the worker would otherwise run on a closed db.
       await vectors.queries.close()
+      await Promise.all([readers.recall.close(), readers.reports.close()])
       await vectors.close()
       store.db.close()
     }
@@ -644,7 +730,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       db: store.db, marker: () => hmacKeys.marker(), onStored: () => observer?.tick(), context, reads: reads.deps,
       semantic: vectors.search, mcpRead: routes.mcpRead, now: Date.now,
     })
-    return { routes, central, scheduler, observer, indexer: vectors.indexer, snapshot, stop }
+    return { routes, central, scheduler, observer, indexer: vectors.indexer, snapshot, stop, passedTest: (provider) => passedTest(store.db, provider, log) }
   }
 
   let core = startCore()
@@ -747,7 +833,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       }),
     },
     observerModels: observerModelsRoute(options.observer?.cliRunnerFor ?? null, log, Date.now),
-    observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log)),
+    observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log, (provider) => core.passedTest(provider))),
     auth: createDashboardAuth(Date.now, fileSessionStore(dataDir, log)),
     backup,
     unavailable: () => (restarter.down() ? RESTORING : null),

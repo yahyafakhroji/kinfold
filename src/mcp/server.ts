@@ -82,11 +82,13 @@ export function createMcpServer(options: McpServerOptions): McpServer {
     if (reader === null) {
       reader = openMemoryReader(options.dataDir)
       openedAt = now()
+      // A repo's keys merge in the daemon (a renamed remote, a fork); this folder's key may now name another.
+      if (reader !== null && projectKey !== null) deps.tools.projectKey = reader.canonical(projectKey)
     }
     return reader
   }
   const deps = {
-    tools: { reader: getReader, projectKey, now, ...(options.semantic !== undefined ? { semantic: options.semantic } : {}) },
+    tools: { reader: getReader, projectKey: projectKey as string | null, now, ...(options.semantic !== undefined ? { semantic: options.semantic } : {}) },
     log,
     clock: options.clock ?? (() => performance.now()),
     ...(options.reporter !== undefined ? { reporter: options.reporter } : {}),

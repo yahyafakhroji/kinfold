@@ -27,6 +27,7 @@ import {
   DAEMON_DOWN_LINE, DAEMON_DOWN_START_LINE, HELD_OUT_LINE, NO_ANSWER_LINE, NO_ANSWER_START_LINE, NO_PROMPT_MEMORY_LINE,
   cleanTitle, daemonDownWith, firstScreenLine, firstScreenList, recallLine,
 } from '../context/recall-line'
+import { promptForRecall } from '../context/prompt-text'
 import { type ContextChannel, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
 import { userMessage as noticeMessage } from '../update/notice-text'
 import type { NormalizedEvent } from '../contract/event'
@@ -143,7 +144,8 @@ async function contextOutput(event: NormalizedEvent, dataDir: string, host: Hook
     const notice = header.result?.updateNotice
     return printed(spec, null, [...(notice !== undefined ? [noticeMessage(notice)] : []), recallMessage('session_start', header, false)].join('\n'))
   }
-  const prompt = wanted.channel === 'prompt' ? (event.promptText ?? '').slice(0, MAX_CONTEXT_PROMPT_CHARS) : ''
+  // Own words before any paste, then cut: a long paste must not push the user's words out of the request.
+  const prompt = wanted.channel === 'prompt' ? promptForRecall(event.promptText ?? '').slice(0, MAX_CONTEXT_PROMPT_CHARS) : ''
   const fetched = await fetchContext(
     dataDir,
     { host: event.host, cwd: event.cwd, hostSessionId: event.hostSessionId, channel: wanted.channel, ...(prompt.trim() !== '' ? { prompt } : {}) },

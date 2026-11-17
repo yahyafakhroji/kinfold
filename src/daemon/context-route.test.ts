@@ -315,3 +315,13 @@ test('GET /watch/debug shows a prompt the daemon answered, through the real serv
   const next = await debug(`?after=${first.cursor}&project=route-repo`)
   expect(next.events).toMatchObject([{ kind: 'prompt', host: 'claude-code', project: 'route-repo', sent: { ids: [old] } }])
 })
+
+test('a prompt from a folder whose key was merged into another is answered from the key it merged into', async () => {
+  const old = 'github.com/me/shared-agent-memory'
+  upsertProject(temp.store.db, { key: old, kind: 'git-remote', displayName: 'shared-agent-memory' }, T0)
+  temp.store.db.query('UPDATE projects SET merged_into = ? WHERE key = ?').run(projectKey, old)
+  seedObservation(temp.store, { sessionId: session, projectKey, host: 'opencode', title: 'Kept under the key it merged into', at: T0 })
+  const handler = contextHandler({ db: temp.store.db, projectKeyFor: () => ({ key: old, kind: 'git-remote', displayName: 'shared-agent-memory' }), log: () => {}, now: () => T0 })
+  await handler({ host: 'claude-code', cwd: '/w', hostSessionId: 'merged-1', channel: 'session_start' })
+  expect(rows("SELECT project_key AS key FROM injections WHERE host_session_id = 'merged-1'")).toEqual([{ key: projectKey }])
+})

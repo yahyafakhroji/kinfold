@@ -21,7 +21,8 @@ export interface ObserverTester {
   test: ((input: ObserverSettingsInput) => Promise<ObserverTestResult>) | null
 }
 
-export function createObserverTester(runnerFor: RunnerFactory | null, log: (line: string) => void): ObserverTester {
+/** `onPass` hears the provider of every passed test: a working provider need not keep waiting out a backoff. */
+export function createObserverTester(runnerFor: RunnerFactory | null, log: (line: string) => void, onPass: (provider: string) => void = () => {}): ObserverTester {
   if (runnerFor === null) return { test: null }
   return {
     test: async (input) => {
@@ -30,6 +31,7 @@ export function createObserverTester(runnerFor: RunnerFactory | null, log: (line
       try {
         await runnerFor({ provider: input.provider, model: input.model, credentialRef: input.credentialRef, enabled: true, source: 'host', ...(input.endpoint === undefined ? {} : { endpoint: input.endpoint }) }).run(CHECK_PROMPT)
         result = { ok: true }
+        onPass(input.provider)
       } catch (error: unknown) {
         result = { ok: false, errorClass: toObserverError(error).errorClass }
       }

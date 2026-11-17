@@ -17,7 +17,7 @@ import { ChoiceError, chooseObservers } from '../observer-choice'
 import { runPlan } from '../plan'
 import { envForDataDir } from '../../cli/data-dir-env'
 import { type FakeWorld, YES, createWorld, fakeService, startWorldDaemon } from '../test-support'
-import { UNREADABLE_OBSERVERS, lockedFolderProblem, readSetupState, savedObserversForYes } from './prefill'
+import { UNREADABLE_OBSERVERS, lockedFolderProblem, mergePlanLines, readSetupState, savedObserversForYes } from './prefill'
 import { installRecordAction } from './record'
 import { posixOnly } from '../../../test/platform-guards'
 
@@ -327,4 +327,22 @@ test('a saved endpoint comes back with its row, so a re-run keeps the address', 
   const local: ObserverSettingsInput = { host: 'codex', provider: 'openai-compatible', model: 'llama3.2', credentialRef: null, enabled: true, endpoint: 'http://127.0.0.1:11434/v1' }
   seedPlainStore(w, local)
   expect((await readSetupState(w.env)).observers.get('codex')).toEqual(local)
+})
+
+test('the install output says which keys of one repo will merge, before the daemon merges them', () => {
+  world = createWorld()
+  const w = world
+  const store = openStore(w.dataDir)
+  try {
+    for (const [key, at] of [['github.com/me/shared-agent-memory', 1], ['github.com/me/kinfold', 2]] as const) {
+      store.db.query('INSERT INTO projects (key, key_kind, display_name, created_at) VALUES (?, ?, ?, ?)').run(key, 'git-remote', key.split('/').at(-1)!, at)
+      store.db.query('INSERT INTO sessions (host, host_session_id, project_key, cwd, started_at, last_event_at) VALUES (?, ?, ?, ?, ?, ?)').run('claude-code', key, key, `/work/${at}`, at, at)
+    }
+  } finally {
+    store.db.close()
+  }
+  expect(mergePlanLines(w.env, w.dataDir, () => 'f'.repeat(40))).toEqual([
+    'project: shared-agent-memory will merge into kinfold (same repo); kinfold project split github.com/me/shared-agent-memory undoes it',
+  ])
+  expect(mergePlanLines(w.env, join(w.dataDir, 'none'), () => 'f'.repeat(40))).toEqual([])
 })

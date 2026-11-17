@@ -60,13 +60,13 @@ function parseRow(value: unknown): ShownRow | null {
 
 /** The update the user is owed, as the dashboard banner says it; null for none. */
 type Update = { version: string; message: string } | null
-type Poll = { kind: 'rows'; cursor: number; lines: string[]; update: Update; epoch?: string } | { kind: 'old' } | { kind: 'down' }
+type Poll = { kind: 'rows'; cursor: number; lines: string[]; update: Update; epoch?: string; merges?: string[] } | { kind: 'old' } | { kind: 'down' }
 
 /** What one route answers and how its answer becomes lines: the prompt rows, or the debug trace. */
 interface Source {
   path: string
   /** Null for an answer of the wrong shape. */
-  read(body: Record<string, unknown>): { cursor: number; lines: string[]; update: Update; epoch?: string } | null
+  read(body: Record<string, unknown>): { cursor: number; lines: string[]; update: Update; epoch?: string; merges?: string[] } | null
   /** Why a 404 means the daemon is too old for this view. */
   missing: string
 }
@@ -74,7 +74,7 @@ interface Source {
 const ROWS: Source = {
   path: '/watch',
   read: (body) => (!Number.isSafeInteger(body.cursor) || !Array.isArray(body.rows) ? null
-    : { cursor: body.cursor as number, lines: body.rows.flatMap((row) => parseRow(row) ?? []).map(formatWatchLine), update: parseUpdate(body.update) }),
+    : { cursor: body.cursor as number, lines: body.rows.flatMap((row) => parseRow(row) ?? []).map(formatWatchLine), update: parseUpdate(body.update), merges: mergeLines(body.merges) }),
   missing: 'the running daemon is an older build without watch; run kinfold update',
 }
 
@@ -89,6 +89,15 @@ function traceSource(json: boolean): Source {
     },
     missing: 'the running daemon is an older build without watch --debug; run kinfold update',
   }
+}
+
+/** "kinfold · merged <old> into <new> (same repo)" for each merge the route lists; an older daemon lists none. */
+function mergeLines(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((merge) => {
+    if (!isRecord(merge) || typeof merge.from !== 'string' || typeof merge.into !== 'string') return []
+    return [`kinfold · merged ${cleanTitle(merge.from)} into ${cleanTitle(merge.into)} (${merge.reason === 'same-repo' ? 'same repo' : 'kinfold project merge'})`]
+  })
 }
 
 function parseUpdate(value: unknown): Update {
@@ -165,6 +174,16 @@ export async function runWatch(env: WatchEnv, args: WatchArgs, deps: WatchDeps =
     say(update.message)
   }
   showUpdate(first.update)
+  // Each project merge is said once per watch, whichever poll carries it.
+  const merged = new Set<string>()
+  const showMerges = (lines: readonly string[] | undefined): void => {
+    for (const line of lines ?? []) {
+      if (merged.has(line)) continue
+      merged.add(line)
+      say(line)
+    }
+  }
+  showMerges(first.kind === 'rows' ? first.merges : undefined)
   // A function, so the check after an await is not narrowed away by the one in the loop's condition.
   const stopped = (): boolean => deps.stop?.aborted === true
   while (!stopped()) {
@@ -176,6 +195,7 @@ export async function runWatch(env: WatchEnv, args: WatchArgs, deps: WatchDeps =
       if (waiting) say('the daemon is back')
       waiting = false
       showUpdate(answer.update)
+      showMerges(answer.merges)
       if (answer.epoch !== undefined && epoch !== undefined && answer.epoch !== epoch) {
         // A restarted daemon's trace counts from 0 again: read it from its start, and drop this answer, which was cut by the old cursor.
         epoch = answer.epoch

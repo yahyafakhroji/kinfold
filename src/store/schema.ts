@@ -519,11 +519,34 @@ CREATE TABLE embedding_settings (
 );
 `
 
+// v16: one repo, one project. A repo is known by its first commit, so a
+// renamed remote, a fork and a clone with no remote are the same repo. A key
+// merged into another stays as an alias (merged_into), and each merge keeps
+// the row ids it moved, so a split puts back exactly those. A split key is
+// held out of automatic merging (merge_held).
+const V16_PROJECT_MERGES = `
+ALTER TABLE projects ADD COLUMN root_commit TEXT;
+ALTER TABLE projects ADD COLUMN merged_into TEXT;
+ALTER TABLE projects ADD COLUMN merge_held INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX projects_by_root ON projects(root_commit) WHERE root_commit IS NOT NULL;
+
+CREATE TABLE project_merges (
+  id INTEGER PRIMARY KEY,
+  from_key TEXT NOT NULL,
+  into_key TEXT NOT NULL,
+  reason TEXT NOT NULL CHECK (reason IN ('same-repo', 'manual')),
+  merged_at INTEGER NOT NULL,
+  moved TEXT NOT NULL,
+  split_at INTEGER
+);
+CREATE INDEX project_merges_by_from ON project_merges(from_key, merged_at DESC);
+`
+
 /** Index i holds the migration that takes user_version from i to i + 1. */
 export const MIGRATIONS: readonly string[] = [
   V1_CORE + V1_MEMORY + V1_DELIVERY, V2_OBSERVER, V3_CONTEXT, V4_DATA_CONTROL, V5_LINKS, V6_USAGE, V7_SHARED_SUMMARIES, V8_VECTORS, V9_RELATED_SERVED,
   V10_OBSERVER_SAFETY, V11_VECTOR_SPACE_INDEX, V12_VISIBLE, V13_LATE_AND_INDEXES,
-  V14_OBSERVER_ENDPOINT, V15_EMBEDDING_SPACES,
+  V14_OBSERVER_ENDPOINT, V15_EMBEDDING_SPACES, V16_PROJECT_MERGES,
 ]
 
 /**

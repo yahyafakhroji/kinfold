@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from '../observer/test-support'
 import type { CredentialProvider } from '../secrets/credentials'
 import { LEGACY_FINGERPRINT_SCHEME, MASTER_FINGERPRINT_SCHEME } from '../secrets/fingerprint'
-import { MAX_OBSERVER_ATTEMPTS } from '../store/observer-store'
+import { MAX_OBSERVER_ATTEMPTS, finishRun, startRun } from '../store/observer-store'
+import { providerBackoff } from '../observer/backoff'
 import { startDaemon } from './daemon'
 import { checkFailedResets } from './failed-reset'
 
@@ -53,6 +54,19 @@ test('the first check records a baseline and resets nothing', () => {
     { host: 'claude-code', credential: 'none' },
     { host: 'opencode', credential: 'missing' },
   ])
+})
+
+test('a new credential ends the backoff of a provider whose events wait as pending', () => {
+  const opencode = seedSession(temp.store, 'opencode', 'oc-1')
+  seedEvent(temp.store, opencode, { kind: 'turn_end', at: T0 })
+  const id = startRun(temp.store.db, { sessionId: opencode, host: 'opencode', provider: 'openrouter', model: 'openrouter/auto', eventCount: 1, startedAt: T0 - 10_000 })
+  finishRun(temp.store.db, id, 'failed', 'credential_missing: no keychain entry for openrouter', T0 - 9_000)
+  expect(providerBackoff(temp.store.db, 'openrouter')).not.toBeNull()
+  check()
+  expect(providerBackoff(temp.store.db, 'openrouter')).not.toBeNull()
+  credential = KEY_V1
+  expect(check()).toEqual([{ host: 'opencode', reason: 'credential', events: 0 }])
+  expect(providerBackoff(temp.store.db, 'openrouter')).toBeNull()
 })
 
 test('an unchanged credential and unchanged settings reset nothing', () => {

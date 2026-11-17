@@ -5,6 +5,7 @@
 // name the field, never echo its value.
 
 import type { Parsed } from '../context/types'
+import { backoffLine, providerBackoffs } from '../observer/backoff'
 import type { ProbeFailure } from '../observer/safety-gate'
 import { KNOWN_HOSTS, isRecord } from '../contract/event'
 import { checkEndpoint } from '../observer/endpoint'
@@ -34,7 +35,19 @@ export interface ObserverSettingsView {
   safety: SafetyView[]
   /** The safety gate's last probe failure per CLI provider; kept in memory only, never a row. */
   probe: ProbeFailure[]
+  /** Providers that keep failing and wait between tries (observer/backoff.ts). */
+  backoff: BackoffView[]
   effective: EffectiveSettings[]
+}
+
+export interface BackoffView {
+  provider: string
+  errorClass: string
+  failures: number
+  since: number
+  retryAt: number
+  /** The sentence status and the dashboard show, written once here so both say the same. */
+  line: string
 }
 
 export interface ObserverSettingsHandlers {
@@ -111,11 +124,14 @@ function effectiveFor(db: Database, host: string): EffectiveSettings {
   }
 }
 
-export function observerSettingsView(db: Database, probe: readonly ProbeFailure[] = []): ObserverSettingsView {
+export function observerSettingsView(db: Database, probe: readonly ProbeFailure[] = [], now: number = Date.now()): ObserverSettingsView {
   const rows = listObserverSettings(db)
   const hosts = [...new Set([...REPORTED_HOSTS, ...rows.map((row) => row.host).filter((host) => host !== '*')])]
   const safety = listSafety(db).map(({ binaryPath: _binaryPath, ...rest }) => rest)
-  return { rows, safety, probe: probe.map(({ provider, errorClass }) => ({ provider, errorClass })), effective: hosts.map((host) => effectiveFor(db, host)) }
+  const backoff = providerBackoffs(db).map((entry) => ({
+    provider: entry.provider, errorClass: entry.errorClass, failures: entry.failures, since: entry.since, retryAt: entry.retryAt, line: backoffLine(entry, now),
+  }))
+  return { rows, safety, probe: probe.map(({ provider, errorClass }) => ({ provider, errorClass })), backoff, effective: hosts.map((host) => effectiveFor(db, host)) }
 }
 
 /** Logs the host and provider only. `probeFailures` is the safety gate's in-memory list, when the daemon observes. */

@@ -20,9 +20,9 @@ import {
   markSessionEnded,
   promptNumberForHostId,
   setPromptReply,
-  upsertProject,
   upsertSession,
 } from '../store/writes'
+import { registerProject } from '../store/project-merge'
 
 export interface DrainOptions extends PrepareOptions {
   spoolDir: string
@@ -116,8 +116,9 @@ function assignPromptNumber(db: Database, sessionId: number, event: NormalizedEv
 function ingestEvent(db: Database, raw: NormalizedEvent, options: DrainOptions, now: number, turnEnds: TurnEnd[]): boolean {
   if (eventExists(db, raw.eventId)) return false
   const event = secondPass(raw, options)
-  const project = options.projectKeyFor(event.cwd)
-  upsertProject(db, project, now)
+  // The key the memory lives under: an alias's target, or the repo's winner when this key's first commit matches another project.
+  const resolved = options.projectKeyFor(event.cwd)
+  const project = { ...resolved, key: registerProject(db, resolved, now) }
   const sessionId = upsertSession(db, {
     host: event.host,
     hostSessionId: event.hostSessionId,

@@ -7,6 +7,7 @@
 
 import type { Parsed } from '../context/types'
 import type { InstallEnv } from '../install/env'
+import { osOf } from '../platform/platform'
 import { managedServiceOf } from '../install/service/control'
 import { readInstallRecord, setCentralMode } from '../install/setup/record'
 import { type DbKeyStore, dbKeyStoreFor } from '../sqlite/keys'
@@ -23,7 +24,7 @@ import { type CentralMode, centralModeOf } from './mode'
 import { DEVICE_KEY_FILE, removeCentralFile } from './paths'
 import { centralProjectKey } from './project-key'
 import { failureReason } from './relay'
-import { type Tailscale, isLoopbackAddress, isTailscaleAddress, systemTailscale } from './tailscale'
+import { type Tailscale, isLoopbackAddress, isTailscaleAddress, isTailscaleProblem, systemTailscale } from './tailscale'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 
@@ -144,7 +145,7 @@ function needsRecord(ctx: Context): boolean {
 /** How a device should name this hub: the MagicDNS name when there is one, else its first Tailscale address. */
 async function hubAddress(ctx: Context, port: number): Promise<string> {
   const self = await (ctx.deps.tailscale ?? systemTailscale()).self()
-  if (self === null) return `<this machine's Tailscale name>${port === DEFAULT_HUB_PORT ? '' : `:${port}`}`
+  if (isTailscaleProblem(self)) return `<this machine's Tailscale name>${port === DEFAULT_HUB_PORT ? '' : `:${port}`}`
   const host = self.dnsName !== '' ? self.dnsName : self.addresses[0] ?? '<this machine>'
   return port === DEFAULT_HUB_PORT ? host : `${host.includes(':') ? `[${host}]` : host}:${port}`
 }
@@ -153,7 +154,11 @@ async function printInvite(ctx: Context, port: number): Promise<void> {
   const code = createInvite(ctx.env.dataDir, ctx.env.now())
   ctx.env.out(`Code: ${code} (valid ${INVITE_LIFE_MS / 60_000} minutes, for one device)`)
   ctx.env.out(`On the device: kinfold central join ${await hubAddress(ctx, port)} ${code}`)
+  if (osOf(ctx.env.platform) === 'macos') ctx.env.out(MAC_FIREWALL_NOTE)
 }
+
+/** The macOS application firewall asks once, on this machine, before kinfold may take incoming connections. */
+const MAC_FIREWALL_NOTE = 'The macOS firewall may ask to allow incoming connections for kinfold the first time a device connects; click Allow on this Mac.'
 
 async function serve(ctx: Context, args: Extract<CentralArgs, { command: 'serve' }>): Promise<number> {
   const mode = centralModeOf(ctx.env.dataDir)

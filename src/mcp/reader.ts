@@ -5,6 +5,7 @@
 // it, and every query is prepared up front so a search is one bound call.
 // A null project means "all projects" (the tools' `project: "*"`).
 
+import { canonicalKey } from '../store/project-merge'
 import type { DbKeyStore } from '../sqlite/keys'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -93,6 +94,8 @@ export interface MemoryReader {
   session(id: number): SessionRef | null
   sessionItems(sessionId: number, cap: number): SessionItems
   observations(ids: readonly number[], project: string | null): FullObservation[]
+  /** The key a project's memory lives under: a key merged into another names that one. */
+  canonical(projectKey: string): string
   close(): void
 }
 
@@ -247,6 +250,7 @@ function createReader(db: Database): MemoryReader {
       const contradicts = allOf<{ id: number; contradictedBy: number }>(q.contradicts, { ids: json })
       return allOf<StoredFull>(q.full, { ids: json, project }).map((row) => toFull(row, contradicts))
     },
+    canonical: (projectKey) => canonicalKey(db, projectKey),
     close: () => db.close(),
   }
 }

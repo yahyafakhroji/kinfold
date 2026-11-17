@@ -32,11 +32,11 @@ const CLI_RESULT = JSON.stringify({
   modelUsage: { 'claude-haiku-5-5': { inputTokens: 12 } },
 })
 
-function capture(result: { exitCode?: number; stdout?: string; timedOut?: boolean } = {}): { spawn: SpawnFn; requests: SpawnRequest[] } {
+function capture(result: { exitCode?: number; stdout?: string; timedOut?: boolean; stderr?: string } = {}): { spawn: SpawnFn; requests: SpawnRequest[] } {
   const requests: SpawnRequest[] = []
   const spawn: SpawnFn = async (request) => {
     requests.push(request)
-    return { exitCode: result.exitCode ?? 0, stdout: result.stdout ?? CLI_RESULT, timedOut: result.timedOut ?? false }
+    return { exitCode: result.exitCode ?? 0, stdout: result.stdout ?? CLI_RESULT, timedOut: result.timedOut ?? false, ...(result.stderr === undefined ? {} : { stderr: result.stderr }) }
   }
   return { spawn, requests }
 }
@@ -105,6 +105,10 @@ test.each([
   [{ timedOut: true, exitCode: 143 }, 'timeout'],
   [{ stdout: 'login expired' }, 'bad_response: claude output is not JSON'],
   [{ stdout: JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true }) }, 'bad_response: claude reported error_max_turns'],
+  [{ exitCode: 1, stdout: JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'Failed to authenticate: OAuth session expired and could not be refreshed' }) },
+    'auth_expired: claude exited 1: Failed to authenticate: OAuth session expired and could not be refreshed'],
+  [{ exitCode: 1, stderr: 'Not logged in · Please run /login\n' }, 'not_logged_in: claude exited 1: Not logged in'],
+  [{ stdout: JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 429 rate_limit_error' }) }, 'rate_limited: claude reported an error: API Error: 429'],
 ])('a failed run %p is a named failure', async (result, message) => {
   const { spawn } = capture(result)
   expect(await failure(runner(spawn).run(PROMPT))).toStartWith(message)

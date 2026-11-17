@@ -187,6 +187,13 @@ test('exit code 3 throws exit_nonzero with detail "exited 3" and no stdout text'
   expect(runFolders()).toEqual([])
 })
 
+test('a non-zero exit reads the CLI\'s first stderr line, never stdout, and names a login problem', async () => {
+  const { adapter } = harness()
+  const error = await failure(runner(adapter, recordingSpawn([VERSION_OK, { exitCode: 1, stdout: SECRET, stderr: 'Error: Your access token has expired. Please log in again.\n' }])).run(PROMPT))
+  expect(error.errorClass).toBe('auth_expired')
+  expect(error.detail).toBe('exited 1: Error: Your access token has expired. Please log in again.')
+})
+
 test('a timeout throws timeout with no stdout text, runs cleanup with a null session id, and removes the folder', async () => {
   const { adapter, cleanups } = harness()
   const error = await failure(runner(adapter, recordingSpawn([VERSION_OK, { timedOut: true, exitCode: 143, stdout: SECRET }])).run(PROMPT))

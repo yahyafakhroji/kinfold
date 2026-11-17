@@ -5,7 +5,9 @@ import { join } from 'node:path'
 import { openStore } from '../store/db'
 import { resolveObserverSettings } from '../observer/settings'
 import { type RunningDaemon, startDaemon } from './daemon'
-import { parseSettingsPut } from './settings-route'
+import { observerSettingsView, parseSettingsPut } from './settings-route'
+import { T0, openTempStore, seedSession } from '../observer/test-support'
+import { finishRun, startRun } from '../store/observer-store'
 
 let root: string
 let dataDir: string
@@ -40,6 +42,7 @@ test('GET reports the built-in defaults for every known host before any row exis
     rows: [],
     safety: [],
     probe: [],
+    backoff: [],
     effective: [
       { host: 'claude-code', settings: { provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: true, source: 'built-in' } },
       { host: 'opencode', settings: { provider: 'openrouter', model: 'openrouter/auto', credentialRef: 'openrouter', enabled: true, source: 'built-in' } },
@@ -65,6 +68,24 @@ test('GET reports the built-in defaults for every known host before any row exis
       { host: 'warp', settings: { provider: 'openrouter', model: 'openrouter/auto', credentialRef: 'openrouter', enabled: true, source: 'built-in' } },
     ],
   })
+})
+
+test('the view lists each provider that is backing off, with the line status and the dashboard show', () => {
+  const temp = openTempStore('kinfold-view-backoff-')
+  try {
+    const session = seedSession(temp.store, 'claude-code', 's1')
+    for (const at of [T0, T0 + 10_000]) {
+      const id = startRun(temp.store.db, { sessionId: session, host: 'claude-code', provider: 'claude-cli', model: 'haiku', eventCount: 1, startedAt: at })
+      finishRun(temp.store.db, id, 'failed', 'exit_nonzero: claude exited 1', at + 1_000)
+    }
+    const view = observerSettingsView(temp.store.db, [], T0 + 20_000)
+    expect(view.backoff).toEqual([{
+      provider: 'claude-cli', errorClass: 'exit_nonzero', failures: 2, since: T0, retryAt: T0 + 11_000 + 120_000,
+      line: expect.stringMatching(/^claude-cli has failed 2 times since .+: exit_nonzero; retrying at .+; check `claude` works in a terminal$/),
+    }])
+  } finally {
+    temp.cleanup()
+  }
 })
 
 test('PUT upserts one row per host, which the observer then resolves', async () => {

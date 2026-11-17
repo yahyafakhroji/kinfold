@@ -132,6 +132,7 @@ export const USAGE = [
   '             --purge shows the finding and asks before it deletes the row; --yes skips the question, and is needed where there is no terminal',
   '  purge      --session <id> | --project <key> | --host <host> | --observation <id> | --before <iso> [--after <iso>] [--dry-run] [--yes]',
   '             shows what it would delete and asks before deleting; --yes skips the question, and is needed where there is no terminal',
+  '  project    list | merge <old> <into> [--yes] | split <key> [--yes]   which key a repo\'s memory lives under; one repo under two keys merges on its own',
   '  backup     <file>   write the memory to one file, still encrypted; capture keeps running',
   '  restore    <file>   replace the memory with a backup; asks for its recovery code (typed, or on stdin)',
   '  restore    --undo   switch back to the memory the last restore replaced and kept; needs no recovery code',

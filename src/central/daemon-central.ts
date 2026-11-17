@@ -9,7 +9,7 @@ import type { CentralAsk } from '../daemon/context-route'
 import type { ReadRouteDeps } from '../daemon/read-routes'
 import type { Database } from '../sqlite/types'
 import type { McpRead } from '../store/mcp-read-store'
-import { upsertProject } from '../store/writes'
+import { canonicalKey, registerProject } from '../store/project-merge'
 import type { SemanticAnswer, SemanticRequest } from '../vectors/search'
 import { readKey } from './client'
 import type { HubEndpoint } from './client'
@@ -39,10 +39,11 @@ export function hubCore(deps: HubCoreDeps): CentralCore {
     capture: captureHandler({ db: deps.db, prepare: deps.marker, now: deps.now, onStored: deps.onStored }),
     context: (request, project, budgetMs) => {
       // A device may ask before its first capture of this project has arrived.
-      upsertProject(deps.db, project, deps.now())
-      return deps.context(request, { projectKey: project.key, ...(budgetMs !== undefined ? { budgetMs } : {}) })
+      const projectKey = registerProject(deps.db, project, deps.now())
+      return deps.context(request, { projectKey, ...(budgetMs !== undefined ? { budgetMs } : {}) })
     },
-    read: (tool, args, projectKey) => callTool(tool, args, { reader: deps.reads.reader, projectKey, now: deps.reads.now, ...(deps.reads.semantic !== undefined ? { semantic: deps.reads.semantic } : {}) }),
+    // A device names its project by its own key; the hub may have merged that key into another.
+    read: (tool, args, projectKey) => callTool(tool, args, { reader: deps.reads.reader, projectKey: projectKey === null ? null : canonicalKey(deps.db, projectKey), now: deps.reads.now, ...(deps.reads.semantic !== undefined ? { semantic: deps.reads.semantic } : {}) }),
     semantic: deps.semantic,
     mcpRead: deps.mcpRead,
     importChunk: (body, context) => {

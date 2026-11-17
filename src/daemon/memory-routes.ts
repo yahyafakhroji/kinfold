@@ -11,7 +11,8 @@ import { ftsMatch, parseSearchQuery } from '../mcp/fts'
 import type { IndexRow } from '../mcp/reader'
 import { OBSERVATION_TYPES, type ObservationType } from '../observer/types'
 import type { Database } from '../sqlite/types'
-import { type BrowseFilters, type Facets, type ObservationDetail, browseObservations, observationDetail, observationFacets } from '../store/memory-reads'
+import { type BrowseFilters, type Facets, type ObservationDetail, observationDetail } from '../store/memory-reads'
+import { type StoreReader, inlineStoreReader } from '../workers/store-reader'
 import type { RouteAnswer } from './data-routes'
 
 export const PAGE_SIZE = 50
@@ -35,9 +36,9 @@ export interface BrowseAnswer {
 }
 
 export interface MemoryHandlers {
-  browse: (query: BrowseQuery) => BrowseAnswer
+  browse: (query: BrowseQuery) => Promise<BrowseAnswer>
   detail: (id: number) => ObservationDetail | null
-  facets: () => Facets
+  facets: () => Promise<Facets>
 }
 
 /** An empty value is the same as an absent one: a cleared filter in the page's form. */
@@ -83,30 +84,31 @@ export function parseBrowseQuery(params: URLSearchParams): Parsed<BrowseQuery> {
   return { ok: true, value: { filters, page: page.value } }
 }
 
-export function memoryHandlers(db: Database, log: (line: string) => void): MemoryHandlers {
+/** Browse and facets scan the store, so they go through `reports` (the daemon's reports reader); default db, on this thread. */
+export function memoryHandlers(db: Database, log: (line: string) => void, reports: StoreReader = inlineStoreReader(db, '')): MemoryHandlers {
   return {
-    browse: (query) => {
+    browse: async (query) => {
       const startedAt = performance.now()
-      const result = browseObservations(db, query.filters)
+      const result = await reports.run('memoryBrowse', { filters: query.filters })
       log(`memory browse rows=${result.rows.length} total=${result.total} search=${query.filters.match !== null} ms=${Math.round(performance.now() - startedAt)}`)
       return { ...result, page: query.page, pageSize: PAGE_SIZE, hasMore: query.filters.offset + result.rows.length < result.total }
     },
     detail: (id) => observationDetail(db, id),
-    facets: () => observationFacets(db),
+    facets: () => reports.run('memoryFacets', {}),
   }
 }
 
 /** Null when the path is not a /memory route, so the caller answers 404. */
-export function memoryRoute(method: string, url: URL, handlers: MemoryHandlers): RouteAnswer | null {
+export async function memoryRoute(method: string, url: URL, handlers: MemoryHandlers): Promise<RouteAnswer | null> {
   const path = url.pathname
   const detail = DETAIL_PATH.exec(path)
   if (path !== '/memory/observations' && path !== '/memory/facets' && detail === null) return null
   if (method !== 'GET') return { status: 405, body: { error: 'method not allowed' } }
-  if (path === '/memory/facets') return { status: 200, body: handlers.facets() }
+  if (path === '/memory/facets') return { status: 200, body: await handlers.facets() }
   if (detail !== null) {
     const found = handlers.detail(Number(detail[1]))
     return found === null ? { status: 404, body: { error: 'no such observation' } } : { status: 200, body: found }
   }
   const query = parseBrowseQuery(url.searchParams)
-  return query.ok ? { status: 200, body: handlers.browse(query.value) } : { status: 400, body: { error: query.error } }
+  return query.ok ? { status: 200, body: await handlers.browse(query.value) } : { status: 400, body: { error: query.error } }
 }

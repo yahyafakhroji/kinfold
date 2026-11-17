@@ -7,6 +7,7 @@
 // reading model this is recalled data, not instructions.
 
 import { type PackItem, mergeNearDuplicates } from './merge'
+import { stillCurrent } from './status-notes'
 import { nameTokens } from './similarity'
 import { CHARS_PER_TOKEN, type ContextResult, EMPTY_CONTEXT, type PackObservation, contradictionLabel, estimateTokens } from './types'
 
@@ -93,7 +94,7 @@ function footer(nextSteps: string | null, repeats: number): string {
 
 /** Fills strongest-first and stops at the first line that would pass the budget. */
 export function buildPack(input: PackInput): BuiltPack {
-  const items = orderItems(input.observations, nameTokens(input.projectName))
+  const items = orderItems(input.observations.filter((row) => stillCurrent(row, input.now)), nameTokens(input.projectName))
   const hasSteps = input.nextSteps !== null && input.nextSteps.trim() !== ''
   if (items.length === 0 && !hasSteps) return { ...EMPTY_CONTEXT, itemLines: [] }
 

@@ -11,6 +11,8 @@ import { FIRST_SCREEN_ROWS, HELD_OUT_LINE, type Recalled, firstScreenToast, late
 import type { RouteAnswer } from '../daemon/data-routes'
 import type { Database } from '../sqlite/types'
 import { firstScreenFor, titlesFor } from '../store/context-store'
+import { recentMerges } from '../store/project-merge'
+import { RECENT_MERGE_MS } from '../daemon/project-routes'
 
 /**
  * A prompt is shown this long after its event time. The hook asks for recall
@@ -192,7 +194,9 @@ export function watchRoute(db: Database, method: string, url: URL, now: number):
   if (project !== null && (project === '' || project.length > MAX_PROJECT_CHARS)) return { status: 400, body: { error: 'project must be a name or key' } }
   const startsAfter = url.searchParams.get('startsAfter')
   if (startsAfter !== null && startsAfter !== 'now' && !/^\d{1,15}$/.test(startsAfter)) return { status: 400, body: { error: 'startsAfter must be now or an id' } }
-  const starts = startsAfter === null ? {} : startsPart(db, startsAfter === 'now' ? null : Number(startsAfter), host, project, now)
+  // A watcher says each of the day's project merges once (watch/cli.ts): one repo under two keys became one project.
+  const merges = recentMerges(db, now - RECENT_MERGE_MS)
+  const starts = { ...(startsAfter === null ? {} : startsPart(db, startsAfter === 'now' ? null : Number(startsAfter), host, project, now)), ...(merges.length > 0 ? { merges } : {}) }
   if (after === null) return { status: 200, body: { cursor: latestPromptId(db), rows: [], ...starts } }
   const afterId = Number(after)
   const newest = latestPromptId(db)

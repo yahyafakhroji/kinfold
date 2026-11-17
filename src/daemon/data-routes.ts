@@ -10,13 +10,14 @@ import { type PurgeRequest, parseFindingsQuery, parsePurgeBody, parseResolveBody
 import { type ResolveAction, type ResolveOutcome, resolveFinding } from '../data-control/resolve'
 import { type RetentionOutcome, type RetentionPreview, applyRetention, describePreview, describeRetention, previewRetention } from '../data-control/retention'
 import { type ScanResult, describeScan, scanUntil } from '../data-control/scanner'
-import { type SizeReport, sizeReport } from '../data-control/size'
+import type { SizeReport } from '../data-control/size'
 import type { Database } from '../sqlite/types'
 import { type DataSettings, type DataSettingsChange, readDataSettings, writeDataSettings } from '../store/data-settings-store'
 import { type DisplayChange, type DisplaySettings, readDisplaySettings, writeDisplaySettings } from '../store/display-settings'
 import { type Finding, type FindingQuery, listFindings, pendingByRule } from '../store/findings-store'
 import type { MarkerKey } from '../redaction/redact'
 import { type Exclusive, runNow } from '../vectors/vector-worker'
+import { type StoreReader, inlineStoreReader } from '../workers/store-reader'
 
 /** An on-demand scan works this long, then answers with what is left; the tick carries on. */
 export const SCAN_REQUEST_BUDGET_MS = 2_000
@@ -27,7 +28,8 @@ export interface FindingsView {
 }
 
 export interface DataHandlers {
-  size: () => SizeReport
+  /** Read through the reports reader: on a large store dbstat takes seconds. */
+  size: () => Promise<SizeReport>
   retention: () => DataSettings
   /** Saves, then applies the new retention at once, so the answer shows what it removed. */
   putRetention: (change: DataSettingsChange) => { saved: DataSettings; applied: RetentionOutcome }
@@ -55,6 +57,8 @@ export interface DataDeps {
   log: (line: string) => void
   /** The agents the impact test covers. */
   holdoutHosts?: readonly string[]
+  /** Where the size report is read; default db, on this thread. The daemon passes its reports reader. */
+  reports?: StoreReader
   /** Called after the display switches are saved; the daemon rewrites display.json for the hooks. */
   onDisplay?: (settings: DisplaySettings) => void
 }
@@ -81,7 +85,7 @@ export function dataHandlers(deps: DataDeps): DataHandlers {
       log(`display settings saved show_recall=${saved.showRecall} holdout=${saved.holdout}`)
       return displayView(saved)
     },
-    size: () => sizeReport(db, deps.dbPath),
+    size: () => (deps.reports ?? inlineStoreReader(db, deps.dbPath)).run('dataSize', {}),
     retention: () => readDataSettings(db),
     putRetention: (change) => {
       const saved = writeDataSettings(db, change, deps.now())
@@ -152,7 +156,7 @@ async function retentionRoute(method: string, readBody: ReadBody, handlers: Data
  */
 export async function dataRoute(method: string, url: URL, readBody: ReadBody, handlers: DataHandlers, exclusive: Exclusive = runNow): Promise<RouteAnswer | null> {
   const path = url.pathname
-  if (path === '/data/size') return method === 'GET' ? { status: 200, body: handlers.size() } : METHOD_NOT_ALLOWED
+  if (path === '/data/size') return method === 'GET' ? { status: 200, body: await handlers.size() } : METHOD_NOT_ALLOWED
   if (path === '/data/retention') return retentionRoute(method, readBody, handlers, exclusive)
   if (path === '/data/display') {
     if (method === 'GET') return { status: 200, body: handlers.display() }

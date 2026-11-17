@@ -238,20 +238,29 @@ function hasLateColumn(db: Database): boolean {
   return found
 }
 
+/** Late answers that may carry one id before it counts as delivered: the first is offered again, the second is not. */
+export const LATE_OFFERS_BEFORE_DELIVERED = 2
+
 export function sessionDeliveries(db: Database, host: string, hostSessionId: string): SessionDeliveries {
   // A held-out prompt leaves a prompt-channel row with no ids, the only row of that shape (any other
   // empty answer records nothing). It delivered nothing, so it must not become the moment the session
   // "first received memory": the delta would then skip what was written before it. Told apart by shape
   // rather than by held_out, so the read-only fallback can run this on a store from before v12.
-  // A late answer was probably never shown, so its ids are not counted as sent: the next prompt carries them again.
+  // A late answer was probably never shown, so its ids are offered again with the next prompt. An id in
+  // two late answers counts as sent: when every answer of a session comes late, the same memory would
+  // otherwise ride on every prompt and never get through. Late rows never set firstAt.
   // The read-only fallback can meet a store from before v13, which has no late column.
-  const notLate = hasLateColumn(db) ? ' AND late = 0' : ''
-  const rows = db.query<{ ids: string; at: number }, { host: string; hostSessionId: string }>(
-    `SELECT observation_ids AS ids, occurred_at AS at FROM injections
-     WHERE host = $host AND host_session_id = $hostSessionId AND NOT (channel = 'prompt' AND observation_ids = '[]')${notLate}`,
+  const late = hasLateColumn(db) ? 'late' : '0'
+  const rows = db.query<{ ids: string; at: number; late: number }, { host: string; hostSessionId: string }>(
+    `SELECT observation_ids AS ids, occurred_at AS at, ${late} AS late FROM injections
+     WHERE host = $host AND host_session_id = $hostSessionId AND NOT (channel = 'prompt' AND observation_ids = '[]')`,
   ).all({ host, hostSessionId })
-  const sentIds = [...new Set(rows.flatMap((row) => parseIds(row.ids)))]
-  const firstAt = rows.length === 0 ? null : Math.min(...rows.map((row) => row.at))
+  const onTime = rows.filter((row) => row.late === 0)
+  const lateOffers = new Map<number, number>()
+  for (const row of rows) if (row.late !== 0) for (const id of new Set(parseIds(row.ids))) lateOffers.set(id, (lateOffers.get(id) ?? 0) + 1)
+  const offeredOut = [...lateOffers.entries()].filter(([, count]) => count >= LATE_OFFERS_BEFORE_DELIVERED).map(([id]) => id)
+  const sentIds = [...new Set([...onTime.flatMap((row) => parseIds(row.ids)), ...offeredOut])]
+  const firstAt = onTime.length === 0 ? null : Math.min(...onTime.map((row) => row.at))
   return { sentIds, firstAt }
 }
 
