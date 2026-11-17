@@ -1,5 +1,18 @@
 # kinfold
 
+## 0.6.0-beta.1
+
+### Minor Changes
+
+- cf12bcf: One repo is one project. Kinfold keeps each repo's first commit, so a renamed remote, a fork and a clone with no remote merge into the newest key with a remote, on their own, and an upgraded store does this once for the projects it already holds. `kinfold status`, `kinfold watch` and the install output say each merge once. `kinfold project list` shows each key with its counts, `kinfold project split <key>` undoes a merge exactly and keeps the key apart, and `kinfold project merge <old> <into>` joins a folder git cannot match. Merge and split are dry runs without `--yes`, and run on the hub in central mode. A session resumed after its remote was renamed moves to the new key, so the prompt line, the turn end, watch and Sessions name one project.
+- cf12bcf: Prompt-time recall answers within the hook's wait on a large, busy store. On a 30,000-memory hub the daemon took 1.5 to 10 s, so the hook gave up and nothing reached the model; it now answers in tens of milliseconds. The prompt's store reads and the dashboard's size, metrics, facets and memory browse run in worker threads with their own read-only connections. The daemon answers by one deadline with what is ready and offers the rest with the next prompt. The search leaves out the wrappers agents add to a prompt (pasted-content tags and their ids, system reminders), ranks your own words before pasted text, and matches on the 8 rarest words its memory holds. Memory in an answer that came too late is offered again once, and counts as sent after a second late answer. Session-start lists put status notes such as "CI run green" after lasting memory and drop them after a day. In the install wizard, a line feed left over from Enter no longer turns a yes or no question to No.
+
+### Patch Changes
+
+- f940f94: The central hub now starts on a Mac that runs the Tailscale app. The app's command acts as a command line only when `TERM` is set, and the daemon runs without one, so every Tailscale lookup failed and the hub never listened. Kinfold now sets `TERM` for every tailscale command, and `kinfold status` says which of three things went wrong: the tailscale command failed (with its first line of output), Tailscale is not running or not signed in, or the command is not installed. A `kinfold central join` that times out now says to look for the firewall prompt on a Mac hub, and `kinfold central serve` and `invite` mention that prompt on macOS.
+  
+  An observer provider that keeps failing the same way no longer retries at full speed. Kinfold waits a minute after a failure, doubling up to an hour, and starts over after a success, a change to that provider's settings, a passed test in the dashboard or a new key. The claude, codex and opencode observers now read the CLI's own error text (one line, capped and redacted), so an expired login, a missing login and a usage limit each get their own name. A login problem waits the full hour, and its events stay pending, so nothing is lost while it is down. `kinfold status`, the dashboard and `kinfold watch --debug` say which provider is failing and what to do, for example: "claude-cli: the login Kinfold uses has expired; run `claude auth login` in a plain terminal (not one with CLAUDE_CONFIG_DIR set)".
+
 ## 0.6.0-beta.0
 
 ### Minor Changes
