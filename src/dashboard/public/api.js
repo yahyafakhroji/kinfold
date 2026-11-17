@@ -2,7 +2,9 @@
 // the session cookie (HttpOnly, so this script never sees it) and the
 // X-SAM-Request header that every state-changing cookie request needs. The
 // daemon token is never in the page. A 401 means the session ended (12 h,
-// sign-out, or a daemon restart), so the page goes back to the login screen.
+// sign-out) or the dashboard closed (the `kinfold dashboard` command that
+// opened it ended), so the page goes back to the login screen, which says
+// which.
 
 export class ApiError extends Error {
   /**
@@ -31,8 +33,10 @@ async function request(path, init) {
     throw new ApiError(0, 'the daemon did not answer; is it running?')
   }
   if (response.status === 401 && path !== '/dashboard/session') {
-    location.assign('/dashboard/login')
-    throw new ApiError(401, 'signed out')
+    const answer = await response.json().catch(() => null)
+    const closed = answer !== null && typeof answer === 'object' && 'closed' in answer && answer.closed === true
+    location.assign(closed ? '/dashboard/login#closed' : '/dashboard/login')
+    throw new ApiError(401, closed ? 'dashboard closed' : 'signed out')
   }
   const parsed = response.status === 204 ? null : await response.json().catch(() => null)
   if (!response.ok) {
@@ -62,6 +66,17 @@ export function api(method, path, body) {
  */
 export function uploadFile(path, file) {
   return request(path, { method: 'POST', headers: { 'x-sam-request': '1', 'content-type': 'application/octet-stream' }, credentials: 'same-origin', body: file })
+}
+
+/**
+ * Asks every few seconds whether the dashboard is still open, so a page left
+ * open notices when its command ends without waiting for the reader to click.
+ * The daemon does not count these as activity.
+ * @param {number} every
+ * @param {(run: () => void, ms: number) => unknown} [schedule]
+ */
+export function watchClosed(every, schedule = (run, ms) => setInterval(run, ms)) {
+  schedule(() => { request('/dashboard/state', { method: 'GET', credentials: 'same-origin' }).catch(() => {}) }, every)
 }
 
 /** @param {unknown} error */

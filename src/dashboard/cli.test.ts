@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { runKinfold } from '../cli/kinfold'
 import { startDaemon } from '../daemon/daemon'
+import type { CommandRequest } from '../install/env'
 import { parseDashboardArgs } from '../install/args'
 import { EXIT_USAGE } from '../install/install'
 import { type FakeWorld, createWorld } from '../install/test-support'
+import { runDashboard } from './cli'
+import { CLOSED_MESSAGE } from './routes'
 
 let world: FakeWorld
 beforeEach(() => {
@@ -19,54 +22,171 @@ function startWorldDaemon(): number {
 }
 
 const LOGIN_URL = /^http:\/\/127\.0\.0\.1:(\d+)\/dashboard\/login#code=([A-Za-z0-9_-]{43})$/
+const ANY_CODE = /[A-Za-z0-9_-]{43}/
+const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 5))
 
-test('`kinfold dashboard --print` prints one login URL with the code in the fragment, and nothing else', async () => {
-  const port = startWorldDaemon()
-  expect(await runKinfold(['dashboard', '--print'], world.env)).toBe(0)
-  expect(world.out).toHaveLength(1)
-  const match = LOGIN_URL.exec(world.out[0]!)
-  expect(match).not.toBeNull()
-  expect(Number(match![1])).toBe(port)
-  expect(world.fetches).toEqual(['POST /dashboard/login-code'])
-  expect(world.commands).toEqual([])
-})
+async function until(check: () => boolean | Promise<boolean>, what: string): Promise<void> {
+  for (let i = 0; i < 400; i += 1) {
+    if (await check()) return
+    await tick()
+  }
+  throw new Error(`timed out waiting for ${what}`)
+}
 
-test('the printed code logs a browser in once', async () => {
-  const port = startWorldDaemon()
-  await runKinfold(['dashboard', '--print'], world.env)
-  const code = LOGIN_URL.exec(world.out[0]!)![2]!
-  const session = (): Promise<Response> => fetch(`http://127.0.0.1:${port}/dashboard/session`, {
+function signIn(port: number, code: string): Promise<Response> {
+  return fetch(`http://127.0.0.1:${port}/dashboard/session`, {
     method: 'POST',
     headers: { origin: `http://127.0.0.1:${port}`, 'x-sam-request': '1', 'content-type': 'application/json' },
     body: JSON.stringify({ code }),
   })
-  expect((await session()).status).toBe(204)
-  expect((await session()).status).toBe(401)
+}
+
+const pageGet = (port: number, path: string, cookie: string): Promise<Response> =>
+  fetch(`http://127.0.0.1:${port}${path}`, { headers: { cookie }, redirect: 'manual' })
+
+function claim(port: number): Promise<Response> {
+  return fetch(`http://127.0.0.1:${port}/dashboard/claim`, { method: 'POST', headers: { origin: `http://127.0.0.1:${port}`, 'x-sam-request': '1' } })
+}
+
+const OPENERS: ReadonlyArray<readonly [NodeJS.Platform, (url: string) => string[]]> = [
+  ['darwin', (url) => ['open', url]],
+  ['linux', (url) => ['xdg-open', url]],
+  ['win32', (url) => ['rundll32', 'url.dll,FileProtocolHandler', url]],
+]
+
+for (const [platform, argvFor] of OPENERS) {
+  test(`${platform}: the opener gets the plain login address only; the page claims the sign-in once, and Ctrl-C signs out and closes the dashboard`, async () => {
+    const port = startWorldDaemon()
+    const opened: CommandRequest[] = []
+    const stop = new AbortController()
+    const env = { ...world.env, platform, sleep: tick, run: async (request: CommandRequest) => (opened.push(request), { exitCode: 0, stdout: '' }) }
+    const running = runDashboard(env, { command: 'dashboard', print: false, close: false }, { stop: stop.signal })
+
+    await until(() => opened.length === 1, 'the browser to open')
+    const plain = `http://127.0.0.1:${port}/dashboard/login`
+    expect(opened[0]!.argv).toEqual(argvFor(plain))
+    expect(opened[0]!.argv.some((arg) => ANY_CODE.test(arg))).toBe(false)
+    const signedIn = await claim(port)
+    expect(signedIn.status).toBe(204)
+    expect((await claim(port)).status).toBe(401)
+    const cookie = (signedIn.headers.get('set-cookie') ?? '').split(';')[0]!
+    expect((await pageGet(port, '/data/size', cookie)).status).toBe(200)
+    await until(() => world.out.some((line) => line.includes('GET /data/size 200')), 'the request line')
+    await until(() => world.out.some((line) => line.endsWith('signed in from a browser')), 'the sign-in line')
+
+    stop.abort()
+    expect(await running).toBe(0)
+    expect(world.out.at(-1)).toBe('Signed out; the dashboard is closed.')
+    const after = await pageGet(port, '/data/size', cookie)
+    expect(after.status).toBe(401)
+    expect(await after.json()).toEqual({ error: CLOSED_MESSAGE, closed: true })
+    expect(world.out.some((line) => ANY_CODE.test(line))).toBe(false)
+    world.out.length = 0
+  })
+}
+
+test('a claim after the command ended is refused, even if its offer was never taken', async () => {
+  const port = startWorldDaemon()
+  const stop = new AbortController()
+  let opened = false
+  const env = { ...world.env, sleep: tick, run: async () => ((opened = true), { exitCode: 0, stdout: '' }) }
+  const running = runDashboard(env, { command: 'dashboard', print: false, close: false }, { stop: stop.signal })
+  await until(() => opened, 'the browser to open')
+  stop.abort()
+  await running
+  expect((await claim(port)).status).toBe(401)
 })
 
-test('without --print it opens the URL with the platform opener, and prints it only if that fails', async () => {
+test('when no browser can be opened the command prints the plain address to open within 60 s, and nothing secret', async () => {
+  const port = startWorldDaemon()
+  const stop = new AbortController()
+  const env = { ...world.env, platform: 'darwin' as const, sleep: tick, run: async () => ({ exitCode: 1, stdout: '' }) }
+  const running = runDashboard(env, { command: 'dashboard', print: false, close: false }, { stop: stop.signal })
+  await until(() => world.out.some((line) => line.startsWith('could not open a browser')), 'the fallback line')
+  expect(world.out).toContain(`http://127.0.0.1:${port}/dashboard/login`)
+  expect((await claim(port)).status).toBe(204)
+  stop.abort()
+  expect(await running).toBe(0)
+  expect(world.out.some((line) => ANY_CODE.test(line))).toBe(false)
+})
+
+test('a daemon that stops answering is waited for, and the lease is held again when it is back', async () => {
   startWorldDaemon()
-  const opened: string[][] = []
-  const env = { ...world.env, platform: 'darwin' as const, run: async (request: { argv: readonly string[] }) => (opened.push([...request.argv]), { exitCode: 0, stdout: '' }) }
-  expect(await runKinfold(['dashboard'], env)).toBe(0)
-  expect(opened).toHaveLength(1)
-  expect(opened[0]![0]).toBe('open')
-  expect(opened[0]![1]).toMatch(LOGIN_URL)
-  expect(world.out).toEqual(['opened the dashboard in your browser; the link works once, within 60 s'])
+  const stop = new AbortController()
+  let down = false
+  const fetchSome: typeof world.env.fetch = (url, init) => (down && url.includes('/dashboard/lease/') && init.method === 'PUT' ? Promise.reject(new Error('down')) : world.env.fetch(url, init))
+  const env = { ...world.env, fetch: fetchSome, sleep: tick, run: async () => ({ exitCode: 0, stdout: '' }) }
+  const running = runDashboard(env, { command: 'dashboard', print: false, close: false }, { stop: stop.signal })
+  await until(() => world.out.some((line) => line.includes('Ctrl-C')), 'the heading')
+  down = true
+  await until(() => world.out.some((line) => line.includes('the daemon is not answering')), 'the waiting line')
+  down = false
+  await until(() => world.out.some((line) => line === 'the daemon is back'), 'the back line')
+  stop.abort()
+  expect(await running).toBe(0)
+})
+
+test('--print prints one link, holds the dashboard open for 12 h, and --close ends it', async () => {
+  const port = startWorldDaemon()
+  expect(await runKinfold(['dashboard', '--print'], world.env)).toBe(0)
+  const match = LOGIN_URL.exec(world.out[0]!)
+  expect(match).not.toBeNull()
+  expect(Number(match![1])).toBe(port)
+  expect(world.out[1]).toBe('the dashboard stays open until `kinfold dashboard --close` or for 12 hours; the link works once, within 60 s')
+  expect(world.commands).toEqual([])
+  const signedIn = await signIn(port, match![2]!)
+  expect(signedIn.status).toBe(204)
+  expect((await signIn(port, match![2]!)).status).toBe(401)
+  const cookie = (signedIn.headers.get('set-cookie') ?? '').split(';')[0]!
 
   world.out.length = 0
-  const failing = { ...env, run: async () => ({ exitCode: 127, stdout: '' }) }
-  expect(await runKinfold(['dashboard'], failing)).toBe(0)
-  expect(world.out[0]).toBe('could not open a browser (open exited 127); open this link within 60 s:')
-  expect(world.out[1]).toMatch(LOGIN_URL)
+  expect(await runKinfold(['dashboard', '--close'], world.env)).toBe(0)
+  expect(world.out).toEqual(['closed the dashboard opened with --print'])
+  expect((await pageGet(port, '/data/size', cookie)).status).toBe(401)
+  world.out.length = 0
+  expect(await runKinfold(['dashboard', '--close'], world.env)).toBe(0)
+  expect(world.out).toEqual(['no dashboard opened with --print was open'])
 })
 
 test('a daemon that is down is exit 1 with one line; bad flags are usage errors', async () => {
   expect(await runKinfold(['dashboard', '--print'], world.env)).toBe(1)
   expect(world.out).toEqual(['kinfold dashboard failed: the daemon is not running (no daemon.json or daemon.token)'])
   expect(await runKinfold(['dashboard', '--open'], world.env)).toBe(EXIT_USAGE)
-  expect(parseDashboardArgs(['dashboard'])).toEqual({ ok: true, value: { command: 'dashboard', print: false } })
-  expect(parseDashboardArgs(['dashboard', '--print'])).toEqual({ ok: true, value: { command: 'dashboard', print: true } })
+  expect(parseDashboardArgs(['dashboard'])).toEqual({ ok: true, value: { command: 'dashboard', print: false, close: false } })
+  expect(parseDashboardArgs(['dashboard', '--print'])).toEqual({ ok: true, value: { command: 'dashboard', print: true, close: false } })
+  expect(parseDashboardArgs(['dashboard', '--close'])).toEqual({ ok: true, value: { command: 'dashboard', print: false, close: true } })
   expect(parseDashboardArgs(['dashboard', '--print', '--print'])?.ok).toBe(false)
+  expect(parseDashboardArgs(['dashboard', '--print', '--close'])?.ok).toBe(false)
   expect(parseDashboardArgs(['status'])).toBeNull()
+})
+
+test('--print gives its lease back when no code comes, so the dashboard does not stay open for 12 h with nobody signed in', async () => {
+  startWorldDaemon()
+  const seen: string[] = []
+  const failing: typeof world.env.fetch = (url, init) => {
+    seen.push(`${init.method} ${new URL(url).pathname.replace(/[A-Za-z0-9_-]{43}$/, '<id>')}`)
+    return url.endsWith('/dashboard/login-code') ? Promise.reject(new Error('timeout')) : world.env.fetch(url, init)
+  }
+  expect(await runDashboard({ ...world.env, fetch: failing }, { command: 'dashboard', print: true, close: false })).toBe(1)
+  expect(seen).toEqual(['PUT /dashboard/lease/<id>', 'POST /dashboard/login-code', 'DELETE /dashboard/lease/<id>'])
+})
+
+test('a refused renewal ends the command with its reason; only a daemon that does not answer is waited for', async () => {
+  startWorldDaemon()
+  let renewals = 0
+  const refusing: typeof world.env.fetch = async (url, init) => {
+    if (url.includes('/dashboard/lease/') && init.method === 'PUT' && (renewals += 1) > 1) return new Response(JSON.stringify({ error: 'too many kinfold dashboard commands are running' }), { status: 409 })
+    return world.env.fetch(url, init)
+  }
+  const env = { ...world.env, fetch: refusing, sleep: tick, run: async () => ({ exitCode: 0, stdout: '' }) }
+  expect(await runDashboard(env, { command: 'dashboard', print: false, close: false })).toBe(1)
+  expect(world.out.at(-1)).toBe('kinfold dashboard failed: too many kinfold dashboard commands are running')
+  expect(world.out.some((line) => line.includes('not answering'))).toBe(false)
+})
+
+test('a daemon from before leases answers 401 on the lease route; that reads as an older build', async () => {
+  startWorldDaemon()
+  const old: typeof world.env.fetch = async (url, init) => (url.includes('/dashboard/lease/') ? new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 }) : world.env.fetch(url, init))
+  expect(await runDashboard({ ...world.env, fetch: old }, { command: 'dashboard', print: false, close: false })).toBe(1)
+  expect(world.out).toEqual(['kinfold dashboard failed: the running daemon is an older build; run kinfold update'])
 })

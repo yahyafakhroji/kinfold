@@ -3,7 +3,7 @@
 // builds a detached tree and the shell swaps it in only if no newer
 // navigation started meanwhile, so a slow answer never overwrites a fast one.
 
-import { api, errorText } from './api.js'
+import { api, errorText, watchClosed } from './api.js'
 import { applyHubOnly, loadCentral, markBrand } from './central-mark.js'
 import { h, notice, replaceContent } from './dom.js'
 import { formatHash, parseHash } from './hash.js'
@@ -19,6 +19,8 @@ const PAGES = { models: renderModels, sessions: renderSessions, memory: renderMe
 let generation = 0
 /** What central memory this daemon serves or uses; asked once per load. */
 const central = loadCentral()
+// How soon a page left open notices that its `kinfold dashboard` ended.
+const STATE_EVERY_MS = 5_000
 
 /** @param {import('./hash.js').HashState} state */
 function navigate(state) {
@@ -64,5 +66,6 @@ function signOut() {
 window.addEventListener('hashchange', () => { render() })
 document.getElementById('sign-out')?.addEventListener('click', signOut)
 render()
+watchClosed(STATE_EVERY_MS)
 showUpdateBanner(document.getElementById('update-banner'))
 central.then((state) => markBrand(document.querySelector('.brand-where'), state))

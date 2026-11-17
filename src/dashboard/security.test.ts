@@ -5,7 +5,7 @@ import { DASHBOARD_SESSIONS_FILE } from './auth'
 import { type TempStore, openTempStore } from '../observer/test-support'
 import { SECURITY_HEADERS } from './headers'
 import { listAssets } from './routes'
-import { type DashboardRig, startRig } from './test-support'
+import { type DashboardRig, startRig, RIG_LEASE } from './test-support'
 
 let temp: TempStore
 let rig: DashboardRig
@@ -23,7 +23,8 @@ const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 's
 const ASSET_PATHS = [...listAssets()].map((name) => `/dashboard/assets/${name}`)
 
 test('login: code with the token, session with the code, then the app page; a code works once', async () => {
-  const issued = await rig.bearer('POST', '/dashboard/login-code')
+  await rig.bearer('PUT', `/dashboard/lease/${RIG_LEASE}`, { mode: 'live' })
+  const issued = await rig.bearer('POST', '/dashboard/login-code', { lease: RIG_LEASE })
   expect(issued.status).toBe(200)
   const { code, expiresInMs } = (await issued.json()) as { code: string; expiresInMs: number }
   expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/)
@@ -48,7 +49,7 @@ test('login: code with the token, session with the code, then the app page; a co
 test('a wrong code, a missing code and an extra field are refused', async () => {
   expect((await rig.page('POST', '/dashboard/session', { body: { code: 'A'.repeat(43) } })).status).toBe(401)
   expect((await rig.page('POST', '/dashboard/session', { body: {} })).status).toBe(400)
-  const { code } = (await (await rig.bearer('POST', '/dashboard/login-code')).json()) as { code: string }
+  const { code } = await rig.issueCode()
   expect((await rig.page('POST', '/dashboard/session', { body: { code, admin: true } })).status).toBe(400)
   expect((await rig.page('POST', '/dashboard/session', { body: { code } })).status).toBe(204)
 })
@@ -118,7 +119,7 @@ test('the token path is unchanged: no Origin needed with the Bearer token', asyn
 })
 
 test('the login exchange itself needs our Origin and header, and the Host check still runs', async () => {
-  const { code } = (await (await rig.bearer('POST', '/dashboard/login-code')).json()) as { code: string }
+  const { code } = await rig.issueCode()
   expect((await rig.page('POST', '/dashboard/session', { body: { code }, bare: true })).status).toBe(403)
   expect((await rig.page('POST', '/dashboard/session', { body: { code }, bare: true, headers: { origin: 'https://evil.example', 'x-sam-request': '1' } })).status).toBe(403)
   const cookie = await rig.login()
@@ -127,8 +128,11 @@ test('the login exchange itself needs our Origin and header, and the Host check 
 })
 
 test('signed out, the app page sends you to the login page; sign-out ends the session', async () => {
+  const closed = await rig.page('GET', '/dashboard/')
+  expect(closed.status).toBe(303)
+  expect(closed.headers.get('location')).toBe('/dashboard/login#closed')
+  await rig.issueCode()
   const away = await rig.page('GET', '/dashboard/')
-  expect(away.status).toBe(303)
   expect(away.headers.get('location')).toBe('/dashboard/login')
   const login = await rig.page('GET', '/dashboard/login')
   expect(login.status).toBe(200)
@@ -165,7 +169,7 @@ test('every dashboard response carries the CSP, nosniff, no-referrer, no-store a
     await rig.page('GET', '/memory/observations', { cookie }),
     await rig.page('GET', '/metrics/summary'),
     await rig.page('POST', '/data/scan', { cookie, bare: true }),
-    await rig.bearer('POST', '/dashboard/login-code'),
+    await rig.bearer('POST', '/dashboard/login-code', { lease: RIG_LEASE }),
     await rig.page('OPTIONS', '/memory/observations', { headers: { origin: 'https://evil.example', 'access-control-request-method': 'PUT' } }),
   ]
   for (const response of responses) {
@@ -190,7 +194,7 @@ test('assets are served by allowlist with their types; nothing outside public/ i
 
 test('no served page, asset or answer contains the daemon token, and logs hold no code or cookie', async () => {
   const cookie = await rig.login()
-  const { code } = (await (await rig.bearer('POST', '/dashboard/login-code')).json()) as { code: string }
+  const { code } = await rig.issueCode()
   const bodies = await Promise.all([
     rig.page('GET', '/dashboard/login'), rig.page('GET', '/dashboard/', { cookie }),
     ...ASSET_PATHS.map((path) => rig.page('GET', path)),

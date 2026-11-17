@@ -209,3 +209,94 @@ test('the data page lists the store by part and shows the warning past the thres
   const under = textNodes(data.sizeBlock({ ...size, overWarn: false, warning: null })).map((node) => node.textContent).join('')
   expect(under).not.toContain('set prompts retention')
 })
+
+test('the login page opened after the dashboard closed says so and posts nothing', async () => {
+  const calls: { fetched: number; replaced: string[] } = { fetched: 0, replaced: [] }
+  const globals = globalThis as Record<string, unknown>
+  const previous = { location: globals.location, history: globals.history, fetch: globals.fetch, document: globals.document }
+  const message = { textContent: '', className: '' }
+  globals.document = { getElementById: (id: string) => (id === 'login-message' ? message : null) }
+  globals.location = { hash: '#closed', replace: () => {} }
+  globals.history = { replaceState: (_s: unknown, _t: string, url: string) => calls.replaced.push(url) }
+  globals.fetch = async () => {
+    calls.fetched += 1
+    return new Response(null, { status: 204 })
+  }
+  try {
+    await import(`${join(PUBLIC_DIR, 'login.js')}?run=closed`)
+    await Bun.sleep(10)
+  } finally {
+    Object.assign(globals, previous)
+  }
+  expect(message.textContent).toBe('Dashboard closed; run `kinfold dashboard` in a terminal to open it again.')
+  expect(calls.fetched).toBe(0)
+  expect(calls.replaced).toEqual(['/dashboard/login'])
+})
+
+test('an open page that finds the dashboard closed goes to the closed login screen', async () => {
+  const api = await load<{ watchClosed(every: number, schedule: (run: () => void, ms: number) => unknown): void }>('api.js')
+  const globals = globalThis as Record<string, unknown>
+  const previous = { location: globals.location, fetch: globals.fetch }
+  const assigned: string[] = []
+  const asked: string[] = []
+  let scheduled: (() => void) | null = null
+  globals.location = { assign: (url: string) => assigned.push(url) }
+  globals.fetch = async (path: string) => {
+    asked.push(path)
+    return new Response(JSON.stringify({ error: 'dashboard closed; run kinfold dashboard', closed: true }), { status: 401 })
+  }
+  try {
+    api.watchClosed(5_000, (run, ms) => {
+      expect(ms).toBe(5_000)
+      scheduled = run
+    })
+    ;(scheduled as unknown as () => void)()
+    await Bun.sleep(10)
+  } finally {
+    Object.assign(globals, previous)
+  }
+  expect(asked).toEqual(['/dashboard/state'])
+  expect(assigned).toEqual(['/dashboard/login#closed'])
+})
+
+test('the login page opened at the plain address claims the waiting sign-in once, then opens the app', async () => {
+  const calls: { fetched: { url: string; init: RequestInit }[]; navigated: string[] } = { fetched: [], navigated: [] }
+  const globals = globalThis as Record<string, unknown>
+  const previous = { location: globals.location, history: globals.history, fetch: globals.fetch, document: globals.document }
+  const message = { textContent: '', className: '' }
+  globals.document = { getElementById: (id: string) => (id === 'login-message' ? message : null) }
+  globals.location = { hash: '', replace: (url: string) => calls.navigated.push(url) }
+  globals.history = { replaceState: () => {} }
+  globals.fetch = async (url: string, init: RequestInit) => {
+    calls.fetched.push({ url, init })
+    return new Response(null, { status: 204 })
+  }
+  try {
+    await import(`${join(PUBLIC_DIR, 'login.js')}?run=claim`)
+    await Bun.sleep(10)
+  } finally {
+    Object.assign(globals, previous)
+  }
+  expect(calls.fetched).toHaveLength(1)
+  expect(calls.fetched[0]!.url).toBe('/dashboard/claim')
+  expect(calls.fetched[0]!.init).toMatchObject({ method: 'POST', credentials: 'same-origin', headers: { 'x-sam-request': '1' } })
+  expect(calls.fetched[0]!.init.body).toBeUndefined()
+  expect(calls.navigated).toEqual(['/dashboard/'])
+})
+
+test('with nothing to claim the login page says how to open the dashboard', async () => {
+  const globals = globalThis as Record<string, unknown>
+  const previous = { location: globals.location, history: globals.history, fetch: globals.fetch, document: globals.document }
+  const message = { textContent: '', className: '' }
+  globals.document = { getElementById: (id: string) => (id === 'login-message' ? message : null) }
+  globals.location = { hash: '', replace: () => {} }
+  globals.history = { replaceState: () => {} }
+  globals.fetch = async () => new Response(JSON.stringify({ error: 'no sign-in is waiting' }), { status: 401 })
+  try {
+    await import(`${join(PUBLIC_DIR, 'login.js')}?run=unclaimed`)
+    await Bun.sleep(10)
+  } finally {
+    Object.assign(globals, previous)
+  }
+  expect(message.textContent).toBe('The dashboard is open while `kinfold dashboard` runs in a terminal. Run it; it opens this page signed in, and Ctrl-C closes it.')
+})

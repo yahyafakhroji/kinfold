@@ -28,6 +28,8 @@ const EXIT_FAILED = 1
 const EXIT_USAGE = 2
 /** 128 + SIGINT, as a shell reports a Ctrl-C. */
 export const EXIT_CANCELLED = 130
+/** SIGHUP is the terminal closing. */
+const DASHBOARD_SIGNALS: readonly NodeJS.Signals[] = ['SIGINT', 'SIGHUP', 'SIGTERM']
 
 export type SubcommandName = 'hook' | 'mcp' | 'daemon' | 'observe'
 
@@ -148,7 +150,16 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       return EXIT_USAGE
     }
     const { runDashboard } = await import('../dashboard/cli')
-    return runFramed(effective, 'dashboard', (env) => runDashboard(env, dashboard.value))
+    // Ctrl-C, a closed terminal and SIGTERM all end the dashboard the same way: its lease is released and its pages are signed out.
+    const stop = new AbortController()
+    // Kept on until the command returns: a second Ctrl-C, or SIGTERM after SIGHUP, must not kill it before the lease is released.
+    const onSignal = (): void => stop.abort()
+    for (const signal of DASHBOARD_SIGNALS) process.on(signal, onSignal)
+    try {
+      return await runFramed(effective, 'dashboard', (env) => runDashboard(env, dashboard.value, { stop: stop.signal }))
+    } finally {
+      for (const signal of DASHBOARD_SIGNALS) process.off(signal, onSignal)
+    }
   }
   const watch = parseWatchArgs(args)
   if (watch !== null) {
