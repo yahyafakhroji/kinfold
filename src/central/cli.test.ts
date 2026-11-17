@@ -70,6 +70,19 @@ test('serve makes this machine the hub, restarts the service and shows a code wi
   expect(centralModeOf(hubWorld.dataDir)).toBeNull()
 })
 
+test('on macOS, serve and invite say the firewall may ask to allow incoming connections; elsewhere they do not', async () => {
+  const note = (out: readonly string[]): boolean => out.some((line) => line.includes('firewall may ask'))
+  const mac = { ...hubWorld.env, platform: 'darwin' as const }
+  expect(await runCentralCommand(mac, { command: 'serve', port: 37_812, off: false }, { tailscale })).toBe(0)
+  expect(note(hubWorld.out)).toBe(true)
+  hubWorld.out.length = 0
+  expect(await runCentralCommand(mac, { command: 'invite' }, { tailscale })).toBe(0)
+  expect(note(hubWorld.out)).toBe(true)
+  hubWorld.out.length = 0
+  expect(await runCentralCommand({ ...hubWorld.env, platform: 'linux' }, { command: 'invite' }, { tailscale })).toBe(0)
+  expect(note(hubWorld.out)).toBe(false)
+})
+
 test('serve needs an install record, and a device cannot also be the hub', async () => {
   const bare = createWorld()
   try {

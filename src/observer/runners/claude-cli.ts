@@ -10,6 +10,7 @@ import { isRecord } from '../../contract/event'
 import { DATA_DIR_MODE } from '../../store/data-dir'
 import { LEGACY_OBSERVER_ENV_FLAG, OBSERVER_ENV_FLAG } from '../env'
 import { ObserverError, type ObserverPrompt, type ObserverRunner, type RunnerResult } from '../types'
+import { cliErrorText, cliFailure } from './cli-error'
 import { withCmdShims } from './windows-shim'
 
 export interface SpawnRequest {
@@ -24,6 +25,8 @@ export interface SpawnResult {
   exitCode: number
   stdout: string
   timedOut: boolean
+  /** The start of what the child wrote to stderr; read only for an error line, never logged whole. */
+  stderr?: string
 }
 
 export type SpawnFn = (request: SpawnRequest) => Promise<SpawnResult>
@@ -76,13 +79,16 @@ export function ensureObserverDir(dataDir: string): string {
   return dir
 }
 
+/** Enough for the error line a CLI prints; the rest is dropped. */
+const MAX_STDERR_CHARS = 4_096
+
 export const spawnProcess: SpawnFn = async (request) => {
   const child = Bun.spawn([...request.cmd], {
     cwd: request.cwd,
     env: { ...request.env },
     stdin: new TextEncoder().encode(request.stdin),
     stdout: 'pipe',
-    stderr: 'ignore',
+    stderr: 'pipe',
   })
   let timedOut = false
   const timer = setTimeout(() => {
@@ -90,8 +96,8 @@ export const spawnProcess: SpawnFn = async (request) => {
     child.kill()
   }, request.timeoutMs)
   try {
-    const [stdout, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited])
-    return { exitCode, stdout, timedOut }
+    const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+    return { exitCode, stdout, timedOut, stderr: stderr.slice(0, MAX_STDERR_CHARS) }
   } finally {
     clearTimeout(timer)
   }
@@ -112,7 +118,8 @@ export function parseCliResult(stdout: string, configuredModel: string): RunnerR
   }
   if (!isRecord(value) || value.type !== 'result') throw new ObserverError('bad_response', 'claude output has no result object')
   if (value.is_error === true || value.subtype !== 'success') {
-    throw new ObserverError('bad_response', `claude reported ${typeof value.subtype === 'string' ? value.subtype : 'an error'}`)
+    const what = `claude reported ${typeof value.subtype === 'string' && value.subtype !== 'success' ? value.subtype : 'an error'}`
+    throw cliFailure(what, typeof value.result === 'string' ? value.result : '', 'bad_response')
   }
   if (typeof value.result !== 'string') throw new ObserverError('bad_response', 'claude result is not text')
   const models = isRecord(value.modelUsage) ? Object.keys(value.modelUsage) : []
@@ -151,7 +158,7 @@ export function createClaudeCliRunner(options: ClaudeCliOptions): ObserverRunner
       throw new ObserverError(code === 'ENOENT' ? 'cli_missing' : 'internal', `claude could not start (${code})`)
     }
     if (result.timedOut) throw new ObserverError('timeout', `claude did not finish in ${request.timeoutMs} ms`)
-    if (result.exitCode !== 0) throw new ObserverError('exit_nonzero', `claude exited ${result.exitCode}`)
+    if (result.exitCode !== 0) throw cliFailure(`claude exited ${result.exitCode}`, cliErrorText(result.stdout, result.stderr ?? ''))
     return parseCliResult(result.stdout, options.model)
   }
   return { run }

@@ -94,7 +94,7 @@ export function formatDebugEvent(event: TraceEvent): string[] {
   if (event.kind === 'prompt') return promptLines(event)
   if (event.kind === 'start') return startLines(event)
   if (event.kind === 'turn') return turnLines(event)
-  return [observerLine(event)]
+  return event.note === undefined ? [observerLine(event)] : [observerLine(event), `  why       ${cleanTitle(event.note)}`]
 }
 
 const KINDS: ReadonlySet<string> = new Set(['prompt', 'start', 'turn', 'observer'])

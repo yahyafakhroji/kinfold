@@ -10,7 +10,7 @@ import { type HubAnswer, type RunningHub, bindAddress, startHubServer } from './
 import { type CentralCore, hubRoutes } from './hub-routes'
 import { publicKeyOf } from './keys'
 import { HUB_KEY_FILE } from './paths'
-import type { Tailscale, TailscaleIdentity } from './tailscale'
+import { type Tailscale, type TailscaleIdentity, isTailscaleProblem } from './tailscale'
 
 export const HUB_RETRY_MS = 30_000
 
@@ -60,7 +60,7 @@ export function startHubWhenReady(deps: HubDaemonDeps): HubDaemon {
     const self = await deps.tailscale.self()
     if (stopped) return
     try {
-      if (self === null) throw new Error('Tailscale is not running or not signed in on this machine')
+      if (isTailscaleProblem(self)) throw new Error(self.problem)
       if (self.identity.tags.length > 0) throw new Error('this machine is a tagged Tailscale node; a hub must be a node owned by your own Tailscale user')
       const identity: TailscaleIdentity = self.identity
       const hostname = bindAddress(self.addresses, deps.allowLoopback === true)

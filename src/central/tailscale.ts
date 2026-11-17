@@ -1,8 +1,8 @@
 // What Tailscale says about a node: who owns it and which node it is. The hub
 // asks through the tailscale command (`whois --json` for a caller, `status
 // --json` for itself) rather than the LocalAPI socket, whose path differs on
-// every OS and install. Every failure reads as "no identity", which the hub
-// treats as a refusal. Only a successful answer is cached, for a minute, so a
+// every OS and install. A failed whois reads as "no identity", which the hub
+// treats as a refusal; a failed self lookup says why, for status and the log. Only a successful answer is cached, for a minute, so a
 // node removed from the tailnet stops passing within that minute.
 
 import { existsSync } from 'node:fs'
@@ -26,13 +26,39 @@ export interface TailscaleSelf {
   dnsName: string
 }
 
-export interface Tailscale {
-  whois(address: string): Promise<TailscaleIdentity | null>
-  self(): Promise<TailscaleSelf | null>
+/** Why this machine has no Tailscale identity, in words for status and the log. */
+export interface TailscaleProblem {
+  problem: string
 }
 
-/** Runs the tailscale command with these arguments; its stdout, or null when it is missing, fails or runs past its time. */
-export type TailscaleRunner = (args: readonly string[]) => Promise<string | null>
+export interface Tailscale {
+  whois(address: string): Promise<TailscaleIdentity | null>
+  self(): Promise<TailscaleSelf | TailscaleProblem>
+}
+
+export type TailscaleRun = { ok: true; stdout: string } | { ok: false; problem: string }
+
+/** Runs the tailscale command with these arguments: its stdout, or why it gave none. */
+export type TailscaleRunner = (args: readonly string[]) => Promise<TailscaleRun>
+
+export const TAILSCALE_MISSING = 'tailscale command not found'
+export const TAILSCALE_STOPPED = 'Tailscale is not running or not signed in on this machine'
+const FAILED = 'the tailscale command failed'
+const MAX_PROBLEM_CHARS = 200
+
+export function isTailscaleProblem(value: TailscaleSelf | TailscaleProblem): value is TailscaleProblem {
+  return 'problem' in value
+}
+
+/** The first non-blank line of the command's output, without escape codes, control or direction characters, bounded. */
+export function firstLine(output: string): string {
+  const plain = output
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, '')
+    .replace(/\u001b\[[0-9;?]*[ -\/]*[@-~]/g, '')
+    .replace(/\u001b[@-_]/g, '')
+  const line = plain.split(/\r?\n/).map((part) => part.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '').trim()).find((part) => part !== '') ?? ''
+  return line.length > MAX_PROBLEM_CHARS ? `${line.slice(0, MAX_PROBLEM_CHARS)}...` : line
+}
 
 export const TAILSCALE_TIMEOUT_MS = 3_000
 export const WHOIS_CACHE_MS = 60_000
@@ -102,13 +128,15 @@ function parseWhois(text: string | null): TailscaleIdentity | null {
   return { userId, loginName: typeof user.LoginName === 'string' ? user.LoginName : '', nodeId, nodeName: shortName(node.Name), tags: tagsOf(node.Tags) }
 }
 
-function parseStatus(text: string | null): TailscaleSelf | null {
-  const value = parseJson(text)
-  if (value === null || value.BackendState !== 'Running' || !isRecord(value.Self)) return null
+function parseStatus(run: TailscaleRun): TailscaleSelf | TailscaleProblem {
+  if (!run.ok) return { problem: run.problem }
+  const value = parseJson(run.stdout)
+  if (value === null) return { problem: `${FAILED}: ${firstLine(run.stdout) || 'it printed no status'}` }
+  if (value.BackendState !== 'Running' || !isRecord(value.Self)) return { problem: TAILSCALE_STOPPED }
   const self = value.Self
   const userId = idString(self.UserID)
   const nodeId = idString(self.ID)
-  if (userId === null || nodeId === null) return null
+  if (userId === null || nodeId === null) return { problem: TAILSCALE_STOPPED }
   const addresses = Array.isArray(self.TailscaleIPs) ? self.TailscaleIPs.filter((ip): ip is string => typeof ip === 'string' && isTailscaleAddress(ip)) : []
   const nodeName = typeof self.HostName === 'string' && self.HostName !== '' ? self.HostName : shortName(self.DNSName)
   const dnsName = typeof self.DNSName === 'string' ? self.DNSName.replace(/\.$/, '') : ''
@@ -120,7 +148,8 @@ export function cliTailscale(run: TailscaleRunner): Tailscale {
     whois: async (address) => {
       // Only an address is ever passed, so nothing the caller controls can read as a flag.
       if (isIP(address) === 0) return null
-      return parseWhois(await run(['whois', '--json', address]))
+      const answer = await run(['whois', '--json', address])
+      return answer.ok ? parseWhois(answer.stdout) : null
     },
     self: async () => parseStatus(await run(['status', '--json', '--peers=false'])),
   }
@@ -150,18 +179,59 @@ export function findTailscale(platform: NodeJS.Platform = currentPlatform().node
   return which('tailscale') ?? KNOWN_PLACES[platform]?.find(exists) ?? null
 }
 
-/** The real runner: the command found above, bounded by TAILSCALE_TIMEOUT_MS, stdout only. */
-export function processRunner(program: string | null = findTailscale()): TailscaleRunner {
+/**
+ * The macOS app binary (and the /usr/local/bin wrapper that calls it) acts as
+ * a CLI only when TERM is set; without it, it tries to start the GUI and
+ * fails. A LaunchAgent has no TERM, so one is always given. "xterm" is the
+ * value confirmed against the app; a TERM already set is kept.
+ */
+export function tailscaleEnv(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [name, value] of Object.entries(env)) if (value !== undefined) out[name] = value
+  if (out.TERM === undefined || out.TERM === '') out.TERM = 'xterm'
+  return out
+}
+
+type Finished = readonly [string, string, number]
+
+/** The real runner: the command found above (program and leading arguments), bounded by timeoutMs. */
+export function processRunner(command: readonly string[] | null = defaultCommand(), env: Readonly<Record<string, string | undefined>> = process.env, timeoutMs: number = TAILSCALE_TIMEOUT_MS): TailscaleRunner {
   return async (args) => {
-    if (program === null) return null
+    if (command === null || command.length === 0) return { ok: false, problem: TAILSCALE_MISSING }
+    let child: ReturnType<typeof Bun.spawn<'ignore', 'pipe', 'pipe'>>
     try {
-      const child = Bun.spawn([program, ...args], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', timeout: TAILSCALE_TIMEOUT_MS })
-      const [out, code] = await Promise.all([new Response(child.stdout).text(), child.exited])
-      return code === 0 ? out : null
-    } catch {
-      return null
+      child = Bun.spawn([...command, ...args], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', env: tailscaleEnv(env) })
+    } catch (error: unknown) {
+      const code = isRecord(error) && typeof error.code === 'string' ? error.code : 'unknown error'
+      return { ok: false, problem: code === 'ENOENT' ? TAILSCALE_MISSING : `${FAILED}: it could not start (${code})` }
+    }
+    // The deadline covers the output too: a wrapper's child can hold the pipes open after the command itself is gone.
+    let timer: Timer | undefined
+    const late = new Promise<'late'>((resolve) => {
+      timer = setTimeout(() => resolve('late'), timeoutMs)
+    })
+    const finished: Promise<Finished> = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+    finished.catch(() => {})
+    try {
+      const outcome = await Promise.race([finished, late])
+      if (outcome === 'late') {
+        child.kill('SIGKILL')
+        return { ok: false, problem: `${FAILED}: no answer within ${timeoutMs / 1000} s` }
+      }
+      const [out, err, code] = outcome
+      if (code === 0) return { ok: true, stdout: out }
+      return { ok: false, problem: `${FAILED}: ${firstLine(err) || firstLine(out) || `exit code ${code}`}` }
+    } catch (error: unknown) {
+      return { ok: false, problem: `${FAILED}: ${error instanceof Error ? error.name : 'unknown error'}` }
+    } finally {
+      clearTimeout(timer)
     }
   }
+}
+
+function defaultCommand(): string[] | null {
+  const program = findTailscale()
+  return program === null ? null : [program]
 }
 
 export function systemTailscale(): Tailscale {

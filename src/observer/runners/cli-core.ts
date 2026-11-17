@@ -8,7 +8,8 @@
 //   - Any tool event in the output rejects the whole run (tool_attempt). There
 //     is no allow list.
 //   - Error details are written here. They never quote stdout, stdin, prompt
-//     text, env values or file contents.
+//     text, env values or file contents; a failed run adds one redacted line
+//     of the CLI's stderr.
 
 import { randomBytes } from 'node:crypto'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -25,6 +26,7 @@ import {
   type RunnerUsage,
   toObserverError,
 } from '../types'
+import { cliFailure } from './cli-error'
 import { withCmdShims } from './windows-shim'
 import { DEFAULT_CLI_TIMEOUT_MS, type SpawnFn, type SpawnRequest, type SpawnResult, ensureObserverDir, spawnProcess } from './claude-cli'
 
@@ -162,7 +164,8 @@ async function spawnStarted(spawn: SpawnFn, request: SpawnRequest, label: string
 /** The class for a timed-out or failed run; stdout never reaches a detail. */
 function exitFailure(result: SpawnResult, timeoutMs: number, label: string): ObserverError | null {
   if (result.timedOut) return new ObserverError('timeout', `${label} did not finish in ${timeoutMs} ms`)
-  if (result.exitCode !== 0) return new ObserverError('exit_nonzero', `exited ${result.exitCode}`)
+  // stderr only: stdout can carry session text.
+  if (result.exitCode !== 0) return cliFailure(`exited ${result.exitCode}`, result.stderr ?? '')
   return null
 }
 

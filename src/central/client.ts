@@ -162,7 +162,7 @@ type Result<T> = { ok: true; value: T } | { ok: false; error: string }
 
 const PUBLIC_KEY = /^[A-Za-z0-9+/]{59}=$/
 
-async function postPlain(input: PairInput, path: string, body: unknown): Promise<Result<{ status: number; value: unknown }>> {
+async function postPlain(input: PairInput, path: string, body: unknown, timeoutError: string): Promise<Result<{ status: number; value: unknown }>> {
   const fetchFn = input.fetch ?? ((url, init) => fetch(url, init))
   const where = `${hostPart(input.hub)}:${input.port}`
   try {
@@ -175,9 +175,21 @@ async function postPlain(input: PairInput, path: string, body: unknown): Promise
     if (value === undefined) return { ok: false, error: `the hub at ${where} sent an answer Kinfold cannot read` }
     return { ok: true, value: { status: response.status, value } }
   } catch (error: unknown) {
+    if (isTimeout(error)) return { ok: false, error: timeoutError }
     return { ok: false, error: `could not reach the hub at ${where} (${errorName(error)}); is it running kinfold central serve, and is Tailscale up on both machines?` }
   }
 }
+
+/**
+ * Seen live: a Mac hub's firewall holds the first connection while it asks
+ * whether to allow kinfold, so the device times out. A request that never
+ * reached the hub spent none of the code's tries.
+ */
+export const PAIR_TIMEOUT = "the hub didn't answer in time; on a Mac hub, check for a firewall prompt to allow kinfold, then run the same command again (the code is still valid until it expires)"
+
+/** The hub answered the first request, so the firewall let it through; it may have used the code up before the answer was lost. */
+export const PAIR_LATE = 'the hub took the code but did not answer in time; run the same command again, and if the hub says the code is not valid, run kinfold central invite on the hub for a new one'
+
 
 const errorOf = (value: unknown): string => (typeof value === 'object' && value !== null && typeof (value as { error?: unknown }).error === 'string' ? (value as { error: string }).error : 'refused')
 
@@ -189,7 +201,7 @@ const errorOf = (value: unknown): string => (typeof value === 'object' && value 
 export async function pairWithHub(input: PairInput): Promise<Result<Paired>> {
   const code = normalizeCode(input.code)
   if (code === null) return { ok: false, error: 'that is not a Kinfold code; it looks like KF-XXXX-XXXX' }
-  const start = await postPlain(input, '/central/pair/start', {})
+  const start = await postPlain(input, '/central/pair/start', {}, PAIR_TIMEOUT)
   if (!start.ok) return start
   if (start.value.status === 409) return { ok: false, error: `the hub runs another Kinfold version; hub and devices need the same major.minor` }
   if (start.value.status !== 200) return { ok: false, error: `the hub refused: ${errorOf(start.value.value)}` }
@@ -202,7 +214,7 @@ export async function pairWithHub(input: PairInput): Promise<Result<Paired>> {
   const key = proofKey(verifierFor(code, salt))
   const fields = { deviceId, devicePublicKey: keys.publicKey, nonce }
   const deviceName = (input.deviceName ?? hostname()).replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 64) || 'device'
-  const pair = await postPlain(input, '/central/pair', { ...fields, deviceName, proof: deviceProof(key, fields), version: input.version })
+  const pair = await postPlain(input, '/central/pair', { ...fields, deviceName, proof: deviceProof(key, fields), version: input.version }, PAIR_LATE)
   if (!pair.ok) return pair
   const answer = pair.value.value as Record<string, unknown>
   if (pair.value.status === 409) return { ok: false, error: `the hub runs Kinfold ${String(answer.hubVersion)} and this device ${input.version}; hub and devices need the same major.minor` }

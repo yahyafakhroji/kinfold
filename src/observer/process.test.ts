@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { NO_CREDENTIALS } from '../secrets/credentials'
 import { RETRY_BASE_MS } from '../store/observer-store'
+import { upsertObserverSettings } from '../store/observer-settings-store'
 import { insertPrompt } from '../store/writes'
 import { processSessionBatch } from './process'
 import { createRunner } from './runners'
@@ -101,17 +102,18 @@ test('a missing credential records the failure, leaves events retryable and call
   expect(outcome).toMatchObject({ status: 'failed', errorClass: 'credential_missing' })
   expect(calls).toEqual([])
   expect(runs()).toEqual([expect.objectContaining({ status: 'failed', provider: 'openrouter', model: 'openrouter/auto', error: 'credential_missing: no keychain entry for openrouter' })])
-  expect(stateCounts(temp.store, session)).toEqual({ failed: 4 })
+  expect(stateCounts(temp.store, session)).toEqual({ pending: 4 })
   expect(observations()).toEqual([])
 })
 
 test('failed events are retried with backoff and stop, still visible, after 3 attempts', async () => {
   const session = seedSession(temp.store, 'claude-code', 's1')
   seedTurn(session)
-  const runner = fakeRunner([new ObserverError('exit_nonzero', 'claude exited 1')])
+  // A reply this batch cannot use counts against its events; a provider that fails as a whole does not (below).
+  const runner = fakeRunner(['I think the tests passed!'])
   const attempts = () => temp.store.db.query('SELECT DISTINCT observer_attempts AS n FROM events').all()
 
-  expect(await process(runner, session)).toMatchObject({ status: 'failed', errorClass: 'exit_nonzero' })
+  expect(await process(runner, session)).toMatchObject({ status: 'failed', errorClass: 'bad_output' })
   expect(attempts()).toEqual([{ n: 1 }])
   expect(await process(runner, session)).toEqual({ status: 'idle' })
   clock += RETRY_BASE_MS
@@ -128,6 +130,87 @@ test('failed events are retried with backoff and stop, still visible, after 3 at
   expect(stateCounts(temp.store, session)).toEqual({ failed: 4 })
   expect(runner.prompts).toHaveLength(3)
   expect(runs().map((row) => row.status)).toEqual(['failed', 'failed', 'failed'])
+})
+
+test('a provider that keeps failing backs off, doubling from a minute, and its events stay pending', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedTurn(session)
+  const runner = fakeRunner([new ObserverError('rate_limited', 'claude exited 1: API Error: 429')])
+  const attempts = () => temp.store.db.query('SELECT DISTINCT observer_attempts AS n FROM events').all()
+
+  expect(await process(runner, session)).toMatchObject({ status: 'failed', errorClass: 'rate_limited' })
+  expect(stateCounts(temp.store, session)).toEqual({ pending: 4 })
+  expect(attempts()).toEqual([{ n: 0 }])
+  const firstRetry = clock + 60_000
+  expect(await process(runner, session)).toEqual({ status: 'backoff', provider: 'claude-cli', errorClass: 'rate_limited', failures: 1, retryAt: firstRetry })
+  // A second session of the same provider waits too: the provider is what is broken.
+  const other = seedSession(temp.store, 'claude-code', 's2')
+  seedTurn(other)
+  expect(await process(runner, other)).toMatchObject({ status: 'backoff' })
+  expect(runner.prompts).toHaveLength(1)
+
+  clock = firstRetry
+  expect(await process(runner, session)).toMatchObject({ status: 'failed' })
+  expect(await process(runner, session)).toMatchObject({ status: 'backoff', failures: 2, retryAt: clock + 120_000 })
+  clock += 120_000
+  expect(await process(runner, session)).toMatchObject({ status: 'failed' })
+  expect(runner.prompts).toHaveLength(3)
+  expect(stateCounts(temp.store, session)).toEqual({ pending: 4 })
+  expect(attempts()).toEqual([{ n: 0 }])
+  // Each failed run says when the provider is tried next; the waits in between log nothing.
+  expect(logs.filter((line) => line.includes('status=failed error=rate_limited') && line.includes(`retry_at=${new Date(clock + 240_000).toISOString()}`))).toHaveLength(1)
+  expect(logs.some((line) => line.includes('status=backoff'))).toBe(false)
+})
+
+test('a batch that times out still counts attempts while its provider waits, so it cannot retry forever', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedTurn(session)
+  const runner = fakeRunner([new ObserverError('timeout', 'claude did not finish in 180000 ms')])
+  expect(await process(runner, session)).toMatchObject({ status: 'failed', errorClass: 'timeout' })
+  expect(stateCounts(temp.store, session)).toEqual({ failed: 4 })
+  expect(await process(runner, session)).toEqual({ status: 'idle' })
+})
+
+test('after a wait, one batch per provider tries again while the others keep waiting', async () => {
+  const first = seedSession(temp.store, 'claude-code', 's1')
+  const second = seedSession(temp.store, 'claude-code', 's2')
+  seedTurn(first)
+  seedTurn(second)
+  expect(await process(fakeRunner([new ObserverError('auth_expired', 'claude exited 1: OAuth session expired')]), first)).toMatchObject({ status: 'failed' })
+  clock += 3_600_000
+  let release = (): void => {}
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const slow: ObserverRunner = { run: async () => {
+    await held
+    throw new ObserverError('auth_expired', 'claude exited 1: OAuth session expired')
+  } }
+  const probing = process(slow, first)
+  await Bun.sleep(5)
+  expect(await process(slow, second)).toMatchObject({ status: 'backoff', provider: 'claude-cli' })
+  release()
+  expect(await probing).toMatchObject({ status: 'failed', errorClass: 'auth_expired' })
+  expect(stateCounts(temp.store, second)).toEqual({ pending: 4 })
+})
+
+test('a success or a settings change ends the backoff', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedTurn(session)
+  const failing = fakeRunner([new ObserverError('rate_limited', 'claude exited 1: API Error: 429')])
+  expect(await process(failing, session)).toMatchObject({ status: 'failed' })
+  clock += 1_000
+  upsertObserverSettings(temp.store.db, { host: 'claude-code', provider: 'claude-cli', model: 'sonnet', credentialRef: null, enabled: true }, clock)
+  clock += 1_000
+  expect(await process(fakeRunner([citingReply()]), session)).toMatchObject({ status: 'succeeded' })
+  seedTurn(session, T0 + 1_000, 2)
+  expect(await process(failing, session)).toMatchObject({ status: 'failed' })
+  clock += 60_000
+  expect(await process(fakeRunner([citingReply('second')]), session)).toMatchObject({ status: 'succeeded' })
+  seedTurn(session, T0 + 2_000, 3)
+  // The success reset the count: one more failure waits a minute again, not two.
+  expect(await process(failing, session)).toMatchObject({ status: 'failed' })
+  expect(await process(failing, session)).toMatchObject({ status: 'backoff', failures: 1, retryAt: clock + 60_000 })
 })
 
 test('a reply that is not valid JSON is a recorded bad_output failure', async () => {

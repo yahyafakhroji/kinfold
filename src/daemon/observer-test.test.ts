@@ -89,6 +89,16 @@ test('without an observer the route says so with 503', async () => {
   expect((await rig.bearer('POST', '/observer/test', BODY)).status).toBe(503)
 })
 
+test('a passed test is reported for its provider, so a waiting provider tries again', async () => {
+  const passed: string[] = []
+  const ok = createObserverTester(() => ({ run: async () => ({ text: 'OK', model: 'm' }) }), () => {}, (provider) => passed.push(provider))
+  const input = { host: 'claude-code', provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: true } as const
+  expect(await ok.test!(input)).toEqual({ ok: true })
+  const failing = createObserverTester(() => ({ run: async () => { throw new ObserverError('auth_expired', 'claude exited 1') } }), () => {}, (provider) => passed.push(provider))
+  expect(await failing.test!(input)).toEqual({ ok: false, errorClass: 'auth_expired' })
+  expect(passed).toEqual(['claude-cli'])
+})
+
 test('the tester hands an endpoint provider its address', async () => {
   const seen: ObserverSettings[] = []
   const tester = createObserverTester((settings) => (seen.push(settings), { run: async () => ({ text: 'OK', model: 'm' }) }), () => {})
