@@ -44,9 +44,12 @@ test('a saved change restarts the core onto the new settings', async () => {
   expect(response.status).toBe(200)
   expect(await response.json()).toMatchObject({ saved: { provider: 'openrouter' }, restarting: true })
   // The route answers 503 while the core restarts.
+  // Whether the new core was up is read before each request: an answer asked before the restart is the old core's.
+  let rebuilt = built.includes('openrouter')
   let answer = await rig.bearer('GET', '/embedding/settings')
-  for (let i = 0; i < 100 && !(built.includes('openrouter') && answer.status === 200); i += 1) {
+  for (let i = 0; i < 100 && !(rebuilt && answer.status === 200); i += 1) {
     await Bun.sleep(20)
+    rebuilt = built.includes('openrouter')
     answer = await rig.bearer('GET', '/embedding/settings')
   }
   expect(built).toEqual(['none', 'openrouter'])

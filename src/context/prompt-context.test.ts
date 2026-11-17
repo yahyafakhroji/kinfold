@@ -3,6 +3,7 @@ import { type TempStore, openTempStore } from '../observer/test-support'
 import { recordInjection } from '../store/context-store'
 import { upsertProject, upsertSession } from '../store/writes'
 import type { SemanticAnswer, SemanticRequest } from '../vectors/search'
+import { inlineStoreReader } from '../workers/store-reader'
 import { createLateMatches } from './late-matches'
 import { type PromptContextDeps, RELATED_VECTOR_K, createEmbedSlots, preparePromptContext } from './prompt-context'
 import { NARRATIVE_MARKER, contradict, seedObservation } from './test-support'
@@ -191,7 +192,7 @@ test('keyword candidates are measured too, so one far from the prompt in meaning
     return { status: 'ok', hits: [{ id: near, distance: 0.3 }, { id: far, distance: 0.95 }], embedMs: 0, searchMs: 0, cached: false }
   }
   const answer = await preparePromptContext(deps(search, { gate: undefined }), ask('csv parser quotes'), CWD, T0)
-  expect(asked[0]!.alsoIds).toEqual(expect.arrayContaining([near, far]))
+  expect(await asked[0]!.alsoIds).toEqual(expect.arrayContaining([near, far]))
   expect(answer.observationIds).toEqual([near])
 })
 
@@ -214,7 +215,7 @@ test('explain() says what the search weighed and why each candidate was sent or 
   })
   const answer = await preparePromptContext(deps(search, { gate: undefined }), ask('why does the csv parser drop quotes?'), CWD, T0)
   expect(answer.observationIds).toEqual([strong])
-  const explained = answer.explain()
+  const explained = await answer.explain()
   expect(explained).toMatchObject({ semantic: 'ok', space: 'local/bge-small', query: 'why does the csv parser drop quotes?', mode: 'keyword and meaning' })
   expect(explained!.terms).toContain('csv')
   const byId = new Map(explained!.candidates.map((candidate) => [candidate.id, candidate]))
@@ -230,15 +231,15 @@ test('explain() says what the search weighed and why each candidate was sent or 
 test('explain() marks a candidate the gate passed but the budget had no room for', async () => {
   const ids = Array.from({ length: 6 }, (_, n) => earlier(`CSV parser quotes ${n} ${'detail '.repeat(18)}`))
   const answer = await preparePromptContext(deps(null), ask('csv parser quotes'), CWD, T0)
-  const outcomes = answer.explain()!.candidates.filter((candidate) => ids.includes(candidate.id)).map((candidate) => candidate.outcome)
+  const outcomes = (await answer.explain())!.candidates.filter((candidate) => ids.includes(candidate.id)).map((candidate) => candidate.outcome)
   expect(outcomes).toContain('sent')
   expect(outcomes).toContain('over budget')
-  expect(answer.explain()).toMatchObject({ semantic: 'off', space: null, query: '' })
+  expect(await answer.explain()).toMatchObject({ semantic: 'off', space: null, query: '' })
 })
 
 test('explain() is null when no related search ran', async () => {
   const answer = await preparePromptContext(deps(null), ask('   '), CWD, T0)
-  expect(answer.explain()).toBeNull()
+  expect(await answer.explain()).toBeNull()
 })
 
 test('explain() names a keyword match the session already has as already delivered', async () => {
@@ -246,12 +247,43 @@ test('explain() names a keyword match the session already has as already deliver
   recordInjection(temp.store.db, { sessionId: null, host: 'claude-code', hostSessionId: 'cc-me', projectKey: CWD, observationIds: [sent], channel: 'session_start', tokens: 1, occurredAt: T0 })
   const answer = await preparePromptContext(deps(null), ask('why does the csv parser drop quotes?'), CWD, T0)
   expect(answer.observationIds).toEqual([])
-  expect(answer.explain()!.candidates).toEqual([{ id: sent, title: 'CSV parser drops quotes on export', source: 'keyword', distance: null, matchedTerms: 3, outcome: 'already delivered' }])
+  expect((await answer.explain())!.candidates).toEqual([{ id: sent, title: 'CSV parser drops quotes on export', source: 'keyword', distance: null, matchedTerms: 3, outcome: 'already delivered' }])
 })
 
 test('explain() leaves out memory this prompt sends as new; the trace lists it under new instead', async () => {
   const fresh = seedObservation(temp.store, { sessionId: other, projectKey: CWD, host: 'opencode', title: 'CSV parser quotes fixed today', at: T0 + 500 })
   const answer = await preparePromptContext(deps(null), ask('csv parser quotes'), CWD, T0 + 1_000)
   expect(answer.observationIds).toContain(fresh)
-  expect(answer.explain()!.candidates.map((candidate) => candidate.id)).not.toContain(fresh)
+  expect((await answer.explain())!.candidates.map((candidate) => candidate.id)).not.toContain(fresh)
+})
+
+/** The store reads on this test's connection, the recall read held back for `ms`. */
+function slowReads(ms: number): PromptContextDeps['reads'] {
+  const inline = inlineStoreReader(temp.store.db, temp.store.path)
+  return {
+    ...inline,
+    run: async (op, args, options) => {
+      if (op === 'recallPrompt') await Bun.sleep(ms)
+      return inline.run(op, args, options)
+    },
+  }
+}
+
+test('a recall read past the deadline is answered with nothing in time, and its keyword matches come with the next prompt', async () => {
+  const strong = earlier('CSV parser drops quotes on export')
+  const late = createLateMatches()
+  const startedAt = performance.now()
+  const slow = await preparePromptContext(deps(null, { late, reads: slowReads(150), deadlineMs: 40 }), ask('why does the csv parser drop quotes?'), CWD, T0)
+  expect(performance.now() - startedAt).toBeLessThan(120)
+  expect(slow).toMatchObject({ text: '', observationIds: [], read: 'late' })
+  await Bun.sleep(200)
+  const next = await preparePromptContext(deps(null, { late }), ask('anything else to check?'), CWD, T0 + 1)
+  expect(next.observationIds).toEqual([strong])
+  expect(next.text).toContain('from the previous prompt')
+})
+
+test('the embedder is asked with the prompt\'s own words and paste, never a wrapper tag or its id', async () => {
+  const { asked, search } = fakeSemantic(() => [])
+  await preparePromptContext(deps(search), ask('why does it fail <pasted_content id="bb24">\nbuild log\n</pasted_content id="bb24">'), CWD, T0)
+  expect(asked[0]!.query).toBe('why does it fail\nbuild log')
 })

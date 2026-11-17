@@ -12,7 +12,7 @@ import { HOLDOUT_HOSTS } from '../context/holdout'
 import type { EffectiveSettings } from '../daemon/settings-route'
 import { envName, readEnv } from '../env-names'
 import { OPENROUTER_CREDENTIAL_REF, credentialRefFor } from '../observer/settings'
-import { getObserverSettings } from './daemon-client'
+import { getObserverSettings, projectMergeLines } from './daemon-client'
 import { dbStatusLines } from './db-encryption'
 import { detectHosts } from './detect'
 import { isFoldedAbsent } from './detectors'
@@ -357,7 +357,7 @@ export async function status(env: InstallEnv, running: string = VERSION, profile
   const situation = await daemonSituation(env)
   const blocker = autoUpdateBlocker(env, situation.loaded)
   const daemon = [...daemonLines(env, situation), ...(await centralStatusLines({ dataDir: env.dataDir, fetch: (url, init) => env.fetch(url, init ?? {}) }))]
-  const database = await databaseLines(env)
+  const database = [...(await databaseLines(env)), ...(await projectMergeLines(env))]
   const credentials = keyStoreLines(env, observer.refs)
   const keys = [
     ...credentials,

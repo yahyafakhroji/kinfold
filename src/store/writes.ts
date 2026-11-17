@@ -43,12 +43,18 @@ export function upsertProject(db: Database, project: ProjectKey, now: number): v
   ).run({ key: project.key, kind: project.kind, displayName: project.displayName, now })
 }
 
-/** Keyed on (host, host_session_id): the same id under two hosts is two sessions. Returns the session row id. */
+/**
+ * Keyed on (host, host_session_id): the same id under two hosts is two
+ * sessions. Returns the session row id. A session takes the project key of
+ * its newest event: one resumed after its repo's remote was renamed shows
+ * under the key its prompts now resolve to, on every screen.
+ */
 export function upsertSession(db: Database, session: SessionInput): number {
   const row = db.query<{ id: number }, Record<string, string | number | null>>(
     `INSERT INTO sessions (host, host_session_id, project_key, cwd, host_version, started_at, last_event_at)
      VALUES ($host, $hostSessionId, $projectKey, $cwd, $hostVersion, $at, $at)
      ON CONFLICT (host, host_session_id) DO UPDATE SET
+       project_key = CASE WHEN excluded.last_event_at >= last_event_at THEN excluded.project_key ELSE project_key END,
        started_at = min(started_at, excluded.started_at),
        last_event_at = max(last_event_at, excluded.last_event_at),
        host_version = coalesce(excluded.host_version, host_version)

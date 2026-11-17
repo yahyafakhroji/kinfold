@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, posix, win32 } from 'node:path'
-import { type GitRunner, GitTimeoutError, createProjectKeyResolver, gitRunnerWithTimeout, nativeTopLevel, remoteSlug, resolveProjectKey } from './project-key'
+import { type GitRunner, GitTimeoutError, PROJECT_KEY_TTL_MS, createProjectKeyResolver, gitRunnerWithTimeout, nativeTopLevel, remoteSlug, resolveProjectKey } from './project-key'
 
 let root: string
 beforeEach(() => {
@@ -119,4 +119,66 @@ test('a git root keys the same as the path key a git timeout falls back to', () 
   expect(timedOut.kind).toBe('path')
   expect(fromGit.key).toBe(timedOut.key)
   expect(fromGit.displayName).toBe(timedOut.displayName)
+})
+
+function commit(cwd: string, message: string): string {
+  git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '--allow-empty', '-m', message)
+  return Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd }).stdout.toString().trim()
+}
+
+test('asked for it, a repo names its first commit, which stays the same across a renamed remote and later commits', () => {
+  git(root, 'init', '-q')
+  git(root, 'remote', 'add', 'origin', 'git@github.com:me/shared-agent-memory.git')
+  const first = commit(root, 'first')
+  commit(root, 'second')
+  expect(resolveProjectKey(root, undefined, { withRoot: true })).toMatchObject({ key: 'github.com/me/shared-agent-memory', rootCommit: first })
+  git(root, 'remote', 'set-url', 'origin', 'git@github.com:me/kinfold.git')
+  expect(resolveProjectKey(root, undefined, { withRoot: true })).toMatchObject({ key: 'github.com/me/kinfold', rootCommit: first })
+  // The hook's fallback never asks: one git call fewer on its budget.
+  expect(resolveProjectKey(root)).not.toHaveProperty('rootCommit')
+})
+
+test('a repo with no commits yet, and a folder outside git, have no first commit', () => {
+  git(root, 'init', '-q')
+  expect(resolveProjectKey(root, undefined, { withRoot: true })).not.toHaveProperty('rootCommit')
+  const plain = realpathSync.native(mkdtempSync(join(tmpdir(), 'sam-plain-')))
+  try {
+    expect(resolveProjectKey(plain, undefined, { withRoot: true })).toEqual({ key: plain, kind: 'path', displayName: basename(plain) })
+  } finally {
+    rmSync(plain, { recursive: true, force: true })
+  }
+})
+
+test('the daemon resolver asks git again after a while, so a renamed remote is seen without a restart', () => {
+  git(root, 'init', '-q')
+  git(root, 'remote', 'add', 'origin', 'git@github.com:me/shared-agent-memory.git')
+  let clock = 0
+  const resolver = createProjectKeyResolver(undefined, { withRoot: true, now: () => clock })
+  expect(resolver(root).key).toBe('github.com/me/shared-agent-memory')
+  git(root, 'remote', 'set-url', 'origin', 'git@github.com:me/kinfold.git')
+  expect(resolver(root).key).toBe('github.com/me/shared-agent-memory')
+  clock = PROJECT_KEY_TTL_MS + 1
+  expect(resolver(root).key).toBe('github.com/me/kinfold')
+})
+
+test('the first commit is asked once per folder, a refresh asks only for the remote, and a slow history walk keeps the key', () => {
+  const calls: string[] = []
+  let slow = false
+  const fake: GitRunner = (_cwd, args) => {
+    calls.push(args[0]!)
+    if (args[0] === 'config') return 'git@github.com:me/kinfold.git'
+    if (args[0] === 'rev-list') {
+      if (slow) throw new GitTimeoutError(1)
+      return 'a'.repeat(40)
+    }
+    return null
+  }
+  let clock = 0
+  const resolver = createProjectKeyResolver(fake, { withRoot: true, now: () => clock })
+  expect(resolver('/w')).toMatchObject({ key: 'github.com/me/kinfold', rootCommit: 'a'.repeat(40) })
+  clock = PROJECT_KEY_TTL_MS + 1
+  expect(resolver('/w')).toMatchObject({ key: 'github.com/me/kinfold', rootCommit: 'a'.repeat(40) })
+  expect(calls.filter((call) => call === 'rev-list')).toHaveLength(1)
+  slow = true
+  expect(resolveProjectKey('/w', fake, { withRoot: true })).toEqual({ key: 'github.com/me/kinfold', kind: 'git-remote', displayName: 'kinfold' })
 })

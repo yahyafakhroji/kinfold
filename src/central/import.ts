@@ -13,7 +13,7 @@ import type { DbKeyStore } from '../sqlite/keys'
 import type { Database } from '../sqlite/types'
 import { DB_FILE } from '../store/data-dir'
 import type { ProjectKey, ProjectKeyKind } from '../store/project-key'
-import { upsertProject } from '../store/writes'
+import { registerProject } from '../store/project-merge'
 import { type PrepareOptions, cleanText } from '../capture/prepare'
 import { sessionWritable } from './hub-capture'
 import type { HubAnswer } from './hub-server'
@@ -212,7 +212,8 @@ export function importChunk(db: Database, body: unknown, deviceId: string, now: 
   const added = db.transaction(() => {
     const counts = { sessions: 0, prompts: 0, summaries: 0, observations: 0, skippedSessions: 0 }
     const skipped = new Set<string>()
-    upsertProject(db, chunk.project, now)
+    // A key the hub merged into another (store/project-merge.ts) imports under that one.
+    const projectKey = registerProject(db, chunk.project, now)
     for (const session of chunk.sessions) {
       if (!sessionWritable(db, session.host, session.hostSessionId, chunk.project.key, deviceId)) {
         skipped.add(sessionKey(session))
@@ -223,7 +224,7 @@ export function importChunk(db: Database, body: unknown, deviceId: string, now: 
       if (id === null) {
         db.query(`INSERT INTO sessions (host, host_session_id, project_key, cwd, host_version, started_at, ended_at, last_event_at)
           VALUES ($host, $hostSessionId, $projectKey, $cwd, $hostVersion, $startedAt, $endedAt, $lastEventAt)`)
-          .run({ host: session.host, hostSessionId: session.hostSessionId, projectKey: chunk.project.key, cwd: session.cwd, hostVersion: session.hostVersion, startedAt: session.startedAt, endedAt: session.endedAt, lastEventAt: session.lastEventAt })
+          .run({ host: session.host, hostSessionId: session.hostSessionId, projectKey, cwd: session.cwd, hostVersion: session.hostVersion, startedAt: session.startedAt, endedAt: session.endedAt, lastEventAt: session.lastEventAt })
         id = sessionId(db, session.host, session.hostSessionId)!
         counts.sessions += 1
       }
@@ -246,7 +247,7 @@ export function importChunk(db: Database, body: unknown, deviceId: string, now: 
       counts.observations += db.query(`INSERT INTO observations (project_key, session_id, host, prompt_number, type, title, narrative, facts, files, evidence,
           source_event_ids, observer_model, content_hash, occurred_at, created_at)
         SELECT $projectKey, $sessionId, $host, $promptNumber, $type, $title, $narrative, $facts, $files, $evidence, $sourceEventIds, $observerModel, $contentHash, $occurredAt, $createdAt
-        WHERE NOT EXISTS (SELECT 1 FROM observations WHERE project_key = $projectKey AND content_hash = $contentHash)`).run({ ...row, projectKey: chunk.project.key, sessionId: session }).changes
+        WHERE NOT EXISTS (SELECT 1 FROM observations WHERE project_key = $projectKey AND content_hash = $contentHash)`).run({ ...row, projectKey, sessionId: session }).changes
     }
     return counts
   })()

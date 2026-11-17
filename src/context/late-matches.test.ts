@@ -37,3 +37,14 @@ test('an answer from an older prompt never replaces a newer one, even after a ta
   late.put('a', [], 170, 40)
   expect(late.take('a', 180)).toEqual([])
 })
+
+test('add merges what one prompt parks from two reads, keeping the hit that has a distance, and still yields to a newer prompt', () => {
+  const late = createLateMatches()
+  const keyword = { id: 1, distance: null, matchedTerms: 2, promptTerms: 3 }
+  late.add('a', [keyword, { id: 2, distance: null, matchedTerms: 2, promptTerms: 3 }], 10, 5)
+  late.add('a', [hit(1)], 11, 5)
+  expect(late.take('a', 12)).toEqual([hit(1), { id: 2, distance: null, matchedTerms: 2, promptTerms: 3 }])
+  late.put('b', [hit(3)], 20, 9)
+  late.add('b', [hit(4)], 21, 5)
+  expect(late.take('b', 22)).toEqual([hit(3)])
+})

@@ -15,6 +15,7 @@ import { openStoreFile } from '../sqlite/open'
 import { type Database, SqliteError } from '../sqlite/types'
 import { DB_FILE } from '../store/data-dir'
 import { readPack } from '../store/context-store'
+import { canonicalKey } from '../store/project-merge'
 import { GIT_TIMEOUT_MS, type GitRunner, GitTimeoutError, gitRunnerWithTimeout, resolveProjectKey } from '../store/project-key'
 import { computeDelta } from './delta'
 import { type ContextRequest, type ContextResult, hostProfileFor } from './types'
@@ -86,12 +87,14 @@ export function readStoredContext(dataDir: string, request: StoredContextRequest
       log(`context fallback: pack=none (git timed out) ms=${now() - startedAt}`)
       return null
     }
+    // A key merged into another (a renamed remote, a fork) reads the memory where it now lives.
+    const key = canonicalKey(db, project.key)
     if (request.channel === 'prompt' && request.hostSessionId !== undefined) {
-      const delta = computeDelta(db, { host: request.host, hostSessionId: request.hostSessionId }, project.key, now())
+      const delta = computeDelta(db, { host: request.host, hostSessionId: request.hostSessionId }, key, now())
       log(`context fallback: delta ids=${delta.observationIds.length} tokens=${delta.tokens} ms=${now() - startedAt}; injection not recorded (read-only path)`)
       return delta.text === '' ? null : delta
     }
-    const pack = readPack(db, project.key, hostProfileFor(request.host))
+    const pack = readPack(db, key, hostProfileFor(request.host))
     const result = pack === null ? null : { text: pack.body, observationIds: pack.observationIds, tokens: pack.tokenCount }
     log(`context fallback: pack=${pack === null ? 'none' : 'stored'} ids=${result?.observationIds.length ?? 0} tokens=${result?.tokens ?? 0} ms=${now() - startedAt}; injection not recorded (read-only path)`)
     return result

@@ -62,3 +62,41 @@ export function matchedTermCounts(db: Database, ids: readonly number[], matches:
   }
   return counts
 }
+
+/** Per connection: the vocabulary table lives in its temp schema, so each connection makes its own once. */
+const vocabReady = new WeakSet<Database>()
+
+/**
+ * How many observations hold each term, from FTS5's own index (an fts5vocab
+ * table in the connection's temp schema: nothing is written to the store, so a
+ * read-only connection can make it). A term the index has never seen is 0.
+ */
+export function termDocCounts(db: Database, terms: readonly string[]): Map<string, number> {
+  if (!vocabReady.has(db)) {
+    db.run("CREATE VIRTUAL TABLE IF NOT EXISTS temp.kinfold_fts_vocab USING fts5vocab(main, observations_fts, 'row')")
+    vocabReady.add(db)
+  }
+  // The index holds terms as its unicode61 tokenizer folds them, without accents: "café" is stored as "cafe".
+  const folded = terms.map(foldTerm)
+  const rows = db.query<{ term: string; doc: number }, { terms: string }>('SELECT term, doc FROM temp.kinfold_fts_vocab WHERE term IN (SELECT value FROM json_each($terms))')
+    .all({ terms: JSON.stringify([...new Set(folded)]) })
+  const docs = new Map(rows.map((row) => [row.term, row.doc]))
+  return new Map(terms.map((term, index) => [term, docs.get(folded[index]!) ?? 0]))
+}
+
+/** A term as FTS5's default tokenizer stores it: lowercase, accents removed. */
+export function foldTerm(term: string): string {
+  return term.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+}
+
+/** Per connection, for a minute: count(*) walks the table, and the share it sets moves slowly. */
+const totals = new WeakMap<Database, { at: number; count: number }>()
+const TOTAL_TTL_MS = 60_000
+
+export function observationCount(db: Database, now: number = Date.now()): number {
+  const known = totals.get(db)
+  if (known !== undefined && now - known.at < TOTAL_TTL_MS) return known.count
+  const count = db.query<{ n: number }, []>('SELECT count(*) AS n FROM observations').get()?.n ?? 0
+  totals.set(db, { at: now, count })
+  return count
+}

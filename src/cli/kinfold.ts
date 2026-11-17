@@ -198,6 +198,16 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     const { runBackupCommand } = await import('../install/backup-cli')
     return runFramed(effective, backup.value.command, (env) => runBackupCommand(env, backup.value))
   }
+  const projectCli = args.includes('project') ? await import('./project-cli') : null
+  const project = projectCli?.parseProjectArgs(args) ?? null
+  if (projectCli !== null && project !== null) {
+    if (!project.ok) {
+      effective.out(project.error)
+      return EXIT_USAGE
+    }
+    const { runProjectCommand } = projectCli
+    return runFramed(effective, 'project', (env) => runProjectCommand(env, project.value))
+  }
   const data = parseDataArgs(args)
   if (data !== null) {
     if (!data.ok) {

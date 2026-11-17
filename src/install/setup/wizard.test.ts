@@ -1,6 +1,9 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
+import { stripVTControlCharacters } from 'node:util'
+import { createClackPrompts } from '../prompt/clack'
 import { DAEMON_INFO_FILE } from '../../store/data-dir'
 import type { CliObserverRunner } from '../../observer/runners/cli-core'
 import { ObserverError } from '../../observer/types'
@@ -916,4 +919,25 @@ test('--updates and --beta answer the question, with or without a terminal', asy
   const betaOnly = setup([ENTER, ENTER, ENTER, ENTER])
   expect(await runWizard(betaOnly.w.env, ask(betaOnly.w), await readSetupState(betaOnly.w.env), flagsOf({ hosts: [], noEncrypt: true, beta: true }), NO_CHOICE)).toMatchObject({ updateCheck: true, autoUpdate: true, beta: true })
   expect(betaOnly.term.output()).toContain('Check daily and tell me, betas included')
+})
+
+for (const [name, enter] of [['\\r', '\r'], ['\\r\\n', '\r\n']] as const) test(`on the clack screen an encrypted store keeps its encryption on Enter sent as ${name}, and the screen says Yes`, async () => {
+  const { w } = setup([])
+  const input = new PassThrough()
+  const output = new PassThrough()
+  let screen = ''
+  output.on('data', (chunk: Buffer) => (screen += chunk.toString()))
+  // Enter at every question, as a person accepting each default would.
+  const typing = setInterval(() => input.write(enter), 15)
+  try {
+    const state = rerun(await readSetupState(w.env), { encryption: 'on' })
+    const answers = await runWizard(w.env, createClackPrompts({ input, output }), state, flagsOf({ hosts: [] }), NO_CHOICE)
+    expect(answers.encryption).toEqual({ kind: 'keep' })
+    const shown = stripVTControlCharacters(screen)
+    const asked = shown.lastIndexOf('Keep memory.db encrypted?')
+    expect(asked).toBeGreaterThan(-1)
+    expect(shown.slice(asked).split('\n').slice(1, 3).join('\n')).toContain('Yes')
+  } finally {
+    clearInterval(typing)
+  }
 })

@@ -284,3 +284,21 @@ test('a row that fits keeps its own spacing: only a row too long for the box is 
   createClackPrompts({ input, output }).section('Agents', [{ mark: 'none', text: '  codex:   wired' }])
   expect(stripVTControlCharacters(written)).toContain('    codex:   wired')
 })
+
+test('a line feed left over from Enter never flips the next yes or no', async () => {
+  const s = screen()
+  // Some terminals send Enter as \r then \n, in two reads: \r answers the select, the \n reached the confirm.
+  s.type([ENTER, '\n', ENTER, '\n'])
+  expect(await s.ask.select('Observer for claude-code:', [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }], 'a')).toBe('a')
+  expect(await s.ask.confirm('Keep memory.db encrypted?', true)).toBe(true)
+  expect(s.text().split('Keep memory.db encrypted?').at(-1)).toContain('Yes')
+})
+
+test('a terminal that sends Enter as a lone line feed still answers', async () => {
+  const s = screen()
+  s.type(['n', '\n'])
+  expect(await s.ask.confirm('Keep memory.db encrypted?', true)).toBe(false)
+  const t = screen()
+  t.type(['\n'])
+  expect(await t.ask.select('Observer:', [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }], 'b')).toBe('b')
+})

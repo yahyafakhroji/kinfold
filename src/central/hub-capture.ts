@@ -11,6 +11,7 @@ import { type ResolvedEvent, ingestResolved } from '../daemon/ingest'
 import type { Database } from '../sqlite/types'
 import type { HubAnswer, HubContext } from './hub-server'
 import { parseDeviceProject } from './project-key'
+import { canonicalKey } from '../store/project-merge'
 
 /** Far above what one relay batch sends; the byte cap is the real bound. */
 export const MAX_CAPTURE_EVENTS = 1_000
@@ -34,7 +35,8 @@ export interface CaptureDeps {
 export function sessionWritable(db: Database, host: string, hostSessionId: string, projectKey: string, deviceId: string): boolean {
   const row = db.query(`SELECT s.project_key AS key, p.key_kind AS kind FROM sessions s JOIN projects p ON p.key = s.project_key
     WHERE s.host = $host AND s.host_session_id = $hostSessionId`).get({ host, hostSessionId }) as { key: string; kind: string } | null
-  return row === null || row.key === projectKey || row.kind === 'git-remote' || row.key.startsWith(`${deviceId}:`)
+  // A key merged into another (store/project-merge.ts) names the project the session moved to.
+  return row === null || row.key === projectKey || row.key === canonicalKey(db, projectKey) || row.kind === 'git-remote' || row.key.startsWith(`${deviceId}:`)
 }
 
 const eventIdOf = (value: unknown): string | null => {

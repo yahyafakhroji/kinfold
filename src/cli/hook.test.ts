@@ -221,3 +221,28 @@ test('runHook returns null for SessionStart under the observer, and the output l
   const line = await runHookInProcess(inRoot('session-start.json'), dataDir, () => {}, {})
   expect(JSON.parse(line!).hookSpecificOutput.additionalContext).toContain('In-process pack')
 })
+
+test('a prompt asks for recall with its own words first and no paste id, cut to the request limit', async () => {
+  const bodies: Record<string, unknown>[] = []
+  const recorder = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: async (request) => {
+      if (new URL(request.url).pathname === '/context') bodies.push(await request.json() as Record<string, unknown>)
+      return Response.json({ text: '', observationIds: [], tokens: 0 })
+    },
+  })
+  try {
+    mkdirSync(dataDir, { recursive: true })
+    writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: recorder.port }))
+    writeFileSync(join(dataDir, 'daemon.token'), 'a'.repeat(64))
+    const paste = 'log line '.repeat(400)
+    const payload = JSON.stringify({ ...JSON.parse(fixture('user-prompt-submit.json')), cwd: root, prompt: `<pasted_content id="bb24">${paste}</pasted_content id="bb24"> why does the build fail` })
+    await runHookInProcess(payload, dataDir, () => {})
+    const prompt = bodies.find((body) => body.channel === 'prompt')?.prompt as string
+    expect(prompt.startsWith('why does the build fail')).toBe(true)
+    expect(prompt).not.toContain('bb24')
+    expect(prompt.length).toBeLessThanOrEqual(2_000)
+  } finally {
+    recorder.stop(true)
+  }
+})

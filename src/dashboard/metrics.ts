@@ -12,6 +12,7 @@
 // channel, p50/p95) and `hitRate`, two proxies for whether injected memory is
 // used (src/dashboard/hit-rate.ts says what each one does and does not show).
 
+import type { StoreReader } from '../workers/store-reader'
 import { OBSERVER_ERROR_CLASSES, type ObserverErrorClass } from '../observer/types'
 import type { Database } from '../sqlite/types'
 import { type EventStageRow, type TurnLagRow, eventStages, turnLags } from '../store/latency-reads'
@@ -190,9 +191,9 @@ export function metricsSummary(db: Database, window: MetricsWindow = DEFAULT_MET
   }
 }
 
-/** GET /metrics/summary?window=24h|7d (default 24h). */
-export function metricsRoute(db: Database, window: string | null, now: () => number = Date.now): { status: number; body: unknown } {
+/** GET /metrics/summary?window=24h|7d (default 24h), read through `reports` (the daemon's reports reader): on a hub it takes seconds. */
+export async function metricsRoute(reports: StoreReader, window: string | null, now: () => number = Date.now): Promise<{ status: number; body: unknown }> {
   const parsed = parseMetricsWindow(window)
   if (parsed === null) return { status: 400, body: { error: 'window must be 24h or 7d' } }
-  return { status: 200, body: metricsSummary(db, parsed, now()) }
+  return { status: 200, body: await reports.run('metricsSummary', { window: parsed, now: now() }) }
 }
