@@ -19,7 +19,7 @@ import { DB_FILE } from '../store/data-dir'
 import { openStore } from '../store/db'
 import { LATEST_SCHEMA_VERSION } from '../store/schema'
 import { RESTORE_INCOMING_DIR, streamThenRemove } from './backup-routes'
-import { PUBLIC_DIR } from '../dashboard/routes'
+import { STATUS_POLL_MS as PAGE_POLL_MS } from '../dashboard/app/src/lib/restore'
 import { STATUS_POLL_MS } from '../install/backup-cli'
 import { type DaemonOptions, FATAL_EXIT_MS } from './daemon'
 
@@ -404,8 +404,7 @@ test('stopping the daemon during a restore waits for it, so no marker is left fo
 })
 
 test('a daemon that must stop after a stranded restore stays up long enough for every client to read why', async () => {
-  const page = (await import(join(PUBLIC_DIR, 'page-backup.js'))) as { STATUS_POLL_MS: number }
-  for (const poll of [STATUS_POLL_MS, page.STATUS_POLL_MS]) {
+  for (const poll of [STATUS_POLL_MS, PAGE_POLL_MS]) {
     expect(poll).toBeGreaterThan(0)
     expect(FATAL_EXIT_MS).toBeGreaterThanOrEqual(poll * 5)
   }
@@ -430,6 +429,16 @@ test('GET /restore/status says whether a kept store is here, and when it was rep
   expect(Math.abs((status.kept?.replacedAt ?? 0) - Date.now())).toBeLessThan(60_000)
   // The path is the daemon's business: the page needs the date only.
   expect(Object.keys(status.kept ?? {})).toEqual(['replacedAt'])
+})
+
+test('GET /restore/status says when the last backup was made, for the overview', async () => {
+  const plain = box({ titles: ['mine'] })
+  expect(await statusOf(plain.rig)).toMatchObject({ lastBackupAt: null })
+  const response = await plain.rig.bearer('GET', '/backup')
+  await response.arrayBuffer()
+  await Bun.sleep(20)
+  const status = (await statusOf(plain.rig)) as Status & { lastBackupAt: number | null }
+  expect(Math.abs((status.lastBackupAt ?? 0) - Date.now())).toBeLessThan(60_000)
 })
 
 test('POST /restore/undo switches back inside the daemon: the session survives and the stores change places', async () => {

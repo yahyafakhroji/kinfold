@@ -20,6 +20,7 @@ import {
   retryableEvents,
   startRun,
 } from '../store/observer-store'
+import { recordActivity } from '../store/activity-store'
 import { setRunUsage } from '../store/impact-reads'
 import { repeatedPromptNumbers } from '../store/summary-share'
 import { dropEchoes, injectedObservations, linkableIds } from './injected'
@@ -224,6 +225,7 @@ export async function processSessionBatch(deps: ProcessDeps, sessionId: number):
   } catch (error: unknown) {
     const failure = toObserverError(error)
     recordFailure(deps.db, runId, batch, failure, now())
+    recordActivity(deps.db, { kind: 'observer-failed', at: now(), host: session.host, projectKey: session.projectKey, sessionId: session.id, detail: failure.errorClass })
     outcome = { status: 'failed', runId, events: batch.length, errorClass: failure.errorClass }
     // A tool ran during a normal batch: record it on the gate, which stops this observer.
     if (failure.errorClass === 'tool_attempt' && choice.ok && deps.safety !== undefined) await deps.safety.reportToolAttempt(choice.settings)

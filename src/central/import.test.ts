@@ -51,6 +51,7 @@ test('a local project exports in chunks the hub stores whole: sessions, prompts 
   expect(result).toEqual({ status: 200, body: { sessions: 1, prompts: 1, summaries: 1, observations: 1, skippedSessions: 0 } })
   expect(counts(hub)).toEqual({ sessions: 1, prompts: 1, summaries: 1, observations: 1 })
   expect(hub.db.query('SELECT reply_text AS reply FROM prompts').get()).toEqual({ reply: 'with .bun-version' })
+  expect(hub.db.query('SELECT device FROM sessions').get()).toEqual({ device: 'dev-a' })
   expect(hub.db.query('SELECT title, project_key AS key FROM observations').get()).toEqual({ title: 'Bun is pinned', key: 'github.com/acme/app' })
   // The FTS index is fed by the same triggers as any other observation, so search finds it.
   expect(hub.db.query("SELECT COUNT(*) AS n FROM observations_fts WHERE observations_fts MATCH 'pinned'").get()).toEqual({ n: 1 })

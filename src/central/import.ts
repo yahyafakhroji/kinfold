@@ -222,9 +222,9 @@ export function importChunk(db: Database, body: unknown, deviceId: string, now: 
       }
       let id = sessionId(db, session.host, session.hostSessionId)
       if (id === null) {
-        db.query(`INSERT INTO sessions (host, host_session_id, project_key, cwd, host_version, started_at, ended_at, last_event_at)
-          VALUES ($host, $hostSessionId, $projectKey, $cwd, $hostVersion, $startedAt, $endedAt, $lastEventAt)`)
-          .run({ host: session.host, hostSessionId: session.hostSessionId, projectKey, cwd: session.cwd, hostVersion: session.hostVersion, startedAt: session.startedAt, endedAt: session.endedAt, lastEventAt: session.lastEventAt })
+        db.query(`INSERT INTO sessions (host, host_session_id, project_key, cwd, host_version, started_at, ended_at, last_event_at, device)
+          VALUES ($host, $hostSessionId, $projectKey, $cwd, $hostVersion, $startedAt, $endedAt, $lastEventAt, $device)`)
+          .run({ device: deviceId, host: session.host, hostSessionId: session.hostSessionId, projectKey, cwd: session.cwd, hostVersion: session.hostVersion, startedAt: session.startedAt, endedAt: session.endedAt, lastEventAt: session.lastEventAt })
         id = sessionId(db, session.host, session.hostSessionId)!
         counts.sessions += 1
       }

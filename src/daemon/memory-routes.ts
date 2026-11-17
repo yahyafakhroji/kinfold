@@ -14,6 +14,7 @@ import type { Database } from '../sqlite/types'
 import { type BrowseFilters, type Facets, type ObservationDetail, observationDetail } from '../store/memory-reads'
 import { type StoreReader, inlineStoreReader } from '../workers/store-reader'
 import type { RouteAnswer } from './data-routes'
+import { type DashboardViewOptions, type ViewRoute, dashboardViews } from './dashboard-views'
 
 export const PAGE_SIZE = 50
 export const MAX_PAGE = 1_000
@@ -39,6 +40,8 @@ export interface MemoryHandlers {
   browse: (query: BrowseQuery) => Promise<BrowseAnswer>
   detail: (id: number) => ObservationDetail | null
   facets: () => Promise<Facets>
+  /** The new dashboard's lists and reports (dashboard-views.ts); null for a path that is not one. */
+  views?: ViewRoute
 }
 
 /** An empty value is the same as an absent one: a cleared filter in the page's form. */
@@ -85,8 +88,9 @@ export function parseBrowseQuery(params: URLSearchParams): Parsed<BrowseQuery> {
 }
 
 /** Browse and facets scan the store, so they go through `reports` (the daemon's reports reader); default db, on this thread. */
-export function memoryHandlers(db: Database, log: (line: string) => void, reports: StoreReader = inlineStoreReader(db, '')): MemoryHandlers {
+export function memoryHandlers(db: Database, log: (line: string) => void, reports: StoreReader = inlineStoreReader(db, ''), views: DashboardViewOptions = {}): MemoryHandlers {
   return {
+    views: dashboardViews(db, reports, { log, ...views }),
     browse: async (query) => {
       const startedAt = performance.now()
       const result = await reports.run('memoryBrowse', { filters: query.filters })
@@ -101,6 +105,8 @@ export function memoryHandlers(db: Database, log: (line: string) => void, report
 /** Null when the path is not a /memory route, so the caller answers 404. */
 export async function memoryRoute(method: string, url: URL, handlers: MemoryHandlers): Promise<RouteAnswer | null> {
   const path = url.pathname
+  const viewed = await handlers.views?.(method, url)
+  if (viewed !== null && viewed !== undefined) return viewed
   const detail = DETAIL_PATH.exec(path)
   if (path !== '/memory/observations' && path !== '/memory/facets' && detail === null) return null
   if (method !== 'GET') return { status: 405, body: { error: 'method not allowed' } }

@@ -76,3 +76,10 @@ test('kinfold watch on a device shows the hub\'s prompts with this device\'s own
   const answer = await deviceRoute('GET', new URL('http://127.0.0.1:4/watch?since=1'), body({}), { relay, hubName: 'mini', watchUpdate: () => ({ version: '0.6.1', message: 'Kinfold 0.6.1 is ready' }) })
   expect(answer).toEqual({ status: 200, body: { rows: [], update: { version: '0.6.1', message: 'Kinfold 0.6.1 is ready' } } })
 })
+
+test('the new dashboard\'s lists and reports come from the hub', async () => {
+  const calls: string[] = []
+  const paths = ['/memory/list/sessions?page=2', '/memory/list/memories', '/memory/list/activity', '/memory/list/projects', '/memory/list/devices', '/memory/sessions/4', '/memory/overview', '/memory/impact?window=7d']
+  for (const path of paths) expect((await route(calls, 'GET', path))?.status).toBe(200)
+  expect(calls).toEqual(paths.map((path) => `view ${path}`))
+})

@@ -20,6 +20,7 @@ import {
   markSessionEnded,
   promptNumberForHostId,
   setPromptReply,
+  LOCAL_DEVICE,
   upsertSession,
 } from '../store/writes'
 import { registerProject } from '../store/project-merge'
@@ -29,6 +30,8 @@ export interface DrainOptions extends PrepareOptions {
   projectKeyFor: ProjectKeyResolver
   batchSize?: number
   now?: () => number
+  /** sessions.device for what this drain stores; LOCAL_DEVICE when absent. */
+  device?: string | null
 }
 
 export interface DrainResult {
@@ -125,6 +128,7 @@ function ingestEvent(db: Database, raw: NormalizedEvent, options: DrainOptions, 
     projectKey: project.key,
     cwd: event.cwd,
     occurredAt: event.occurredAt,
+    device: options.device === undefined ? LOCAL_DEVICE : options.device,
     ...(event.hostVersion !== undefined ? { hostVersion: event.hostVersion } : {}),
   })
   if (event.kind === 'session_end') markSessionEnded(db, sessionId, event.occurredAt)
@@ -178,11 +182,12 @@ export interface ResolvedEvent {
  * transaction. A transcript path names a file on the device, which this
  * machine must never read, so it is dropped before the event is stored.
  */
-export function ingestResolved(db: Database, items: readonly ResolvedEvent[], options: PrepareOptions & { now?: () => number }): { inserted: number; duplicates: number } {
+export function ingestResolved(db: Database, items: readonly ResolvedEvent[], options: PrepareOptions & { now?: () => number; device?: string | null }): { inserted: number; duplicates: number } {
   const now = (options.now ?? Date.now)()
   const inserted = db.transaction(() => items.filter((item) => {
     const { transcriptPath: _local, ...event } = item.event
-    return ingestEvent(db, event, { ...options, spoolDir: '', projectKeyFor: () => item.project }, now, [])
+    // Captured on another machine: its device id when the caller knows it, never this machine's mark.
+    return ingestEvent(db, event, { ...options, device: options.device ?? null, spoolDir: '', projectKeyFor: () => item.project }, now, [])
   }).length)()
   return { inserted, duplicates: items.length - inserted }
 }

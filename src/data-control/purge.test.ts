@@ -5,6 +5,7 @@ import { readPack } from '../store/context-store'
 import { insertFinding } from '../store/findings-store'
 import { DAY, type Fixture, MARKERS, count, ftsMatch, seedFixture, tableCounts } from './test-support'
 import { describePurge, purge } from './purge'
+import { recordActivity } from '../store/activity-store'
 
 let fx: Fixture
 beforeEach(() => {
@@ -130,4 +131,21 @@ test('turn usage goes with the prompt it measured: by prompt, by session and by 
   expect(turnUsage().some((row) => row.sessionId === fx.sessions.a2)).toBe(false)
   run({ kind: 'range', after: null, before: T0 + 100 * DAY })
   expect(turnUsage()).toEqual([])
+})
+
+test('activity rows that name a purged project, session or host go with it, and a range takes the rows inside it', () => {
+  const { db } = fx.temp.store
+  const rows = (): string[] => (db.query('SELECT kind || \':\' || coalesce(project_key, \'-\') || \':\' || coalesce(session_id, 0) AS row FROM activity ORDER BY id').all() as { row: string }[]).map((entry) => entry.row)
+  db.run('DELETE FROM activity')
+  recordActivity(db, { kind: 'save', at: T0, projectKey: fx.projectA, sessionId: fx.sessions.a1, host: 'claude-code', count: 1 })
+  recordActivity(db, { kind: 'save', at: T0, projectKey: fx.projectB, sessionId: fx.sessions.b1, host: 'claude-code', count: 1 })
+  recordActivity(db, { kind: 'backup', at: T0 })
+  const dry = purge(db, { kind: 'project', key: fx.projectA }, { dryRun: true, now: () => T0 })
+  expect(dry.counts.activity).toBe(1)
+  purge(db, { kind: 'project', key: fx.projectA }, { dryRun: false, now: () => T0 })
+  expect(rows()).toEqual([`save:${fx.projectB}:${fx.sessions.b1}`, 'backup:-:0'])
+  purge(db, { kind: 'session', id: fx.sessions.b1 }, { dryRun: false, now: () => T0 })
+  expect(rows()).toEqual(['backup:-:0'])
+  purge(db, { kind: 'range', after: null, before: T0 + 1 }, { dryRun: false, now: () => T0 })
+  expect(rows()).toEqual([])
 })

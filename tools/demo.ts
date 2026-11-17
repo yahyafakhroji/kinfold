@@ -150,7 +150,7 @@ let env = {
 const assets = {
   sqlite3mc: { bytes: async () => new Uint8Array(), sha256: 'sqlite3mc-sha', sourceSha256: 'source-sha' },
   vec0: { bytes: async () => new Uint8Array(), sha256: 'vec0-sha' },
-  dashboardFile: () => null,
+  dashboardFile: () => null, dashboardNames: () => [],
   opencodePlugin: async () => PLUGIN_BUNDLE,
   kiloPlugin: async () => PLUGIN_BUNDLE,
 }

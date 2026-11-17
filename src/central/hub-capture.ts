@@ -72,7 +72,7 @@ export function captureHandler(deps: CaptureDeps): (body: unknown, context: HubC
     const batch = parseBatch(deps.db, body, context.deviceId)
     if (batch === null) return { status: 400, body: { error: 'body must be {"events": [{"event": ..., "project": ...}]}, each event with an id' } }
     const prepare = typeof deps.prepare === 'function' ? deps.prepare() : deps.prepare
-    const result = batch.items.length === 0 ? { inserted: 0, duplicates: 0 } : ingestResolved(deps.db, batch.items, { ...prepare, now: deps.now })
+    const result = batch.items.length === 0 ? { inserted: 0, duplicates: 0 } : ingestResolved(deps.db, batch.items, { ...prepare, now: deps.now, device: context.deviceId })
     if (result.inserted > 0) deps.onStored()
     return { status: 200, body: { stored: result.inserted, duplicates: result.duplicates, rejected: batch.rejected } }
   }
