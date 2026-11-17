@@ -52,6 +52,8 @@ export interface HubServerDeps {
   routes: Readonly<Record<string, HubRoute>>
   /** Codes, ids and counts only; never a body. */
   log: (line: string) => void
+  /** A device paired: for the Activity page. */
+  onPaired?: (deviceId: string) => void
   /** Tests only: loopback senders stand in for the tailnet. */
   allowLoopback?: boolean
 }
@@ -179,6 +181,7 @@ async function pairRoute(request: Request, address: string, deps: HubServerDeps)
   }
   addDevice(deps.dataDir, { id: body.deviceId, name: body.deviceName, publicKey: body.devicePublicKey, nodeId: node.nodeId, userId: node.userId, pairedAt: deps.auth.now() })
   deps.log(`central paired device=${body.deviceId}`)
+  deps.onPaired?.(body.deviceId)
   const proof = hubProof(key, { hubPublicKey: deps.hubPublicKey, devicePublicKey: body.devicePublicKey, nonce: body.nonce })
   return json(200, { hubPublicKey: deps.hubPublicKey, hubName: deps.hubName, hubProof: proof, version: deps.version })
 }

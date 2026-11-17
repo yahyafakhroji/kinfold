@@ -112,3 +112,11 @@ test('import says which projects the hub already holds, and stores a chunk', asy
   expect((await call(table, '/central/import', {})).status).toBe(200)
   expect(calls).toEqual(['import dev-a'])
 })
+
+test('the new dashboard\'s lists and reports are views a device may read', async () => {
+  const views: string[] = []
+  const table = routes([], views)
+  const paths = ['/memory/list/sessions?page=2&sort=prompts', '/memory/list/memories?q=bun', '/memory/list/activity?kind=recall', '/memory/list/projects', '/memory/list/devices', '/memory/sessions/4', '/memory/overview', '/memory/impact?window=30d']
+  for (const path of paths) expect((await call(table, '/central/view', { path })).status).toBe(200)
+  expect(views).toHaveLength(paths.length)
+})

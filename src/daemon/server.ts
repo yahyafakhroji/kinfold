@@ -98,6 +98,12 @@ export interface ServerDeps {
   auth: DashboardAuth
   /** What `kinfold dashboard` prints while it runs; absent, a log no command reads. */
   dashboardEvents?: DashboardEvents
+  /** A browser signed in to the dashboard: for the Activity page. */
+  onSignIn?: () => void
+  /** The service's log file, offered on the Activity page; absent, the download is 404. */
+  daemonLogPath?: string
+  /** A central device's own events, kept in memory; empty elsewhere. */
+  deviceActivity?: () => unknown[]
   /** The /read/ routes (token only); absent, every /read/ path is 404. */
   reads?: ReadRouteDeps
   /** GET /backup, POST /restore/upload, POST /restore, POST /restore/undo, GET /restore/status; absent, each is 404. */
@@ -493,7 +499,7 @@ async function answer(request: Request, port: number, deps: ServerDeps): Promise
     if (routed !== null) return json(routed.status, routed.body)
   }
   const dashboard = isDashboardPath
-    ? await dashboardRoute(request, url.pathname, { port, auth: deps.auth, readBody: () => readJson(request), events: dashboardEvents(deps), log: deps.log })
+    ? await dashboardRoute(request, url.pathname, { port, auth: deps.auth, readBody: () => readJson(request), events: dashboardEvents(deps), log: deps.log, ...(deps.onSignIn !== undefined ? { onSignIn: deps.onSignIn } : {}), ...(deps.daemonLogPath !== undefined ? { daemonLogPath: deps.daemonLogPath } : {}), ...(deps.deviceActivity !== undefined ? { deviceActivity: deps.deviceActivity } : {}) })
     : undefined
   const other = (): Promise<Response> => (BACKUP_PATHS.has(url.pathname) ? backupRoute(request, url.pathname, deps) : storeRoute(request, url, deps, checked.via))
   const response = dashboard === undefined ? await other() : (dashboard ?? json(404, { error: 'not found' }))

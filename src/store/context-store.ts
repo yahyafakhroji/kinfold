@@ -6,6 +6,7 @@
 import type { FirstScreen } from '../context/recall-line'
 import type { ContextChannel, HostProfile, PackObservation } from '../context/types'
 import type { Database } from '../sqlite/types'
+import { recordActivity } from './activity-store'
 import { confirmationsColumn, contradictionKindColumn, hasLinksTable } from './observation-links'
 
 export interface PackRow {
@@ -139,7 +140,16 @@ export function recordInjection(db: Database, injection: InjectionRow): number {
     relatedCount: injection.relatedCount ?? 0, late: injection.late === true ? 1 : 0,
   })
   if (row === null) throw new Error('injection insert returned no row')
+  countRecall(db, injection)
   return row.id
+}
+
+/** Times recalled, kept per memory so Memory can sort by it: a late answer was probably never shown, so it does not count. */
+function countRecall(db: Database, injection: InjectionRow): void {
+  const ids = injection.observationIds.filter((id) => Number.isSafeInteger(id))
+  if (ids.length === 0 || injection.late === true || injection.heldOut === true) return
+  db.query('UPDATE observations SET recall_count = recall_count + 1 WHERE id IN (SELECT value FROM json_each($ids))').run({ ids: JSON.stringify(ids) })
+  recordActivity(db, { kind: 'recall', at: injection.occurredAt, host: injection.host, projectKey: injection.projectKey ?? null, sessionId: injection.sessionId ?? null, count: ids.length })
 }
 
 /** The session's newest prompt at or before `at`; null when none is stored (the hook asks before its prompt is ingested). */

@@ -148,7 +148,7 @@ function fakeAssets(bundle: string): EmbeddedAssets {
   return {
     sqlite3mc: { bytes: async () => new Uint8Array(), sha256: 'sqlite3mc-sha', sourceSha256: 'source-sha' },
     vec0: { bytes: async () => new Uint8Array(), sha256: 'vec0-sha' },
-    dashboardFile: () => null,
+    dashboardFile: () => null, dashboardNames: () => [],
     opencodePlugin: async () => bundle,
     kiloPlugin: async () => bundle,
   }

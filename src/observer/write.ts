@@ -16,6 +16,7 @@ import {
   insertObservation,
   markDone,
 } from '../store/observer-store'
+import { recordActivity } from '../store/activity-store'
 import { insertLinks, observationIdByHash, settleContradictions } from '../store/observation-links'
 import { type SummaryWrite, writeSharedSummary } from '../store/summary-share'
 import { finalStrength } from './sources'
@@ -106,13 +107,16 @@ export function writeBatchResult(
 ): WriteCounts {
   const { runId, output, batch, session, model, now } = input
   return db.transaction(() => {
-    const rows = output.observations.map((observation) => ({ observation, row: observationRow(observation, batch, session, model, now) }))
+    const rows = output.observations.map((observation) => ({ observation, row: { ...observationRow(observation, batch, session, model, now), observerRunId: runId } }))
     const inserted = rows.filter(({ row }) => insertObservation(db, row)).length
     const downgraded = rows.filter(({ observation, row }) => observation.evidence.strength !== row.evidence).length
     const linked = writeLinks(db, rows, now)
     const summary = writeSummary(db, output, batch, session, now)
     markDone(db, batch.map((event) => event.eventId))
     finishRun(db, runId, 'succeeded', null, now, model)
+    const at = { at: now, host: session.host, projectKey: session.projectKey, sessionId: session.id }
+    if (inserted > 0) recordActivity(db, { kind: 'save', ...at, count: inserted })
+    if (summary !== 'none') recordActivity(db, { kind: 'summary', ...at, count: 1 })
     return { observations: rows.length, inserted, downgraded, summary: summary !== 'none', summaryShared: summary === 'shared', ...linked }
   })()
 }

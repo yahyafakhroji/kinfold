@@ -8,6 +8,10 @@ import { type MetricsWindow, metricsSummary } from '../dashboard/metrics'
 import { sizeReport } from '../data-control/size'
 import type { Database } from '../sqlite/types'
 import { type BrowseFilters, browseObservations, observationFacets } from '../store/memory-reads'
+import { type ActivityQuery, listActivity } from '../store/activity-store'
+import { type MemoriesQuery, type ProjectsQuery, type SessionsQuery, devicesSeen, memoriesPage, projectsPage } from '../store/list-reads'
+import { type ImpactWindow, type MeasuredEntries, impactReport, overviewReport, sessionsWithSaved } from '../dashboard/overview'
+import { hostTurns, measureSaving } from '../dashboard/saved'
 
 export const STORE_READS = {
   /** For tests of the worker itself: answers with its argument. */
@@ -21,6 +25,14 @@ export const STORE_READS = {
   metricsSummary: (db: Database, _dbPath: string, args: { window: MetricsWindow; now: number }) => metricsSummary(db, args.window, args.now),
   memoryFacets: (db: Database, _dbPath: string, _args: Record<string, never>) => observationFacets(db),
   memoryBrowse: (db: Database, _dbPath: string, args: { filters: BrowseFilters }) => browseObservations(db, args.filters),
+  dashboardSessions: (db: Database, _dbPath: string, args: { query: SessionsQuery; measured: MeasuredEntries }) => sessionsWithSaved(db, args.query, args.measured),
+  dashboardMemories: (db: Database, _dbPath: string, args: { query: MemoriesQuery }) => memoriesPage(db, args.query),
+  dashboardActivity: (db: Database, _dbPath: string, args: { query: ActivityQuery }) => listActivity(db, args.query),
+  dashboardProjects: (db: Database, _dbPath: string, args: { query: ProjectsQuery }) => projectsPage(db, args.query),
+  dashboardDevices: (db: Database, _dbPath: string, _args: Record<string, never>) => devicesSeen(db),
+  measuredSaving: (db: Database, _dbPath: string, _args: Record<string, never>) => [...measureSaving(hostTurns(db))],
+  overviewReport: (db: Database, _dbPath: string, args: { now: number; measured: MeasuredEntries }) => overviewReport(db, args.now, args.measured),
+  impactReport: (db: Database, _dbPath: string, args: { now: number; window: ImpactWindow; measured: MeasuredEntries }) => impactReport(db, args.now, args.window, args.measured),
 }
 
 export type StoreReadName = keyof typeof STORE_READS

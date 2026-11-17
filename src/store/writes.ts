@@ -12,7 +12,12 @@ export interface SessionInput {
   cwd: string
   hostVersion?: string
   occurredAt: number
+  /** The machine it was captured on: LOCAL_DEVICE, a central device's id, or null when not known. */
+  device?: string | null
 }
+
+/** sessions.device for a session this daemon's own spool captured. */
+export const LOCAL_DEVICE = 'local'
 
 export interface PromptInput {
   sessionId: number
@@ -51,13 +56,14 @@ export function upsertProject(db: Database, project: ProjectKey, now: number): v
  */
 export function upsertSession(db: Database, session: SessionInput): number {
   const row = db.query<{ id: number }, Record<string, string | number | null>>(
-    `INSERT INTO sessions (host, host_session_id, project_key, cwd, host_version, started_at, last_event_at)
-     VALUES ($host, $hostSessionId, $projectKey, $cwd, $hostVersion, $at, $at)
+    `INSERT INTO sessions (host, host_session_id, project_key, cwd, host_version, started_at, last_event_at, device)
+     VALUES ($host, $hostSessionId, $projectKey, $cwd, $hostVersion, $at, $at, $device)
      ON CONFLICT (host, host_session_id) DO UPDATE SET
        project_key = CASE WHEN excluded.last_event_at >= last_event_at THEN excluded.project_key ELSE project_key END,
        started_at = min(started_at, excluded.started_at),
        last_event_at = max(last_event_at, excluded.last_event_at),
-       host_version = coalesce(excluded.host_version, host_version)
+       host_version = coalesce(excluded.host_version, host_version),
+       device = coalesce(device, excluded.device)
      RETURNING id`,
   ).get({
     host: session.host,
@@ -66,6 +72,7 @@ export function upsertSession(db: Database, session: SessionInput): number {
     cwd: session.cwd,
     hostVersion: session.hostVersion ?? null,
     at: session.occurredAt,
+    device: session.device ?? null,
   })
   if (row === null) throw new Error('session upsert returned no row')
   return row.id

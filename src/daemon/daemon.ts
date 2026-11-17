@@ -69,6 +69,9 @@ import { HOLDOUT_HOSTS, contextHandler } from './context-route'
 import { dataHandlers } from './data-routes'
 import { mcpReadHandler } from './mcp-read-route'
 import { memoryHandlers } from './memory-routes'
+import { listDevices } from '../central/devices'
+import { type ActivityInput, type ActivityRing, createActivityRing, recordActivity, recordUpdateOnce } from '../store/activity-store'
+import { readAutoState } from '../update/auto-state'
 import { observerModelsRoute } from './observer-models-route'
 import { createObserverTester, observerTestRoute } from './observer-test'
 import { startDataTicks } from './data-ticks'
@@ -336,6 +339,8 @@ interface Core {
   /** Settles once every connection to memory.db is closed. */
   stop: () => Promise<void>
   readersStarted: () => Promise<void>
+  /** Logs one event for the Activity page; a central device writes nothing to its kept store. */
+  activity: (input: ActivityInput) => void
 }
 
 const RESTORING = 'Kinfold is restoring a backup; try again in a moment'
@@ -519,6 +524,22 @@ export async function mergeSameRepos(db: Database, git: AsyncGitRunner, log: (li
   }
 }
 
+/** The update auto-update.json names, once per daemon start, for a device's own activity. */
+function noteDeviceUpdate(ring: ActivityRing | null, updated: { version: string; at: number } | null): void {
+  if (ring === null || updated === null || ring.rows().some((row) => row.kind === 'update-installed' && row.at === updated.at)) return
+  ring.push({ kind: 'update-installed', at: updated.at, detail: updated.version })
+}
+
+/** Names of the devices paired with this hub, for the dashboard's device column; none when the list cannot be read. */
+function pairedDeviceNames(dataDir: string, log: (line: string) => void): ReadonlyMap<string, string> {
+  try {
+    return new Map(listDevices(dataDir).map((device) => [device.id, device.name]))
+  } catch (error: unknown) {
+    log(`device list unreadable: ${error instanceof Error ? error.name : 'error'}`)
+    return new Map()
+  }
+}
+
 /** The store reader workers' connections: recall reads the same hot pages a prompt does; reports read every page once in a while. */
 export const RECALL_CACHE_KIB = 65_536
 export const REPORTS_CACHE_KIB = 16_384
@@ -626,6 +647,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   // Kept across core restarts: a restart is when the store's slow work runs.
   const watch = createStallWatch({ log })
 
+  // A device writes nothing to its kept store, so its own events (sign-ins, an update installed here) live in memory.
+  const deviceActivity = relay === null ? null : createActivityRing()
   /** Bound once the restarter exists; a change saved before that has nothing to restart. */
   let applyEmbedding = (): void => {}
   function startCore(): Core {
@@ -714,7 +737,11 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     sizeChanged = () => data.sizeChanged?.()
     const data = dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log, holdoutHosts: HOLDOUT_HOSTS, onDisplay: publishDisplay, reports: readers.reports })
     // Measured once the start has settled, so `kinfold size` and the Data page find a report instead of waiting on dbstat.
-    const sizeWarm = relay !== null ? null : setTimeout(() => data.warmSize?.(), SIZE_WARM_DELAY_MS)
+    // The dashboard's kept reports are measured then too, so its first page finds them ready.
+    const sizeWarm = relay !== null ? null : setTimeout(() => {
+      data.warmSize?.()
+      void routes.memory.views?.warm()
+    }, SIZE_WARM_DELAY_MS)
     const routes: CoreRoutes = {
       schemaVersion: store.schemaVersion,
       vectorSearch: vectors.support.ok ? 'on' : 'off',
@@ -726,7 +753,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? []),
       data,
       exclusive,
-      memory: memoryHandlers(store.db, log, readers.reports),
+      memory: memoryHandlers(store.db, log, readers.reports, { deviceNames: () => pairedDeviceNames(dataDir, log) }),
       metrics: (window) => metricsRoute(readers.reports, window),
       projects: (method, url, readBody) => projectRoute(method, url, readBody, { db: store.db, now: Date.now, log, device: relay !== null }),
       watch: (method, url) => watchRoute(store.db, method, url, Date.now()),
@@ -773,7 +800,17 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     const readersStarted = async (): Promise<void> => {
       await Promise.all([readers.recall.started?.(), readers.delta.started?.()])
     }
-    return { routes, central, scheduler, observer, indexer: vectors.indexer, snapshot, stop, readersStarted, passedTest: (provider) => passedTest(store.db, provider, log) }
+    const activity = (input: ActivityInput): void => {
+      if (deviceActivity !== null) return deviceActivity.push(input)
+      try {
+        recordActivity(store.db, input)
+      } catch (error: unknown) {
+        log(`activity not recorded kind=${input.kind}: ${errorMessage(error)}`)
+      }
+    }
+    if (relay === null) recordUpdateOnce(store.db, readAutoState(dataDir).updated, log)
+    else noteDeviceUpdate(deviceActivity, readAutoState(dataDir).updated)
+    return { routes, central, scheduler, observer, indexer: vectors.indexer, snapshot, stop, readersStarted, activity, passedTest: (provider) => passedTest(store.db, provider, log) }
   }
 
   let core = watch.step('core start', startCore)
@@ -827,6 +864,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     keyStore: () => (options.keyStore !== undefined ? options.keyStore : defaultKeyStore(dataDir)),
     restart,
     sleep: options.backup?.sleep ?? ((ms) => Bun.sleep(ms)),
+    onEvent: (kind, detail) => core.activity({ kind, at: Date.now(), detail }),
     uploadLimit: options.backup?.uploadLimit ?? (() => uploadLimitFor(dataDir, MAX_UPLOAD_BYTES)),
     ...(options.backup?.lockAttempts !== undefined ? { lockAttempts: options.backup.lockAttempts } : {}),
   })
@@ -881,6 +919,9 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log, (provider) => core.passedTest(provider))),
     auth: dashboardAuth,
     dashboardEvents: createDashboardEvents(dashboardNow),
+    onSignIn: () => core.activity({ kind: 'sign-in', at: Date.now() }),
+    daemonLogPath: join(dataDir, 'logs', 'daemon.log'),
+    deviceActivity: () => deviceActivity?.rows() ?? [],
     backup,
     unavailable: () => (restarter.down() ? RESTORING : null),
     log,
@@ -910,6 +951,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       return core.central
     },
     view, log,
+    onPaired: (device) => core.activity({ kind: 'device-paired', at: Date.now(), device }),
     ...(options.central?.allowLoopback === true ? { allowLoopback: true } : {}),
     ...(options.central?.hubRetryMs !== undefined ? { retryMs: options.central.hubRetryMs } : {}),
   })
