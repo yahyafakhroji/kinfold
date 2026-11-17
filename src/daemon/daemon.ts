@@ -55,6 +55,7 @@ import { logLine } from './log-line'
 import { DEFAULT_OBSERVER_TICK_MS, type ObserverScheduleConfig, type ObserverScheduler, createObserverScheduler } from './observer-scheduler'
 import { type DrainScheduler, createDrainScheduler } from './scheduler'
 import { createDashboardAuth, fileSessionStore } from '../dashboard/auth'
+import { createDashboardEvents } from '../dashboard/events'
 import { metricsRoute } from '../dashboard/metrics'
 import { writeDisplayFile } from '../context/display-file'
 import { watchRoute } from '../watch/reads'
@@ -129,6 +130,8 @@ export interface DaemonOptions {
   keychain?: CredentialProvider
   /** The database key store; default this platform's (src/sqlite/keys.ts). */
   dbKeys?: DbKeyStore
+  /** The dashboard leases' and log's clock, for tests. */
+  dashboard?: { now?: () => number }
   /** Rotation tick and clock, for tests. */
   hmac?: { rotationTickMs?: number; now?: () => number }
   /** Semantic search. Without it there is no embedding and /search/semantic answers unavailable. */
@@ -841,6 +844,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     }
   }
   let hub: HubDaemon | null = null
+  const dashboardNow = options.dashboard?.now ?? Date.now
+  const dashboardAuth = createDashboardAuth(dashboardNow, fileSessionStore(dataDir, log))
   const deps: ServerDeps = {
     onActivity: agentEvent,
     port: options.port,
@@ -874,7 +879,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     },
     observerModels: observerModelsRoute(options.observer?.cliRunnerFor ?? null, log, Date.now),
     observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log, (provider) => core.passedTest(provider))),
-    auth: createDashboardAuth(Date.now, fileSessionStore(dataDir, log)),
+    auth: dashboardAuth,
+    dashboardEvents: createDashboardEvents(dashboardNow),
     backup,
     unavailable: () => (restarter.down() ? RESTORING : null),
     log,
@@ -946,6 +952,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   log(`listening on 127.0.0.1:${server.port} schema=${core.routes.schemaVersion} observer=${core.observer !== null ? 'on' : 'off'}`)
 
   const stop = async (): Promise<void> => {
+    // Before any await, so a stop that hangs or throws still keeps each lease's latest expiry: renewals are not written one by one.
+    dashboardAuth.flush()
     watch.stop()
     clearInterval(rotation)
     updateChecks.stop()

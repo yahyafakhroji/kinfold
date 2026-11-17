@@ -118,7 +118,8 @@ test('reads and ingest key the same cwd the same way', async () => {
 })
 
 test('the read routes take the token only', async () => {
-  const secret = auth.redeemCode(auth.issueCode().code)
+  auth.holdLease('R'.repeat(43), 'print')
+  const secret = auth.redeemCode(auth.issueCode('R'.repeat(43))!.code)
   expect(secret).not.toBeNull()
   const cookie = sessionCookie(secret!).split(';')[0]!
   const body = { args: SEARCH, cwd: CWD }

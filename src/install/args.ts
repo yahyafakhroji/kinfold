@@ -123,7 +123,7 @@ export const USAGE = [
   '             --remove-hmac-keys deletes the stored hmac-master and hmac-legacy keys and hmac.d/: stored refs can no longer',
   '             be checked, and a later install starts a new master (hmac.key is written back from hmac-legacy first)',
   '  status',
-  '  dashboard  [--print]',
+  '  dashboard  [--print | --close]',
   '  watch      [--host <agent>] [--project <name>] [--debug [--json]]   what Kinfold recalled for each prompt, live, for every agent; --debug adds why; Ctrl-C stops it',
   '  size',
   '  retention  [--set <events|prompts|observations|summaries>=<days|keep>]... [--set warn_bytes=<n>] [--yes]',
@@ -265,7 +265,7 @@ function purgeArgs(flags: readonly DataFlag[]): Parsed<DataArgs> {
   return parsed.ok ? { ok: true, value: { command: 'purge', body, yes } } : { ok: false, error: `purge: ${parsed.error}` }
 }
 
-// ---- Dashboard: `kinfold dashboard [--print]` -------------------------------------
+// ---- Dashboard: `kinfold dashboard [--print | --close]` -------------------------------------
 // Asks the daemon for a one-time login code and opens (or prints) the login
 // link. Its only flag is --print.
 
@@ -301,7 +301,10 @@ export function parseKeyArgs(argv: readonly string[]): Parsed<KeyArgs> | null {
 
 export interface DashboardArgs {
   command: 'dashboard'
+  /** Print the link and hold the dashboard open for 12 h instead of staying in the foreground. */
   print: boolean
+  /** End what --print holds open. */
+  close: boolean
 }
 
 export interface WatchArgs {
@@ -354,9 +357,10 @@ export function parseWatchArgs(argv: readonly string[]): Parsed<WatchArgs> | nul
 export function parseDashboardArgs(argv: readonly string[]): Parsed<DashboardArgs> | null {
   if (argv[0] !== 'dashboard') return null
   const rest = argv.slice(1)
-  if (rest.length === 0) return { ok: true, value: { command: 'dashboard', print: false } }
-  if (rest.length === 1 && rest[0] === '--print') return { ok: true, value: { command: 'dashboard', print: true } }
-  return { ok: false, error: `dashboard takes only --print\n${USAGE}` }
+  if (rest.length === 0) return { ok: true, value: { command: 'dashboard', print: false, close: false } }
+  if (rest.length === 1 && rest[0] === '--print') return { ok: true, value: { command: 'dashboard', print: true, close: false } }
+  if (rest.length === 1 && rest[0] === '--close') return { ok: true, value: { command: 'dashboard', print: false, close: true } }
+  return { ok: false, error: `dashboard takes one of --print or --close\n${USAGE}` }
 }
 
 /** Null when argv is not a data command, so install/uninstall/status parse exactly as before. */

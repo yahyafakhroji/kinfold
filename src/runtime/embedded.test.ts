@@ -4,6 +4,7 @@ import * as fs from 'node:fs'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createDashboardAuth } from '../dashboard/auth'
+import { createDashboardEvents } from '../dashboard/events'
 import { EMBEDDED_ASSET_NAMES, PUBLIC_DIR, dashboardRoute, listAssets } from '../dashboard/routes'
 import type { DashboardDeps } from '../dashboard/routes'
 import { type FakeWorld, createWorld } from '../install/test-support'
@@ -45,6 +46,7 @@ function dashboardDeps(assets: EmbeddedAssets | null): DashboardDeps {
     port: 1,
     auth: createDashboardAuth(),
     readBody: async () => ({ ok: true, value: {} }),
+    events: createDashboardEvents(),
     log: () => {},
     assets,
   }

@@ -31,7 +31,7 @@ test('every dashboard path on localhost is a 303 to the same path and query on 1
 })
 
 test('a login code sent to localhost is not redeemed and sets no cookie; it still works on 127.0.0.1', async () => {
-  const { code } = (await (await rig.bearer('POST', '/dashboard/login-code')).json()) as { code: string }
+  const { code } = await rig.issueCode()
   const onLocalhost = await asLocalhost('POST', '/dashboard/session', {
     headers: { origin: `http://localhost:${port()}`, 'x-sam-request': '1', 'content-type': 'application/json' },
     body: JSON.stringify({ code }),
