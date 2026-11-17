@@ -264,6 +264,11 @@ interface Unrooted {
   cwd: string | null
 }
 
+/** The folders whose repo backfillRoots asks for, each a project's latest session folder: what a caller can look up ahead of it. */
+export function unrootedFolders(db: Database): string[] {
+  return [...new Set(unrooted(db).flatMap((row) => (row.cwd === null ? [] : [row.cwd])))]
+}
+
 /** Whether the store keeps first commits (v16); the installer reads a store before the daemon migrates it. */
 function keepsRoots(db: Database): boolean {
   return db.query<{ name: string }, []>('PRAGMA table_info(projects)').all().some((row) => row.name === 'root_commit')

@@ -25,6 +25,7 @@ import { HIDDEN_WINDOW } from '../install/system'
 import { QUIET_MS } from './auto'
 import { mergeAutoState } from './auto-state'
 import { UpdateCheckError, fetchNewestRelease } from './check'
+import { betaChannelOn } from './enabled'
 import { writeInstallRun } from './install-run'
 import { isDevVersion } from './release'
 import { type UpdateLockDeps, acquireUpdateLock, updateLockHolder } from './lock'
@@ -433,7 +434,7 @@ async function applyUpdateSteps(env: InstallEnv, options: StepOptions, deps: Upd
   const running = deps.version ?? VERSION
   let latest: string
   try {
-    const found = await fetchNewestRelease(env.fetch, env.now, readInstallRecord(env.dataDir)?.beta === true, running)
+    const found = await fetchNewestRelease(env.fetch, env.now, betaChannelOn(readInstallRecord(env.dataDir), running), running)
     // An automatic run applies only a patch, so the beta on offer beside it is left for kinfold update.
     latest = options.patchOnly ? (found.patch ?? found.release.version) : found.release.version
   } catch (error: unknown) {

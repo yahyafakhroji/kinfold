@@ -24,6 +24,8 @@ export interface DataTickOptions {
   scanBatchSize?: number
   /** Retention ends with a TRUNCATE checkpoint, so it runs clear of the vector worker's read snapshot; default at once. */
   exclusive?: Exclusive
+  /** After a retention run that removed rows: the kept size report is out of date. */
+  onRemoved?: () => void
 }
 
 export interface DataTicks {
@@ -59,7 +61,10 @@ export function startDataTicks(options: DataTickOptions): DataTicks {
     void exclusive(() => {
       try {
         const line = describeRetention(applyRetention(db, now()))
-        if (line !== null) log(line)
+        if (line !== null) {
+          log(line)
+          options.onRemoved?.()
+        }
       } catch (error: unknown) {
         log(`data retention failed: ${errorMessage(error)}`)
       }

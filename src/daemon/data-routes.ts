@@ -11,6 +11,7 @@ import { type ResolveAction, type ResolveOutcome, resolveFinding } from '../data
 import { type RetentionOutcome, type RetentionPreview, applyRetention, describePreview, describeRetention, previewRetention } from '../data-control/retention'
 import { type ScanResult, describeScan, scanUntil } from '../data-control/scanner'
 import type { SizeReport } from '../data-control/size'
+import { SizeStillComputingError, createSizeCache } from './size-cache'
 import type { Database } from '../sqlite/types'
 import { type DataSettings, type DataSettingsChange, readDataSettings, writeDataSettings } from '../store/data-settings-store'
 import { type DisplayChange, type DisplaySettings, readDisplaySettings, writeDisplaySettings } from '../store/display-settings'
@@ -28,8 +29,12 @@ export interface FindingsView {
 }
 
 export interface DataHandlers {
-  /** Read through the reports reader: on a large store dbstat takes seconds. */
-  size: () => Promise<SizeReport>
+  /** Read through the reports reader and kept (size-cache.ts): on a large store dbstat takes seconds. */
+  size: () => Promise<SizeReport & { measuredAt: number }>
+  /** Starts the first size read in the background, so the first ask finds a report. */
+  warmSize?: () => void
+  /** Rows went (a scheduled retention run): the kept size report is measured again on the next ask. */
+  sizeChanged?: () => void
   retention: () => DataSettings
   /** Saves, then applies the new retention at once, so the answer shows what it removed. */
   putRetention: (change: DataSettingsChange) => { saved: DataSettings; applied: RetentionOutcome }
@@ -77,6 +82,7 @@ export function parseDisplayChange(body: unknown): Parsed<DisplayChange> {
 export function dataHandlers(deps: DataDeps): DataHandlers {
   const { db, log } = deps
   const displayView = (settings: DisplaySettings): DisplayView => ({ ...settings, holdoutHosts: deps.holdoutHosts ?? [] })
+  const sizes = createSizeCache(() => (deps.reports ?? inlineStoreReader(db, deps.dbPath)).run('dataSize', {}), { now: deps.now })
   return {
     display: () => displayView(readDisplaySettings(db)),
     putDisplay: (change) => {
@@ -85,11 +91,17 @@ export function dataHandlers(deps: DataDeps): DataHandlers {
       log(`display settings saved show_recall=${saved.showRecall} holdout=${saved.holdout}`)
       return displayView(saved)
     },
-    size: () => (deps.reports ?? inlineStoreReader(db, deps.dbPath)).run('dataSize', {}),
+    size: async () => {
+      const measured = await sizes.get()
+      return { ...measured.report, measuredAt: measured.measuredAt }
+    },
+    warmSize: () => sizes.refresh(),
+    sizeChanged: () => sizes.stale(),
     retention: () => readDataSettings(db),
     putRetention: (change) => {
       const saved = writeDataSettings(db, change, deps.now())
       const applied = applyRetention(db, deps.now())
+      sizes.stale()
       log(`data retention saved events=${saved.retention.events} prompts=${saved.retention.prompts} observations=${saved.retention.observations} summaries=${saved.retention.summaries} warn_bytes=${saved.warnBytes}`)
       const line = describeRetention(applied)
       if (line !== null) log(line)
@@ -108,11 +120,13 @@ export function dataHandlers(deps: DataDeps): DataHandlers {
     findings: (query) => ({ findings: listFindings(db, query), pendingByRule: pendingByRule(db) }),
     resolve: (id, action) => {
       const outcome = resolveFinding(db, id, action, { ...deps.markerKey(), now: deps.now })
+      if (outcome.ok && outcome.purge !== null) sizes.stale()
       log(`data finding resolve id=${id} action=${action} ${outcome.ok ? 'ok' : `refused=${outcome.status}`}`)
       return outcome
     },
     purge: (request) => {
       const report = purge(db, request.target, { dryRun: request.dryRun, now: deps.now })
+      if (!request.dryRun) sizes.stale()
       log(describePurge(request.target, report))
       return report
     },
@@ -149,6 +163,16 @@ async function retentionRoute(method: string, readBody: ReadBody, handlers: Data
   }))
 }
 
+/** A report still being worked out is a 503 that says so: the HTTP server drops a request that waits past its idle timeout. */
+async function sizeRoute(handlers: DataHandlers): Promise<RouteAnswer> {
+  try {
+    return { status: 200, body: await handlers.size() }
+  } catch (error: unknown) {
+    if (error instanceof SizeStillComputingError) return { status: 503, body: { error: error.message } }
+    throw error
+  }
+}
+
 /**
  * Null when the path is not a /data route, so the caller answers 404.
  * Retention, purge and resolve end with a TRUNCATE checkpoint, so they run
@@ -156,7 +180,7 @@ async function retentionRoute(method: string, readBody: ReadBody, handlers: Data
  */
 export async function dataRoute(method: string, url: URL, readBody: ReadBody, handlers: DataHandlers, exclusive: Exclusive = runNow): Promise<RouteAnswer | null> {
   const path = url.pathname
-  if (path === '/data/size') return method === 'GET' ? { status: 200, body: await handlers.size() } : METHOD_NOT_ALLOWED
+  if (path === '/data/size') return method === 'GET' ? sizeRoute(handlers) : METHOD_NOT_ALLOWED
   if (path === '/data/retention') return retentionRoute(method, readBody, handlers, exclusive)
   if (path === '/data/display') {
     if (method === 'GET') return { status: 200, body: handlers.display() }

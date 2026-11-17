@@ -542,11 +542,19 @@ CREATE TABLE project_merges (
 CREATE INDEX project_merges_by_from ON project_merges(from_key, merged_at DESC);
 `
 
+// v17: the keyword match at prompt time filters every FTS hit by project,
+// contradiction and session. Those columns sit after a row's text, so on the
+// table each hit cost a page of text to read (and, encrypted, to decrypt);
+// this index holds them alone, and the text is read only for the rows kept.
+const V17_RECALL_INDEX = `
+CREATE INDEX observations_recall ON observations(id, project_key, contradicted_by, session_id);
+`
+
 /** Index i holds the migration that takes user_version from i to i + 1. */
 export const MIGRATIONS: readonly string[] = [
   V1_CORE + V1_MEMORY + V1_DELIVERY, V2_OBSERVER, V3_CONTEXT, V4_DATA_CONTROL, V5_LINKS, V6_USAGE, V7_SHARED_SUMMARIES, V8_VECTORS, V9_RELATED_SERVED,
   V10_OBSERVER_SAFETY, V11_VECTOR_SPACE_INDEX, V12_VISIBLE, V13_LATE_AND_INDEXES,
-  V14_OBSERVER_ENDPOINT, V15_EMBEDDING_SPACES, V16_PROJECT_MERGES,
+  V14_OBSERVER_ENDPOINT, V15_EMBEDDING_SPACES, V16_PROJECT_MERGES, V17_RECALL_INDEX,
 ]
 
 /**

@@ -553,3 +553,12 @@ test('install records --updates and --beta, and a later plain run keeps them', a
   expect(await install(w.env, { ...YES, beta: false })).toBe(EXIT_OK)
   expect(record()).not.toHaveProperty('beta')
 })
+
+test('installing a prerelease turns the beta channel on, unless --no-beta is given', async () => {
+  const w = both()
+  const record = (): unknown => JSON.parse(readFileSync(join(w.dataDir, 'install.json'), 'utf8'))
+  expect(await install(w.env, { ...YES, releaseVersion: '0.6.0-beta.1' })).toBe(EXIT_OK)
+  expect(record()).toMatchObject({ beta: true })
+  expect(await install(w.env, { ...YES, releaseVersion: '0.6.0-beta.1', beta: false })).toBe(EXIT_OK)
+  expect(record()).not.toHaveProperty('beta')
+})

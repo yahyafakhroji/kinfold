@@ -24,15 +24,48 @@ export interface KeywordQuery {
   limit: number
 }
 
-/** Best BM25 first, then newest id. */
-export function keywordCandidates(db: Database, query: KeywordQuery): PackObservation[] {
-  return db.query<PackObservation, Record<string, string | number>>(
-    `SELECT ${columns(db)} FROM observations_fts f JOIN observations o ON o.id = f.rowid
+/** The index the keyword match filters its hits through (schema v17). */
+export const RECALL_INDEX = 'observations_recall'
+
+/** Per connection: a read-only fallback can meet a store from before v17, which matches on the table as before. */
+const recallIndex = new WeakMap<Database, boolean>()
+
+function hasRecallIndex(db: Database): boolean {
+  const known = recallIndex.get(db)
+  if (known !== undefined) return known
+  const found = db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'index' AND name = ?").get(RECALL_INDEX)?.n === 1
+  recallIndex.set(db, found)
+  return found
+}
+
+/**
+ * The ids, best BM25 first. Named so: the planner would look each hit up in
+ * the table, where its project and contradiction sit behind its text, and on
+ * a 30,000-memory store that read was most of a prompt's keyword time.
+ */
+function keywordIdsSql(db: Database): string {
+  return `SELECT o.id FROM observations_fts f JOIN observations o${hasRecallIndex(db) ? ` INDEXED BY ${RECALL_INDEX}` : ''} ON o.id = f.rowid
      WHERE observations_fts MATCH $match AND o.project_key = $projectKey AND o.contradicted_by IS NULL
        AND o.id NOT IN (SELECT value FROM json_each($exclude))
        AND (o.session_id IS NULL OR o.session_id <> $session)
-     ORDER BY bm25(observations_fts), o.id DESC LIMIT $limit`,
-  ).all({ match: query.match, projectKey: query.projectKey, exclude: JSON.stringify(query.excludeIds), session: query.excludeSessionId ?? -1, limit: query.limit })
+     ORDER BY bm25(observations_fts), o.id DESC LIMIT $limit`
+}
+
+/** The keyword match's query plan, for the test that holds it to the index. */
+export function keywordIdsPlan(db: Database): string {
+  return db.query<{ detail: string }, Record<string, string | number>>(`EXPLAIN QUERY PLAN ${keywordIdsSql(db)}`)
+    .all({ match: 'x', projectKey: '', exclude: '[]', session: -1, limit: 1 }).map((row) => row.detail).join('\n')
+}
+
+/** Best BM25 first, then newest id. The full rows are read for the ids kept, after the match. */
+export function keywordCandidates(db: Database, query: KeywordQuery): PackObservation[] {
+  const ids = db.query<{ id: number }, Record<string, string | number>>(keywordIdsSql(db))
+    .all({ match: query.match, projectKey: query.projectKey, exclude: JSON.stringify(query.excludeIds), session: query.excludeSessionId ?? -1, limit: query.limit })
+    .map((row) => row.id)
+  if (ids.length === 0) return []
+  const rows = new Map(db.query<PackObservation, { ids: string }>(`SELECT ${columns(db)} FROM observations o WHERE o.id IN (SELECT value FROM json_each($ids))`)
+    .all({ ids: JSON.stringify(ids) }).map((row) => [row.id, row]))
+  return ids.flatMap((id) => rows.get(id) ?? [])
 }
 
 /** Current observations of the project among `ids`, other sessions' only (null: no exclusion), in no particular order. */
@@ -66,22 +99,43 @@ export function matchedTermCounts(db: Database, ids: readonly number[], matches:
 /** Per connection: the vocabulary table lives in its temp schema, so each connection makes its own once. */
 const vocabReady = new WeakSet<Database>()
 
+/** How long a term's memory count is kept per connection: shares move slowly, and asking the vocabulary is a cold read after every write. */
+export const TERM_COUNT_TTL_MS = 60_000
+/** Terms kept per connection; past this the oldest go. */
+const TERM_COUNT_KEEP = 5_000
+const termCounts = new WeakMap<Database, Map<string, { doc: number; at: number }>>()
+
 /**
  * How many observations hold each term, from FTS5's own index (an fts5vocab
  * table in the connection's temp schema: nothing is written to the store, so a
  * read-only connection can make it). A term the index has never seen is 0.
+ * Counts are kept TERM_COUNT_TTL_MS per connection: a writer's commit empties
+ * a reader's page cache, so every prompt read the vocabulary cold.
  */
-export function termDocCounts(db: Database, terms: readonly string[]): Map<string, number> {
+export function termDocCounts(db: Database, terms: readonly string[], now: number = Date.now()): Map<string, number> {
   if (!vocabReady.has(db)) {
     db.run("CREATE VIRTUAL TABLE IF NOT EXISTS temp.kinfold_fts_vocab USING fts5vocab(main, observations_fts, 'row')")
     vocabReady.add(db)
   }
+  const kept = termCounts.get(db) ?? new Map<string, { doc: number; at: number }>()
+  termCounts.set(db, kept)
   // The index holds terms as its unicode61 tokenizer folds them, without accents: "café" is stored as "cafe".
   const folded = terms.map(foldTerm)
-  const rows = db.query<{ term: string; doc: number }, { terms: string }>('SELECT term, doc FROM temp.kinfold_fts_vocab WHERE term IN (SELECT value FROM json_each($terms))')
-    .all({ terms: JSON.stringify([...new Set(folded)]) })
-  const docs = new Map(rows.map((row) => [row.term, row.doc]))
-  return new Map(terms.map((term, index) => [term, docs.get(folded[index]!) ?? 0]))
+  const missing = [...new Set(folded)].filter((term) => {
+    const entry = kept.get(term)
+    return entry === undefined || now - entry.at >= TERM_COUNT_TTL_MS
+  })
+  if (missing.length > 0) {
+    const rows = db.query<{ term: string; doc: number }, { terms: string }>('SELECT term, doc FROM temp.kinfold_fts_vocab WHERE term IN (SELECT value FROM json_each($terms))')
+      .all({ terms: JSON.stringify(missing) })
+    const docs = new Map(rows.map((row) => [row.term, row.doc]))
+    for (const term of missing) {
+      kept.delete(term)
+      kept.set(term, { doc: docs.get(term) ?? 0, at: now })
+    }
+    while (kept.size > TERM_COUNT_KEEP) kept.delete(kept.keys().next().value!)
+  }
+  return new Map(terms.map((term, index) => [term, kept.get(folded[index]!)?.doc ?? 0]))
 }
 
 /** A term as FTS5's default tokenizer stores it: lowercase, accents removed. */

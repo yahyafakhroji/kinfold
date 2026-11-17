@@ -54,6 +54,7 @@ import { vec0InstallActions } from './vec0-install'
 import { envForDataDir } from '../cli/data-dir-env'
 import { builtProfiles, hasWiring, overlapPlan, overlapState, overlapWiring, profileOf } from '../agents/install-profiles'
 import { VERSION } from '../version'
+import { isPrerelease } from '../update/enabled'
 import { wslInstall } from '../wsl/entry'
 
 export const EXIT_OK = 0
@@ -614,7 +615,8 @@ function setupFlags(options: InstallOptions, envVars: Readonly<Record<string, st
     noAutoUpdate: (options.noAutoUpdate ?? false) || readEnv(envVars, 'NO_AUTO_UPDATE') === '1',
     autoUpdate: options.autoUpdate ?? false,
     ...(options.updates !== undefined ? { updates: options.updates } : {}),
-    ...(options.beta !== undefined ? { beta: options.beta } : {}),
+    // A prerelease was installed on purpose, so the releases after it are asked for too. --no-beta keeps the channel off once a final release runs; a running prerelease reads it anyway (betaChannelOn).
+    ...(options.beta !== undefined ? { beta: options.beta } : isPrerelease(options.releaseVersion ?? VERSION) ? { beta: true } : {}),
     yes: options.yes,
     path: options.path ?? null,
     ...(options.display?.holdout !== undefined ? { holdout: options.display.holdout } : {}),
