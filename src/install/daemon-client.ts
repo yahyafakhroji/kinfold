@@ -218,3 +218,28 @@ export async function getQuietForMs(env: InstallEnv): Promise<number | null> {
     return null
   }
 }
+
+/** A merge as GET /projects lists it. */
+interface MergeView {
+  from: string
+  into: string
+  reason: string
+}
+
+/**
+ * One line per project merge of the last day: one repo under two keys (a
+ * renamed remote, a fork) became one project, and status says so. Empty when
+ * there is none, or when the daemon is down or too old to say.
+ */
+export async function projectMergeLines(env: Pick<InstallEnv, 'dataDir' | 'fetch'>): Promise<string[]> {
+  try {
+    const { base, token } = authorized(env as InstallEnv)
+    const response = await env.fetch(`${base}/projects`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+    if (response.status !== 200) return []
+    const body: unknown = await response.json()
+    if (!isRecord(body) || !Array.isArray(body.merges)) return []
+    return (body.merges as MergeView[]).map((merge) => `project: merged ${merge.from} into ${merge.into} (${merge.reason === 'same-repo' ? 'same repo' : 'kinfold project merge'})`)
+  } catch {
+    return []
+  }
+}

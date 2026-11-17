@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { inlineStoreReader } from '../workers/store-reader'
 import { type LatencySummary, metricsRoute, summarizeLatency } from '../dashboard/metrics'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
 import { PROJECT, T0, type TempStore, openTempStore, seedEvent, seedSession } from '../observer/test-support'
@@ -65,9 +66,10 @@ test('lag from turn end runs to the first succeeded run that started after the t
   expect(turnLags(temp.store.db, T0 - DAY)).toEqual([{ host: 'claude-code', provider: 'claude-cli', lagMs: 13_000 }])
 })
 
-test('the summary groups by host and provider and honours the 24h and 7d windows', () => {
+test('the summary groups by host and provider and honours the 24h and 7d windows', async () => {
   seed()
-  const day = metricsRoute(temp.store.db, '24h', () => T0 + 20_000)
+  const reports = inlineStoreReader(temp.store.db, temp.store.path)
+  const day = await metricsRoute(reports, '24h', () => T0 + 20_000)
   expect(day.status).toBe(200)
   const latency = latencyOf(day)
   expect(latency.window).toBe('24h')
@@ -75,9 +77,9 @@ test('the summary groups by host and provider and honours the 24h and 7d windows
   expect(latency.all.lagFromEventMs).toEqual({ samples: 2, p50: 14_000, p95: 15_000 })
   expect(latency.all.lagFromTurnEndMs).toEqual({ samples: 1, p50: 13_000, p95: 13_000 })
   expect(latency.groups.map((group) => group.host)).toEqual(['claude-code'])
-  const week = latencyOf(metricsRoute(temp.store.db, '7d', () => T0 + 20_000))
+  const week = latencyOf(await metricsRoute(reports, '7d', () => T0 + 20_000))
   expect(week.groups.map((group) => [group.host, group.provider, group.runMs.p50])).toEqual([['claude-code', 'claude-cli', 10_000], ['opencode', 'openrouter', 3_000]])
-  expect(metricsRoute(temp.store.db, 'forever')).toEqual({ status: 400, body: { error: 'window must be 24h or 7d' } })
+  expect(await metricsRoute(reports, 'forever')).toEqual({ status: 400, body: { error: 'window must be 24h or 7d' } })
 })
 
 test('empty stores give null percentiles, and the HTTP route takes and checks ?window', async () => {

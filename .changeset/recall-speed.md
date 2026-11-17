@@ -1,0 +1,5 @@
+---
+"kinfold": minor
+---
+
+Prompt-time recall answers within the hook's wait on a large, busy store. On a 30,000-memory hub the daemon took 1.5 to 10 s, so the hook gave up and nothing reached the model; it now answers in tens of milliseconds. The prompt's store reads and the dashboard's size, metrics, facets and memory browse run in worker threads with their own read-only connections. The daemon answers by one deadline with what is ready and offers the rest with the next prompt. The search leaves out the wrappers agents add to a prompt (pasted-content tags and their ids, system reminders), ranks your own words before pasted text, and matches on the 8 rarest words its memory holds. Memory in an answer that came too late is offered again once, and counts as sent after a second late answer. Session-start lists put status notes such as "CI run green" after lasting memory and drop them after a day. In the install wizard, a line feed left over from Enter no longer turns a yes or no question to No.

@@ -4,8 +4,9 @@ import { type NormalizedEvent, SCHEMA_VERSION } from '../contract/event'
 import { ulid } from '../contract/ulid'
 import { type TempStore, openTempStore } from '../observer/test-support'
 import { upsertProject, upsertSession } from '../store/writes'
-import { MAX_CAPTURE_EVENTS, captureHandler } from './hub-capture'
+import { MAX_CAPTURE_EVENTS, captureHandler, sessionWritable } from './hub-capture'
 import { centralProjectKey, parseDeviceProject } from './project-key'
+import { registerProject } from '../store/project-merge'
 
 let temp: TempStore
 beforeEach(() => {
@@ -115,4 +116,27 @@ test('a stored batch wakes the observer', async () => {
   await capture({ events: [{ event: event(), project: remote }] }, context)
   await capture({ events: [{ event: event(), project: remote }].map((item) => item) }, context)
   expect(woken).toBe(2)
+})
+
+test('a device sends its repo\'s first commit, so the hub can tell the same repo under two keys; a malformed one is dropped', () => {
+  const rootCommit = 'd'.repeat(40)
+  expect(parseDeviceProject({ ...remote, rootCommit }, 'dev-a')).toEqual({ ...remote, rootCommit })
+  expect(parseDeviceProject({ ...remote, rootCommit: 'not-a-commit' }, 'dev-a')).toEqual(remote)
+  expect(centralProjectKey({ key: '/home/me/repo', kind: 'git-root', displayName: 'repo', rootCommit }, 'dev-a')).toMatchObject({ key: 'dev-a:/home/me/repo', rootCommit })
+})
+
+test('after one repo\'s keys merged on the hub, a device still writes its sessions there', () => {
+  const temp = openTempStore('kinfold-writable-')
+  try {
+    const db = temp.store.db
+    const root = 'f'.repeat(40)
+    registerProject(db, { key: 'dev-a:/repo', kind: 'git-root', displayName: 'repo', rootCommit: root }, 1)
+    // A later key of the same repo wins, and the device's session moves under it.
+    const winner = registerProject(db, { key: 'dev-b:/repo', kind: 'git-root', displayName: 'repo', rootCommit: root }, 2)
+    upsertSession(db, { host: 'claude-code', hostSessionId: 's', projectKey: winner, cwd: '/repo', occurredAt: 3 })
+    expect(sessionWritable(db, 'claude-code', 's', 'dev-a:/repo', 'dev-a')).toBe(true)
+    expect(sessionWritable(db, 'claude-code', 's', 'dev-c:/other', 'dev-c')).toBe(false)
+  } finally {
+    temp.cleanup()
+  }
 })

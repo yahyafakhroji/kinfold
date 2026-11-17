@@ -18,6 +18,7 @@ const CONTROL = /[\u0000-\u001f\u007f]/
  */
 const REMOTE_KEY = /^(?:[^\s/:\[\]]+|\[[0-9a-f:.]+\])(?:\/[^/]+){2,}$/
 const KINDS: readonly ProjectKeyKind[] = ['git-remote', 'git-root', 'path']
+const COMMIT = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
 
 const scopePrefix = (deviceId: string): string => `${deviceId}:`
 
@@ -34,5 +35,9 @@ export function parseDeviceProject(value: unknown, deviceId: string): ProjectKey
   if (typeof displayName !== 'string' || displayName.length === 0 || displayName.length > MAX_NAME_CHARS || CONTROL.test(displayName)) return null
   if (typeof kind !== 'string' || !(KINDS as readonly string[]).includes(kind)) return null
   const scoped = kind === 'git-remote' ? REMOTE_KEY.test(key) : key.startsWith(scopePrefix(deviceId)) && key.length > scopePrefix(deviceId).length
-  return scoped ? { key, kind: kind as ProjectKeyKind, displayName } : null
+  if (!scoped) return null
+  // The first commit lets the hub merge one repo's keys (store/project-merge.ts); a malformed one is dropped, never the event.
+  const { rootCommit } = value as Record<string, unknown>
+  const root = typeof rootCommit === 'string' && COMMIT.test(rootCommit) ? { rootCommit } : {}
+  return { key, kind: kind as ProjectKeyKind, displayName, ...root }
 }

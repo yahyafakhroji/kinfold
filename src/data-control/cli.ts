@@ -48,7 +48,8 @@ export function rowOf(line: string): Row {
   return { mark, text: mark === 'none' ? line.trimEnd() : line.trim() }
 }
 
-async function call(env: DataCliEnv, method: string, path: string, body?: unknown): Promise<Answer> {
+/** One request to the daemon with its token; the project commands use it too. */
+export async function daemonCall(env: Pick<DataCliEnv, 'dataDir' | 'fetch'>, method: string, path: string, body?: unknown): Promise<Answer> {
   const endpoint = readDaemonEndpoint(env.dataDir)
   if (endpoint === null) return { ok: false, error: 'the daemon is not running (no daemon.json or daemon.token)' }
   try {
@@ -192,7 +193,7 @@ async function confirmedPurge(env: DataCliEnv, args: Extract<DataArgs, { command
     env.out(PURGE_NEEDS_YES)
     return EXIT_FAILED
   }
-  const preview = await call(env, 'POST', '/data/purge', { ...args.body, dryRun: true })
+  const preview = await daemonCall(env, 'POST', '/data/purge', { ...args.body, dryRun: true })
   if (!preview.ok) {
     env.ui.error(`kinfold purge failed: ${preview.error}`)
     return EXIT_FAILED
@@ -207,7 +208,7 @@ async function confirmedPurge(env: DataCliEnv, args: Extract<DataArgs, { command
     env.out('nothing was deleted')
     return EXIT_OK
   }
-  const answer = await call(env, 'POST', '/data/purge', args.body)
+  const answer = await daemonCall(env, 'POST', '/data/purge', args.body)
   if (!answer.ok) {
     env.ui.error(`kinfold purge failed: ${answer.error}`)
     return EXIT_FAILED
@@ -230,7 +231,7 @@ async function confirmedFindingPurge(env: DataCliEnv, id: number): Promise<numbe
     env.out(FINDING_PURGE_NEEDS_YES)
     return EXIT_FAILED
   }
-  const listed = await call(env, 'GET', '/data/findings?action=pending')
+  const listed = await daemonCall(env, 'GET', '/data/findings?action=pending')
   if (!listed.ok) {
     env.ui.error(`kinfold findings failed: ${listed.error}`)
     return EXIT_FAILED
@@ -245,7 +246,7 @@ async function confirmedFindingPurge(env: DataCliEnv, id: number): Promise<numbe
     env.out('nothing was deleted')
     return EXIT_OK
   }
-  const answer = await call(env, 'POST', `/data/findings/${id}/resolve`, { action: 'purge' })
+  const answer = await daemonCall(env, 'POST', `/data/findings/${id}/resolve`, { action: 'purge' })
   if (!answer.ok) {
     env.ui.error(`kinfold findings failed: ${answer.error}`)
     return EXIT_FAILED
@@ -258,7 +259,7 @@ export async function runDataCommand(env: DataCliEnv, args: DataArgs): Promise<n
   if (args.command === 'purge' && args.body.dryRun !== true && !args.yes) return confirmedPurge(env, args)
   if (args.command === 'findings' && args.resolve?.action === 'purge' && !args.yes) return confirmedFindingPurge(env, args.resolve.id)
   const plan = planFor(args)
-  const answer = await call(env, plan.method, plan.path, plan.body)
+  const answer = await daemonCall(env, plan.method, plan.path, plan.body)
   if (!answer.ok) {
     ;(env.ui?.error ?? env.out)(`kinfold ${args.command} failed: ${answer.error}`)
     return EXIT_FAILED

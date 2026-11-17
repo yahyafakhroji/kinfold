@@ -135,7 +135,7 @@ test('a worker that stops fails its query and every later one with a reason', as
 test('after a worker stops, searches move to the daemon connection and the move is logged once', async () => {
   const lines: string[] = []
   const inlineHits: VectorHit[] = [{ id: 1, distance: 0.5 }]
-  const inline: VectorQueries = { nearest: async () => inlineHits, distances: async () => [], exclusive: runNow, close: async () => {} }
+  const inline: VectorQueries = { nearest: async () => inlineHits, distances: async () => [], exclusive: runNow, hold: async () => () => {}, close: async () => {} }
   const queries = workerOrInline(startFake('crash'), inline, (line) => lines.push(line))
   opened.push(queries)
   expect(await queries.nearest(NEAREST)).toEqual(inlineHits)
@@ -145,7 +145,7 @@ test('after a worker stops, searches move to the daemon connection and the move 
 
 test('a worker that cannot start leaves searches on the daemon connection', async () => {
   const lines: string[] = []
-  const inline: VectorQueries = { nearest: async () => [{ id: 2, distance: 0.1 }], distances: async () => [], exclusive: runNow, close: async () => {} }
+  const inline: VectorQueries = { nearest: async () => [{ id: 2, distance: 0.1 }], distances: async () => [], exclusive: runNow, hold: async () => () => {}, close: async () => {} }
   const queries = workerOrInline(startFake('fail-start'), inline, (line) => lines.push(line))
   expect(await queries.nearest(NEAREST)).toEqual([{ id: 2, distance: 0.1 }])
   expect(lines).toEqual(['vectors search worker off (cannot open the store); searching on the daemon connection'])
@@ -211,3 +211,25 @@ for (const encrypted of [false, true]) {
     }
   })
 }
+
+test('hold waits for reads in the worker and keeps new ones back until it is released', async () => {
+  const queries = await fake('busy')
+  const inFlight = queries.nearest(NEAREST)
+  const release = await queries.hold()
+  expect(await inFlight).toEqual([{ id: 7, distance: 0.25 }])
+  let answered = false
+  const later = queries.nearest(NEAREST).then((hits) => {
+    answered = true
+    return hits
+  })
+  await sleep(400)
+  expect(answered).toBe(false)
+  release()
+  expect(await later).toEqual([{ id: 7, distance: 0.25 }])
+})
+
+test('hold on the daemon connection holds nothing', async () => {
+  const release = await workerOrInline(Promise.resolve({ ok: false, reason: 'off' }), { nearest: async () => [], distances: async () => [], exclusive: runNow, hold: async () => () => {}, close: async () => {} }, () => {}).hold()
+  expect(typeof release).toBe('function')
+  release()
+})

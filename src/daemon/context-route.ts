@@ -24,13 +24,17 @@ import { firstScreenFor, projectDisplayName, titlesFor } from '../store/context-
 import { peekNotice, takeNotice } from '../update/notice'
 import type { Database } from '../sqlite/types'
 import type { ProjectKeyResolver } from '../store/project-key'
+import { canonicalKey } from '../store/project-merge'
 import { type ServedRelated, recordRelatedServed } from '../store/related-served-store'
 import type { SemanticAnswer, SemanticRequest } from '../vectors/search'
+import type { StoreReader } from '../workers/store-reader'
 
 export interface ContextRouteDeps {
   db: Database
   projectKeyFor: ProjectKeyResolver
   log: (line: string) => void
+  /** Where the prompt path's store reads run: the daemon's recall reader worker. Absent: on db, on this thread. */
+  reads?: StoreReader
   /** The daemon's vector search; absent or null means keyword matches only. */
   semantic?: ((request: SemanticRequest) => Promise<SemanticAnswer>) | null
   late?: LateMatches
@@ -55,9 +59,9 @@ export const PROMPT_SERVE_BUDGET_MS = DAEMON_SHARE_MS - 20
 
 export { HOLDOUT_HOSTS, HOLDOUT_RATE }
 
-type Prepared = PreparedContext & { promptDetail: string; relatedText: string; relatedServed: ServedRelated[]; explain: () => SearchTrace | null }
+type Prepared = PreparedContext & { promptDetail: string; relatedText: string; relatedServed: ServedRelated[]; explain: () => Promise<SearchTrace | null> }
 
-const NO_SEARCH = (): null => null
+const NO_SEARCH = async (): Promise<null> => null
 const NOTHING: Prepared = { ...EMPTY_CONTEXT, rebuilt: false, promptDetail: '', relatedText: '', relatedServed: [], explain: NO_SEARCH }
 
 /** Titles and a header for the ids the answer carries; it adds no id of its own. */
@@ -109,7 +113,7 @@ interface Answered {
   heldOut: boolean
 }
 
-function traceEvent(deps: ContextRouteDeps, answered: Answered): Parameters<TraceBuffer['push']>[0] {
+async function traceEvent(deps: ContextRouteDeps, answered: Answered): Promise<Parameters<TraceBuffer['push']>[0]> {
   const { request, projectKey, prepared, at } = answered
   const base = { at, host: request.host, project: projectDisplayName(deps.db, projectKey) ?? projectKey, projectKey, hostSessionId: request.hostSessionId }
   const ids = prepared.observationIds
@@ -123,7 +127,7 @@ function traceEvent(deps: ContextRouteDeps, answered: Answered): Parameters<Trac
     kind: 'prompt',
     hook: { ms: answered.durationMs, budgetMs: shownBudgetMs(request.host), late: answered.late, heldOut: answered.heldOut },
     fresh: rows.filter((row) => !related.has(row.id)),
-    search: prepared.explain(),
+    search: await prepared.explain(),
     sent: { ids, tokens: prepared.tokens, line: answered.heldOut ? HELD_OUT_LINE : answered.late ? lateLine(recall) : recall },
   }
 }
@@ -135,11 +139,9 @@ function traceEvent(deps: ContextRouteDeps, answered: Answered): Parameters<Trac
  */
 function traceLater(deps: ContextRouteDeps, trace: TraceBuffer, answered: Answered): void {
   setTimeout(() => {
-    try {
-      trace.push(traceEvent(deps, answered))
-    } catch (error: unknown) {
-      deps.log(`trace failed: ${error instanceof Error ? error.name : 'error'}`)
-    }
+    traceEvent(deps, answered)
+      .then((event) => trace.push(event))
+      .catch((error: unknown) => deps.log(`trace failed: ${error instanceof Error ? error.name : 'error'}`))
   }, 0)
 }
 
@@ -167,6 +169,7 @@ export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest
     late: deps.late ?? createLateMatches(),
     log: deps.log,
     slots: createEmbedSlots(),
+    ...(deps.reads !== undefined ? { reads: deps.reads } : {}),
     now,
     clock,
     ...(deps.gate !== undefined ? { gate: deps.gate } : {}),
@@ -176,12 +179,13 @@ export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest
     if (request.channel !== 'prompt' || request.prompt === undefined) return { ...prepareContext(deps.db, request, projectKey, at), promptDetail: '', relatedText: '', relatedServed: [], explain: NO_SEARCH }
     const answer = await preparePromptContext(prompt, request, projectKey, at, startedAt, budgetMs === undefined ? undefined : Math.max(0, budgetMs - CENTRAL_SEMANTIC_MARGIN_MS))
     return { text: answer.text, observationIds: answer.observationIds, tokens: answer.tokens, rebuilt: false, relatedText: answer.relatedText, relatedServed: answer.relatedServed, explain: answer.explain,
-      promptDetail: ` related=${answer.related} semantic=${answer.semantic} delta_ms=${answer.deltaMs} related_ms=${answer.relatedMs}` }
+      promptDetail: ` related=${answer.related} semantic=${answer.semantic} read=${answer.read} delta_ms=${answer.deltaMs} related_ms=${answer.relatedMs}` }
   }
   return async (request, central) => {
     const startedAt = clock()
     const at = now()
-    const projectKey = central?.projectKey ?? deps.projectKeyFor(request.cwd).key
+    // A key merged into another (a renamed remote, a fork) names that one: prompt, turn end, watch and Sessions show one project.
+    const projectKey = canonicalKey(deps.db, central?.projectKey ?? deps.projectKeyFor(request.cwd).key)
     const keyMs = Math.round(clock() - startedAt)
     // Held out before anything is matched: the delta is not computed, so its cursor stays where it was and the
     // same memory arrives with the next prompt that is not held out; parked late hits wait for that prompt too.

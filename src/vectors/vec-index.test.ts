@@ -52,6 +52,17 @@ describe.skipIf(VEC0 === undefined || VEC0 === '')('vec-index', () => {
     expect(knnCandidates(db(), space, Float32Array.from([1, 0]), null, 10)).not.toContain(id)
   })
 
+  test('reconcile files a row again when its observation moved to another project', () => {
+    const space = startActive(db(), SPACE, T0)
+    createVecIndex(db(), space)
+    const id = seed('a', 1, 0)
+    reconcileVecIndex(db(), space, 100)
+    // As a project merge does on a connection without sqlite-vec: the row moves, its index row stays behind.
+    db().query('UPDATE observations SET project_key = ? WHERE id = ?').run('other', id)
+    expect(reconcileVecIndex(db(), space, 100)).toEqual({ added: 1, removed: 1, done: true })
+    expect(knnCandidates(db(), space, Float32Array.from([1, 0]), 'other', 10)).toEqual([id])
+  })
+
   test('candidates come nearest first and a project keeps to its own rows', () => {
     const space = startActive(db(), SPACE, T0)
     createVecIndex(db(), space)

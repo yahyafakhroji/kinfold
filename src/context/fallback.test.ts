@@ -106,3 +106,16 @@ test('when the store cannot be opened the log says why, with our library message
   }
   expect(logs).toEqual([`context fallback: database could not be opened read-only (SQLITE_CANTOPEN: ${SQLITE3MC_LIB_ENV} names a missing file)`])
 })
+
+test('a folder whose key was merged into another reads the pack of the key it merged into', () => {
+  seedStoreAndClose()
+  const store = openStore(dataDir)
+  try {
+    upsertProject(store.db, { key: '/work/old-name', kind: 'path', displayName: 'old-name' }, NOW)
+    store.db.query('UPDATE projects SET merged_into = ? WHERE key = ?').run(CWD, '/work/old-name')
+  } finally {
+    store.db.close()
+  }
+  const result = readStoredContext(dataDir, { host: 'claude-code', cwd: '/work/old-name' }, { budgetMs: 300, git: noGit, log: () => {} })
+  expect(result!.text).toContain('Fallback serves stored packs (#1)')
+})

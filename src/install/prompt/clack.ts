@@ -89,8 +89,61 @@ function rowLines(mark: string, text: string, columns: number): string {
   return wrapWords(text, width).map((line, index) => `${index === 0 ? mark : ' '} ${line}`).join('\n')
 }
 
+const KEY_LISTENERS = new Set<PropertyKey>(['on', 'addListener', 'prependListener', 'once', 'prependOnceListener'])
+const KEY_REMOVERS = new Set<PropertyKey>(['off', 'removeListener'])
+
+type KeyListener = (char: string | undefined, key: { name?: string } | undefined) => void
+
+/** A line feed this soon after a carriage return is the second half of one Enter. */
+const CRLF_GAP_MS = 100
+
+/**
+ * The input with each Enter read as one return key. readline names \r
+ * "return" and \n "enter"; clack submits on return but takes enter as a
+ * cursor key, and a cursor key flips a yes or no. A terminal that sends
+ * Enter as \r and \n in two reads answered the question on screen with \r and
+ * left the \n for the next one: "Keep memory.db encrypted?" showed No without
+ * a key pressed. Here a \n right after a \r is dropped, and a lone \n (a
+ * terminal that sends only that for Enter) is passed on as return. Every
+ * other key and the stream's own methods (raw mode, TTY size) pass through.
+ */
+export function withoutLineFeedKeys<T extends Readable>(input: T, now: () => number = () => performance.now()): T {
+  const wrapped = new WeakMap<KeyListener, KeyListener>()
+  let returnAt = Number.NEGATIVE_INFINITY
+  const filtered = (listener: KeyListener): KeyListener => {
+    const known = wrapped.get(listener)
+    if (known !== undefined) return known
+    const guard: KeyListener = (char, key) => {
+      if (key?.name === 'return') returnAt = now()
+      if (key?.name === 'enter' && char === '\n') {
+        if (now() - returnAt < CRLF_GAP_MS) return
+        listener('\r', { ...key, name: 'return', sequence: '\r' } as typeof key)
+        return
+      }
+      listener(char, key)
+    }
+    wrapped.set(listener, guard)
+    return guard
+  }
+  return new Proxy(input, {
+    get(target, property, receiver) {
+      const value: unknown = Reflect.get(target, property, target)
+      if (typeof value !== 'function') return value
+      if (KEY_LISTENERS.has(property) || KEY_REMOVERS.has(property)) {
+        return (event: string | symbol, listener: KeyListener) => {
+          const actual = event === 'keypress' ? (KEY_LISTENERS.has(property) ? filtered(listener) : wrapped.get(listener) ?? listener) : listener
+          ;(value as (event: string | symbol, listener: KeyListener) => unknown).call(target, event, actual)
+          return receiver
+        }
+      }
+      return (value as (...args: unknown[]) => unknown).bind(target)
+    },
+  })
+}
+
 export function createClackPrompts(streams: PromptStreams = { input: process.stdin, output: process.stdout }): Prompts {
-  const { input, output } = streams
+  const output = streams.output
+  const input = withoutLineFeedKeys(streams.input)
   withUsableSize(output)
   const common = { input, output }
   const write = (text: string): void => void output.write(text)

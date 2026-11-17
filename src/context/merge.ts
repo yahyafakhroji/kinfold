@@ -7,6 +7,7 @@
 
 import { confirmBoost } from '../store/observation-links'
 import { isNearDuplicate, titleTokens } from './similarity'
+import { isStatusNote } from './status-notes'
 import type { PackObservation } from './types'
 
 export interface PackItem {
@@ -27,9 +28,9 @@ export function rankScore(row: PackObservation): number {
   return STRENGTH_RANK[row.evidence] + confirmBoost(row.confirmedBy)
 }
 
-/** Highest rank score first, then newest, then highest id, so ties order the same way every build. */
+/** Lasting memory before status notes (status-notes.ts), then highest rank score, then newest, then highest id, so ties order the same way every build. */
 export function compareStrength(a: PackObservation, b: PackObservation): number {
-  return rankScore(b) - rankScore(a) || b.occurredAt - a.occurredAt || b.id - a.id
+  return Number(isStatusNote(a.title)) - Number(isStatusNote(b.title)) || rankScore(b) - rankScore(a) || b.occurredAt - a.occurredAt || b.id - a.id
 }
 
 export function rankObservations(observations: readonly PackObservation[]): PackObservation[] {

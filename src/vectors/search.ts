@@ -29,8 +29,8 @@ export interface SemanticRequest {
   deadlineMs: number
   /** The MCP search filters, applied before the top k. */
   filters: NearestFilters
-  /** Rows to measure as well, after the top k: the prompt path's keyword candidates. */
-  alsoIds?: readonly number[]
+  /** Rows to measure as well, after the top k: the prompt path's keyword candidates, which may still be being read when the embed starts. */
+  alsoIds?: readonly number[] | PromiseLike<readonly number[]>
   /**
    * When the caller stops waiting, from the request's start. Set by callers
    * that abort at their deadline (the MCP routes); unset, a read may run late,
@@ -158,7 +158,7 @@ export function createSemanticSearch(deps: SemanticSearchDeps): (request: Semant
       const nearest = await queries.nearest({ model: embedder.model, vector: embedded.vector, project: request.project, k: request.k, filters: request.filters }, left())
       if (nearest === null) return { status: 'timeout', ms: Math.round(now() - startedAt) }
       const found = new Set(nearest.map((hit) => hit.id))
-      const ids = request.alsoIds?.filter((id) => !found.has(id)) ?? []
+      const ids = (await request.alsoIds ?? []).filter((id) => !found.has(id))
       const extra = ids.length === 0 ? [] : await queries.distances({ model: embedder.model, vector: embedded.vector, project: request.project, ids }, left())
       if (extra === null) return { status: 'timeout', ms: Math.round(now() - startedAt) }
       return { status: 'ok', hits: [...nearest, ...extra], embedMs: Math.round(embeddedAt - startedAt), searchMs: Math.round(now() - embeddedAt), cached: embedded.cached, model: embedder.model }

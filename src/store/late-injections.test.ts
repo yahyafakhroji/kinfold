@@ -78,3 +78,13 @@ test('the read-only fallback can still read deliveries from a store from before 
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('memory in one late answer is offered again; memory in two late answers counts as delivered, so it is not offered forever', () => {
+  const db = temp.store.db
+  const row = { sessionId: session, host: 'claude-code', hostSessionId: 'cc', projectKey: PROJECT, channel: 'prompt' as const, tokens: 30, durationMs: 900, late: true }
+  expect(sessionDeliveries(db, 'claude-code', 'cc').sentIds).not.toContain(lateId)
+  recordInjection(db, { ...row, observationIds: [lateId], occurredAt: T0 + 3, promptNumber: 3 })
+  expect(sessionDeliveries(db, 'claude-code', 'cc').sentIds).toEqual([seen, lateId])
+  // A session that only ever got late answers has not received memory: the delta keeps its floor at the session's start.
+  expect(sessionDeliveries(db, 'claude-code', 'cc').firstAt).toBe(T0 + 1)
+})

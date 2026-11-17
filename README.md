@@ -66,6 +66,7 @@ Kinfold needs at least one supported coding agent. `kinfold status` lists them a
 - **What it recalled, on your screen.** After each prompt your agent shows one line, for example `kinfold · recalled 2 · #28771 Bun 1.4.4 is pinned · #94451 Schema version from MIGRATIONS`, or `kinfold · nothing recalled`. At session start it shows the newest memories it put in context. You see both; the model sees neither. See [Seeing what Kinfold does](#seeing-what-kinfold-does).
 - **Dashboard.** `kinfold dashboard` opens a local page. Sessions shows your prompts and the agents' replies as plain text, with what Kinfold recalled for each turn. Memory, Metrics and the observer settings sit beside it.
 - **Data control.** `kinfold retention` sets how long each kind of data is kept, `kinfold purge` removes a session, project or agent, and `kinfold scan` checks the store for secrets that slipped through. Purge shows what it would delete and asks first, and so does `kinfold findings --purge <id>`, which shows the finding and never the secret. A script passes `--yes`. Without a terminal or `--yes`, neither deletes anything.
+- **One project per repo.** Kinfold names a project by its git remote, then its repo root, then its folder. It also keeps each repo's first commit, which stays the same through a renamed remote, in a fork and in a clone with no remote. When a key turns up whose first commit another project has, the two merge into the newest key that has a remote, and `kinfold status`, `kinfold watch` and the install output say so once: `merged shared-agent-memory into kinfold (same repo)`. An upgraded store does this once for the projects it already holds. `kinfold project list` shows each key with its memory and session counts, `kinfold project split <key>` puts a merge back the way it was and keeps that key apart from then on, and `kinfold project merge <old> <into>` joins a folder git cannot match, such as a parent folder with no repo. Merge and split show what would move and change nothing without `--yes`. On a central device, run them on the hub.
 - **Backup and restore.** `kinfold backup <file>` writes the whole memory to one file while capture keeps running, and `kinfold restore <file>` brings it back on a fresh system. The dashboard's Backup page does both in the browser. See [Backup and restore](#backup-and-restore).
 - **Updates.** Pick a level with the wizard's Updates question, `kinfold install --updates off|notify|patch`, or the dashboard's Data page. `patch` is the default. `notify` checks once a day and tells you; nothing installs by itself. `off` stops checking.
 - **Patch releases** (0.2.0 to 0.2.1) install themselves at the `patch` level: the daemon checks once a day, waits until nothing has reached it for ten minutes (a hook event, a context request, an MCP read, the dashboard or a restore), then runs the same steps as `kinfold update`. The updater checks for quiet again after the download and waits up to 30 minutes for it. A failed update leaves the running version in place and is tried again after the next daily check. The next session, `kinfold status` and the dashboard tell you when an update happened. An automatic update runs its install with the agent home variables (`CODEX_HOME`, `XDG_CONFIG_HOME` and the like) that your last install ran with; `kinfold status` lists them.
@@ -126,6 +127,12 @@ What Kinfold wires for each agent on macOS and Linux. **Observer** is `yes` when
 ## Seeing what Kinfold does
 
 **The recall line.** Kinfold builds the line from the memory ids it sent with that prompt, so the line and the model's context match. It names two kinds of memory: memory related to your prompt, and memory other sessions wrote since this one last received any. A missing line means Kinfold did not run. If the daemon is down, the line says so and your prompt is captured once the daemon starts.
+
+**When the answer is slow.** The hook waits 200 ms for the daemon. The daemon answers by about 150 ms with what it has, and anything still being looked up then (a slow store read, an embedding) comes with your next prompt, marked as from the previous prompt. If an answer arrives after the hook stopped waiting anyway, its new memory is offered again with the next prompt, once. Memory that two late answers carried counts as sent, so a run of slow answers cannot repeat it forever. It stays searchable.
+
+**What the search reads.** The wrappers agents put around a prompt are left out of the search: the `<pasted_content id="...">` tags and their ids, system reminders and slash-command blocks. Your own words count before pasted text, and of up to 16 candidate words Kinfold keeps the 8 rarest that its memory holds. A word found in more than one memory in ten is too common to tell memories apart.
+
+**What a session starts with.** The session-start list ranks lasting memory first: decisions, fixes and how things work. Status notes such as `CI run green`, `PR #8 checks pass` or `Task 9 commit pushed` come after every lasting memory and leave the list after a day. They stay in the store and in search.
 
 **Where it shows.**
 
@@ -208,6 +215,15 @@ Measured on 2026-11-16 by `src/vectors/knn-bench.test.ts` on an Apple-silicon Ma
 | Nearest 10 in one project of 2,500 vectors | 1.4 ms (8.5 ms for a scan) |
 | Loading the local model | 0.2 to 1 s on the five release targets |
 | Embedding three short texts with the local model | 39 to 176 ms on the same runners |
+
+Prompt-time recall, measured on 2026-11-17 by `src/daemon/recall-bench.test.ts` on an Apple-silicon Mac. The store is encrypted, with 30,000 memories, 150,000 captured events and 20,000 recall records. While the prompts ran, an observer failed and retried, captures arrived, and the dashboard read the data size, metrics and facets the whole time. Each prompt was a long one with a paste, timed from the client as a hook sees it:
+
+| | p50 | p95 | max |
+| --- | --- | --- | --- |
+| Before (0.6.0-beta.0) | 1,472 ms | 3,541 ms | 5,054 ms |
+| Now | 37 ms | 67 ms | 160 ms |
+
+The hook waits 200 ms, so before this almost every answer came too late to reach the model. Now 29 of 30 answers carried memory. The prompt path's store reads and the dashboard's reports run in two worker threads with their own read-only connections, so neither waits behind the other, and the thread that answers hooks, `/health` and captures never waits on them.
 
 Each embedding space has a [sqlite-vec](https://github.com/asg017/sqlite-vec) `vec0` index inside the store, partitioned by project, so a search reads one project's vectors instead of every row. The index only proposes candidates: the exact distances and the filters come from the stored vectors. Searches run in a worker thread on their own connection, so they don't hold up capture or the hooks.
 

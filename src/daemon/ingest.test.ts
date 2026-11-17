@@ -174,3 +174,19 @@ test('the second pass keeps the original withheld marker instead of describing t
   expect(again.tool!.withheld).toBe('sensitive_command')
   expect(again.redactions).toEqual(edge.redactions!)
 })
+
+test('a session resumed after its repo\'s remote was renamed moves to the new key, and the old key merges into it', () => {
+  const root = 'c'.repeat(40)
+  let project = { key: 'github.com/me/shared-agent-memory', kind: 'git-remote' as const, displayName: 'shared-agent-memory', rootCommit: root }
+  const options = () => ({ spoolDir, hmacKey: HMAC, projectKeyFor: () => project })
+  spool(event({ kind: 'session_start' }))
+  drainSpool(store.db, options())
+  project = { key: 'github.com/me/kinfold', kind: 'git-remote', displayName: 'kinfold', rootCommit: root }
+  spool(event({ kind: 'user_prompt', promptText: 'next' }))
+  drainSpool(store.db, options())
+  expect(rows<{ key: string }>('SELECT project_key AS key FROM sessions')).toEqual([{ key: 'github.com/me/kinfold' }])
+  expect(rows<{ key: string; into: string | null }>('SELECT key, merged_into AS "into" FROM projects ORDER BY key')).toEqual([
+    { key: 'github.com/me/kinfold', into: null },
+    { key: 'github.com/me/shared-agent-memory', into: 'github.com/me/kinfold' },
+  ])
+})
