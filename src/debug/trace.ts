@@ -88,6 +88,8 @@ export interface ObserverTrace extends TraceBase {
   status: string
   events: number
   written: number
+  /** For a failed run whose provider is backing off: the line status shows, naming what to fix. */
+  note?: string
 }
 
 export type TraceInput = PromptTrace | StartTrace | TurnTrace | ObserverTrace

@@ -112,6 +112,19 @@ function notRunningNotice(errorClass) {
     ' The daemon could not start this CLI. Fix the cause (for example, install it, log in, or re-run the installer so the daemon\'s PATH finds it); the daemon tries again on its own.')
 }
 
+/**
+ * The daemon's "has failed N times" line for a provider that is backing off,
+ * or null. It retries on its own; the line names what to check.
+ * @param {{ provider: string, line: string }[]} backoff
+ * @param {string} provider
+ */
+function backoffNotice(backoff, provider) {
+  const entry = backoff.find((item) => item.provider === provider)
+  if (entry === undefined || typeof entry.line !== 'string') return null
+  return h('div', { class: 'notice notice-error backing-off', role: 'alert' },
+    h('span', { class: 'badge run-failed' }, 'Backing off'), `: ${entry.line}`)
+}
+
 /** One in-flight /observer/models request per provider, shared by every form. @type {Map<string, Promise<any>>} */
 const modelRequests = new Map()
 
@@ -146,8 +159,9 @@ function loadModelNames(list, provider) {
  * @param {string | null} problem the effective setting's error class, if it could not be resolved
  * @param {{ provider: string, status: string, errorClass: string | null }[]} [safety]
  * @param {{ provider: string, errorClass: string }[]} [probe]
+ * @param {{ provider: string, line: string }[]} [backoff]
  */
-function hostForm(host, choice, problem, safety = [], probe = []) {
+function hostForm(host, choice, problem, safety = [], probe = [], backoff = []) {
   const id = (name) => `${name}-${host === '*' ? 'default' : host}`
   const status = h('div', { class: 'test-status', 'aria-live': 'polite' })
   const current = choice ?? { provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: true }
@@ -160,6 +174,7 @@ function hostForm(host, choice, problem, safety = [], probe = []) {
       h('p', { class: 'hint' }, choice === null ? 'No default row: hosts without their own row use the built-in default.' : SOURCES[choice.source ?? 'host'] ?? '')),
     problem === null ? null : notice(`This host's setting cannot be used: ${problem}`, 'error'),
     unprobed === null ? null : notRunningNotice(unprobed),
+    backoffNotice(backoff, current.provider),
     stopped === null ? null : stoppedNotice(current.provider, stopped),
     h('div', { class: 'form-grid' },
       h('label', { class: 'field', for: id('provider') }, h('span', { class: 'field-label' }, 'Provider'),
@@ -219,7 +234,7 @@ function runTest(host, form, status, button) {
 }
 
 /**
- * @typedef {{ rows: { host: string, provider: string, model: string, credentialRef: string | null, enabled: boolean }[], effective: ({ host: string, settings: Choice } | { host: string, error: string })[], safety?: { provider: string, status: string, errorClass: string | null }[], probe?: { provider: string, errorClass: string }[] }} SettingsView
+ * @typedef {{ rows: { host: string, provider: string, model: string, credentialRef: string | null, enabled: boolean }[], effective: ({ host: string, settings: Choice } | { host: string, error: string })[], safety?: { provider: string, status: string, errorClass: string | null }[], probe?: { provider: string, errorClass: string }[], backoff?: { provider: string, line: string }[] }} SettingsView
  */
 
 /**
@@ -240,7 +255,8 @@ export function hostEntries(view) {
 export function hostForms(view) {
   const safety = Array.isArray(view.safety) ? view.safety : []
   const probe = Array.isArray(view.probe) ? view.probe : []
-  return hostEntries(view).map((entry) => hostForm(entry.host, entry.choice, entry.problem, safety, probe))
+  const backoff = Array.isArray(view.backoff) ? view.backoff : []
+  return hostEntries(view).map((entry) => hostForm(entry.host, entry.choice, entry.problem, safety, probe, backoff))
 }
 
 /**

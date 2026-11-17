@@ -147,6 +147,15 @@ export function markFailed(db: Database, eventIds: readonly string[], now: numbe
   )
 }
 
+/**
+ * A batch whose provider failed as a whole: its events go back to pending with
+ * no attempt counted, so a long outage never exhausts them. The provider's
+ * backoff (observer/backoff.ts) spaces out the next tries.
+ */
+export function markPendingAgain(db: Database, eventIds: readonly string[]): void {
+  setStates(db, eventIds, "UPDATE events SET observer_state = 'pending', observer_retry_at = NULL WHERE event_id = $eventId")
+}
+
 export function startRun(db: Database, run: RunStart): number {
   const row = db.query<{ id: number }, Record<string, string | number>>(
     `INSERT INTO observer_runs (session_id, host, provider, model, status, event_count, started_at)

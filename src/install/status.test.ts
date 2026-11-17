@@ -144,6 +144,22 @@ test('status says an observer is off, in the words the wizard used', async () =>
   expect(w.out).toContain('  opencode: openrouter/openrouter/auto key openrouter; source built-in')
 })
 
+test('status says which observer provider is backing off and what to check', async () => {
+  const w = make()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  const realFetch = w.env.fetch
+  const line = 'claude-cli has failed 1300 times since 2026-11-14 10:29: exit_nonzero; retrying at 2026-11-17 09:00; check `claude` works in a terminal'
+  w.env.fetch = async (url, init) => {
+    if (new URL(url).pathname !== '/observer/settings') return realFetch(url, init)
+    const effective = [{ host: 'claude-code', settings: { provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: true, source: 'host' } }]
+    const backoff = [{ provider: 'claude-cli', errorClass: 'exit_nonzero', failures: 1300, since: 1, retryAt: 2, line }]
+    return new Response(JSON.stringify({ rows: [], effective, backoff }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  w.out.length = 0
+  await status(w.env)
+  expect(w.out).toContain(`  observer backing off: ${line}`)
+})
+
 test('status says when the recall line is off and when the impact test is on, and nothing about either otherwise', async () => {
   const w = make()
   mkdirSync(w.dataDir, { recursive: true })

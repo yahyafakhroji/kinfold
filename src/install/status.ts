@@ -122,7 +122,9 @@ async function observerLines(env: InstallEnv): Promise<{ lines: string[]; refs: 
     const ref = 'settings' in entry && entry.settings.enabled ? credentialRefFor(entry.settings) : null
     return ref === null ? [] : [ref]
   })
-  return { lines: ['observer settings:', ...read.view.effective.map(effectiveLine)], refs: [...new Set([OPENROUTER_CREDENTIAL_REF, ...refs])] }
+  // An older daemon sends no backoff list.
+  const backoff = Array.isArray(read.view.backoff) ? read.view.backoff.map((entry) => `  observer backing off: ${entry.line}`) : []
+  return { lines: ['observer settings:', ...read.view.effective.map(effectiveLine), ...backoff], refs: [...new Set([OPENROUTER_CREDENTIAL_REF, ...refs])] }
 }
 
 function keyStoreLines(env: InstallEnv, refs: readonly string[]): string[] {
@@ -254,6 +256,7 @@ async function agentRows(env: InstallEnv, profiles: ProfileTable): Promise<{ row
 const MARK_RULES: readonly (readonly [RegExp, Mark])[] = [
   // A line that calls itself a warning is one, whatever else it names.
   [/^warning: /, 'warn'],
+  [/^observer backing off: /, 'warn'],
   [/^daemon \/health: up\b/, 'ok'],
   [/^daemon \/health: down\b/, 'fail'],
   [/^service \(.*running: yes/, 'ok'],

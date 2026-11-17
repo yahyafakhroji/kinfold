@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startHubWhenReady } from './hub-daemon'
 import type { CentralCore } from './hub-routes'
-import type { Tailscale, TailscaleSelf } from './tailscale'
+import { TAILSCALE_STOPPED, type Tailscale, type TailscaleProblem, type TailscaleSelf } from './tailscale'
 
 let dir: string
 beforeEach(() => {
@@ -18,7 +18,7 @@ const SELF: TailscaleSelf = { identity: { userId: '42', loginName: '', nodeId: '
 const core = (): CentralCore => { throw new Error('not used') }
 
 test('the hub waits for Tailscale, then binds and answers', async () => {
-  let self: TailscaleSelf | null = null
+  let self: TailscaleSelf | TailscaleProblem = { problem: TAILSCALE_STOPPED }
   const logs: string[] = []
   const tailscale: Tailscale = { self: async () => self, whois: async () => null }
   const hub = startHubWhenReady({ dataDir: dir, version: '0.6.0', port: 0, tailscale, core, view: async () => ({ status: 200, body: {} }), log: (line) => logs.push(line), allowLoopback: true, retryMs: 20 })

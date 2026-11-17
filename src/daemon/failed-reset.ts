@@ -10,6 +10,7 @@
 // mistake; and a stored fingerprint under the other key scheme (hmac.key
 // before the migration, the master after) is re-baselined, not a change.
 
+import { clearBackoff, providerBackoffs } from '../observer/backoff'
 import { credentialRefFor, resolveObserverSettings, settingsFingerprint } from '../observer/settings'
 import type { ObserverSettings } from '../observer/types'
 import { type CredentialProvider, isSystemCredentialRef } from '../secrets/credentials'
@@ -89,14 +90,31 @@ function checkHost(deps: FailedResetDeps, host: string, now: number): ResetOutco
   return deps.db.transaction(() => {
     writeFingerprints(deps.db, host, after, now)
     if (reason === null) return null
+    if (reason !== 'settings') clearHostBackoff(deps.db, host, now)
     return { host, reason, events: resetExhaustedForHost(deps.db, host) }
   })()
+}
+
+/** A new credential may be the fix the backoff line asked for; settings changes are already read by the backoff itself. */
+function clearHostBackoff(db: Database, host: string, now: number): void {
+  try {
+    clearBackoff(db, resolveObserverSettings(db, host).provider, now)
+  } catch {
+    // Settings that cannot be resolved name no provider to clear.
+  }
+}
+
+/** Hosts with failed events, and hosts whose recent runs used a provider that is backing off (its events wait as pending). */
+function hostsToCheck(db: Database): string[] {
+  const waiting = providerBackoffs(db).flatMap((entry) =>
+    db.query<{ host: string }, { provider: string }>('SELECT DISTINCT host FROM observer_runs WHERE provider = $provider').all({ provider: entry.provider }).map((row) => row.host))
+  return [...new Set([...hostsWithFailedEvents(db), ...waiting])].sort()
 }
 
 /** One pass over hosts with failed events. Returns the hosts whose settings or credential changed. */
 export function checkFailedResets(deps: FailedResetDeps): ResetOutcome[] {
   const now = (deps.now ?? Date.now)()
-  const outcomes = hostsWithFailedEvents(deps.db)
+  const outcomes = hostsToCheck(deps.db)
     .map((host) => checkHost(deps, host, now))
     .filter((outcome): outcome is ResetOutcome => outcome !== null)
   for (const outcome of outcomes) deps.log?.(`observer reset host=${outcome.host} reason=${outcome.reason} events=${outcome.events}`)

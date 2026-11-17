@@ -1,8 +1,10 @@
 // One observer batch for one session: claim its retryable events, call the
 // runner its host's settings name, validate the reply, store the result. Any
 // failure (bad settings, missing credential, missing CLI, non-zero exit, bad
-// JSON) is recorded on the run and the events become failed-and-retryable;
-// nothing switches to another provider (no silent fallback).
+// JSON) is recorded on the run; nothing switches to another provider (no
+// silent fallback). A failure of the provider as a whole sends the events back
+// to pending and backs the provider off; a failure of this batch alone makes
+// its events failed-and-retryable.
 // Logs carry ids, counts, durations, provider/model and error class only.
 
 import type { Database } from '../sqlite/types'
@@ -12,6 +14,7 @@ import {
   getObserverSession,
   markDone,
   markFailed,
+  markPendingAgain,
   markProcessing,
   markSkipped,
   retryableEvents,
@@ -23,6 +26,7 @@ import { dropEchoes, injectedObservations, linkableIds } from './injected'
 import { parseObserverOutput } from './parse'
 import { DEFAULT_PROMPT_LIMITS, type PromptLimits, buildObserverPrompt } from './prompt'
 import type { RunnerFactory } from './runners'
+import { providerBackoff, returnsToPending } from './backoff'
 import type { SafetyGate } from './safety-gate'
 import { resolveObserverSettings, settingsFingerprint } from './settings'
 import { toSourceEvent } from './sources'
@@ -46,6 +50,8 @@ export type BatchOutcome =
   | { status: 'disabled' }
   /** The safety gate stopped this observer: no run, events untouched. */
   | { status: 'blocked'; errorClass: string }
+  /** The provider keeps failing and waits until retryAt: no run, events untouched. */
+  | { status: 'backoff'; provider: string; errorClass: string; failures: number; retryAt: number }
   | { status: 'skipped'; events: number }
   | ({ status: 'succeeded'; runId: number; events: number; echoes: number; droppedRelations: number } & WriteCounts)
   | { status: 'failed'; runId: number; events: number; errorClass: string }
@@ -66,7 +72,7 @@ function claim(db: Database, session: ObserverSession, batch: readonly ObserverE
     return startRun(db, {
       sessionId: session.id,
       host: session.host,
-      provider: choice.ok ? choice.settings.provider : 'unresolved',
+      provider: providerOf(choice),
       model: choice.ok ? choice.settings.model : 'unresolved',
       eventCount: batch.length,
       startedAt: now,
@@ -76,7 +82,9 @@ function claim(db: Database, session: ObserverSession, batch: readonly ObserverE
 
 function recordFailure(db: Database, runId: number, batch: readonly ObserverEvent[], error: ObserverError, now: number): void {
   db.transaction(() => {
-    markFailed(db, batch.map((event) => event.eventId), now)
+    const ids = batch.map((event) => event.eventId)
+    if (returnsToPending(error.errorClass)) markPendingAgain(db, ids)
+    else markFailed(db, ids, now)
     finishRun(db, runId, 'failed', `${error.errorClass}: ${error.detail}`, now)
   })()
 }
@@ -87,13 +95,16 @@ async function observe(deps: ProcessDeps, choice: SettingsChoice, prompt: Return
   return { text: result.text, model: result.model, usage: result.usage }
 }
 
-function describe(session: ObserverSession, choice: SettingsChoice, outcome: BatchOutcome, ms: number): string {
+function describe(session: ObserverSession, choice: SettingsChoice, outcome: BatchOutcome, ms: number, retryAt: number | null): string {
   const who = choice.ok ? `provider=${choice.settings.provider} model=${choice.settings.model}` : 'provider=unresolved'
   const head = `observer session=${session.id} host=${session.host} ${who}`
   if (outcome.status === 'succeeded') {
     return `${head} run=${outcome.runId} events=${outcome.events} status=succeeded observations=${outcome.observations} echoes=${outcome.echoes} inserted=${outcome.inserted} downgraded=${outcome.downgraded} summary=${outcome.summary} links=${outcome.links} contradicted=${outcome.contradicted} relations_dropped=${outcome.droppedRelations} ms=${ms}`
   }
-  if (outcome.status === 'failed') return `${head} run=${outcome.runId} events=${outcome.events} status=failed error=${outcome.errorClass} ms=${ms}`
+  if (outcome.status === 'failed') {
+    const retry = retryAt === null ? '' : ` retry_at=${new Date(retryAt).toISOString()}`
+    return `${head} run=${outcome.runId} events=${outcome.events} status=failed error=${outcome.errorClass}${retry} ms=${ms}`
+  }
   return `${head} status=${outcome.status}`
 }
 
@@ -115,6 +126,31 @@ function pendingBatch(db: Database, sessionId: number, now: number): PendingBatc
   return { session, candidates }
 }
 
+const providerOf = (choice: SettingsChoice): string => (choice.ok ? choice.settings.provider : 'unresolved')
+
+/**
+ * Providers with a failing streak that have a batch in flight, per store.
+ * Once a wait ends, one batch tries the provider; the others keep waiting, so
+ * a round of parallel failures cannot add several to the count at once.
+ */
+const probing = new WeakMap<Database, Set<string>>()
+
+function probesOf(db: Database): Set<string> {
+  const known = probing.get(db)
+  if (known !== undefined) return known
+  const fresh = new Set<string>()
+  probing.set(db, fresh)
+  return fresh
+}
+
+/** The backoff outcome while this provider's wait lasts or another batch is trying it, else null. */
+function backoffOf(db: Database, choice: SettingsChoice, now: number): BatchOutcome | null {
+  const entry = providerBackoff(db, providerOf(choice))
+  if (entry === null) return null
+  if (entry.retryAt <= now && !probesOf(db).has(entry.provider)) return null
+  return { status: 'backoff', provider: entry.provider, errorClass: entry.errorClass, failures: entry.failures, retryAt: entry.retryAt }
+}
+
 /** Gate passes per batch before giving up to the next tick, if settings keep changing during the checks. */
 const MAX_GATE_PASSES = 3
 
@@ -134,6 +170,8 @@ async function gated(deps: ProcessDeps, sessionId: number, first: PendingBatch, 
       markSkipped(deps.db, sessionId)
       return { status: 'disabled' }
     }
+    const waiting = backoffOf(deps.db, choice, now())
+    if (waiting !== null) return waiting
     if (!choice.ok || deps.safety === undefined) return { pending, choice }
     const gate = await deps.safety.check(choice.settings)
     if (!gate.ok) return { status: 'blocked', errorClass: gate.errorClass }
@@ -162,6 +200,13 @@ export async function processSessionBatch(deps: ProcessDeps, sessionId: number):
   const prompt = buildObserverPrompt(candidates, deps.limits ?? DEFAULT_PROMPT_LIMITS, known, repeats)
   const included = new Set(prompt.eventIds)
   const batch = candidates.filter((event) => included.has(event.eventId))
+  // Checked again here, with no await before the claim: the gate above can take minutes.
+  const waiting = backoffOf(deps.db, choice, now())
+  if (waiting !== null) return waiting
+  const provider = providerOf(choice)
+  const probes = probesOf(deps.db)
+  const isProbe = providerBackoff(deps.db, provider) !== null
+  if (isProbe) probes.add(provider)
   const startedAt = now()
   const runId = claim(deps.db, session, batch, choice, startedAt)
 
@@ -182,7 +227,10 @@ export async function processSessionBatch(deps: ProcessDeps, sessionId: number):
     outcome = { status: 'failed', runId, events: batch.length, errorClass: failure.errorClass }
     // A tool ran during a normal batch: record it on the gate, which stops this observer.
     if (failure.errorClass === 'tool_attempt' && choice.ok && deps.safety !== undefined) await deps.safety.reportToolAttempt(choice.settings)
+  } finally {
+    if (isProbe) probes.delete(provider)
   }
-  log(describe(session, choice, outcome, now() - startedAt))
+  const retryAt = outcome.status === 'failed' ? providerBackoff(deps.db, providerOf(choice))?.retryAt ?? null : null
+  log(describe(session, choice, outcome, now() - startedAt, retryAt))
   return outcome
 }

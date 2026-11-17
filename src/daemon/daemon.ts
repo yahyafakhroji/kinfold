@@ -37,6 +37,7 @@ import { type Store, openStore } from '../store/db'
 import { DAEMON_GIT_TIMEOUT_MS, createProjectKeyResolver, gitRunnerWithTimeout } from '../store/project-key'
 import { listRecentSessions } from '../store/reads'
 import { rebuildProjectPacks } from '../context/packs'
+import { clearBackoff, ensureBackoffIndex } from '../observer/backoff'
 import { type BatchOutcome, processSessionBatch } from '../observer/process'
 import type { RunnerFactory } from '../observer/runners'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
@@ -321,6 +322,8 @@ interface Core {
   indexer: VectorIndexer | null
   /** Writes the store's snapshot to a new file and resolves with its schema version. */
   snapshot: (dest: string) => Promise<number>
+  /** A dashboard test of this provider passed. */
+  passedTest: (provider: string) => void
   /** Settles once every connection to memory.db is closed. */
   stop: () => Promise<void>
 }
@@ -395,8 +398,18 @@ function resetCheck(db: Database, options: DaemonObserverOptions, keys: HmacKeyS
   }
 }
 
+/** A passed dashboard test ends the provider's backoff, so its next batch runs without waiting out the hour. */
+function passedTest(db: Database, provider: string, log: (line: string) => void): void {
+  try {
+    clearBackoff(db, provider, Date.now())
+  } catch (error: unknown) {
+    log(`observer backoff clear failed: ${errorMessage(error)}`)
+  }
+}
+
 /** Recovers runs a crash left open, then ticks on an interval and after every drain that inserted rows. */
 function startObserver(db: Database, options: DaemonObserverOptions, keys: HmacKeyState, afterWrite: () => void, log: (line: string) => void, trace: TraceBuffer): Observing {
+  ensureBackoffIndex(db)
   const recovered = recoverInterrupted(db, Date.now())
   if (recovered.events > 0 || recovered.runs > 0) log(`observer recovered events=${recovered.events} runs=${recovered.runs}`)
   const safety = options.safety?.(db, log)
@@ -644,7 +657,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       db: store.db, marker: () => hmacKeys.marker(), onStored: () => observer?.tick(), context, reads: reads.deps,
       semantic: vectors.search, mcpRead: routes.mcpRead, now: Date.now,
     })
-    return { routes, central, scheduler, observer, indexer: vectors.indexer, snapshot, stop }
+    return { routes, central, scheduler, observer, indexer: vectors.indexer, snapshot, stop, passedTest: (provider) => passedTest(store.db, provider, log) }
   }
 
   let core = startCore()
@@ -747,7 +760,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       }),
     },
     observerModels: observerModelsRoute(options.observer?.cliRunnerFor ?? null, log, Date.now),
-    observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log)),
+    observerTest: observerTestRoute(createObserverTester(options.observer?.runnerFor ?? null, log, (provider) => core.passedTest(provider))),
     auth: createDashboardAuth(Date.now, fileSessionStore(dataDir, log)),
     backup,
     unavailable: () => (restarter.down() ? RESTORING : null),

@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { isRecord } from '../../contract/event'
 import { ObserverError } from '../types'
 import type { CliAdapter, CliParsed, CliRunContext, Semver } from './cli-core'
+import { cliFailure } from './cli-error'
 import type { SpawnFn, SpawnRequest, SpawnResult } from './claude-cli'
 
 export const OPENCODE_MIN_VERSION: Semver = [2, 0, 0]
@@ -202,7 +203,7 @@ async function runCommand(spawn: SpawnFn, request: Omit<SpawnRequest, 'stdin' | 
     throw new ObserverError(code === 'ENOENT' ? 'cli_missing' : 'internal', `${label} could not start (${code})`)
   }
   if (result.timedOut) throw new ObserverError('timeout', `${label} did not finish in ${COMMAND_TIMEOUT_MS} ms`)
-  if (result.exitCode !== 0) throw new ObserverError('exit_nonzero', `${label} exited ${result.exitCode}`)
+  if (result.exitCode !== 0) throw cliFailure(`${label} exited ${result.exitCode}`, result.stderr ?? '')
   return result
 }
 

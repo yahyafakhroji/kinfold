@@ -127,6 +127,15 @@ test('a host whose provider has a probe failure shows "Not running: <class>" as 
   expect(hostForms({ ...view, probe: undefined }).map(textOf).join('|')).not.toContain('Not running:')
 })
 
+test('a host whose provider is backing off shows the daemon\'s line as text', async () => {
+  const { hostForms } = (await load()) as unknown as { hostForms(view: unknown): FakeElement[] }
+  const view = { ...VIEW, safety: [], backoff: [{ provider: 'codex-cli', errorClass: 'exit_nonzero', failures: 3, since: 1, retryAt: 2, line: `codex-cli has failed 3 times ${HOSTILE}` }] }
+  const shown = hostForms(view).map(textOf).join('|')
+  expect(shown).toContain(`Backing off|: codex-cli has failed 3 times ${HOSTILE}`)
+  expect(shown.match(/Backing off\|/g)).toHaveLength(2)
+  expect(hostForms({ ...view, backoff: undefined }).map(textOf).join('|')).not.toContain('Backing off')
+})
+
 test('the provider list is the daemon\'s, and auggie-cli is not in it', async () => {
   const { PROVIDERS } = (await load()) as unknown as { PROVIDERS: string[] }
   const { OBSERVER_PROVIDERS } = await import('../observer/types')

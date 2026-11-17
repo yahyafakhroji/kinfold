@@ -4,6 +4,7 @@
 // trace. Everything here reads ids and numbers; nothing is written.
 
 import type { ObserverTrace, TraceBuffer, TurnTrace } from '../debug/trace'
+import { backoffLine, providerBackoff } from '../observer/backoff'
 import type { BatchOutcome } from '../observer/process'
 import type { Database } from '../sqlite/types'
 import { projectDisplayName } from '../store/context-store'
@@ -36,15 +37,23 @@ export function turnTrace(db: Database, turn: TurnEnd, usage: TurnUsage | null):
 }
 
 /** An idle look found nothing to do, so it is not an event. */
+function noteFor(db: Database, outcome: BatchOutcome, at: number): { note?: string } {
+  if (outcome.status !== 'failed') return {}
+  const provider = db.query<{ provider: string }, { runId: number }>('SELECT provider FROM observer_runs WHERE id = $runId').get({ runId: outcome.runId })?.provider
+  const entry = provider === undefined ? null : providerBackoff(db, provider)
+  return entry === null ? {} : { note: backoffLine(entry, at) }
+}
+
 export function observerTrace(db: Database, sessionId: number, outcome: BatchOutcome, at: number): ObserverTrace | null {
-  if (outcome.status === 'idle') return null
+  // A wait between tries does nothing; the failed run before it already said why.
+  if (outcome.status === 'idle' || outcome.status === 'backoff') return null
   const session = sessionRow(db, sessionId)
   if (session === null) return null
   const events = 'events' in outcome ? outcome.events : 0
   const written = outcome.status === 'succeeded' ? outcome.inserted : 0
   return {
     kind: 'observer', at, host: session.host, project: projectDisplayName(db, session.projectKey) ?? session.projectKey, projectKey: session.projectKey,
-    hostSessionId: session.hostSessionId, status: outcome.status, events, written,
+    hostSessionId: session.hostSessionId, status: outcome.status, events, written, ...noteFor(db, outcome, at),
   }
 }
 
