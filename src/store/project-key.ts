@@ -63,6 +63,38 @@ export const gitRunnerWithTimeout = (timeoutMs: number): GitRunner => (cwd, args
 
 export const runGit: GitRunner = gitRunnerWithTimeout(GIT_TIMEOUT_MS)
 
+/** GitRunner's answer without holding the caller's thread: work that can wait (the daemon's merge backfill) runs git this way. */
+export type AsyncGitRunner = (cwd: string, args: readonly string[]) => Promise<string | null>
+
+/** Like gitRunnerWithTimeout, on a child the caller awaits; a timeout rejects with GitTimeoutError. */
+export const asyncGitRunnerWithTimeout = (timeoutMs: number): AsyncGitRunner => async (cwd, args) => {
+  let child: ReturnType<typeof Bun.spawn>
+  try {
+    child = Bun.spawn(['git', '-C', cwd, ...args], {
+      stdout: 'pipe',
+      stderr: 'ignore',
+      env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', GIT_TERMINAL_PROMPT: '0' },
+    })
+  } catch (error: unknown) {
+    // git not installed, or a cwd that no longer exists: both mean "not a git checkout".
+    if (error instanceof Error) return null
+    throw error
+  }
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    child.kill()
+  }, timeoutMs)
+  try {
+    const [out, code] = await Promise.all([new Response(child.stdout as ReadableStream<Uint8Array>).text(), child.exited])
+    if (timedOut) throw new GitTimeoutError(timeoutMs)
+    const trimmed = out.trim()
+    return code !== 0 || trimmed === '' ? null : trimmed
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 interface RemoteParts {
   host: string
   path: string
@@ -115,7 +147,17 @@ const COMMIT = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
  * is named by the smallest, so every clone picks the same one.
  */
 export function rootCommitOf(cwd: string, git: GitRunner = runGit): string | null {
-  const out = git(cwd, ['rev-list', '--max-parents=0', 'HEAD'])
+  return firstRoot(git(cwd, ROOT_ARGS))
+}
+
+/** rootCommitOf through a runner the caller awaits. */
+export async function rootCommitOfAsync(cwd: string, git: AsyncGitRunner): Promise<string | null> {
+  return firstRoot(await git(cwd, ROOT_ARGS))
+}
+
+const ROOT_ARGS = ['rev-list', '--max-parents=0', 'HEAD'] as const
+
+function firstRoot(out: string | null): string | null {
   if (out === null) return null
   const roots = out.split(/\s+/).filter((line) => COMMIT.test(line)).sort()
   return roots[0] ?? null
@@ -165,7 +207,17 @@ export interface ResolverOptions extends ResolveOptions {
   now?: () => number
 }
 
-export function createProjectKeyResolver(git: GitRunner = runGit, options: ResolverOptions = {}): ProjectKeyResolver {
+export interface CachingProjectKeyResolver extends ProjectKeyResolver {
+  /**
+   * The key without the first commit, for a request that waits on it (the
+   * prompt path): finding the first commit walks the whole history, which on
+   * a large repo is the slow half, and only the merge of one repo under two
+   * keys needs it. A key the resolver already holds is reused as it is.
+   */
+  keyOnly: ProjectKeyResolver
+}
+
+export function createProjectKeyResolver(git: GitRunner = runGit, options: ResolverOptions = {}): CachingProjectKeyResolver {
   const now = options.now ?? Date.now
   const cache = new Map<string, { key: ProjectKey; at: number }>()
   // A folder's first commit never changes, and finding it walks the whole history: asked once per folder.
@@ -186,7 +238,21 @@ export function createProjectKeyResolver(git: GitRunner = runGit, options: Resol
       throw error
     }
   }
-  return (cwd) => {
+  const keysOnly = new Map<string, { key: ProjectKey; at: number }>()
+  const keyOnly: ProjectKeyResolver = (cwd) => {
+    const at = now()
+    const fresh = [cache.get(cwd), keysOnly.get(cwd)].find((entry) => entry !== undefined && at - entry.at < PROJECT_KEY_TTL_MS)
+    if (fresh !== undefined) return fresh.key
+    try {
+      const key = resolveProjectKey(cwd, git)
+      keysOnly.set(cwd, { key, at })
+      return key
+    } catch (error: unknown) {
+      if (error instanceof GitTimeoutError) return cache.get(cwd)?.key ?? keysOnly.get(cwd)?.key ?? pathKey(cwd)
+      throw error
+    }
+  }
+  const resolver = (cwd: string): ProjectKey => {
     const at = now()
     const cached = cache.get(cwd)
     if (cached !== undefined && at - cached.at < PROJECT_KEY_TTL_MS) return cached.key
@@ -200,4 +266,5 @@ export function createProjectKeyResolver(git: GitRunner = runGit, options: Resol
     cache.set(cwd, { key: resolved, at })
     return resolved
   }
+  return Object.assign(resolver, { keyOnly })
 }

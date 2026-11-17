@@ -6,6 +6,7 @@ import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../ob
 import type { Exclusive } from '../vectors/vector-worker'
 import { type RunningDaemon, startDaemon } from './daemon'
 import { type DataHandlers, dataRoute } from './data-routes'
+import { SizeStillComputingError } from './size-cache'
 
 let temp: TempStore
 let daemon: RunningDaemon
@@ -141,4 +142,15 @@ test('PUT /data/retention with preview: true answers counts and bytes, saves not
   expect(logs.some((line) => line.startsWith('data retention saved'))).toBe(false)
   expect((await call('PUT', '/data/retention', { retention: { events: 1 }, preview: 'yes' })).status).toBe(400)
   expect((await call('PUT', '/data/retention', { preview: true, extra: 1 })).status).toBe(400)
+})
+
+test('a size report still being worked out answers 503 with what to do, never a dropped connection', async () => {
+  const handlers = { size: async () => { throw new SizeStillComputingError() } } as unknown as DataHandlers
+  const answer = await dataRoute('GET', new URL('http://127.0.0.1/data/size'), async () => ({ ok: true as const, value: null }), handlers)
+  expect(answer).toEqual({ status: 503, body: { error: 'the size report is still being worked out on this store; try again in a minute' } })
+})
+
+test('the size report says when it was measured', async () => {
+  const size = (await (await call('GET', '/data/size')).json()) as Record<string, unknown>
+  expect(size.measuredAt).toEqual(expect.any(Number))
 })

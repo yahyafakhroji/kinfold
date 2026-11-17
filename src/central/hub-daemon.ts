@@ -23,6 +23,7 @@ export interface HubDaemonDeps {
   core: () => CentralCore
   view: (path: string) => Promise<HubAnswer>
   log: (line: string) => void
+  onPaired?: (deviceId: string) => void
   /** Tests only: bind loopback in place of a Tailscale address. */
   allowLoopback?: boolean
   retryMs?: number
@@ -73,6 +74,7 @@ export function startHubWhenReady(deps: HubDaemonDeps): HubDaemon {
         auth: { dataDir: deps.dataDir, hub: () => identity, whois: (address) => deps.tailscale.whois(address), now: deps.now ?? Date.now, nonces: createNonceCache(deps.now) },
         routes: hubRoutes({ core: deps.core, view: deps.view, version: deps.version, hubName: identity.nodeName }),
         log: deps.log,
+        ...(deps.onPaired !== undefined ? { onPaired: deps.onPaired } : {}),
         hostname,
         port: deps.port,
         ...(deps.allowLoopback === true ? { allowLoopback: true } : {}),

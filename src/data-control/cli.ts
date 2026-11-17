@@ -22,7 +22,7 @@ export type DataCliEnv = Pick<InstallEnv, 'dataDir' | 'fetch' | 'out' | 'ui'>
 const EXIT_OK = 0
 const EXIT_FAILED = 1
 /** A scan request works up to 2 s on the daemon side; leave room for it. */
-const REQUEST_TIMEOUT_MS = 15_000
+export const REQUEST_TIMEOUT_MS = 15_000
 
 type Answer = { ok: true; body: unknown } | { ok: false; error: string }
 
@@ -48,6 +48,13 @@ export function rowOf(line: string): Row {
   return { mark, text: mark === 'none' ? line.trimEnd() : line.trim() }
 }
 
+/** What went wrong, in words: a timeout says how long it waited, and a dropped connection (fetch's TypeError) says so. */
+function callFailure(method: string, path: string, error: unknown): string {
+  if (error instanceof Error && error.name === 'TimeoutError') return `${method} ${path} timed out after ${REQUEST_TIMEOUT_MS / 1000} s`
+  if (error instanceof TypeError) return `${method} ${path} failed: the daemon closed the connection before answering`
+  return `${method} ${path} failed (${error instanceof Error ? error.name : 'error'})`
+}
+
 /** One request to the daemon with its token; the project commands use it too. */
 export async function daemonCall(env: Pick<DataCliEnv, 'dataDir' | 'fetch'>, method: string, path: string, body?: unknown): Promise<Answer> {
   const endpoint = readDaemonEndpoint(env.dataDir)
@@ -64,7 +71,7 @@ export async function daemonCall(env: Pick<DataCliEnv, 'dataDir' | 'fetch'>, met
     const detail = isRecord(parsed) && typeof parsed.error === 'string' ? `: ${parsed.error}` : ''
     return { ok: false, error: `${method} ${path} answered ${response.status}${detail}` }
   } catch (error: unknown) {
-    return { ok: false, error: `${method} ${path} failed (${error instanceof Error ? error.name : 'error'})` }
+    return { ok: false, error: callFailure(method, path, error) }
   }
 }
 

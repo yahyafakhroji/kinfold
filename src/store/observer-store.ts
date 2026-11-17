@@ -53,6 +53,8 @@ export interface ObservationRow {
   contentHash: string
   occurredAt: number
   createdAt: number
+  /** The run that wrote it, so the run's tokens can be split over what it made. */
+  observerRunId?: number | null
 }
 
 export interface SummaryRow {
@@ -176,11 +178,11 @@ export function finishRun(db: Database, runId: number, status: 'succeeded' | 'fa
 export function insertObservation(db: Database, row: ObservationRow): boolean {
   const result = db.query(
     `INSERT INTO observations (project_key, session_id, host, prompt_number, type, title, narrative, facts, files, evidence,
-       source_event_ids, observer_model, content_hash, occurred_at, created_at, rules_version, scanned_version)
+       source_event_ids, observer_model, content_hash, occurred_at, created_at, rules_version, scanned_version, observer_run_id)
      SELECT $projectKey, $sessionId, $host, $promptNumber, $type, $title, $narrative, $facts, $files, $evidence,
-       $sourceEventIds, $observerModel, $contentHash, $occurredAt, $createdAt, $rulesVersion, 0
+       $sourceEventIds, $observerModel, $contentHash, $occurredAt, $createdAt, $rulesVersion, 0, $observerRunId
      WHERE NOT EXISTS (SELECT 1 FROM observations WHERE project_key = $projectKey AND content_hash = $contentHash)`,
-  ).run({ ...row, rulesVersion: RULES_VERSION })
+  ).run({ ...row, observerRunId: row.observerRunId ?? null, rulesVersion: RULES_VERSION })
   return result.changes > 0
 }
 

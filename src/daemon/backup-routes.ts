@@ -26,7 +26,7 @@ import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { type ArchiveHeader, BACKUP_FILE_EXTENSION, BackupError } from '../backup/archive'
 import { BACKUP_TMP_DIR, createBackup, privateTmpDir } from '../backup/create'
-import { writeBackupRecord } from '../backup/record'
+import { readBackupRecord, writeBackupRecord } from '../backup/record'
 import { type RestoreStep, type Staged, applyRestore, checkRestore, discardStaged, inspectBackup, stageSnapshot } from '../backup/restore'
 import { applyUndo, checkUndo, keptStore } from '../backup/undo'
 import type { Parsed } from '../context/types'
@@ -57,6 +57,8 @@ export interface BackupRouteDeps {
   version: string
   now: () => number
   /** Counts, states and error names only. */
+  /** A backup delivered in full, or a restore or switch back finished: for the Activity page. */
+  onEvent?: (kind: 'backup' | 'restore', detail: string | null) => void
   log: (line: string) => void
   /** Writes the open store's snapshot to the path and resolves with its schema version. */
   snapshot: (dest: string) => Promise<number>
@@ -172,6 +174,7 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
         } catch (error: unknown) {
           deps.log(`backup.json not written: ${errorName(error)}`)
         }
+        deps.onEvent?.('backup', null)
       }
       return new Response(streamThenRemove(dest, delivered), {
         status: 200,
@@ -272,6 +275,7 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
       dropPending()
       status = { state: 'done', step: null, lines, error: null }
       deps.log('restore finished')
+      deps.onEvent?.('restore', null)
     } catch (error: unknown) {
       deps.log(`restore failed: ${error instanceof BackupError ? error.kind : errorName(error)}`)
       status = { state: 'failed', step: null, lines: [], error: error instanceof BackupError ? error.message : `the restore failed (${errorName(error)})` }
@@ -340,6 +344,7 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
       })
       status = { state: 'done', step: null, lines, error: null }
       deps.log('restore undo finished')
+      deps.onEvent?.('restore', 'undo')
     } catch (error: unknown) {
       deps.log(`restore undo failed: ${error instanceof BackupError ? error.kind : errorName(error)}`)
       status = { state: 'failed', step: null, lines: [], error: error instanceof BackupError ? error.message : `switching back failed (${errorName(error)})` }
@@ -370,5 +375,5 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
     return store === null ? null : { replacedAt: store.replacedAt }
   }
 
-  return { download, upload, start, undo, status: () => ({ status: 200, body: { ...status, kept: kept() } }), busy: () => busy }
+  return { download, upload, start, undo, status: () => ({ status: 200, body: { ...status, kept: kept(), lastBackupAt: readBackupRecord(deps.dataDir)?.lastBackupAt ?? null } }), busy: () => busy }
 }

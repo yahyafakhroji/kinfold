@@ -15,9 +15,10 @@
 import { timingSafeEqual } from 'node:crypto'
 import { type ContextRequest, type ContextResult, type Parsed, parseContextRequest } from '../context/types'
 import { type Access, type AccessResult, type Credential, accessFor, checkAccess } from '../dashboard/access'
-import type { DashboardAuth } from '../dashboard/auth'
+import { type DashboardAuth, sessionFromCookie } from '../dashboard/auth'
+import { type DashboardEvents, createDashboardEvents } from '../dashboard/events'
 import { withSecurityHeaders } from '../dashboard/headers'
-import { dashboardRoute } from '../dashboard/routes'
+import { CLOSED_MESSAGE, LEASE_PREFIX, dashboardRoute } from '../dashboard/routes'
 import type { RetryTarget } from '../store/observer-reset'
 import type { McpRead } from '../store/mcp-read-store'
 import type { SessionSummary } from '../store/reads'
@@ -93,8 +94,16 @@ export interface ServerDeps {
   embeddingSettings?: EmbeddingRoute
   /** GET /observer/models: the installed CLI's model names, cached for ten minutes. */
   observerModels: ObserverModelsRoute
-  /** Login codes and session cookies for the dashboard; in memory only. */
+  /** Leases, login codes and session cookies for the dashboard. */
   auth: DashboardAuth
+  /** What `kinfold dashboard` prints while it runs; absent, a log no command reads. */
+  dashboardEvents?: DashboardEvents
+  /** A browser signed in to the dashboard: for the Activity page. */
+  onSignIn?: () => void
+  /** The service's log file, offered on the Activity page; absent, the download is 404. */
+  daemonLogPath?: string
+  /** A central device's own events, kept in memory; empty elsewhere. */
+  deviceActivity?: () => unknown[]
   /** The /read/ routes (token only); absent, every /read/ path is 404. */
   reads?: ReadRouteDeps
   /** GET /backup, POST /restore/upload, POST /restore, POST /restore/undo, GET /restore/status; absent, each is 404. */
@@ -399,13 +408,24 @@ async function autoUpdateRoute(request: Request, handlers: UpdateHandlers | unde
 
 const DASHBOARD_PAGES = new Set(['/dashboard', '/dashboard/'])
 
-/** A signed-out browser opening the app page goes to the login page, which explains `kinfold dashboard`. */
+/** Closed for this browser: its own command ended, or no command runs at all. A browser that never signed in, with a dashboard open, only needs a sign-in. */
+function isClosedFor(request: Request, auth: DashboardAuth): boolean {
+  return auth.sessionState(sessionFromCookie(request.headers.get('cookie'))) === 'closed' || !auth.isOpen()
+}
+
+/**
+ * A signed-out browser opening the app page goes to the login page, which
+ * explains `kinfold dashboard`. With no command holding a lease the dashboard
+ * is closed, and a request without the token says so, so an open page can
+ * tell the reader why it stopped.
+ */
 function refused(request: Request, path: string, access: Access, result: Extract<AccessResult, { ok: false }>, deps: ServerDeps): Response {
+  const closed = result.status === 401 && access !== 'token' && request.headers.get('authorization') === null && isClosedFor(request, deps.auth)
   if (access === 'cookie' && result.status === 401 && request.method === 'GET' && DASHBOARD_PAGES.has(path)) {
-    return new Response(null, { status: 303, headers: { location: '/dashboard/login' } })
+    return new Response(null, { status: 303, headers: { location: closed ? '/dashboard/login#closed' : '/dashboard/login' } })
   }
   if (result.status === 403) deps.log(`request refused status=403 reason=origin method=${request.method}`)
-  return json(result.status, { error: result.error })
+  return closed ? json(401, { error: CLOSED_MESSAGE, closed: true }) : json(result.status, { error: result.error })
 }
 
 /**
@@ -432,13 +452,27 @@ function isUpdateQuestion(path: string): boolean {
   return path === '/update' || path.startsWith('/update/') || path === '/watch' || path === '/watch/debug'
 }
 
+/** `kinfold dashboard`'s heartbeat and the page's open-or-closed check come every few seconds; neither is someone at work. */
+function isDashboardPulse(path: string): boolean {
+  return path === '/dashboard/state' || path.startsWith(LEASE_PREFIX)
+}
+
 /**
  * `kinfold status` and `kinfold install` read the observer settings with the
  * token; a person running them is not an agent at work. The dashboard reads
  * the same route with its cookie, and a change through either still counts.
  */
 function isQuietRead(request: Request, path: string, via: Credential): boolean {
-  return isUpdateQuestion(path) || (path === '/observer/settings' && request.method === 'GET' && via === 'token')
+  return isUpdateQuestion(path) || isDashboardPulse(path) || (path === '/observer/settings' && request.method === 'GET' && via === 'token')
+}
+
+const unreadEvents = new WeakMap<ServerDeps, DashboardEvents>()
+
+function dashboardEvents(deps: ServerDeps): DashboardEvents {
+  if (deps.dashboardEvents !== undefined) return deps.dashboardEvents
+  const kept = unreadEvents.get(deps) ?? createDashboardEvents()
+  unreadEvents.set(deps, kept)
+  return kept
 }
 
 async function answer(request: Request, port: number, deps: ServerDeps): Promise<Response> {
@@ -465,12 +499,16 @@ async function answer(request: Request, port: number, deps: ServerDeps): Promise
     if (routed !== null) return json(routed.status, routed.body)
   }
   const dashboard = isDashboardPath
-    ? await dashboardRoute(request, url.pathname, { port, auth: deps.auth, readBody: () => readJson(request), log: deps.log })
+    ? await dashboardRoute(request, url.pathname, { port, auth: deps.auth, readBody: () => readJson(request), events: dashboardEvents(deps), log: deps.log, ...(deps.onSignIn !== undefined ? { onSignIn: deps.onSignIn } : {}), ...(deps.daemonLogPath !== undefined ? { daemonLogPath: deps.daemonLogPath } : {}), ...(deps.deviceActivity !== undefined ? { deviceActivity: deps.deviceActivity } : {}) })
     : undefined
   const other = (): Promise<Response> => (BACKUP_PATHS.has(url.pathname) ? backupRoute(request, url.pathname, deps) : storeRoute(request, url, deps, checked.via))
   const response = dashboard === undefined ? await other() : (dashboard ?? json(404, { error: 'not found' }))
   // Route, status and time only: no query string, body or cookie.
-  if (checked.via === 'cookie') deps.log(`dashboard ${request.method} ${url.pathname} status=${response.status} ms=${Math.round(performance.now() - startedAt)}`)
+  if (checked.via === 'cookie' && !isDashboardPulse(url.pathname)) {
+    const ms = Math.round(performance.now() - startedAt)
+    deps.log(`dashboard ${request.method} ${url.pathname} status=${response.status} ms=${ms}`)
+    dashboardEvents(deps).request(request.method, url.pathname, response.status, ms)
+  }
   return response
 }
 
@@ -478,12 +516,17 @@ export async function handleRequest(request: Request, port: number, deps: Server
   return withSecurityHeaders(await answer(request, port, deps))
 }
 
+/** Seconds a request may go without a byte either way before the server drops it. */
+export const SERVER_IDLE_TIMEOUT_S = 30
+
 export function startServer(deps: ServerDeps): RunningServer {
   const server = Bun.serve({
     hostname: LOOPBACK_HOST,
     port: deps.port,
     // Server-wide, so it is the upload's ceiling; every other route is held to MAX_BODY_BYTES in answer() and readJson.
     maxRequestBodySize: MAX_UPLOAD_BYTES,
+    // Past every client's own wait (the CLI waits 15 s): Bun's 10 s default dropped a slow report's connection, which the CLI could only call a TypeError.
+    idleTimeout: SERVER_IDLE_TIMEOUT_S,
     fetch: (request, self) => handleRequest(request, self.port ?? deps.port, deps),
     error: (error) => {
       // The name only: a SQLite message can echo query fragments, and prompt terms are query fragments.

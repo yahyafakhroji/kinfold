@@ -257,17 +257,54 @@ test('explain() leaves out memory this prompt sends as new; the trace lists it u
   expect((await answer.explain())!.candidates.map((candidate) => candidate.id)).not.toContain(fresh)
 })
 
-/** The store reads on this test's connection, the recall read held back for `ms`. */
-function slowReads(ms: number): PromptContextDeps['reads'] {
+/** The store reads on this test's connection, each named read held back for its `ms`. */
+function slowReads(ms: number, ops: readonly string[] = ['recallKeyword']): PromptContextDeps['reads'] {
   const inline = inlineStoreReader(temp.store.db, temp.store.path)
   return {
     ...inline,
     run: async (op, args, options) => {
-      if (op === 'recallPrompt') await Bun.sleep(ms)
+      if (ops.includes(op)) await Bun.sleep(ms)
       return inline.run(op, args, options)
     },
   }
 }
+
+/** Written by another session after this one started: the delta's. */
+const fresh = (title: string): number => seedObservation(temp.store, { sessionId: other, projectKey: CWD, host: 'opencode', title, at: T0 + 500 })
+
+test('a related read past the deadline still lets the new memory through in time', async () => {
+  const added = fresh('Deploy script now pins the runner')
+  earlier('CSV parser drops quotes on export')
+  const startedAt = performance.now()
+  const answer = await preparePromptContext(deps(null, { reads: slowReads(150), deadlineMs: 40 }), ask('why does the csv parser drop quotes?'), CWD, T0 + 1_000)
+  expect(performance.now() - startedAt).toBeLessThan(120)
+  expect(answer).toMatchObject({ observationIds: [added], read: 'late' })
+})
+
+test('a delta read past the deadline still lets related memory through in time', async () => {
+  const strong = earlier('CSV parser drops quotes on export')
+  const startedAt = performance.now()
+  const answer = await preparePromptContext(deps(null, { reads: slowReads(150, ['recallDelta']), deadlineMs: 40 }), ask('why does the csv parser drop quotes?'), CWD, T0 + 1_000)
+  expect(performance.now() - startedAt).toBeLessThan(120)
+  expect(answer.observationIds).toEqual([strong])
+})
+
+test('the delta and the related read run at once, so two reads that each fit the deadline both arrive', async () => {
+  const added = fresh('Deploy script now pins the runner')
+  const strong = earlier('CSV parser drops quotes on export')
+  const startedAt = performance.now()
+  const answer = await preparePromptContext(deps(null, { reads: slowReads(60, ['recallDelta', 'recallKeyword']), deadlineMs: 100 }), ask('why does the csv parser drop quotes?'), CWD, T0 + 1_000)
+  // One after the other they would take 120 ms.
+  expect(performance.now() - startedAt).toBeLessThan(110)
+  expect(answer.observationIds).toEqual([added, strong])
+})
+
+test('a row that is both new and a keyword match is sent once, as new', async () => {
+  const added = fresh('CSV parser drops quotes on export')
+  const answer = await preparePromptContext(deps(null), ask('why does the csv parser drop quotes?'), CWD, T0 + 1_000)
+  expect(answer.observationIds).toEqual([added])
+  expect(answer.related).toBe(0)
+})
 
 test('a recall read past the deadline is answered with nothing in time, and its keyword matches come with the next prompt', async () => {
   const strong = earlier('CSV parser drops quotes on export')
@@ -286,4 +323,28 @@ test('the embedder is asked with the prompt\'s own words and paste, never a wrap
   const { asked, search } = fakeSemantic(() => [])
   await preparePromptContext(deps(search), ask('why does it fail <pasted_content id="bb24">\nbuild log\n</pasted_content id="bb24">'), CWD, T0)
   expect(asked[0]!.query).toBe('why does it fail\nbuild log')
+})
+
+test('a keyword read that fails before the deadline keeps the delta, logs the failure, and leaves nothing unhandled', async () => {
+  const added = fresh('Deploy script now pins the runner')
+  const inline = inlineStoreReader(temp.store.db, temp.store.path)
+  const failing: PromptContextDeps['reads'] = {
+    ...inline,
+    run: async (op, args, options) => {
+      if (op === 'recallKeyword') throw new Error('the store reader was closed')
+      return inline.run(op, args, options)
+    },
+  }
+  const unhandled: unknown[] = []
+  const onUnhandled = (reason: unknown): void => void unhandled.push(reason)
+  process.on('unhandledRejection', onUnhandled)
+  try {
+    const answer = await preparePromptContext(deps(null, { reads: failing }), ask('why does the csv parser drop quotes?'), CWD, T0 + 1_000)
+    await Bun.sleep(20)
+    expect(answer).toMatchObject({ observationIds: [added], read: 'error' })
+    expect(logs).toContain('prompt recall read failed: Error')
+    expect(unhandled).toEqual([])
+  } finally {
+    process.off('unhandledRejection', onUnhandled)
+  }
 })

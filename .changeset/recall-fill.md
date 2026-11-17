@@ -1,0 +1,5 @@
+---
+"kinfold": patch
+---
+
+Prompt recall carries memory again on a large hub. The new-memory delta and the related search now read at the same time, each on a reader that starts with the daemon, so a slow keyword read no longer costs the new memory and a slow delta no longer costs the related lines. The keyword match filters through a new index (schema 17) instead of each memory's text, about three times faster on a cold 30,000-memory store. The daemon answers right after a start or update: the project merge backfill and the prompt's project lookup no longer run git on the thread that answers. `kinfold size` answers from a kept report on a large store, and a request that times out says so. A running prerelease checks the beta channel for updates, and installing a prerelease turns the beta channel on unless `--no-beta` is given. `kinfold watch --debug` no longer calls a sent memory refused when the previous prompt also found it, and words the term rule as "2 terms matched, 3 needed". The daemon logs what held its thread when anything does for more than a second.

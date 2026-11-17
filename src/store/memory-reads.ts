@@ -38,6 +38,10 @@ export interface RelatedObservation {
 export interface ObservationDetail extends FullObservation {
   createdAt: number
   projectName: string | null
+  /** Delivered injections that carried it (schema v18 on, with what was stored before counted at the upgrade). */
+  recallCount: number
+  /** The machine its session was captured on, when recorded. */
+  device: string | null
   related: RelatedObservation[]
   /** confirms / updates / contradicts links, outgoing and incoming. */
   links: LinkedObservation[]
@@ -70,7 +74,8 @@ const FILTERED = `($project IS NULL OR o.project_key = $project)
 const pageSql = (hasLinks: boolean): string => `SELECT ${indexColumns(hasLinks)} FROM observations o WHERE ${FILTERED}
   ORDER BY o.occurred_at DESC, o.id DESC LIMIT $limit OFFSET $offset`
 const detailSql = (hasLinks: boolean): string => `SELECT ${indexColumns(hasLinks)}, o.session_id AS sessionId, o.prompt_number AS promptNumber, o.narrative, o.facts, o.files,
-      o.source_event_ids AS sourceEventIds, o.observer_model AS observerModel, o.created_at AS createdAt, p.display_name AS projectName
+      o.source_event_ids AS sourceEventIds, o.observer_model AS observerModel, o.created_at AS createdAt, p.display_name AS projectName,
+      o.recall_count AS recallCount, (SELECT device FROM sessions WHERE id = o.session_id) AS device
     FROM observations o LEFT JOIN projects p ON p.key = o.project_key WHERE o.id = $id`
 
 const SQL = {

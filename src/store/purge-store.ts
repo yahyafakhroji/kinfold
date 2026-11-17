@@ -6,6 +6,8 @@
 // values only ever travel as bound parameters. Observation links cascade with
 // either end; a row that a purged row had hidden is shown again, unless a
 // remaining link may still hide it (settleContradictions re-applies those).
+// activity (v18) names a session, a project and a host: rows naming purged ones go, as do
+// rows inside a purged date range, so a forgotten project leaves no path on the Activity page.
 // mcp_reads (v6) has no session: a project, host or date-range purge deletes
 // its rows directly, and purged observation ids leave every row's
 // returned_ids, as they leave injections.
@@ -32,7 +34,7 @@ export type PurgeTarget =
   | { kind: 'expire'; table: 'observations' | 'summaries'; before: number }
 
 /** Delete order: every table after the ones that point at it. */
-export const PURGE_TABLES = ['injections', 'mcp_reads', 'observer_runs', 'summaries', 'events', 'turn_usage', 'prompts', 'observations', 'sessions', 'context_packs', 'projects'] as const
+export const PURGE_TABLES = ['injections', 'activity', 'mcp_reads', 'observer_runs', 'summaries', 'events', 'turn_usage', 'prompts', 'observations', 'sessions', 'context_packs', 'projects'] as const
 export type PurgeTable = (typeof PURGE_TABLES)[number]
 
 export type PurgeCounts = Record<PurgeTable | 'findings' | 'injectionsTrimmed' | 'links', number>
@@ -55,6 +57,7 @@ function bySessions(sessions: string, extra: Partial<Record<PurgeTable, string>>
   const base: Record<PurgeTable, string> = {
     ...EMPTY,
     injections: `${owned} OR (host, host_session_id) IN (SELECT host, host_session_id FROM sessions WHERE id IN (${sessions}))`,
+    activity: owned,
     observer_runs: owned,
     summaries: owned,
     events: owned,
@@ -80,6 +83,7 @@ function rangeScope(): Record<PurgeTable, string> {
     prompts: within('occurred_at'),
     observations: within('occurred_at'),
     mcp_reads: within('occurred_at'),
+    activity: within('at'),
   })
 }
 
@@ -121,10 +125,10 @@ function baseScope(target: PurgeTarget): { where: Record<PurgeTable, string>; pa
     case 'session':
       return { where: bySessions('SELECT id FROM sessions WHERE id = $id'), params: { id: target.id } }
     case 'host':
-      return { where: bySessions('SELECT id FROM sessions WHERE host = $host', { observations: 'host = $host', injections: 'host = $host', mcp_reads: 'host = $host' }), params: { host: target.host } }
+      return { where: bySessions('SELECT id FROM sessions WHERE host = $host', { observations: 'host = $host', injections: 'host = $host', mcp_reads: 'host = $host', activity: 'host = $host' }), params: { host: target.host } }
     case 'project': {
       const extra = {
-        observations: 'project_key = $key', injections: 'project_key = $key', mcp_reads: 'project_key = $key',
+        observations: 'project_key = $key', injections: 'project_key = $key', mcp_reads: 'project_key = $key', activity: 'project_key = $key',
         context_packs: 'project_key = $key', projects: 'key = $key',
       }
       return { where: bySessions('SELECT id FROM sessions WHERE project_key = $key', extra), params: { key: target.key } }

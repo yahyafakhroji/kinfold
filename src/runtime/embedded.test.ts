@@ -4,7 +4,9 @@ import * as fs from 'node:fs'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createDashboardAuth } from '../dashboard/auth'
-import { EMBEDDED_ASSET_NAMES, PUBLIC_DIR, dashboardRoute, listAssets } from '../dashboard/routes'
+import { createDashboardEvents } from '../dashboard/events'
+import { APP_DIST, ensureAppBuilt, listAssets } from '../dashboard/app-files'
+import { dashboardRoute } from '../dashboard/routes'
 import type { DashboardDeps } from '../dashboard/routes'
 import { type FakeWorld, createWorld } from '../install/test-support'
 import { runPlan } from '../install/plan'
@@ -26,6 +28,8 @@ const NO_HEALTH = { up: false, reason: 'not running' } as const
  * bytes to prove the check, and the fake dashboard serves one page whatever the
  * route asks for, so a path check has to refuse before it is called.
  */
+const EMBEDDED_DASHBOARD = ['index.html', 'login.html', 'index-0a1b2c3d.js', 'style-4e5f6a7b.css']
+
 function fakeAssets(overrides: { sqlite3mcSha256?: string; vec0Sha256?: string; sqlite3mcSourceSha256?: string } = {}): EmbeddedAssets {
   return {
     sqlite3mc: {
@@ -34,7 +38,8 @@ function fakeAssets(overrides: { sqlite3mcSha256?: string; vec0Sha256?: string; 
       sourceSha256: overrides.sqlite3mcSourceSha256 ?? SQLITE3MC_ZIP_SHA256,
     },
     vec0: { bytes: async () => VEC0, sha256: overrides.vec0Sha256 ?? sha(VEC0) },
-    dashboardFile: (name) => (name === 'index.html' || name.endsWith('.js') ? new Blob([`embedded ${name}`]) : null),
+    dashboardFile: (name) => (EMBEDDED_DASHBOARD.includes(name) ? new Blob([`embedded ${name}`]) : null),
+    dashboardNames: () => [...EMBEDDED_DASHBOARD],
     opencodePlugin: async () => 'embedded opencode plugin',
     kiloPlugin: async () => 'embedded kilo plugin',
   }
@@ -45,6 +50,7 @@ function dashboardDeps(assets: EmbeddedAssets | null): DashboardDeps {
     port: 1,
     auth: createDashboardAuth(),
     readBody: async () => ({ ok: true, value: {} }),
+    events: createDashboardEvents(),
     log: () => {},
     assets,
   }
@@ -62,8 +68,13 @@ test('a developer checkout has no embedded assets', () => {
   expect(embeddedAssets()).toBeNull()
 })
 
-test('the embedded asset list stays equal to the dashboard public folder', () => {
-  expect([...EMBEDDED_ASSET_NAMES].sort().join(',')).toBe([...listAssets(PUBLIC_DIR)].sort().join(','))
+test('a compiled program serves the assets its build carries, and nothing else', async () => {
+  const deps = dashboardDeps(fakeAssets())
+  const asset = await dashboardRoute(new Request('http://127.0.0.1:1/dashboard/assets/index-0a1b2c3d.js'), '/dashboard/assets/index-0a1b2c3d.js', deps)
+  expect([asset?.status, await asset?.text(), asset?.headers.get('content-type')]).toEqual([200, 'embedded index-0a1b2c3d.js', 'text/javascript; charset=utf-8'])
+  expect(await dashboardRoute(new Request('http://127.0.0.1:1/dashboard/assets/other-00000000.js'), '/dashboard/assets/other-00000000.js', deps)).toBeNull()
+  // The pages are served by their own routes, never as assets.
+  expect(await dashboardRoute(new Request('http://127.0.0.1:1/dashboard/assets/index.html'), '/dashboard/assets/index.html', deps)).toBeNull()
 })
 
 test('an embedded library is written under its hash with the manifest, with no compiler and no network', async () => {
@@ -185,13 +196,14 @@ test('an embedded dashboard page is served through the dashboard routes', async 
   expect(await response?.text()).toBe('embedded index.html')
 })
 
-test('developer mode serves the dashboard page from PUBLIC_DIR', async () => {
+test('developer mode serves the built dashboard page', async () => {
+  ensureAppBuilt()
   const response = await dashboardRoute(new Request('http://127.0.0.1:1/dashboard/'), '/dashboard/', dashboardDeps(null))
   expect(response?.status).toBe(200)
-  expect(await response?.text()).toBe(readFileSync(join(PUBLIC_DIR, 'index.html'), 'utf8'))
+  expect(await response?.text()).toBe(readFileSync(join(APP_DIST, 'index.html'), 'utf8'))
 })
 
-test('a public folder that cannot be read is an error, not an empty asset list', () => {
+test('an asset folder that cannot be read is an error, not an empty asset list', () => {
   const notADir = join(w.root, 'not-a-folder')
   writeFileSync(notADir, 'x')
   expect(() => listAssets(notADir)).toThrow()

@@ -31,6 +31,16 @@ const INJECTIONS = 20_000
 const P95_CEILING_MS = PROMPT_SERVE_BUDGET_MS
 /** Answers that must carry memory: each prompt has new memory from other sessions waiting, at least. */
 const MIN_CARRIED_SHARE = 0.8
+/**
+ * Answers in time that must carry related memory as well: every prompt here
+ * shares rare words with many stored memories, so an on-time answer without
+ * any means the related search missed the deadline, the failure the hub saw.
+ */
+const MIN_RELATED_SHARE = 0.95
+/** The delta's own read, beside the keyword read: index reads of a few rows. */
+const DELTA_P95_CEILING_MS = 20
+/** How often `kinfold watch --debug` asks, as the user's watcher did during the hub's misses: its trace reads run beside the prompts. */
+const WATCH_POLL_MS = 1_000
 /** A request the old daemon never answered is counted at this, so the run ends. */
 const CLIENT_GIVE_UP_MS = 15_000
 const BENCH_SESSION = 'bench-session'
@@ -160,25 +170,48 @@ test(`a long pasted prompt on a ${MEMORIES.toLocaleString('en')}-memory store un
   // Warm the store as a running hub's is: one answer before the load starts.
   await call('POST', '/context', { host: HOST, hostSessionId: BENCH_SESSION, cwd: root, channel: 'prompt', prompt: longPrompt(-1) })
   await startLoad()
+  let watching = true
+  const watcher = (async () => {
+    while (watching) {
+      await call('GET', '/watch/debug')
+      await Bun.sleep(WATCH_POLL_MS)
+    }
+  })()
   await Bun.sleep(300)
   const samples: number[] = []
   let carried = 0
+  let withRelated = 0
+  let relatedHits = 0
+  const deltaSamples: number[] = []
   for (let index = 0; index < PROMPTS; index += 1) {
+    const before = daemonLog.length
     const answer = await ask(longPrompt(index))
     samples.push(answer.ms)
     if (answer.ids > 0) carried += 1
+    const line = daemonLog.slice(before).find((entry) => entry.startsWith('context ') && entry.includes('channel=prompt'))
+    const related = Number(/ related=(\d+)/.exec(line ?? '')?.[1] ?? 0)
+    if (related > 0 && answer.ms <= P95_CEILING_MS) withRelated += 1
+    relatedHits += related
+    deltaSamples.push(Number(/ delta_ms=(\d+)/.exec(line ?? '')?.[1] ?? CLIENT_GIVE_UP_MS))
     await Bun.sleep(100)
   }
+  watching = false
+  await watcher
   const sorted = [...samples].sort((a, b) => a - b)
   const p95 = percentile(sorted, 0.95)
-  process.stderr.write(`recall bench: memories=${MEMORIES} prompts=${PROMPTS} p50=${percentile(sorted, 0.5).toFixed(0)}ms p95=${p95.toFixed(0)}ms max=${sorted.at(-1)!.toFixed(0)}ms carried=${carried}/${PROMPTS}\n`)
-  if (p95 > P95_CEILING_MS || carried / PROMPTS < MIN_CARRIED_SHARE) {
+  const deltaP95 = percentile([...deltaSamples].sort((a, b) => a - b), 0.95)
+  process.stderr.write(`recall bench: memories=${MEMORIES} prompts=${PROMPTS} p50=${percentile(sorted, 0.5).toFixed(0)}ms p95=${p95.toFixed(0)}ms max=${sorted.at(-1)!.toFixed(0)}ms carried=${carried}/${PROMPTS} related_in_time=${withRelated}/${PROMPTS} related_hits=${relatedHits} delta_p95=${deltaP95}ms\n`)
+  if (p95 > P95_CEILING_MS || carried / PROMPTS < MIN_CARRIED_SHARE || withRelated / PROMPTS < MIN_RELATED_SHARE) {
     const slow = daemonLog.filter((line) => line.startsWith('context ') && Number(/ ms=(\d+)/.exec(line)?.[1] ?? 0) > 100)
     process.stderr.write(`recall bench samples: ${samples.map((ms) => ms.toFixed(0)).join(' ')}\n${slow.slice(-12).join('\n')}\n`)
   }
+  process.stderr.write(daemonLog.filter((l) => l.startsWith("context ")).join("\n") + "\n")
   // The load ran: its captures reached the daemon while the prompts were asked.
   expect(daemonLog.some((line) => /^drained read=\d+ inserted=[1-9]/.test(line))).toBe(true)
   expect(p95).toBeLessThanOrEqual(P95_CEILING_MS)
   // An answer in time that never carries memory would pass the clock and fail the user.
   expect(carried / PROMPTS).toBeGreaterThanOrEqual(MIN_CARRIED_SHARE)
+  // The delta alone fills the count above; related memory in time is what the hub's answers lacked.
+  expect(withRelated / PROMPTS).toBeGreaterThanOrEqual(MIN_RELATED_SHARE)
+  expect(deltaP95).toBeLessThanOrEqual(DELTA_P95_CEILING_MS)
 }, 900_000)

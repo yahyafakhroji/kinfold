@@ -172,3 +172,22 @@ test('a reader that waits for its worker never reads on the daemon connection wh
     store.db.close()
   }
 })
+
+test('an eager reader starts its worker before any read, so the first prompt after a start is read there', async () => {
+  const { dataDir, dbPath } = tempStore()
+  const store = openStore(dataDir)
+  try {
+    const inline = inlineStoreReader(store.db, dbPath)
+    let inlineReads = 0
+    const counting = { ...inline, run: ((op, args, options) => (inlineReads += 1, inline.run(op, args, options))) as typeof inline.run }
+    let starts = 0
+    const reader = readerOrInline('recall', () => (starts += 1, startStoreReader({ dbPath: 'ok', dataDir: '/nowhere', key: null, libraryOverride: null, cacheKib: null, workerUrl: FAKE })), counting, () => {}, { eager: true })
+    opened.push(reader)
+    expect(starts).toBe(1)
+    await Bun.sleep(200)
+    expect(await reader.run('ping', { value: 1 })).toEqual({ value: 1 })
+    expect(inlineReads).toBe(0)
+  } finally {
+    store.db.close()
+  }
+})

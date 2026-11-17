@@ -542,11 +542,64 @@ CREATE TABLE project_merges (
 CREATE INDEX project_merges_by_from ON project_merges(from_key, merged_at DESC);
 `
 
+// v17: the keyword match at prompt time filters every FTS hit by project,
+// contradiction and session. Those columns sit after a row's text, so on the
+// table each hit cost a page of text to read (and, encrypted, to decrypt);
+// this index holds them alone, and the text is read only for the rows kept.
+const V17_RECALL_INDEX = `
+CREATE INDEX observations_recall ON observations(id, project_key, contradicted_by, session_id);
+`
+
+// v18: what the dashboard shows that nothing recorded before.
+//   sessions.device: the machine a session was captured on. A local drain
+//     writes 'local'; a hub writes the device id. A device-scoped key
+//     (dev-...:path) names its device, so those rows are filled in; any other
+//     row stays NULL, shown as not recorded before records.since.
+//   observations.recall_count: how many delivered injections carried the
+//     row, counted from the injections already stored (late ones left out:
+//     they were probably never shown) and kept up by recordInjection.
+//   observations.observer_run_id: the run that wrote the row, so the run's
+//     tokens can be split over what it made. NULL for rows written before.
+//   activity: what happened, for the Activity page. Kinds and counts, never
+//     memory text; detail holds a short machine word (an error class, a
+//     version). Kept to 90 days and 100,000 rows (src/store/activity-store.ts).
+const V18_DASHBOARD_RECORDS = `
+ALTER TABLE sessions ADD COLUMN device TEXT;
+UPDATE sessions SET device = substr(project_key, 1, instr(project_key, ':') - 1) WHERE project_key GLOB 'dev-?*:?*';
+CREATE INDEX sessions_by_started ON sessions(started_at DESC, id DESC);
+
+ALTER TABLE observations ADD COLUMN recall_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE observations ADD COLUMN observer_run_id INTEGER REFERENCES observer_runs(id) ON DELETE SET NULL;
+CREATE TEMP TABLE recall_counts (id INTEGER PRIMARY KEY, n INTEGER NOT NULL);
+INSERT INTO recall_counts (id, n)
+  SELECT CAST(j.value AS INTEGER) AS id, count(*) AS n FROM injections i, json_each(i.observation_ids) j
+  WHERE i.late = 0 AND i.held_out = 0 GROUP BY CAST(j.value AS INTEGER);
+UPDATE observations SET recall_count = (SELECT n FROM recall_counts WHERE recall_counts.id = observations.id)
+  WHERE id IN (SELECT id FROM recall_counts);
+DROP TABLE recall_counts;
+CREATE INDEX observations_by_recalls ON observations(recall_count DESC, id DESC);
+CREATE INDEX observations_by_run ON observations(observer_run_id) WHERE observer_run_id IS NOT NULL;
+
+CREATE TABLE activity (
+  id INTEGER PRIMARY KEY,
+  at INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  host TEXT,
+  project_key TEXT,
+  session_id INTEGER,
+  device TEXT,
+  count INTEGER,
+  detail TEXT
+);
+CREATE INDEX activity_by_time ON activity(at DESC, id DESC);
+CREATE INDEX activity_by_kind ON activity(kind, at DESC, id DESC);
+`
+
 /** Index i holds the migration that takes user_version from i to i + 1. */
 export const MIGRATIONS: readonly string[] = [
   V1_CORE + V1_MEMORY + V1_DELIVERY, V2_OBSERVER, V3_CONTEXT, V4_DATA_CONTROL, V5_LINKS, V6_USAGE, V7_SHARED_SUMMARIES, V8_VECTORS, V9_RELATED_SERVED,
   V10_OBSERVER_SAFETY, V11_VECTOR_SPACE_INDEX, V12_VISIBLE, V13_LATE_AND_INDEXES,
-  V14_OBSERVER_ENDPOINT, V15_EMBEDDING_SPACES, V16_PROJECT_MERGES,
+  V14_OBSERVER_ENDPOINT, V15_EMBEDDING_SPACES, V16_PROJECT_MERGES, V17_RECALL_INDEX, V18_DASHBOARD_RECORDS,
 ]
 
 /**
@@ -559,6 +612,10 @@ export const MIGRATION_STEPS: Readonly<Record<number, (db: Database) => void>> =
   },
   12: (db) => {
     backfillReplies(db)
+  },
+  // The date the v18 records start, so a page can say "not recorded before" instead of guessing.
+  18: (db) => {
+    db.query("INSERT INTO data_settings (key, value, updated_at) VALUES ('records.since', $now, $now) ON CONFLICT (key) DO NOTHING").run({ now: Date.now() })
   },
 }
 

@@ -76,6 +76,13 @@ test('pairing with the code stores the device, bound to its node, and proves the
   expect(findDevice(dir, 'dev-1')).toMatchObject({ name: 'laptop', publicKey: device.publicKey, nodeId: 'nLAPTOP', userId: '42' })
 })
 
+test('a pairing is reported by device id for the Activity page', async () => {
+  const paired: string[] = []
+  deps = { ...deps, onPaired: (id) => paired.push(id) }
+  expect((await pair()).response.status).toBe(200)
+  expect(paired).toEqual(['dev-1'])
+})
+
 test('a wrong code counts a try and pairs nothing', async () => {
   createInvite(dir, Date.now())
   const { response } = await pair('100.64.0.5', 'KF-0000-0000')

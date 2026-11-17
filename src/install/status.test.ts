@@ -629,3 +629,7 @@ test('status names the beta channel when it is on', async () => {
   expect(await linesOf(installed({ ...AUTO_RECORD, beta: true }))).toContain('beta releases: on (each one waits for your yes)')
   expect((await linesOf(installed())).some((line) => line.startsWith('beta releases'))).toBe(false)
 })
+
+test('status says a running prerelease reads the beta channel even with it off in the record', async () => {
+  expect(await linesOf(installed(), '0.6.0-beta.1')).toContain('beta releases: on while this prerelease runs (each one waits for your yes); kinfold install --beta keeps them after 0.6.0')
+})

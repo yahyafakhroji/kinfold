@@ -18,10 +18,12 @@ export const REQUEST_HEADER = 'x-sam-request'
 const SAFE_METHODS = new Set(['GET', 'HEAD'])
 const EITHER_EXACT = new Set(['/central/status', '/observer/settings', '/embedding/settings', '/observer/test', '/observer/recheck', '/observer/models', '/metrics/summary', '/update', '/update/auto', '/update/settings', '/update/install', '/backup', '/restore', '/restore/upload', '/restore/undo', '/restore/status'])
 const EITHER_PREFIXES = ['/data/', '/memory/']
-const PUBLIC_DASHBOARD = new Set(['/dashboard/login', '/dashboard/session'])
+// The claim is public like the session exchange: it carries no credential, and createSession's own-page check guards both.
+const PUBLIC_DASHBOARD = new Set(['/dashboard/login', '/dashboard/session', '/dashboard/claim'])
 
 export function accessFor(path: string): Access {
-  if (path === '/dashboard/login-code') return 'token'
+  // `kinfold dashboard` holds its lease and asks for codes with the token; a browser never can.
+  if (path === '/dashboard/login-code' || path === '/dashboard/offer' || path === '/dashboard/close' || path.startsWith('/dashboard/lease/')) return 'token'
   if (PUBLIC_DASHBOARD.has(path) || path.startsWith('/dashboard/assets/')) return 'public'
   if (path === '/dashboard' || path.startsWith('/dashboard/')) return 'cookie'
   if (EITHER_EXACT.has(path) || EITHER_PREFIXES.some((prefix) => path.startsWith(prefix))) return 'either'

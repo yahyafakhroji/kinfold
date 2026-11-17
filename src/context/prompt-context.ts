@@ -1,13 +1,15 @@
 // The prompt channel's answer in the daemon: the delta (new memory from
 // other sessions), then earlier memory related to the prompt. Everything is
 // answered by one deadline, counted from when the request arrived, because
-// the hook stops waiting soon after. The store reads (the delta, keyword
-// candidates, rows for vector hits) run in the recall reader worker when the
-// daemon has one, so a busy store or a long dashboard report never holds the
-// thread that answers; the prompt's embedding races the same deadline. A
-// part that misses it keeps running and its hits are parked for the
-// session's next prompt (late-matches.ts); a delta that misses is worked out
-// again next time, since nothing of it was recorded. A prompt the redaction
+// the hook stops waiting soon after. The store reads run in reader workers
+// when the daemon has them, so a busy store or a long dashboard report never
+// holds the thread that answers: the delta in one, the keyword candidates and
+// the rows for vector hits in another, both asked at once, so a slow keyword
+// read never costs the new memory and a slow delta never costs the related
+// lines. The prompt's embedding races the same deadline. A part that misses
+// it keeps running and its hits are parked for the session's next prompt
+// (late-matches.ts); a delta that misses is worked out again next time, since
+// nothing of it was recorded. A prompt the redaction
 // rules flag is never embedded. The prompt text reaches the matcher and the
 // embedder only, wrappers removed (prompt-text.ts); nothing here logs or
 // stores it.
@@ -23,7 +25,7 @@ import { explainRelated } from './explain'
 import { type LateHit, type LateMatches, lateSessionKey } from './late-matches'
 import { promptSecretRules, promptTermCandidates, termMatches } from './prompt-query'
 import { searchablePrompt } from './prompt-text'
-import type { RecallPromptAnswer, RecallRowsAnswer, TermCounts } from './recall-reads'
+import type { RecallKeywordAnswer, RecallRowsAnswer, TermCounts } from './recall-reads'
 import { RELATED_BUDGET_TOKENS, RELATED_CANDIDATES, type RelatedCandidate, type RelatedGate, type RelatedMode, buildRelated, isRelated, joinContext, rankRelated } from './related'
 import { type ContextRequest, type ContextResult, EMPTY_CONTEXT, MAX_CONTEXT_PROMPT_CHARS } from './types'
 
@@ -47,8 +49,9 @@ export interface PromptContext extends ContextResult {
   related: number
   semantic: SemanticOutcome
   read: ReadOutcome
-  /** Time in each half, for the route's log line: numbers only. deltaMs is the store read the delta comes with. */
+  /** Time in each part, for the route's log line: numbers only. deltaMs and keywordMs are the two store reads, asked at once. */
   deltaMs: number
+  keywordMs: number
   relatedMs: number
   /** The related lines in `relatedText`, with what earned them; recorded only when the answer is (src/daemon/context-route.ts). */
   relatedServed: ServedRelated[]
@@ -84,8 +87,12 @@ export interface PromptContextDeps {
   semantic: ((request: SemanticRequest) => Promise<SemanticAnswer>) | null
   late: LateMatches
   log: (line: string) => void
-  /** Where the store reads run; default the db connection, on this thread. The daemon passes its recall reader. */
+  /** Where the keyword and row reads run; default the db connection, on this thread. The daemon passes its recall reader. */
   reads?: StoreReader
+  /** Where the delta read runs, beside `reads`; default `reads`. The daemon passes a reader of its own. */
+  deltaReads?: StoreReader
+  /** Where `kinfold watch --debug`'s extra reads run, after the answer, so they never queue ahead of a prompt; default `reads`. */
+  traceReads?: StoreReader
   gate?: RelatedGate
   deadlineMs?: number
   /** Absent: no cap. */
@@ -162,42 +169,68 @@ export async function preparePromptContext(deps: PromptContextDeps, request: Con
   const deadlineAt = began + (deadlineMs ?? deps.deadlineMs ?? PROMPT_SEMANTIC_DEADLINE_MS)
   const left = (): number => Math.max(0, deadlineAt - clock())
   const reads = deps.reads ?? inlineStoreReader(deps.db, '')
-  const nothing = (read: ReadOutcome, semantic: SemanticOutcome, deltaMs: number): PromptContext =>
-    ({ ...EMPTY_CONTEXT, relatedText: '', related: 0, semantic, read, deltaMs, relatedMs: 0, relatedServed: [], explain: NO_SEARCH })
+  const deltaReads = deps.deltaReads ?? reads
+  const nothing = (read: ReadOutcome, semantic: SemanticOutcome, deltaMs: number, keywordMs: number): PromptContext =>
+    ({ ...EMPTY_CONTEXT, relatedText: '', related: 0, semantic, read, deltaMs, keywordMs, relatedMs: 0, relatedServed: [], explain: NO_SEARCH })
   // A primary-key read: cheap on this thread, and it keeps an unknown project from costing an embed.
   const projectName = projectDisplayName(deps.db, projectKey)
-  if (projectName === null) return nothing('none', 'no_prompt', 0)
+  if (projectName === null) return nothing('none', 'no_prompt', 0, 0)
   const raw = (request.prompt ?? '').slice(0, MAX_CONTEXT_PROMPT_CHARS).trim()
   const query = searchablePrompt(raw)
   const candidates = query === '' ? [] : promptTermCandidates(raw)
   const sessionKey = lateSessionKey(request.host, request.hostSessionId)
 
-  const readStart = performance.now()
-  const reading = reads.run('recallPrompt', {
-    host: request.host, hostSessionId: request.hostSessionId, projectKey, now, terms: candidates, limit: RELATED_CANDIDATES,
-  }, { expireMs: LATE_EMBED_DEADLINE_MS })
+  const timed = <T>(pending: Promise<T>): { pending: Promise<T>; ms: () => number } => {
+    const start = performance.now()
+    let ms: number | null = null
+    const done = (): void => void (ms ??= Math.round(performance.now() - start))
+    pending.then(done, done)
+    return { pending, ms: () => ms ?? Math.round(performance.now() - start) }
+  }
+  const where = { host: request.host, hostSessionId: request.hostSessionId, projectKey, now }
+  // Both reads race what is left now, read once: they are asked together.
+  const wait = left()
+  // A delta nobody waits for any more is worked out again with the next prompt, so it may expire with the deadline.
+  const deltaRead = timed(deltaReads.run('recallDelta', where, { expireMs: Math.max(1, wait) }))
+  const keywordRead = timed(query === '' ? Promise.resolve(null) : reads.run('recallKeyword', { ...where, terms: candidates, limit: RELATED_CANDIDATES }, { expireMs: LATE_EMBED_DEADLINE_MS }))
+  const reading = keywordRead.pending.then((answer) => answer ?? EMPTY_KEYWORD)
+  // Its failure is logged from the race below; with no embed and no parking nothing else would take it.
+  reading.catch(() => {})
   const embedding = query === '' ? { pending: null, semantic: 'no_prompt' as SemanticOutcome } : startEmbed(deps, projectKey, query, reading)
 
-  const read = await race(reading, left())
-  const deltaMs = Math.round(performance.now() - readStart)
+  const [deltaRaced, read] = await Promise.all([race(deltaRead.pending, wait), race(keywordRead.pending, wait)])
+  if (deltaRaced.kind === 'failed') deps.log(`prompt delta read failed: ${errorName(deltaRaced.error)}`)
+  const delta = deltaRaced.kind === 'answer' ? deltaRaced.value : EMPTY_CONTEXT
+  const deltaMs = deltaRead.ms()
+  const keywordMs = keywordRead.ms()
+  const deltaRead_ = deltaRaced.kind === 'answer' ? 'ok' : deltaRaced.kind === 'failed' ? 'error' : 'late'
   if (read.kind !== 'answer') {
     if (read.kind === 'failed') deps.log(`prompt recall read failed: ${errorName(read.error)}`)
     else parkLate(deps, reads, { projectKey, sessionKey }, reading, embedding.pending, now)
-    return nothing(read.kind === 'failed' ? 'error' : 'late', embedding.pending === null ? embedding.semantic : 'late', deltaMs)
+    return { ...nothing(read.kind === 'failed' ? 'error' : 'late', embedding.pending === null ? embedding.semantic : 'late', deltaMs, keywordMs), ...delta }
   }
-  const answer = read.value
-  if (answer.projectName === null || query === '') return { ...nothing('ok', 'no_prompt', deltaMs), ...answer.delta }
+  const read_: ReadOutcome = deltaRead_ === 'ok' ? 'ok' : deltaRead_
+  if (read.value === null || read.value.projectName === null) return { ...nothing(read_, 'no_prompt', deltaMs, keywordMs), ...delta }
+  // The keyword read ran beside the delta, so it could not leave out the delta's rows; they go out as new memory, once.
+  const deltaIds = new Set(delta.observationIds)
+  const answer: RecallKeywordAnswer = {
+    ...read.value,
+    sentIds: [...new Set([...read.value.sentIds, ...delta.observationIds])],
+    keywordRows: read.value.keywordRows.filter((row) => !deltaIds.has(row.id)),
+  }
   const matching = matchingFor({ projectKey, sessionKey }, answer.terms)
   const relatedStart = performance.now()
   try {
-    const related = await relatedFor(deps, reads, { matching, answer, projectName, now, left, query, embedding })
-    return { ...joinContext(answer.delta, related.result), relatedText: related.result.text, related: related.result.observationIds.length, semantic: related.semantic, read: 'ok',
-      deltaMs, relatedMs: Math.round(performance.now() - relatedStart), relatedServed: related.served, explain: related.explain }
+    const related = await relatedFor(deps, reads, { matching, answer, delta, projectName, now, left, query, embedding })
+    return { ...joinContext(delta, related.result), relatedText: related.result.text, related: related.result.observationIds.length, semantic: related.semantic, read: read_,
+      deltaMs, keywordMs, relatedMs: Math.round(performance.now() - relatedStart), relatedServed: related.served, explain: related.explain }
   } catch (error: unknown) {
     deps.log(`prompt related failed: ${errorName(error)}`)
-    return { ...nothing('ok', 'error', deltaMs), ...answer.delta, relatedMs: Math.round(performance.now() - relatedStart) }
+    return { ...nothing(read_, 'error', deltaMs, keywordMs), ...delta, relatedMs: Math.round(performance.now() - relatedStart) }
   }
 }
+
+const EMPTY_KEYWORD: RecallKeywordAnswer = { projectName: null, sessionId: null, terms: [], sentIds: [], keywordRows: [], keywordCounts: [] }
 
 interface Embedding {
   pending: Promise<SemanticAnswer> | null
@@ -206,7 +239,7 @@ interface Embedding {
 }
 
 /** Starts the embed at once, beside the store read; the keyword candidates it also measures follow when that read answers. */
-function startEmbed(deps: PromptContextDeps, projectKey: string, query: string, reading: Promise<RecallPromptAnswer>): Embedding {
+function startEmbed(deps: PromptContextDeps, projectKey: string, query: string, reading: Promise<RecallKeywordAnswer>): Embedding {
   if (deps.semantic === null) return { pending: null, semantic: 'off' }
   const guardRules = promptSecretRules(query)
   if (guardRules.length > 0) {
@@ -224,7 +257,8 @@ function startEmbed(deps: PromptContextDeps, projectKey: string, query: string, 
 
 interface RelatedInputs {
   matching: Matching
-  answer: RecallPromptAnswer
+  answer: RecallKeywordAnswer
+  delta: ContextResult
   projectName: string
   now: number
   left: () => number
@@ -282,7 +316,7 @@ async function relatedFor(deps: PromptContextDeps, reads: StoreReader, inputs: R
   const lateKeyword = late.filter((candidate) => candidate.distance === null)
   const lateVector = late.filter((candidate) => candidate.distance !== null)
   const lateIds = new Set(late.map((candidate) => candidate.row.id))
-  const deltaIds = new Set(answer.delta.observationIds)
+  const deltaIds = new Set(inputs.delta.observationIds)
   // This prompt's matches first: a row in both keeps this prompt's distance.
   const ranked = rankRelated([...keyword, ...lateKeyword], [...vector, ...lateVector], deps.gate ?? isRelated)
   const inTime = new Set(vector.map((candidate) => candidate.row.id))
@@ -291,10 +325,10 @@ async function relatedFor(deps: PromptContextDeps, reads: StoreReader, inputs: R
   const result = buildRelated({ projectName: inputs.projectName, observations: ranked, mode, budgetTokens: RELATED_BUDGET_TOKENS, now })
   const dropped = droppedHits(hits, sent, vector)
   const explain = async (): Promise<SearchTrace> => {
-    const delivered = await deliveredKeywordMatches(reads, matching, answer, dropped)
+    const delivered = await deliveredKeywordMatches(deps.traceReads ?? reads, matching, answer, dropped)
     return explainRelated({
       db: deps.db, gate: deps.gate, mode, semantic, space, terms: matching.terms, query: pending === null ? null : inputs.query,
-      keyword: [...keyword, ...lateKeyword], vector: [...vector, ...lateVector], lateIds, served: result.observationIds,
+      keyword, parkedKeyword: lateKeyword, vector: [...vector, ...lateVector], lateIds, served: result.observationIds,
       // The delta's own lines are shown as new memory, so they are not listed again as already delivered.
       dropped: [...dropped, ...delivered].filter((hit) => !deltaIds.has(hit.id)),
     })
@@ -303,7 +337,7 @@ async function relatedFor(deps: PromptContextDeps, reads: StoreReader, inputs: R
 }
 
 /** Keyword matches the session already has, for the trace only (after the answer): the candidate read leaves them out. */
-async function deliveredKeywordMatches(reads: StoreReader, matching: Matching, answer: RecallPromptAnswer, already: readonly DroppedHit[]): Promise<DroppedHit[]> {
+async function deliveredKeywordMatches(reads: StoreReader, matching: Matching, answer: RecallKeywordAnswer, already: readonly DroppedHit[]): Promise<DroppedHit[]> {
   if (matching.terms.length === 0 || answer.sentIds.length === 0) return []
   const listed = new Set(already.map((hit) => hit.id))
   const found = await reads.run('recallDelivered', { projectKey: matching.projectKey, any: matching.any, each: matching.each, sessionId: answer.sessionId, sent: answer.sentIds, limit: RELATED_CANDIDATES })
@@ -360,7 +394,7 @@ function parkVectorHits(deps: PromptContextDeps, reads: StoreReader, matching: M
 }
 
 /** A store read past the deadline: its keyword matches, and the embed's hits when it ends, wait for the next prompt. */
-function parkLate(deps: PromptContextDeps, reads: StoreReader, where: Where, reading: Promise<RecallPromptAnswer>, pending: Promise<SemanticAnswer> | null, askedAt: number): void {
+function parkLate(deps: PromptContextDeps, reads: StoreReader, where: Where, reading: Promise<RecallKeywordAnswer>, pending: Promise<SemanticAnswer> | null, askedAt: number): void {
   void reading.then((answer) => {
     const matching = matchingFor(where, answer.terms)
     const counts = countsOf(answer.keywordCounts)

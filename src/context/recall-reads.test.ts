@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { type TempStore, openTempStore } from '../observer/test-support'
 import { upsertProject, upsertSession } from '../store/writes'
-import { chooseTerms, recallPrompt } from './recall-reads'
+import { chooseTerms, recallKeyword } from './recall-reads'
+import { TERM_COUNT_TTL_MS, termDocCounts } from '../store/related-store'
 import { seedObservation } from './test-support'
 
 const CWD = '/work/terms-repo'
@@ -32,8 +33,8 @@ test('a prompt of common words still keeps its two rarest, so it can match somet
   expect(chooseTerms(temp.store.db, ['common', 'note'], 8)).toEqual(['common', 'note'])
 })
 
-test('the recall read answers with the terms it matched on', () => {
-  const answer = recallPrompt(temp.store.db, { host: 'claude-code', hostSessionId: 'me', projectKey: CWD, now: T0, terms: ['common', 'sqlite3mc', 'build'], limit: 20 })
+test('the keyword read answers with the terms it matched on', () => {
+  const answer = recallKeyword(temp.store.db, { host: 'claude-code', hostSessionId: 'me', projectKey: CWD, now: T0, terms: ['common', 'sqlite3mc', 'build'], limit: 20 })
   expect(answer.terms).toEqual(['sqlite3mc', 'build'])
   expect(answer.keywordRows.map((row) => row.title)).toEqual(['common sqlite3mc build'])
 })
@@ -41,4 +42,11 @@ test('the recall read answers with the terms it matched on', () => {
 test('a term with an accent is looked up as the index folds it, so it is kept', () => {
   seedObservation(temp.store, { sessionId: other, projectKey: CWD, host: 'opencode', title: 'common café menu', at: T0 - 5_000 })
   expect(chooseTerms(temp.store.db, ['café', 'sqlite3mc'], 8)).toEqual(['café', 'sqlite3mc'])
+})
+
+test("a term's memory count is kept a minute per connection, so a cold read does not ask the index for it again", () => {
+  expect(termDocCounts(temp.store.db, ['zircon'], T0).get('zircon')).toBe(0)
+  seedObservation(temp.store, { sessionId: other, projectKey: CWD, host: 'opencode', title: 'zircon crystal note', at: T0 - 5_000 })
+  expect(termDocCounts(temp.store.db, ['zircon'], T0 + 1_000).get('zircon')).toBe(0)
+  expect(termDocCounts(temp.store.db, ['zircon'], T0 + TERM_COUNT_TTL_MS + 1).get('zircon')).toBe(1)
 })

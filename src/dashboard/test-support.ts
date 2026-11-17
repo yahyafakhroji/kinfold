@@ -16,8 +16,10 @@ export interface DashboardRig {
   page: (method: string, path: string, options?: PageOptions) => Promise<Response>
   /** A request with the Bearer token, as the CLI sends it. */
   bearer: (method: string, path: string, body?: unknown) => Promise<Response>
-  /** Runs the whole login: code with the token, then session with the code; returns the cookie pair. */
+  /** Runs the whole login as `kinfold dashboard --print` would: a lease, a code with the token, then a session with the code; returns the cookie pair. */
   login: () => Promise<string>
+  /** A lease held as --print holds it, then one login code under it. */
+  issueCode: () => Promise<{ code: string }>
   stop: () => Promise<void>
 }
 
@@ -28,6 +30,9 @@ export interface PageOptions {
   /** Leave out Origin and X-SAM-Request. */
   bare?: boolean
 }
+
+/** The lease the rig holds; a 12 h --print lease, so tests about pages never see the dashboard close. */
+export const RIG_LEASE = 'R'.repeat(43)
 
 export function cookiePair(setCookie: string | null): string {
   const pair = (setCookie ?? '').split(';')[0] ?? ''
@@ -55,11 +60,15 @@ export function startRig(dataDir: string, options: Partial<DaemonOptions> = {}):
   })
   const bearer = (method: string, path: string, body?: unknown): Promise<Response> =>
     fetch(url(path), { method, redirect: 'manual', headers: { authorization: `Bearer ${token}` }, ...withBody(body) })
+  const issueCode = async (): Promise<{ code: string }> => {
+    await bearer('PUT', `/dashboard/lease/${RIG_LEASE}`, { mode: 'print' })
+    return (await (await bearer('POST', '/dashboard/login-code', { lease: RIG_LEASE })).json()) as { code: string }
+  }
   const login = async (): Promise<string> => {
-    const issued = (await (await bearer('POST', '/dashboard/login-code')).json()) as { code: string }
+    const issued = await issueCode()
     const session = await page('POST', '/dashboard/session', { body: { code: issued.code } })
     if (session.status !== 204) throw new Error(`session answered ${session.status}`)
     return cookiePair(session.headers.get('set-cookie'))
   }
-  return { daemon, token, logs, origin, url, page, bearer, login, stop: () => daemon.stop() }
+  return { daemon, token, logs, origin, url, page, bearer, issueCode, login, stop: () => daemon.stop() }
 }

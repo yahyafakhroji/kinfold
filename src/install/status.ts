@@ -30,12 +30,12 @@ import { vectorStatusLine } from './vec0-install'
 import { QUIET_MS, autoUpdateView } from '../update/auto'
 import { readAutoState } from '../update/auto-state'
 import { detachPlan } from '../update/detach'
-import { autoUpdateSetting, updatesEnabled } from '../update/enabled'
+import { autoUpdateSetting, betaChannelOn, isPrerelease, updatesEnabled } from '../update/enabled'
 import { pendingNotice, userMessage } from '../update/notice'
 import { knownRelease, readUpdateState } from '../update/state'
 import { compareVersions, isPatchUpdate, parseVersion } from '../update/version-order'
 import { VERSION } from '../version'
-import { readInstallRecord } from './setup/record'
+import { type InstallRecord, readInstallRecord } from './setup/record'
 import { type WslStatus, wslStatus } from '../wsl/entry'
 import type { HookHostSpec } from '../agents/hook-spec'
 import { HOOK_SPECS } from '../agents/hook-specs'
@@ -177,7 +177,7 @@ export function updateLine(env: InstallEnv, running: string = VERSION, blocker: 
   const stage = { dataDir: env.dataDir, platform: env.platform, arch: env.arch ?? process.arch, capable: blocker === null, now: env.now() }
   const notice = pendingNotice(state, record, running, vars, hold, stage)
   if (notice !== null) return `update: ${userMessage(notice)}`
-  const offered = knownRelease(state, record?.beta === true)
+  const offered = knownRelease(state, betaChannelOn(record, running))
   if (offered !== null && parseVersion(running) !== null && compareVersions(offered.version, running) > 0 && !isPatchUpdate(running, offered.version) && autoUpdateSetting(running, record, vars).on && blocker === null) {
     return `update: downloading Kinfold ${offered.version} so it is ready to install`
   }
@@ -200,6 +200,14 @@ export function keptStoreLine(env: InstallEnv): string | null {
   return kept === null ? null : `kept store: the store replaced on ${new Date(kept.replacedAt).toISOString()} is kept as ${kept.path}; kinfold restore --undo switches back to it`
 }
 
+/** The beta channel's line: on by the record, or on because a prerelease is running (which reads it whatever the record says). */
+function betaLines(record: InstallRecord | null, running: string): string[] {
+  if (record?.beta === true) return ['beta releases: on (each one waits for your yes)']
+  if (!isPrerelease(running)) return []
+  const release = running.replace(/-.*$/, '')
+  return [`beta releases: on while this prerelease runs (each one waits for your yes); kinfold install --beta keeps them after ${release}`]
+}
+
 /** Whether patch releases install themselves, the last one that did, and the last attempt that failed. Reads only. */
 export function autoUpdateLines(env: InstallEnv, running: string, blocker: string | null): string[] {
   const vars = env.envVars ?? {}
@@ -212,7 +220,7 @@ export function autoUpdateLines(env: InstallEnv, running: string, blocker: strin
   const homes = Object.entries(readInstallRecord(env.dataDir)?.agentHomes ?? {})
   return [
     `auto-update: ${state}${note}`,
-    ...(readInstallRecord(env.dataDir)?.beta === true ? ['beta releases: on (each one waits for your yes)'] : []),
+    ...betaLines(readInstallRecord(env.dataDir), running),
     ...(view.lastUpdate === null ? [] : [`  last update: ${view.lastUpdate.version} (was ${view.lastUpdate.previous}) on ${date(view.lastUpdate.at)}`]),
     ...(view.lastError === null ? [] : [`  last error: ${view.lastError.version} on ${date(view.lastError.at)}: ${view.lastError.reason}. ${view.lastError.blocked === true ? 'It is tried again when the daemon restarts or the install changes.' : 'It is tried again after the next daily check.'}`]),
     ...(homes.length === 0 ? [] : [`  agent homes used by an automatic update: ${homes.map(([name, value]) => `${name}=${value}`).join(', ')}`]),

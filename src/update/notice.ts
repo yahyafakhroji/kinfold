@@ -12,7 +12,7 @@ import { DATA_DIR_NAME } from '../names'
 import { currentPlatform, osOf } from '../platform/platform'
 import { type InstallChannel, type InstallRecord, readInstallRecord } from '../install/setup/record'
 import { type AutoUpdateState, STALE_ATTEMPT_MS, lostAttempt, readAutoState } from './auto-state'
-import { autoUpdateSetting, updatesEnabled } from './enabled'
+import { autoUpdateSetting, betaChannelOn, updatesEnabled } from './enabled'
 import { releaseAssetName } from '../install/self-install'
 import { releaseKind } from './release'
 import { readStageRecord, stagedProgram } from './stage'
@@ -71,7 +71,7 @@ function stillStaging(stage: StageContext, version: string, checkedAt: number | 
  */
 export function pendingNotice(state: UpdateState, record: InstallRecord | null, running: string, env: Env, hold?: AutoHold, stage?: StageContext): UpdateNotice | null {
   if (!updatesEnabled(running, record, env)) return null
-  const release = knownRelease(state, record?.beta === true)
+  const release = knownRelease(state, betaChannelOn(record, running))
   if (release === null || compareVersions(release.version, running) <= 0) return null
   const latest = release.version
   const patchLevel = autoUpdateSetting(running, record, env).on

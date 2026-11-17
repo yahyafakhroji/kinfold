@@ -4,7 +4,7 @@
 // is retried in a day, not on every tick.
 
 import { readInstallRecord } from '../install/setup/record'
-import { updatesEnabled } from './enabled'
+import { betaChannelOn, updatesEnabled } from './enabled'
 import { type ReleaseInfo, releaseFromGithub } from './release'
 import { mergeUpdateState, readUpdateState } from './state'
 import { compareVersions, isPatchUpdate } from './version-order'
@@ -116,7 +116,7 @@ export function checkEnabled(deps: UpdateCheckDeps): boolean {
   return updatesEnabled(deps.version, readInstallRecord(deps.dataDir), deps.envVars())
 }
 
-const betaOn = (deps: UpdateCheckDeps): boolean => readInstallRecord(deps.dataDir)?.beta === true
+const betaOn = (deps: UpdateCheckDeps): boolean => betaChannelOn(readInstallRecord(deps.dataDir), deps.version)
 
 export async function runUpdateCheck(deps: UpdateCheckDeps): Promise<'disabled' | 'not-due' | 'checked' | 'failed'> {
   try {

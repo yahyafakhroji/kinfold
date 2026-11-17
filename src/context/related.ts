@@ -52,11 +52,17 @@ export function isRelated({ matchedTerms, promptTerms, distance }: RelatedCandid
   return matchedTerms >= Math.max(MIN_MATCHED_TERMS, Math.ceil(promptTerms * MIN_TERM_SHARE))
 }
 
-/** Why isRelated refused a candidate, in words for `kinfold watch --debug`; it mirrors isRelated's order. */
-export function refusalRule({ matchedTerms, promptTerms, distance }: RelatedCandidate): string {
+/**
+ * Why isRelated refused a candidate, in words for `kinfold watch --debug`; it
+ * mirrors isRelated's order. A row parked from the previous prompt was counted
+ * against that prompt's terms, so the share is named as that prompt's.
+ */
+export function refusalRule({ matchedTerms, promptTerms, distance }: RelatedCandidate, parked: boolean = false): string {
   if (distance !== null && distance > VETO_DISTANCE) return `farther than ${VETO_DISTANCE.toFixed(2)} in meaning`
-  const needed = Math.max(MIN_MATCHED_TERMS, Math.ceil(promptTerms * MIN_TERM_SHARE))
-  const terms = `${matchedTerms} of ${needed} prompt terms needed`
+  const share = Math.ceil(promptTerms * MIN_TERM_SHARE)
+  const needed = Math.max(MIN_MATCHED_TERMS, share)
+  const whose = parked ? 'the previous prompt\'s' : 'this prompt\'s'
+  const terms = `${matchedTerms} ${matchedTerms === 1 ? 'term' : 'terms'} matched, ${needed} needed${share > MIN_MATCHED_TERMS ? ` (a third of ${whose} ${promptTerms})` : ''}`
   if (distance === null) return terms
   return matchedTerms >= 1 ? `not within ${STRONG_DISTANCE.toFixed(2)} in meaning, ${terms}` : `not within ${STRONG_DISTANCE.toFixed(2)} in meaning, or ${SUPPORTED_DISTANCE.toFixed(2)} with a shared term`
 }

@@ -26,3 +26,18 @@ export function autoUpdateSetting(running: string, record: InstallRecord | null,
   if (readEnv(env, 'NO_AUTO_UPDATE') === '1') return { on: false, reason: `${envName('NO_AUTO_UPDATE')} is set` }
   return record.autoUpdate ? { on: true } : { on: false, reason: 'turned off' }
 }
+
+/**
+ * Whether the check reads the beta channel. A prerelease that is running asks
+ * it whatever the record says: /releases/latest never names a prerelease, so
+ * a beta asked only that would call itself up to date while the next beta is
+ * out. A beta found this way is still offered and waits for a yes.
+ */
+export function betaChannelOn(record: InstallRecord | null, running: string): boolean {
+  return record?.beta === true || isPrerelease(running)
+}
+
+/** A release's prerelease tag; a checkout's dev version is no release. */
+export function isPrerelease(version: string): boolean {
+  return version !== DEV_VERSION && (parseVersion(version)?.pre ?? null) !== null
+}

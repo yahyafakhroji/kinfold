@@ -13,7 +13,7 @@ import { fetchReleaseSums, fileSha256, parseSha256Sums, releaseAssetName, RELEAS
 import { readInstallRecord } from '../install/setup/record'
 import { osOf } from '../platform/platform'
 import { DATA_FILE_MODE } from '../store/data-dir'
-import { autoUpdateSetting } from './enabled'
+import { autoUpdateSetting, betaChannelOn } from './enabled'
 import { releaseKind } from './release'
 import { knownRelease, readUpdateState } from './state'
 import { compareVersions, parseVersion } from './version-order'
@@ -160,7 +160,7 @@ export function stageDecision(input: StageInput): StageDecision {
   const record = readInstallRecord(input.dataDir)
   if (!autoUpdateSetting(input.running, record, input.env).on) return { stage: false, reason: 'off' }
   const state = readUpdateState(input.dataDir)
-  const release = knownRelease(state, record?.beta === true)
+  const release = knownRelease(state, betaChannelOn(record, input.running))
   if (release === null || compareVersions(release.version, input.running) <= 0 || releaseKind(input.running, release.version) === 'patch') return { stage: false, reason: 'none' }
   const asset = releaseAssetName(input.platform, input.arch)
   if (asset === null) return { stage: false, reason: 'no-build' }
@@ -277,7 +277,7 @@ export async function runStageTick(deps: StageDeps): Promise<StageHold | 'staged
     const staged = readStageRecord(deps.dataDir).staged
     const passed = staged !== null && parseVersion(deps.version) !== null && compareVersions(staged.version, deps.version) <= 0
     // A beta kept after the user left the channel would never be offered again; it only takes space.
-    const leftBeta = staged !== null && parseVersion(staged.version)?.pre != null && readInstallRecord(deps.dataDir)?.beta !== true
+    const leftBeta = staged !== null && parseVersion(staged.version)?.pre != null && !betaChannelOn(readInstallRecord(deps.dataDir), deps.version)
     if (passed || leftBeta) removeStaged(deps.dataDir)
     const decision = stageDecision({ dataDir: deps.dataDir, running: deps.version, env: deps.envVars(), platform: deps.platform, arch: deps.arch })
     return decision.stage ? await stage(deps, decision) : decision.reason

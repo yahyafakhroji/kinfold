@@ -180,6 +180,8 @@ async function launchctl(world: FakeWorld, argv: readonly string[]): Promise<Com
     }
     world.launchd.loaded = true
     world.launchd.daemon = startWorldDaemon(world, world.dataDir)
+    // Its store readers open memory.db just after it starts, touching the -shm file; a test's file snapshots come after that.
+    await world.launchd.daemon.readersStarted()
     return { exitCode: 0, stdout: '' }
   }
   if (verb === 'bootout') {
