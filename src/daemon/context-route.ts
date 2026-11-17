@@ -35,6 +35,10 @@ export interface ContextRouteDeps {
   log: (line: string) => void
   /** Where the prompt path's store reads run: the daemon's recall reader worker. Absent: on db, on this thread. */
   reads?: StoreReader
+  /** Where the delta read runs, beside `reads`; absent: `reads`. */
+  deltaReads?: StoreReader
+  /** Where the debug trace's extra reads run; absent: `reads`. */
+  traceReads?: StoreReader
   /** The daemon's vector search; absent or null means keyword matches only. */
   semantic?: ((request: SemanticRequest) => Promise<SemanticAnswer>) | null
   late?: LateMatches
@@ -170,6 +174,8 @@ export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest
     log: deps.log,
     slots: createEmbedSlots(),
     ...(deps.reads !== undefined ? { reads: deps.reads } : {}),
+    ...(deps.deltaReads !== undefined ? { deltaReads: deps.deltaReads } : {}),
+    ...(deps.traceReads !== undefined ? { traceReads: deps.traceReads } : {}),
     now,
     clock,
     ...(deps.gate !== undefined ? { gate: deps.gate } : {}),
@@ -179,7 +185,7 @@ export function contextHandler(deps: ContextRouteDeps): (request: ContextRequest
     if (request.channel !== 'prompt' || request.prompt === undefined) return { ...prepareContext(deps.db, request, projectKey, at), promptDetail: '', relatedText: '', relatedServed: [], explain: NO_SEARCH }
     const answer = await preparePromptContext(prompt, request, projectKey, at, startedAt, budgetMs === undefined ? undefined : Math.max(0, budgetMs - CENTRAL_SEMANTIC_MARGIN_MS))
     return { text: answer.text, observationIds: answer.observationIds, tokens: answer.tokens, rebuilt: false, relatedText: answer.relatedText, relatedServed: answer.relatedServed, explain: answer.explain,
-      promptDetail: ` related=${answer.related} semantic=${answer.semantic} read=${answer.read} delta_ms=${answer.deltaMs} related_ms=${answer.relatedMs}` }
+      promptDetail: ` related=${answer.related} semantic=${answer.semantic} read=${answer.read} delta_ms=${answer.deltaMs} keyword_ms=${answer.keywordMs} related_ms=${answer.relatedMs}` }
   }
   return async (request, central) => {
     const startedAt = clock()

@@ -8,7 +8,7 @@ import { projectDisplayName, sessionDeliveries, sessionStartFor } from '../store
 import { currentObservationsByIds, keywordCandidates, matchedTermCounts, observationCount, termDocCounts } from '../store/related-store'
 import { termMatches } from './prompt-query'
 import { computeDelta } from './delta'
-import { type ContextResult, EMPTY_CONTEXT, type PackObservation } from './types'
+import type { ContextResult, PackObservation } from './types'
 
 export interface RecallPromptArgs {
   host: string
@@ -51,33 +51,50 @@ export function chooseTerms(db: Database, candidates: readonly string[], max: nu
 /** [observation id, terms it matched]: an array, so the worker's answer and the inline one are the same data. */
 export type TermCounts = readonly (readonly [number, number])[]
 
-export interface RecallPromptAnswer {
-  /** Null for a project the store has never seen: no delta and no related memory. */
+export interface RecallKeywordAnswer {
+  /** Null for a project the store has never seen: no related memory. */
   projectName: string | null
   /** This session's sessions row; its own observations are never related memory. */
   sessionId: number | null
   /** The terms matched on (chooseTerms): the counts and the gate measure against these. */
   terms: string[]
-  /** What the session was already sent, plus this delta's ids. */
+  /** What the session was already sent; the delta read beside this one adds its own ids. */
   sentIds: number[]
-  delta: ContextResult
   keywordRows: PackObservation[]
   keywordCounts: TermCounts
 }
 
 const counted = (counts: Map<number, number>): TermCounts => [...counts.entries()]
 
-/** The delta, then keyword candidates that leave out everything the session has or is about to get. */
-export function recallPrompt(db: Database, args: RecallPromptArgs): RecallPromptAnswer {
+export type RecallDeltaArgs = Pick<RecallPromptArgs, 'host' | 'hostSessionId' | 'projectKey' | 'now'>
+
+/**
+ * The delta alone: index reads of a few rows, so it stays quick even when the
+ * keyword read beside it is slow, and the new memory reaches the prompt either way.
+ */
+export function recallDelta(db: Database, args: RecallDeltaArgs): ContextResult {
+  return computeDelta(db, args, args.projectKey, args.now)
+}
+
+/**
+ * Keyword candidates that leave out what the session was already sent. It
+ * runs beside the delta read, so a row the delta is about to send can come
+ * back here too; the prompt path drops it from this side.
+ */
+export function recallKeyword(db: Database, args: RecallPromptArgs): RecallKeywordAnswer {
   const projectName = projectDisplayName(db, args.projectKey)
-  if (projectName === null) return { projectName: null, sessionId: null, terms: [], sentIds: [], delta: EMPTY_CONTEXT, keywordRows: [], keywordCounts: [] }
+  if (projectName === null) return { projectName: null, sessionId: null, terms: [], sentIds: [], keywordRows: [], keywordCounts: [] }
   const terms = chooseTerms(db, args.terms)
   const { any, each } = termMatches(terms)
-  const delta = computeDelta(db, args, args.projectKey, args.now)
   const sessionId = sessionStartFor(db, args.host, args.hostSessionId)?.id ?? null
-  const sent = [...new Set([...sessionDeliveries(db, args.host, args.hostSessionId).sentIds, ...delta.observationIds])]
+  const sent = sessionDeliveries(db, args.host, args.hostSessionId).sentIds
   const keywordRows = terms.length === 0 ? [] : keywordCandidates(db, { projectKey: args.projectKey, match: any, excludeIds: sent, excludeSessionId: sessionId, limit: args.limit })
-  return { projectName, sessionId, terms, sentIds: sent, delta, keywordRows, keywordCounts: counted(matchedTermCounts(db, keywordRows.map((row) => row.id), each)) }
+  return { projectName, sessionId, terms, sentIds: sent, keywordRows, keywordCounts: counted(matchedTermCounts(db, keywordRows.map((row) => row.id), each)) }
+}
+
+/** Sets a new worker's connection up for prompts: the vocabulary table chooseTerms reads, and the memory count it keeps. */
+export function recallWarm(db: Database): { terms: number } {
+  return { terms: chooseTerms(db, ['kinfold']).length }
 }
 
 export interface RecallRowsArgs {

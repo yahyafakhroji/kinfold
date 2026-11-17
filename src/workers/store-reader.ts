@@ -39,6 +39,8 @@ export interface StoreReader {
   hold(): Promise<() => void>
   /** Settles once the worker has closed its connection and ended; the same promise on every call. */
   close(): Promise<void>
+  /** Settles once a worker asked to start has started or given up; at once when none was asked. */
+  started?(): Promise<void>
 }
 
 /** Thrown to a caller whose read waited past its expiry and was skipped. */
@@ -228,11 +230,12 @@ export async function startStoreReader(options: StoreReaderOptions): Promise<Sto
 
 /**
  * The worker once it has started, `inline` until then and after it stops.
- * The worker is started by the first read, not before: a daemon nothing asks
- * runs no extra thread and holds no extra connection. Unlike the vector
- * search, a read never waits for the worker to start: a prompt asked in the
- * first moments after a restart is answered from the daemon's own connection,
- * unless the caller asks it to wait (ReaderOrInlineOptions).
+ * The worker is started by the first read, or at once when the caller asks
+ * (the prompt path's readers, whose first read must not pay for opening an
+ * encrypted store). Unlike the vector search, a read never waits for the
+ * worker to start: a prompt asked in the first moments after a restart is
+ * answered from the daemon's own connection, unless the caller asks it to
+ * wait (ReaderOrInlineOptions).
  */
 export interface ReaderOrInlineOptions {
   /**
@@ -241,6 +244,10 @@ export interface ReaderOrInlineOptions {
    * the daemon's thread for seconds and a short wait costs nothing.
    */
   waitForStart?: boolean
+  /** Starts the worker now instead of on the first read. */
+  eager?: boolean
+  /** Run once on the worker as soon as it is up, so its first real read finds the connection set up. */
+  warm?: (reader: StoreReader) => Promise<unknown>
 }
 
 export function readerOrInline(name: string, start: () => Promise<StoreReaderStartResult>, inline: StoreReader, log: (line: string) => void, options: ReaderOrInlineOptions = {}): StoreReader {
@@ -256,6 +263,9 @@ export function readerOrInline(name: string, start: () => Promise<StoreReaderSta
         worker = started.reader
         // Closed while it started: it is closed below and never used.
         if (closing === null) current = started.reader
+        if (closing === null && options.warm !== undefined) {
+          return options.warm(started.reader).then(() => {}, (error: unknown) => log(`${name} reader warm-up failed: ${error instanceof Error ? error.name : 'error'}`))
+        }
       })
       .catch((error: unknown) => log(`${name} reader worker off (${error instanceof Error ? error.message : 'it failed to start'}); reading on the daemon connection`))
   }
@@ -269,6 +279,7 @@ export function readerOrInline(name: string, start: () => Promise<StoreReaderSta
     }
     return inline
   }
+  if (options.eager === true) begin()
   return {
     run: async (op, args, runOptions) => {
       begin()
@@ -279,6 +290,9 @@ export function readerOrInline(name: string, start: () => Promise<StoreReaderSta
       } catch (error: unknown) {
         return fallBack(error).run(op, args, runOptions)
       }
+    },
+    started: async () => {
+      await ready
     },
     // A hold asked while the worker starts waits for it (briefly), so the reads it holds back include the worker's.
     hold: async () => {

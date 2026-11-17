@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { InstallRecord } from '../install/setup/record'
-import { autoUpdateSetting } from './enabled'
+import { autoUpdateSetting, betaChannelOn } from './enabled'
 
 const RECORD: InstallRecord = { channel: 'curl', updateCheck: true, autoUpdate: true, autoUpdateIntro: false, agentHomes: {}, firstInstalledAt: 1 }
 
@@ -23,4 +23,15 @@ test('the record and the environment each turn it off, and say which', () => {
 
 test('a folder with no install record never updates itself', () => {
   expect(autoUpdateSetting('0.2.0', null, {})).toEqual({ on: false, reason: 'no install record' })
+})
+
+test('a running prerelease reads the beta channel even when the record leaves it off', () => {
+  expect(betaChannelOn(RECORD, '0.6.0-beta.1')).toBe(true)
+  expect(betaChannelOn(null, '0.6.0-beta.1')).toBe(true)
+  expect(betaChannelOn(RECORD, '0.6.0')).toBe(false)
+  expect(betaChannelOn({ ...RECORD, beta: true }, '0.6.0')).toBe(true)
+})
+
+test("a checkout's dev version is not a prerelease", () => {
+  expect(betaChannelOn(RECORD, '0.0.0-dev')).toBe(false)
 })

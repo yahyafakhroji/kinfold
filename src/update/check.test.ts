@@ -233,3 +233,14 @@ test('without a patch of the running line, the check keeps none', async () => {
   expect(await runUpdateCheck(deps())).toBe('checked')
   expect(readUpdateState(dir)).toMatchObject({ latestVersion: '0.2.0', patchVersion: null })
 })
+
+test('a running prerelease checks the beta channel with the record off, and finds the next beta', async () => {
+  writeRecord({})
+  respond = async () => new Response(JSON.stringify([
+    { tag_name: 'v0.6.0-beta.1', draft: false, prerelease: true, body: '' },
+    { tag_name: 'v0.5.0', draft: false, prerelease: false, body: '' },
+  ]))
+  expect(await runUpdateCheck({ ...deps(), version: '0.6.0-beta.0' })).toBe('checked')
+  expect(calls[0]!.url).toBe(RELEASES_URL)
+  expect(readUpdateState(dir)).toMatchObject({ latestVersion: '0.6.0-beta.1', beta: true })
+})

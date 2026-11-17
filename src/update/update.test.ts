@@ -792,3 +792,10 @@ test('the dashboard run refuses where no service runs the daemon, since nothing 
   expect(await runUpdate(w.env, { dryRun: false, staged: '0.2.0' }, { version: '0.1.0', runProgram: noRun })).toBe(1)
   expect(readInstallRun(w.dataDir)).toMatchObject({ state: 'failed', message: NOT_RUN_BY_SERVICE })
 })
+
+test('a running prerelease asks the beta channel, so the next beta is found with the record off', async () => {
+  const { w, fetched } = updateWorld({ tag: 'v0.5.0' })
+  await runUpdate(w.env, { dryRun: true }, { version: '0.6.0-beta.0', runProgram: noRun })
+  expect(fetched[0]).toBe(RELEASES_URL)
+  expect(w.out).not.toContain('kinfold is up to date (0.6.0-beta.0)')
+})

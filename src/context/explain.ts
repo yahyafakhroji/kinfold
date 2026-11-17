@@ -24,7 +24,10 @@ export interface ExplainInputs {
   terms: readonly string[]
   /** The redacted prompt, when the meaning half embedded it. */
   query: string | null
+  /** This prompt's keyword matches. */
   keyword: readonly RelatedCandidate[]
+  /** Keyword matches parked from the previous prompt, counted against its terms. */
+  parkedKeyword: readonly RelatedCandidate[]
   /** This prompt's hits, then the previous prompt's parked ones. */
   vector: readonly RelatedCandidate[]
   lateIds: ReadonlySet<number>
@@ -48,15 +51,24 @@ function weigh(inputs: ExplainInputs): Weighed[] {
   const gate = inputs.gate ?? isRelated
   const vectorById = new Map<number, RelatedCandidate>()
   for (const candidate of inputs.vector) if (!vectorById.has(candidate.row.id)) vectorById.set(candidate.row.id, candidate)
-  const keywordById = new Map(inputs.keyword.map((candidate) => [candidate.row.id, candidate]))
-  const ids = [...new Set([...keywordById.keys(), ...vectorById.keys()])]
+  // This prompt's own match comes first: rankRelated passes a row that either copy passes, and the copy parked
+  // from a longer previous prompt was counted against more terms, so showing it alone called a sent row refused.
+  const keywordById = new Map<number, RelatedCandidate>()
+  for (const candidate of inputs.keyword) if (!keywordById.has(candidate.row.id)) keywordById.set(candidate.row.id, candidate)
+  const parkedById = new Map<number, RelatedCandidate>()
+  for (const candidate of inputs.parkedKeyword) if (!parkedById.has(candidate.row.id)) parkedById.set(candidate.row.id, candidate)
+  const ids = [...new Set([...keywordById.keys(), ...parkedById.keys(), ...vectorById.keys()])]
   return ids.map((id) => {
-    const word = keywordById.get(id)
+    const own = keywordById.get(id)
+    const parked = parkedById.get(id)
+    const word = own ?? parked
     const near = vectorById.get(id)
     const merged: RelatedCandidate = word !== undefined ? { ...word, distance: near?.distance ?? word.distance } : near!
-    const passed = (word !== undefined && gate(merged)) || (near !== undefined && near.distance !== null && gate(near))
-    const source: CandidateSource = near === undefined ? 'keyword' : inputs.lateIds.has(id) && !(word !== undefined) ? 'previous prompt' : word !== undefined ? 'keyword and meaning' : 'meaning'
-    return { id, title: merged.row.title, source, distance: merged.distance, matchedTerms: merged.matchedTerms, passed, rule: inputs.gate === undefined ? refusalRule(merged) : 'refused by the gate' }
+    const passedBy = (candidate: RelatedCandidate | undefined): boolean => candidate !== undefined && gate({ ...candidate, distance: near?.distance ?? candidate.distance })
+    const passed = passedBy(own) || passedBy(parked) || (near !== undefined && near.distance !== null && gate(near))
+    const fromParked = own === undefined && (parked !== undefined || inputs.lateIds.has(id))
+    const source: CandidateSource = fromParked ? 'previous prompt' : near === undefined ? 'keyword' : word !== undefined ? 'keyword and meaning' : 'meaning'
+    return { id, title: merged.row.title, source, distance: merged.distance, matchedTerms: merged.matchedTerms, passed, rule: inputs.gate === undefined ? refusalRule(merged, fromParked) : 'refused by the gate' }
   })
 }
 

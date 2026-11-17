@@ -182,3 +182,19 @@ test('the first commit is asked once per folder, a refresh asks only for the rem
   slow = true
   expect(resolveProjectKey('/w', fake, { withRoot: true })).toEqual({ key: 'github.com/me/kinfold', kind: 'git-remote', displayName: 'kinfold' })
 })
+
+test("the key alone never walks the history for the first commit, and reuses a key the resolver already holds", () => {
+  const calls: string[] = []
+  const fake: GitRunner = (cwd, args) => {
+    calls.push(`${cwd} ${args[0]}`)
+    if (args[0] === 'config') return 'git@github.com:acme/widgets.git'
+    return args[0] === 'rev-list' ? 'a'.repeat(40) : null
+  }
+  const resolve = createProjectKeyResolver(fake, { withRoot: true })
+  expect(resolve.keyOnly('/a')).toEqual({ key: 'github.com/acme/widgets', kind: 'git-remote', displayName: 'widgets' })
+  expect(calls).toEqual(['/a config'])
+  expect(resolve('/b').rootCommit).toBe('a'.repeat(40))
+  calls.length = 0
+  expect(resolve.keyOnly('/b').key).toBe('github.com/acme/widgets')
+  expect(calls).toEqual([])
+})

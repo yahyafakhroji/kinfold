@@ -478,12 +478,17 @@ export async function handleRequest(request: Request, port: number, deps: Server
   return withSecurityHeaders(await answer(request, port, deps))
 }
 
+/** Seconds a request may go without a byte either way before the server drops it. */
+export const SERVER_IDLE_TIMEOUT_S = 30
+
 export function startServer(deps: ServerDeps): RunningServer {
   const server = Bun.serve({
     hostname: LOOPBACK_HOST,
     port: deps.port,
     // Server-wide, so it is the upload's ceiling; every other route is held to MAX_BODY_BYTES in answer() and readJson.
     maxRequestBodySize: MAX_UPLOAD_BYTES,
+    // Past every client's own wait (the CLI waits 15 s): Bun's 10 s default dropped a slow report's connection, which the CLI could only call a TypeError.
+    idleTimeout: SERVER_IDLE_TIMEOUT_S,
     fetch: (request, self) => handleRequest(request, self.port ?? deps.port, deps),
     error: (error) => {
       // The name only: a SQLite message can echo query fragments, and prompt terms are query fragments.
