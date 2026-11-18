@@ -5,11 +5,13 @@
 #
 # Usage: bash .github/smoke/macos.sh setup|cleanup
 set -eo pipefail
+# shellcheck source=.github/smoke/claude-code.sh
+source "$(dirname "${BASH_SOURCE[0]}")/claude-code.sh"
 
 install_claude_code() {
-  npm install --global --no-audit --no-fund @anthropic-ai/claude-code
+  npm_install_retrying --global "$CLAUDE_CODE_PACKAGE"
   echo "$(npm prefix --global)/bin" >> "$GITHUB_PATH"
-  "$(npm prefix --global)/bin/claude" --version
+  check_claude_runs "$(npm prefix --global)/bin/claude" "$(npm root --global)/@anthropic-ai/claude-code"
 }
 
 # npm's opencode-ai reports 1.x, and Kinfold refuses anything below 2.0.

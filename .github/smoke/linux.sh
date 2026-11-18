@@ -7,6 +7,8 @@
 #
 # Usage: bash .github/smoke/linux.sh setup|cleanup
 set -euo pipefail
+# shellcheck source=.github/smoke/claude-code.sh
+source "$(dirname "${BASH_SOURCE[0]}")/claude-code.sh"
 
 OPENCODE_VERSION=2.2.6
 SECRET_SERVICE_WAIT_SECONDS=30
@@ -73,9 +75,9 @@ run_live_detach_test() {
 
 install_claude_code() {
   local prefix="$RUNNER_TEMP/npm-global"
-  npm install --global --prefix "$prefix" --no-audit --no-fund @anthropic-ai/claude-code
+  npm_install_retrying --global --prefix "$prefix" "$CLAUDE_CODE_PACKAGE"
   echo "$prefix/bin" >> "$GITHUB_PATH"
-  "$prefix/bin/claude" --version
+  check_claude_runs "$prefix/bin/claude" "$prefix/lib/node_modules/@anthropic-ai/claude-code"
 }
 
 # npm's opencode-ai reports 1.x, and Kinfold refuses anything below 2.0. These

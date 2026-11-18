@@ -10,6 +10,8 @@
 #
 # Usage: bash .github/smoke/windows.sh setup|cleanup
 set -eo pipefail
+# shellcheck source=.github/smoke/claude-code.sh
+source "$(dirname "${BASH_SOURCE[0]}")/claude-code.sh"
 
 # Same as the macOS tap's opencode-v2 formula; npm's opencode-ai still
 # reports 1.x, which Kinfold refuses.
@@ -25,11 +27,12 @@ install_agent_clis() {
   prefix="$(cygpath -u "$RUNNER_TEMP")/agent-clis"
   mkdir -p "$prefix"
   prefix_win="$(cygpath -w "$prefix")"
-  npm install --global --prefix "$prefix_win" --no-audit --no-fund \
-    @anthropic-ai/claude-code "@opencode/cli@$OPENCODE_VERSION"
+  npm_install_retrying --global --prefix "$prefix_win" \
+    "$CLAUDE_CODE_PACKAGE" "@opencode/cli@$OPENCODE_VERSION"
   echo "$prefix_win" >> "$GITHUB_PATH"
   export PATH="$prefix:$PATH"
-  claude --version
+  # The npm .cmd shim on PATH is what the smoke exercises, so the check runs it.
+  check_claude_runs claude "$(cygpath -w "$prefix/node_modules/@anthropic-ai/claude-code")"
   opencode --version | tee "$RUNNER_TEMP/opencode-version.txt"
   if ! grep -Eq '(^|[^0-9])2\.[0-9]+\.[0-9]+' "$RUNNER_TEMP/opencode-version.txt"; then
     echo "opencode did not report a 2.x version; Kinfold will not wire it"
