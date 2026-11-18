@@ -106,10 +106,20 @@ test('the status line says how often, since when, when it tries next and what to
   expect(backoffLine({ ...entry, provider: 'openrouter', errorClass: 'http_error' }, T0)).toMatch(/; check its key and settings in the dashboard$/)
 })
 
+test('with a long-lived token in use, a login problem says to run claude setup-token again, not to log in', () => {
+  const entry = { provider: 'claude-cli', errorClass: 'auth_expired', failures: 2, since: T0, lastFailedAt: T0, retryAt: T0 + BACKOFF_MAX_MS }
+  const line = backoffLine(entry, T0, { claudeToken: true })
+  expect(line).toStartWith('claude-cli: the long-lived token Kinfold uses has expired or was revoked; run `claude setup-token` again and store the new token (kinfold install --observer-token-stdin, or Settings in the dashboard).')
+  expect(line).not.toContain('claude auth login')
+  expect(backoffLine({ ...entry, errorClass: 'not_logged_in' }, T0, { claudeToken: true })).toContain('run `claude setup-token` again')
+  // The token is claude-cli's only.
+  expect(backoffLine({ ...entry, provider: 'codex-cli' }, T0, { claudeToken: true })).toContain('`codex login`')
+})
+
 test('a login problem says what to run, and where', () => {
   const entry = { provider: 'claude-cli', errorClass: 'auth_expired', failures: 4, since: T0, lastFailedAt: T0, retryAt: T0 + BACKOFF_MAX_MS }
-  expect(backoffLine(entry, T0)).toMatch(/^claude-cli: the login Kinfold uses has expired; run `claude auth login` in a plain terminal \(not one with CLAUDE_CONFIG_DIR set\)\. Failed 4 times since .+; retrying at .+$/)
-  expect(backoffLine({ ...entry, errorClass: 'not_logged_in' }, T0)).toStartWith('claude-cli: the CLI Kinfold runs is not logged in; run `claude auth login` in a plain terminal (not one with CLAUDE_CONFIG_DIR set).')
+  expect(backoffLine(entry, T0)).toMatch(/^claude-cli: the login Kinfold uses has expired; run `claude auth login` in a plain terminal \(not one with CLAUDE_CONFIG_DIR set\), or store a long-lived token from `claude setup-token` with kinfold install --observer-token-stdin\. Failed 4 times since .+; retrying at .+$/)
+  expect(backoffLine({ ...entry, errorClass: 'not_logged_in' }, T0)).toStartWith('claude-cli: the CLI Kinfold runs is not logged in; run `claude auth login` in a plain terminal (not one with CLAUDE_CONFIG_DIR set), or store')
   expect(backoffLine({ ...entry, provider: 'codex-cli' }, T0)).toStartWith('codex-cli: the login Kinfold uses has expired; run `codex login` in a plain terminal (not one with CODEX_HOME set).')
   expect(backoffLine({ ...entry, errorClass: 'rate_limited' }, T0)).toMatch(/^claude-cli has failed 4 times since .+: rate_limited \(a usage limit\); retrying at .+$/)
 })

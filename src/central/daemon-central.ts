@@ -12,7 +12,7 @@ import type { McpRead } from '../store/mcp-read-store'
 import { canonicalKey, registerProject } from '../store/project-merge'
 import type { SemanticAnswer, SemanticRequest } from '../vectors/search'
 import { readKey } from './client'
-import type { HubEndpoint } from './client'
+import type { HubEndpoint, HubFailure } from './client'
 import { listDevices } from './devices'
 import { captureHandler } from './hub-capture'
 import { importChunk, knownProjects } from './import'
@@ -64,7 +64,7 @@ export function deviceEndpoint(dataDir: string, mode: Extract<CentralMode, { rol
 export type CentralStatus =
   | { role: 'local' }
   | { role: 'hub'; hubName: string | null; listening: string | null; error: string | null; devices: { id: string; name: string; pairedAt: number }[] }
-  | { role: 'device'; hub: string; address: string; deviceId: string; reachable: boolean | null; problem: string | null; queued: number; lastContactAt: number | null }
+  | { role: 'device'; hub: string; address: string; deviceId: string; reachable: boolean | null; failure: HubFailure | null; problem: string | null; queued: number; lastContactAt: number | null }
 
 export function centralStatus(dataDir: string, mode: CentralMode | null, hub: HubDaemon | null, relay: Relay | null): CentralStatus {
   if (mode?.role === 'hub') {
@@ -74,7 +74,7 @@ export function centralStatus(dataDir: string, mode: CentralMode | null, hub: Hu
   if (mode?.role === 'device' && relay !== null) {
     const state = relay.state()
     return {
-      role: 'device', hub: mode.hubName, address: `${mode.hub}:${mode.port}`, deviceId: mode.deviceId, reachable: state.reachable,
+      role: 'device', hub: mode.hubName, address: `${mode.hub}:${mode.port}`, deviceId: mode.deviceId, reachable: state.reachable, failure: state.failure,
       problem: state.failure === null ? null : failureReason(state.failure, mode.hubName, state.gap), queued: state.queued, lastContactAt: state.lastContactAt,
     }
   }

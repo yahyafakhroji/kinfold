@@ -3,6 +3,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { installPaths } from './env'
+import { CLAUDE_TOKEN_REF } from '../observer/settings'
 import { EXIT_BLOCKED, EXIT_OK, install } from './install'
 import { UPDATE_LOCK_FILE, acquireUpdateLock, updateLockHolder } from '../update/lock'
 import { LAUNCHCTL, bootoutArgv } from './launch-agent'
@@ -212,4 +213,13 @@ test('uninstall removes the dashboard sign-ins', async () => {
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
   expect(existsSync(join(w.dataDir, DASHBOARD_SESSIONS_FILE))).toBe(false)
   expect(w.out.join('\n')).toContain('the dashboard sign-ins')
+})
+
+test('uninstall always removes the claude-cli long-lived token, and keeps provider keys unless asked', async () => {
+  const w = await installed()
+  w.keychain.add(CLAUDE_TOKEN_REF)
+  expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
+  expect(w.keychain.has(CLAUDE_TOKEN_REF)).toBe(false)
+  expect(w.keychain.has('openrouter')).toBe(true)
+  expect(w.out.join('\n')).not.toContain('FAKE-UNINSTALL-TOKEN')
 })

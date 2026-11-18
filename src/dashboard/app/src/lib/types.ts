@@ -180,7 +180,8 @@ export interface Impact {
 export type CentralStatus =
   | { role: 'local' }
   | { role: 'hub'; listening: string | null; hubName: string | null; error: string | null; devices: { id: string; name: string; pairedAt: number }[] }
-  | { role: 'device'; hub: string; address: string; deviceId: string; reachable: boolean; problem: string | null; queued: number; lastContactAt: number | null }
+  /** failure: the last call's failure kind ('timeout' is a busy hub); absent from a daemon older than 0.6.0. */
+  | { role: 'device'; hub: string; address: string; deviceId: string; reachable: boolean; failure?: string | null; problem: string | null; queued: number; lastContactAt: number | null }
 
 export interface UpdateView {
   notice: { version: string; message: string } | null

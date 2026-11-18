@@ -131,16 +131,27 @@ function when(ms: number): string {
 
 /** How to log in again, run where the daemon's own config folder is used. */
 const LOGIN_FIX: Readonly<Record<string, string>> = {
-  'claude-cli': 'run `claude auth login` in a plain terminal (not one with CLAUDE_CONFIG_DIR set)',
+  'claude-cli': 'run `claude auth login` in a plain terminal (not one with CLAUDE_CONFIG_DIR set), or store a long-lived token from `claude setup-token` with kinfold install --observer-token-stdin',
   'codex-cli': 'run `codex login` in a plain terminal (not one with CODEX_HOME set)',
   'opencode-cli': 'run `opencode auth login` in a plain terminal',
   'goose-cli': 'run `goose configure` in a plain terminal',
 }
 
-export function backoffLine(entry: ProviderBackoff, now: number): string {
+/** What a token from `claude setup-token` needs once it stops working: a new token, since logging the CLI in again changes nothing the observer uses. */
+const TOKEN_FIX = 'run `claude setup-token` again and store the new token (kinfold install --observer-token-stdin, or Settings in the dashboard)'
+
+export interface BackoffLineOptions {
+  /** The claude-cli observer runs on a stored long-lived token. */
+  claudeToken?: boolean
+}
+
+export function backoffLine(entry: ProviderBackoff, now: number, options: BackoffLineOptions = {}): string {
   const times = entry.failures === 1 ? 'time' : 'times'
   const next = entry.retryAt > now ? `retrying at ${when(entry.retryAt)}` : 'retrying with its next batch'
   const fix = LOGIN_FIX[entry.provider]
+  if (LOGIN_CLASSES.has(entry.errorClass) && entry.provider === 'claude-cli' && options.claudeToken === true) {
+    return `${entry.provider}: the long-lived token Kinfold uses has expired or was revoked; ${TOKEN_FIX}. Failed ${entry.failures} ${times} since ${when(entry.since)}; ${next}`
+  }
   if (LOGIN_CLASSES.has(entry.errorClass) && fix !== undefined) {
     const what = entry.errorClass === 'auth_expired' ? 'the login Kinfold uses has expired' : 'the CLI Kinfold runs is not logged in'
     return `${entry.provider}: ${what}; ${fix}. Failed ${entry.failures} ${times} since ${when(entry.since)}; ${next}`

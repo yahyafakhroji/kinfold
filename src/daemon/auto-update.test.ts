@@ -202,3 +202,7 @@ test('an attempt that left no result is shown as the last error', async () => {
   const body = (await (await call('GET', '/update/auto')).json()) as { auto: { lastError: unknown } }
   expect(body.auto.lastError).toEqual({ version: '0.2.1', at: T0 - 2 * 3_600_000, reason: 'the updater started and recorded no result; see logs/auto-update.log' })
 })
+
+test('the dashboard may set the claude-cli token, like the other observer settings', () => {
+  expect(accessFor('/observer/claude-token')).toBe('either')
+})

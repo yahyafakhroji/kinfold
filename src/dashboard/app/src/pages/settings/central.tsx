@@ -7,8 +7,9 @@ import { Notice } from '../../components/ui/notice'
 import { Skeleton } from '../../components/ui/skeleton'
 import { get } from '../../lib/api'
 import { ago, dateOnly, plural } from '../../lib/format'
+import { deviceNotice } from '../../lib/central'
 import { useCentral } from '../../lib/queries'
-import type { DeviceRow } from '../../lib/types'
+import type { CentralStatus, DeviceRow } from '../../lib/types'
 import { Section } from './section'
 
 function Devices() {
@@ -37,6 +38,12 @@ function Devices() {
   )
 }
 
+function DeviceLink({ data }: { data: Extract<CentralStatus, { role: 'device' }> }) {
+  const notice = deviceNotice(data)
+  if (notice !== null) return <Notice tone={notice.tone}>{notice.text}</Notice>
+  return <p className="text-sm text-muted">{data.lastContactAt !== null ? `Last heard from ${ago(data.lastContactAt)}.` : ''} {data.queued > 0 ? `${plural(data.queued, 'capture is', 'captures are')} waiting to be sent.` : ''}</p>
+}
+
 export function CentralSection() {
   const central = useCentral()
   const data = central.data
@@ -53,7 +60,7 @@ export function CentralSection() {
       ) : (
         <>
           <p className="text-sm">This computer uses the memory kept on {data.hub} ({data.address}). Changes to stored memory, backups and summary settings are made there.</p>
-          {data.reachable ? <p className="text-sm text-muted">{data.lastContactAt !== null ? `Last heard from ${ago(data.lastContactAt)}.` : ''} {data.queued > 0 ? `${plural(data.queued, 'capture is', 'captures are')} waiting to be sent.` : ''}</p> : <Notice tone="bad">{data.hub} cannot be reached{data.problem !== null ? `: ${data.problem}` : ''}. Captures wait here and are sent when it is back.</Notice>}
+          <DeviceLink data={data} />
         </>
       )}
     </Section>

@@ -147,7 +147,8 @@ function reindexVectors(db: Database, ids: readonly number[]): void {
     } catch {
       // No sqlite-vec on this connection: the reconcile files the rows under their new project once it can (vec-index.ts).
     }
-    db.query('UPDATE vector_spaces SET vec_ready = 0 WHERE id = ? AND vec_ready = 1').run(space.id)
+    // -1, not 0: a reconcile pass under way when the row left must not end by calling the index complete (space-manager.ts).
+    db.query('UPDATE vector_spaces SET vec_ready = -1 WHERE id = ?').run(space.id)
   }
 }
 

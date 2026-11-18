@@ -31,3 +31,26 @@ test('the detail is capped and never carries a secret the CLI printed', () => {
   expect(cliFailure('exited 2', '')).toMatchObject({ errorClass: 'exit_nonzero', detail: 'exited 2' })
   expect(cliFailure('exited 2', 'segfault')).toMatchObject({ errorClass: 'exit_nonzero', detail: 'exited 2: segfault' })
 })
+
+const EXPIRED = 'Failed to authenticate: OAuth session expired and could not be refreshed'
+
+test('the hub\'s exact output, with a line before it, as an array or as JSON lines, still names the expired login', () => {
+  const exact = `{"is_error": true, "result": "${EXPIRED}"}`
+  expect(cliFailure('claude exited 1', cliErrorText(exact, '')).errorClass).toBe('auth_expired')
+  expect(cliErrorText(`Warning: a newer version is available\n${exact}\n`, '')).toBe(EXPIRED)
+  const array = JSON.stringify([{ type: 'system', subtype: 'init', session_id: 's' }, { type: 'result', subtype: 'success', is_error: true, result: EXPIRED }])
+  expect(cliErrorText(array, '')).toBe(EXPIRED)
+  const lines = [{ type: 'system', subtype: 'init' }, { type: 'result', is_error: true, result: EXPIRED }].map((value) => JSON.stringify(value)).join('\n')
+  expect(cliErrorText(lines, '')).toBe(EXPIRED)
+})
+
+test('codex and opencode error events give their message; nothing else in stdout is read', () => {
+  const codex = [{ type: 'thread.started', thread_id: 't' }, { type: 'item.completed', item: { type: 'agent_message', text: 'session text' } }, { type: 'error', message: 'Not logged in. Run `codex login`.' }]
+  expect(cliErrorText(codex.map((value) => JSON.stringify(value)).join('\n'), '')).toBe('Not logged in. Run `codex login`.')
+  const failedTurn = JSON.stringify({ type: 'turn.failed', error: { message: 'Your access token could not be refreshed' } })
+  expect(classifyCliError(cliErrorText(failedTurn, ''))).toBe('auth_expired')
+  const opencode = JSON.stringify({ type: 'error', error: { name: 'ProviderAuthError', data: { message: 'Invalid API key' } } })
+  expect(classifyCliError(cliErrorText(opencode, ''))).toBe('not_logged_in')
+  // Text events never become an error line.
+  expect(cliErrorText(JSON.stringify({ type: 'text', part: { text: 'not logged in' } }), 'stderr line')).toBe('stderr line')
+})

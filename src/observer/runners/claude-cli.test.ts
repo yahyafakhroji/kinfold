@@ -108,8 +108,48 @@ test.each([
   [{ exitCode: 1, stdout: JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'Failed to authenticate: OAuth session expired and could not be refreshed' }) },
     'auth_expired: claude exited 1: Failed to authenticate: OAuth session expired and could not be refreshed'],
   [{ exitCode: 1, stderr: 'Not logged in · Please run /login\n' }, 'not_logged_in: claude exited 1: Not logged in'],
+  // The hub's exact output: no type or subtype, spaces after the colons.
+  [{ exitCode: 1, stdout: '{"is_error": true, "result": "Failed to authenticate: OAuth session expired and could not be refreshed"}' },
+    'auth_expired: claude exited 1: Failed to authenticate: OAuth session expired and could not be refreshed'],
+  [{ exitCode: 1, stdout: `Warning: notice\n${JSON.stringify([{ type: 'system' }, { type: 'result', is_error: true, result: 'Invalid API key · Please run /login' }])}` },
+    'not_logged_in: claude exited 1: Invalid API key'],
+  [{ stdout: JSON.stringify([{ type: 'system' }, { type: 'result', subtype: 'success', is_error: true, result: 'OAuth session expired and could not be refreshed' }]) },
+    'auth_expired: claude reported an error: OAuth session expired'],
   [{ stdout: JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 429 rate_limit_error' }) }, 'rate_limited: claude reported an error: API Error: 429'],
 ])('a failed run %p is a named failure', async (result, message) => {
   const { spawn } = capture(result)
   expect(await failure(runner(spawn).run(PROMPT))).toStartWith(message)
+})
+
+const TOKEN = 'sk-ant-oat01-FAKE-TEST-TOKEN-0000000000'
+
+test('a long-lived token goes to the child in CLAUDE_CODE_OAUTH_TOKEN only: never in argv, never from the parent', async () => {
+  const { spawn, requests } = capture()
+  const withToken = createClaudeCliRunner({ dataDir: temp.dataDir, model: 'haiku', spawn, which: () => '/opt/bin/claude', parentEnv: { ...PARENT_ENV, CLAUDE_CODE_OAUTH_TOKEN: 'parent-token' }, oauthToken: () => TOKEN })
+  await withToken.run(PROMPT)
+  expect(requests[0]!.env.CLAUDE_CODE_OAUTH_TOKEN).toBe(TOKEN)
+  expect(requests[0]!.cmd.join(' ')).not.toContain(TOKEN)
+  expect(requests[0]!.stdin).not.toContain(TOKEN)
+  const noToken = createClaudeCliRunner({ dataDir: temp.dataDir, model: 'haiku', spawn, which: () => '/opt/bin/claude', parentEnv: { ...PARENT_ENV, CLAUDE_CODE_OAUTH_TOKEN: 'parent-token' }, oauthToken: () => null })
+  await noToken.run(PROMPT)
+  expect(requests[1]!.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+})
+
+test('a token is read for each run, so one saved or removed later applies to the next batch', async () => {
+  const { spawn, requests } = capture()
+  let stored: string | null = null
+  const run = createClaudeCliRunner({ dataDir: temp.dataDir, model: 'haiku', spawn, which: () => '/opt/bin/claude', parentEnv: PARENT_ENV, oauthToken: () => stored })
+  await run.run(PROMPT)
+  stored = TOKEN
+  await run.run(PROMPT)
+  expect(requests.map((request) => request.env.CLAUDE_CODE_OAUTH_TOKEN)).toEqual([undefined, TOKEN])
+})
+
+test('an expired token fails as auth_expired and says the token is what expired, without the token', async () => {
+  const stdout = JSON.stringify({ type: 'result', is_error: true, result: 'Failed to authenticate: OAuth token has expired' })
+  const { spawn } = capture({ exitCode: 1, stdout })
+  const run = createClaudeCliRunner({ dataDir: temp.dataDir, model: 'haiku', spawn, which: () => '/opt/bin/claude', parentEnv: PARENT_ENV, oauthToken: () => TOKEN })
+  const message = await failure(run.run(PROMPT))
+  expect(message).toStartWith('auth_expired: claude exited 1 (long-lived token): Failed to authenticate')
+  expect(message).not.toContain(TOKEN)
 })

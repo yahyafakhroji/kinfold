@@ -115,6 +115,14 @@ function displayLines(env: InstallEnv): string[] {
   ]
 }
 
+/** What the claude-cli observer signs in with, as the daemon sees it; an older daemon does not say, and nothing is guessed. */
+function claudeAuthLine(auth: string | undefined): string | null {
+  if (auth === 'token') return 'claude-cli auth: a long-lived token from `claude setup-token`, kept in the key store'
+  if (auth === 'login') return "claude-cli auth: the claude CLI's own login (store a long-lived token with kinfold install --observer-token-stdin)"
+  if (auth === 'unknown') return 'claude-cli auth: unknown (the key store could not be asked)'
+  return null
+}
+
 async function observerLines(env: InstallEnv): Promise<{ lines: string[]; refs: string[] }> {
   const read = await getObserverSettings(env)
   if (!read.ok) return { lines: [`observer settings: unknown (${read.reason})`], refs: [OPENROUTER_CREDENTIAL_REF] }
@@ -124,7 +132,9 @@ async function observerLines(env: InstallEnv): Promise<{ lines: string[]; refs: 
   })
   // An older daemon sends no backoff list.
   const backoff = Array.isArray(read.view.backoff) ? read.view.backoff.map((entry) => `  observer backing off: ${entry.line}`) : []
-  return { lines: ['observer settings:', ...read.view.effective.map(effectiveLine), ...backoff], refs: [...new Set([OPENROUTER_CREDENTIAL_REF, ...refs])] }
+  const usesClaude = read.view.effective.some((entry) => 'settings' in entry && entry.settings.enabled && entry.settings.provider === 'claude-cli')
+  const auth = usesClaude ? claudeAuthLine(read.view.claudeAuth) : null
+  return { lines: ['observer settings:', ...read.view.effective.map(effectiveLine), ...backoff, ...(auth === null ? [] : [auth])], refs: [...new Set([OPENROUTER_CREDENTIAL_REF, ...refs])] }
 }
 
 function keyStoreLines(env: InstallEnv, refs: readonly string[]): string[] {

@@ -160,6 +160,33 @@ test('status says which observer provider is backing off and what to check', asy
   expect(w.out).toContain(`  observer backing off: ${line}`)
 })
 
+test('status says what the claude-cli observer signs in with, only when an agent uses it', async () => {
+  const w = make()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  const realFetch = w.env.fetch
+  let claudeAuth: string | undefined = 'token'
+  let provider = 'claude-cli'
+  w.env.fetch = async (url, init) => {
+    if (new URL(url).pathname !== '/observer/settings') return realFetch(url, init)
+    const effective = [{ host: 'claude-code', settings: { provider, model: 'haiku', credentialRef: null, enabled: true, source: 'host' } }]
+    return new Response(JSON.stringify({ rows: [], effective, backoff: [], ...(claudeAuth === undefined ? {} : { claudeAuth }) }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  const authLines = async (): Promise<string[]> => {
+    w.out.length = 0
+    await status(w.env)
+    return w.out.filter((line) => line.startsWith('claude-cli auth:'))
+  }
+  expect(await authLines()).toEqual(['claude-cli auth: a long-lived token from `claude setup-token`, kept in the key store'])
+  claudeAuth = 'login'
+  expect(await authLines()).toEqual(["claude-cli auth: the claude CLI's own login (store a long-lived token with kinfold install --observer-token-stdin)"])
+  // An older daemon does not say; nothing is guessed.
+  claudeAuth = undefined
+  expect(await authLines()).toEqual([])
+  claudeAuth = 'token'
+  provider = 'codex-cli'
+  expect(await authLines()).toEqual([])
+})
+
 test('status says when the recall line is off and when the impact test is on, and nothing about either otherwise', async () => {
   const w = make()
   mkdirSync(w.dataDir, { recursive: true })

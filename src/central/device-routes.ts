@@ -25,7 +25,8 @@ export interface DeviceRouting {
 }
 
 const BACKUP_PATHS = new Set(['/backup', '/restore', '/restore/upload', '/restore/undo', '/restore/status'])
-const HUB_ONLY_ANY_METHOD = new Set(['/observer/retry', '/observer/recheck', '/observer/test'])
+// The observer runs on the hub, so its token is kept there too.
+const HUB_ONLY_ANY_METHOD = new Set(['/observer/retry', '/observer/recheck', '/observer/test', '/observer/claude-token'])
 const HUB_ONLY_WRITES = new Set(['/observer/settings', '/embedding/settings'])
 
 export function isHubOnly(method: string, path: string): boolean {

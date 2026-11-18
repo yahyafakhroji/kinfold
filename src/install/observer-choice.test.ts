@@ -14,6 +14,7 @@ test('parseProviderModel keeps the slash in the model and splits only on the fir
 import { afterEach } from 'bun:test'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
 import { ObserverError } from '../observer/types'
+import { CLAUDE_TOKEN_REF } from '../observer/settings'
 import { parseObserverFlag } from './args'
 import { NO_TOOLS_OFF } from '../agents/profile'
 import { UNPROVEN_CLI_PROVIDERS } from '../observer/types'
@@ -253,4 +254,81 @@ test('the OpenAI-compatible observer offers the local LLM embedding address when
   const saved = new Map([['codex', { host: 'codex', provider: 'openai-compatible', model: 'm', credentialRef: null, enabled: true, endpoint: 'http://127.0.0.1:9/v1' }]]) as Parameters<typeof defaultEndpoint>[2]
   expect(defaultEndpoint('openai-compatible', 'codex', saved, embeddingUrl)).toBe('http://127.0.0.1:9/v1')
   expect(defaultEndpoint('qwen-api', 'codex', undefined, embeddingUrl)).not.toBe(embeddingUrl)
+})
+
+const TOKEN = 'sk-ant-oat01-FAKE-INSTALL-TOKEN-0000000'
+
+test('--observer-token-stdin keeps a claude-cli token for the key store, and the install check runs on it', async () => {
+  world = createWorld({ stdin: `${TOKEN}\n` })
+  const seen: (string | null)[] = []
+  world.env.runnerFor = (_settings, credentials) => ({ run: async () => (seen.push(credentials.get(CLAUDE_TOKEN_REF)), { text: 'ok', model: 'haiku' }) })
+  const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, yes: true, observerTokenStdin: true })
+  expect(choice?.input).toMatchObject({ provider: 'claude-cli' })
+  expect(choice?.credential).toEqual({ ref: CLAUDE_TOKEN_REF, value: TOKEN })
+  expect(choice?.credentialNote).toContain('long-lived token')
+  expect(choice?.credentialNote).not.toContain(TOKEN)
+  expect(seen).toEqual([TOKEN])
+})
+
+test('the wizard asks for a token once, masked, when the claude-cli login is failing on this machine; Enter keeps the CLI login', async () => {
+  world = createWorld({ interactive: true, answers: ['', ''], secrets: [TOKEN], keychainRefs: ['openrouter'] })
+  const asked: string[] = []
+  const askSecret = world.env.io.askSecret
+  world.env.io.askSecret = async (question) => (asked.push(question), askSecret(question))
+  const choices = await chooseObservers(world.env, ['claude-code', 'opencode'], { ...options, skipCheck: true, missingClis: async () => new Map(), offerClaudeToken: true })
+  expect(asked).toHaveLength(1)
+  expect(asked[0]).toContain('claude setup-token')
+  expect(asked[0]).toContain('not shown')
+  expect(choices[0]?.credential).toEqual({ ref: CLAUDE_TOKEN_REF, value: TOKEN })
+
+  world = createWorld({ interactive: true, answers: [''], secrets: [''] })
+  const [kept] = await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: async () => new Map(), offerClaudeToken: true })
+  expect(kept?.credential).toBeNull()
+  expect(kept?.credentialNote).toBe('no key needed')
+})
+
+test('with the login working, the wizard asks nothing about a token', async () => {
+  world = createWorld({ interactive: true, answers: [''] })
+  const asked: string[] = []
+  world.env.io.askSecret = async (question) => (asked.push(question), '')
+  await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: async () => new Map() })
+  expect(asked).toEqual([])
+})
+
+test('a claude-cli check that fails on its login offers the token, and passes on it', async () => {
+  world = createWorld({ interactive: true, answers: [''], secrets: [TOKEN] })
+  const seen: (string | null)[] = []
+  world.env.runnerFor = (_settings, credentials) => ({
+    run: async () => {
+      const token = credentials.get(CLAUDE_TOKEN_REF)
+      seen.push(token)
+      if (token === null) throw new ObserverError('auth_expired', 'claude exited 1: OAuth session expired')
+      return { text: 'ok', model: 'haiku' }
+    },
+  })
+  const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, missingClis: async () => new Map() })
+  expect(seen).toEqual([null, TOKEN])
+  expect(choice).toMatchObject({ check: 'ok', credential: { ref: CLAUDE_TOKEN_REF, value: TOKEN } })
+})
+
+test('a stored token is not asked for again', async () => {
+  world = createWorld({ interactive: true, answers: [''], keychainRefs: [CLAUDE_TOKEN_REF] })
+  const asked: string[] = []
+  world.env.io.askSecret = async (question) => (asked.push(question), '')
+  const [choice] = await chooseObservers(world.env, ['claude-code'], { ...options, skipCheck: true, missingClis: async () => new Map(), offerClaudeToken: true })
+  expect(asked).toEqual([])
+  expect(choice?.credentialNote).toContain('long-lived token present')
+})
+
+test('--observer-token-stdin is refused with no claude-cli observer, with a second stdin reader, or for a value that cannot be stored', async () => {
+  world = createWorld({ stdin: TOKEN })
+  await expect(chooseObservers(world.env, ['claude-code'], { ...options, yes: true, observerTokenStdin: true, flags: [{ host: 'claude-code', provider: 'openrouter', model: 'm' }], skipCheck: true, credentialStdin: true }))
+    .rejects.toThrow(/stdin/)
+  world = createWorld({ stdin: TOKEN, keychainRefs: ['openrouter'] })
+  await expect(chooseObservers(world.env, ['claude-code'], { ...options, yes: true, observerTokenStdin: true, flags: [{ host: 'claude-code', provider: 'openrouter', model: 'm' }], skipCheck: true }))
+    .rejects.toThrow('--observer-token-stdin is for the claude-cli observer, and no agent here uses it')
+  world = createWorld({ stdin: 'has a space' })
+  const refused = chooseObservers(world.env, ['claude-code'], { ...options, yes: true, observerTokenStdin: true, skipCheck: true })
+  await expect(refused).rejects.toBeInstanceOf(ChoiceError)
+  await expect(refused).rejects.not.toThrow(/has a space/)
 })

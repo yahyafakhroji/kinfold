@@ -131,3 +131,10 @@ test('--central names a hub to offer after install, and --central-code gives its
   expect(parseArgs(['status', '--central', 'mini'])).toEqual({ ok: false, error: '--central does not apply to status' })
   expect(USAGE).toContain('--central <hub>')
 })
+
+test('--observer-token-stdin reads the claude-cli token from stdin, for install only, and is in USAGE', () => {
+  const parsed = parseArgs(['install', '--yes', '--observer-token-stdin'])
+  expect(parsed.ok && parsed.value.observerTokenStdin).toBe(true)
+  expect(parseArgs(['uninstall', '--observer-token-stdin'])).toEqual({ ok: false, error: '--observer-token-stdin does not apply to uninstall' })
+  expect(USAGE).toContain('--observer-token-stdin')
+})

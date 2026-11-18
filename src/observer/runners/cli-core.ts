@@ -26,7 +26,7 @@ import {
   type RunnerUsage,
   toObserverError,
 } from '../types'
-import { cliFailure } from './cli-error'
+import { classifyCliError, cliErrorText, cliFailure } from './cli-error'
 import { withCmdShims } from './windows-shim'
 import { DEFAULT_CLI_TIMEOUT_MS, type SpawnFn, type SpawnRequest, type SpawnResult, ensureObserverDir, spawnProcess } from './claude-cli'
 
@@ -164,9 +164,20 @@ async function spawnStarted(spawn: SpawnFn, request: SpawnRequest, label: string
 /** The class for a timed-out or failed run; stdout never reaches a detail. */
 function exitFailure(result: SpawnResult, timeoutMs: number, label: string): ObserverError | null {
   if (result.timedOut) return new ObserverError('timeout', `${label} did not finish in ${timeoutMs} ms`)
-  // stderr only: stdout can carry session text.
-  if (result.exitCode !== 0) return cliFailure(`exited ${result.exitCode}`, result.stderr ?? '')
+  // From stdout only an error event's message is read: other events carry session text.
+  if (result.exitCode !== 0) return cliFailure(`exited ${result.exitCode}`, cliErrorText(result.stdout, result.stderr ?? ''))
   return null
+}
+
+/** The parse of a run that exited 0; an output that is only a login or usage-limit error says so instead of bad_response. */
+function parseRun(adapter: CliAdapter, stdout: string): CliParsed {
+  try {
+    return adapter.parse(stdout)
+  } catch (error: unknown) {
+    const text = error instanceof ObserverError && error.errorClass === 'bad_response' ? cliErrorText(stdout, '') : ''
+    if (text !== '' && classifyCliError(text) !== null) throw cliFailure('reported an error', text)
+    throw error
+  }
 }
 
 async function spawnChecked(spawn: SpawnFn, request: SpawnRequest, label: string): Promise<SpawnResult> {
@@ -307,7 +318,7 @@ export function createCliObserverRunner(adapter: CliAdapter, options: CliRunnerO
         const tools = toolEventsIn(adapter, result.stdout)
         throw tools > 0 ? toolAttempt(label, tools) : failure
       }
-      const parsed = adapter.parse(result.stdout)
+      const parsed = parseRun(adapter, result.stdout)
       sessionId = parsed.sessionId
       if (parsed.toolEvents > 0) throw toolAttempt(label, parsed.toolEvents)
       return { text: parsed.text, model: parsed.model ?? options.model, ...(parsed.usage !== undefined ? { usage: parsed.usage } : {}) }

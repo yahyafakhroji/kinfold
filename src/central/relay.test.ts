@@ -12,7 +12,7 @@ import { loadOrCreateKey, pairWithHub } from './client'
 import { type HubRoute, type HubServerDeps, type RunningHub, startHubServer } from './hub-server'
 import { createInvite } from './invites'
 import { newKeyPair } from './keys'
-import { type Relay, type RelayDeps, createRelay } from './relay'
+import { type Relay, type RelayDeps, VIEW_TIMEOUT_MS, createRelay, failureReason } from './relay'
 import type { TailscaleIdentity } from './tailscale'
 
 const hubKey = newKeyPair()
@@ -165,7 +165,7 @@ test('a slow hub is given up on inside the hook\'s wait', async () => {
   const answer = await relay.context(prompt('hi'))
   // The hook waits 200 ms for its daemon; the relay must have answered inside that.
   expect(performance.now() - startedAt).toBeLessThan(200)
-  expect(answer.display?.unavailable).toContain('central memory unreachable')
+  expect(answer.display?.unavailable).toBe("kinfold · mini is busy and didn't answer in time; this prompt is saved and will be sent when it answers")
 })
 
 test('a version gap is said with the side to update', async () => {
@@ -206,6 +206,42 @@ test('dashboard views come from the hub, and come back marked with its name', as
   expect(await relay.view('/memory/observations?limit=5')).toEqual({ status: 200, body: { path: '/memory/observations?limit=5' } })
   await hub!.stop()
   expect(await relay.view('/memory/observations')).toEqual({ status: 503, body: { error: 'central memory unreachable: could not reach the hub mini', central: { hub: 'mini', reachable: false } } })
+})
+
+test('a timeout says the hub is busy; only no answer at all says it cannot be reached', () => {
+  expect(failureReason('timeout', 'mini', null)).toBe("mini is busy and didn't answer in time")
+  expect(failureReason('unreachable', 'mini', null)).toBe('could not reach the hub mini')
+  expect(failureReason('refused', 'mini', null)).toContain('mini refused this device')
+})
+
+test('a dashboard view gets a longer wait than a recall, since a page can take seconds on a large hub', () => {
+  expect(VIEW_TIMEOUT_MS).toBeGreaterThanOrEqual(10_000)
+})
+
+test('a view that times out once is asked again quietly, and the device stays marked as connected', async () => {
+  relay = createRelay({ ...relayDeps(), viewTimeoutMs: 150 })
+  await relay.hello()
+  let asked = 0
+  answers['/central/view'] = async (body) => {
+    asked += 1
+    if (asked === 1) await Bun.sleep(400)
+    return { status: 200, body: { path: body.path } }
+  }
+  expect(await relay.view('/memory/overview')).toEqual({ status: 200, body: { path: '/memory/overview' } })
+  expect(asked).toBe(2)
+  expect(relay.state()).toMatchObject({ reachable: true, failure: null })
+})
+
+test('a view that times out twice says the hub is busy, never that it cannot be reached', async () => {
+  relay = createRelay({ ...relayDeps(), viewTimeoutMs: 100 })
+  answers['/central/view'] = async () => {
+    await Bun.sleep(300)
+    return { status: 200, body: {} }
+  }
+  expect(await relay.view('/memory/overview')).toEqual({
+    status: 503, body: { error: "central memory busy: mini is busy and didn't answer in time", central: { hub: 'mini', reachable: true, busy: true } },
+  })
+  expect(relay.state()).toMatchObject({ failure: 'timeout' })
 })
 
 test('the device id in scoped keys is this device\'s', async () => {

@@ -14,6 +14,7 @@ import { Card, CardTitle } from '../components/ui/card'
 import { Select } from '../components/ui/input'
 import { Notice } from '../components/ui/notice'
 import { KIND_LABELS, activitySentence } from '../lib/activity'
+import { deviceNotice } from '../lib/central'
 import { get } from '../lib/api'
 import { agentName, ago, deviceName, plural, when } from '../lib/format'
 import { type ListSearch, withFilter } from '../lib/list-search'
@@ -23,13 +24,14 @@ import { ACTIVITY_KINDS, type ActivityRow, type ListPage } from '../lib/types'
 function ThisDevice() {
   const central = useCentral().data
   if (central?.role !== 'device') return null
+  const notice = deviceNotice(central)
   return (
     <Card className="mb-5" aria-label="This device">
       <CardTitle>This device</CardTitle>
-      {central.reachable ? (
+      {notice === null ? (
         <p className="text-sm">Connected to {central.hub}{central.lastContactAt !== null ? `, last heard from ${ago(central.lastContactAt)}` : ''}. {central.queued > 0 ? `${plural(central.queued, 'capture is', 'captures are')} waiting to be sent.` : 'Nothing is waiting to be sent.'}</p>
       ) : (
-        <Notice tone="bad">This device cannot reach {central.hub}{central.problem !== null ? `: ${central.problem}` : ''}. {plural(central.queued, 'capture waits', 'captures wait')} here and will be sent when it is back.</Notice>
+        <Notice tone={notice.tone}>{notice.text}</Notice>
       )}
       <DeviceEvents />
       <p className="mt-2 text-xs text-muted">The list below is the hub's activity, which includes what this device sends it.</p>

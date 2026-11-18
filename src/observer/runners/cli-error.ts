@@ -27,14 +27,52 @@ function firstLine(text: string): string {
   return text.split(/\r?\n/).map((line) => line.replace(/[\u0000-\u001f\u007f]/g, '').trim()).find((line) => line !== '') ?? ''
 }
 
-/** The `result` of a JSON result object that reports is_error, else the first stderr line. */
-export function cliErrorText(stdout: string, stderr: string): string {
+const ERROR_EVENT_TYPES: ReadonlySet<string> = new Set(['error', 'turn.failed'])
+
+function parsed(text: string): unknown {
   try {
-    const value: unknown = JSON.parse(stdout)
-    if (isRecord(value) && value.is_error === true && typeof value.result === 'string') return firstLine(value.result)
-    if (isRecord(value)) return firstLine(stderr)
+    return JSON.parse(text)
   } catch {
-    // Not JSON: stderr is all there is.
+    return undefined
+  }
+}
+
+/**
+ * The JSON values in a CLI's stdout: one value, or one per line. A CLI can
+ * print a notice line before its JSON, so lines that are not JSON are skipped.
+ */
+function jsonValues(stdout: string): unknown[] {
+  const whole = parsed(stdout)
+  if (whole !== undefined) return Array.isArray(whole) ? whole : [whole]
+  return stdout.split(/\r?\n/).flatMap((line) => {
+    const value = line.trim() === '' ? undefined : parsed(line)
+    if (value === undefined) return []
+    return Array.isArray(value) ? value : [value]
+  })
+}
+
+/**
+ * The message of an error object only: a result that reports is_error
+ * (claude), or an error or failed-turn event (codex, opencode). Other
+ * events carry session text, so they are never read.
+ */
+function errorMessage(value: unknown): string | null {
+  if (!isRecord(value)) return null
+  if (value.is_error === true) return typeof value.result === 'string' ? value.result : null
+  if (typeof value.type !== 'string' || !ERROR_EVENT_TYPES.has(value.type)) return null
+  if (typeof value.message === 'string') return value.message
+  const error = value.error
+  if (typeof error === 'string') return error
+  if (!isRecord(error)) return null
+  if (typeof error.message === 'string') return error.message
+  return isRecord(error.data) && typeof error.data.message === 'string' ? error.data.message : null
+}
+
+/** The message of the first error object in stdout, else the first stderr line. */
+export function cliErrorText(stdout: string, stderr: string): string {
+  for (const value of jsonValues(stdout)) {
+    const message = errorMessage(value)
+    if (message !== null && firstLine(message) !== '') return firstLine(message)
   }
   return firstLine(stderr)
 }

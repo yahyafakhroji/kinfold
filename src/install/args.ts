@@ -25,6 +25,7 @@ export interface CliArgs {
   skipCheck: boolean
   replaceCredential: boolean
   credentialStdin: boolean
+  observerTokenStdin: boolean
   takeover: boolean
   removeCredentials: boolean
   removeHmacKeys: boolean
@@ -66,7 +67,7 @@ export interface CliArgs {
   centralCode: string | null
 }
 
-type BooleanFlag = 'addPath' | 'noPath' | 'verbose' | 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck' | 'noAutoUpdate' | 'autoUpdate' | 'auto' | 'beta' | 'noBeta'
+type BooleanFlag = 'addPath' | 'noPath' | 'verbose' | 'dryRun' | 'yes' | 'skipCheck' | 'replaceCredential' | 'credentialStdin' | 'observerTokenStdin' | 'takeover' | 'removeCredentials' | 'removeHmacKeys' | 'noEncrypt' | 'noUpdateCheck' | 'noAutoUpdate' | 'autoUpdate' | 'auto' | 'beta' | 'noBeta'
   | 'showRecall' | 'noShowRecall' | 'holdout' | 'noHoldout'
 
 /** What the display flags ask for: only the switches a flag named. */
@@ -83,6 +84,7 @@ const BOOLEAN_FLAGS: Readonly<Record<string, { key: BooleanFlag; commands: reado
   '--skip-check': { key: 'skipCheck', commands: ['install'] },
   '--replace-credential': { key: 'replaceCredential', commands: ['install'] },
   '--credential-stdin': { key: 'credentialStdin', commands: ['install'] },
+  '--observer-token-stdin': { key: 'observerTokenStdin', commands: ['install'] },
   '--takeover': { key: 'takeover', commands: ['install'] },
   '--no-encrypt': { key: 'noEncrypt', commands: ['install'] },
   '--no-update-check': { key: 'noUpdateCheck', commands: ['install'] },
@@ -107,6 +109,7 @@ export const USAGE = [
   '  install    [--dry-run] [--yes] [--hosts claude-code,opencode,codex,cursor] [--observer <host>=<provider>:<model>|off]...',
   '             [--observer-endpoint <url>] (the address for qwen-api or openai-compatible: https, or http on this machine)',
   '             [--skip-check] [--replace-credential] [--credential-stdin] [--takeover]',
+  '             [--observer-token-stdin] (a long-lived token from `claude setup-token` for the claude-cli observer, kept in the key store)',
   '             [--no-encrypt] [--port <1024-65535>] [--updates off|notify|patch] [--beta | --no-beta]',
   '             --updates patch (the default) installs patch releases itself and downloads larger ones to install when you say so;',
   '             notify checks daily and tells you; off stops checking. --beta also offers prereleases, each waiting for your yes',
@@ -421,7 +424,7 @@ export function parseObserverFlag(value: string): Parsed<ObserverFlag> {
 }
 
 function initial(command: Command): CliArgs {
-  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], observerEndpoint: null, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, updates: null, beta: false, noBeta: false, staged: null, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false, embeddings: null, central: null, centralCode: null }
+  return { command, dryRun: false, yes: false, skipCheck: false, replaceCredential: false, credentialStdin: false, observerTokenStdin: false, takeover: false, removeCredentials: false, removeHmacKeys: false, hosts: null, observers: [], observerEndpoint: null, noEncrypt: false, noUpdateCheck: false, noAutoUpdate: false, autoUpdate: false, auto: false, updates: null, beta: false, noBeta: false, staged: null, port: null, path: null, addPath: false, noPath: false, verbose: false, showRecall: false, noShowRecall: false, holdout: false, noHoldout: false, embeddings: null, central: null, centralCode: null }
 }
 
 /** `--flag value` or `--flag=value`; returns the value and how many argv slots it used. */

@@ -12,7 +12,7 @@ import type { AgentProfile } from '../agents/profile'
 import type { Parsed } from '../context/types'
 import { DASHSCOPE_DEFAULT_ENDPOINT, checkEndpoint, isLoopbackEndpoint } from '../observer/endpoint'
 import { parseGooseModel } from '../observer/runners/goose-cli'
-import { DEFAULT_CREDENTIAL_REFS, OPENAI_COMPATIBLE_CREDENTIAL_REF, builtInSettings, credentialRefFor, isEndpointProvider } from '../observer/settings'
+import { CLAUDE_TOKEN_REF, DEFAULT_CREDENTIAL_REFS, OPENAI_COMPATIBLE_CREDENTIAL_REF, builtInSettings, credentialRefFor, isEndpointProvider } from '../observer/settings'
 import { runPlantedCheck } from '../observer/planted-check'
 import {
   CLI_LOGIN_PROVIDERS,
@@ -57,6 +57,10 @@ export interface ChoiceOptions {
   skipCheck: boolean
   replaceCredential: boolean
   credentialStdin: boolean
+  /** --observer-token-stdin: the claude-cli observer's long-lived token (from `claude setup-token`) is read from stdin. */
+  observerTokenStdin?: boolean
+  /** The claude-cli login is failing on this machine (the daemon backs off on it): ask for a token where a question can be asked. */
+  offerClaudeToken?: boolean
   flags: readonly ObserverFlag[]
   /** What each host has now (setup/prefill.ts); under --yes a host with no flag keeps its row instead of taking the built-in default. */
   saved?: ReadonlyMap<InstallHost, ObserverSettingsInput>
@@ -335,6 +339,8 @@ type CredentialState = { kind: 'none' } | { kind: 'stored'; label: string } | { 
 export interface CredentialSession {
   entered: Map<string, string>
   stdinUsed: boolean
+  /** The claude-cli token question was asked this run; it is asked once, whichever agents use claude-cli. */
+  tokenAsked: boolean
 }
 
 /** The Keychain keeps today's wording; any other store names its own place. */
@@ -410,7 +416,64 @@ export async function runCheck(env: InstallEnv, input: ObserverSettingsInput, cr
 }
 
 export function newCredentialSession(): CredentialSession {
-  return { entered: new Map(), stdinUsed: false }
+  return { entered: new Map(), stdinUsed: false, tokenAsked: false }
+}
+
+const LOGIN_ERRORS: ReadonlySet<string> = new Set(['auth_expired', 'not_logged_in'])
+
+type TokenState = { kind: 'none' } | { kind: 'stored'; label: string } | { kind: 'entered'; value: string; label: string }
+
+const TOKEN_QUESTION = (place: string): string =>
+  `Long-lived token for Claude Code summaries, from \`claude setup-token\` (stored in ${place}, not shown; Enter to use the claude CLI's own login) > `
+
+function storableToken(value: string): string {
+  const trimmed = value.replace(/[\r\n]+$/, '').trim()
+  try {
+    assertStorableValue(trimmed)
+  } catch {
+    throw new ChoiceError('the claude-cli token must be 1 to 512 printable characters without spaces or quotes')
+  }
+  return trimmed
+}
+
+/**
+ * The claude-cli observer's optional long-lived token. Without one it runs on
+ * the CLI's own login, which another Claude Code session can refresh out from
+ * under it; a token from `claude setup-token` lasts a year. Read from stdin
+ * under --observer-token-stdin, else asked once (masked) on a terminal when
+ * none is stored. The value goes to the key store only.
+ */
+async function resolveToken(env: InstallEnv, options: ChoiceOptions, session: CredentialSession, offer: boolean): Promise<TokenState> {
+  const store = keyStoreOf(env)
+  if (store === null) {
+    if (options.observerTokenStdin === true) throw new ChoiceError(`storing the claude-cli token needs a key store, and ${env.platform} has none here`)
+    return { kind: 'none' }
+  }
+  const known = session.entered.get(CLAUDE_TOKEN_REF)
+  if (known !== undefined) return { kind: 'entered', value: known, label: store.label }
+  if (options.observerTokenStdin === true) {
+    if (session.stdinUsed) throw new ChoiceError('stdin was already read for a key; pass the claude-cli token in a run of its own with --observer-token-stdin')
+    session.stdinUsed = true
+    const value = storableToken(await env.io.readStdin())
+    session.entered.set(CLAUDE_TOKEN_REF, value)
+    return { kind: 'entered', value, label: store.label }
+  }
+  if (store.exists(CLAUDE_TOKEN_REF)) return { kind: 'stored', label: store.label }
+  // Asked only where it helps: a login that works needs no token, and most machines have one login.
+  if (!offer || !env.io.interactive || options.yes || options.dryRun || session.tokenAsked) return { kind: 'none' }
+  session.tokenAsked = true
+  const answer = await env.io.askSecret(TOKEN_QUESTION(promptPlace(store)))
+  if (answer.trim() === '') return { kind: 'none' }
+  const value = storableToken(answer)
+  session.entered.set(CLAUDE_TOKEN_REF, value)
+  return { kind: 'entered', value, label: store.label }
+}
+
+/** Null: no token, and the note stays the key note ("no key needed"). */
+function tokenNote(state: TokenState): string | null {
+  if (state.kind === 'stored') return `${state.label} long-lived token present (claude-cli uses it)`
+  if (state.kind === 'entered') return `long-lived token for claude-cli will be stored in the ${state.label}`
+  return null
 }
 
 /** The check ran and the provider did not pass it; only the error class, never the reply. */
@@ -432,15 +495,39 @@ export async function chooseObserverWith(
   }
   const ref = credentialRefFor(asSettings(candidate.input))
   const state = await resolveCredential(env, candidate.input, options, session)
-  const base = { ...candidate, credential: state.kind === 'entered' && ref !== null ? { ref, value: state.value } : null, credentialNote: credentialNote(state, ref) }
+  const keyed = { ...candidate, credential: state.kind === 'entered' && ref !== null ? { ref, value: state.value } : null, credentialNote: credentialNote(state, ref) }
+  // claude-cli takes no key; its optional token rides in the same place, so the plan stores it the same way.
+  const token = candidate.input.provider === 'claude-cli' ? await resolveToken(env, options, session, options.offerClaudeToken === true) : null
+  const base = token === null ? keyed : { ...keyed, credential: token.kind === 'entered' ? { ref: CLAUDE_TOKEN_REF, value: token.value } : null, credentialNote: tokenNote(token) ?? keyed.credentialNote }
   if (options.dryRun) return { ...base, check: 'not run (dry run)' }
   // A row that was already saved and is kept as it is was tested when it was chosen.
   if (candidate.origin === 'saved') return { ...base, check: 'unchanged' }
   if (options.skipCheck) return { ...base, check: 'skipped' }
   const result = await runCheck(env, candidate.input, checkCredentials(env, session))
   if (result.ok) return { ...base, check: 'ok' }
-  env.out(`observer check for ${host} (${describeInput(candidate.input)}) failed: ${result.errorClass}`)
+  // A claude-cli login that failed the check: a token from `claude setup-token` is the other way in, so it is offered before another observer.
+  const failedLine = `observer check for ${host} (${describeInput(candidate.input)}) failed: ${result.errorClass}`
+  let said = false
+  if (token?.kind === 'none' && LOGIN_ERRORS.has(result.errorClass) && env.io.interactive && !options.yes && !session.tokenAsked && keyStoreOf(env)?.exists(CLAUDE_TOKEN_REF) === false) {
+    env.out(failedLine)
+    said = true
+    const offered = await resolveToken(env, options, session, true)
+    if (offered.kind === 'entered') {
+      const again = await runCheck(env, candidate.input, checkCredentials(env, session))
+      const withToken = { ...base, credential: { ref: CLAUDE_TOKEN_REF, value: offered.value }, credentialNote: tokenNote(offered) ?? base.credentialNote }
+      if (again.ok) return { ...withToken, check: 'ok' }
+      session.entered.delete(CLAUDE_TOKEN_REF)
+      env.out(`observer check for ${host} (${describeInput(candidate.input)}) with the token failed: ${again.errorClass}`)
+      return { failed: again.errorClass }
+    }
+  }
+  if (!said) env.out(failedLine)
   if (ref !== null) session.entered.delete(ref)
+  // A token typed at the prompt that did not work is asked for again with the next choice.
+  if (token?.kind === 'entered' && options.observerTokenStdin !== true) {
+    session.entered.delete(CLAUDE_TOKEN_REF)
+    session.tokenAsked = false
+  }
   return { failed: result.errorClass }
 }
 
@@ -457,5 +544,8 @@ export async function chooseObservers(env: InstallEnv, hosts: readonly InstallHo
   const session = newCredentialSession()
   const choices: ObserverChoice[] = []
   for (const host of hosts) choices.push(await chooseOne(env, host, options, session))
+  if (options.observerTokenStdin === true && !choices.some((choice) => choice.input.enabled && choice.input.provider === 'claude-cli')) {
+    throw new ChoiceError('--observer-token-stdin is for the claude-cli observer, and no agent here uses it')
+  }
   return choices
 }

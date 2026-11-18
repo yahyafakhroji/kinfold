@@ -43,6 +43,8 @@ export interface SetupState {
    * daemon answered (install asks it again) or nothing could be read. A saved choice for one still gets its PUT.
    */
   failedProviders: readonly string[]
+  /** The running daemon backs off on a claude-cli login that expired or is missing, so setup offers a long-lived token. */
+  claudeLoginFailing?: boolean
   encryption: 'on' | 'off' | 'new'
   port: number
   updateCheck: boolean
@@ -146,11 +148,19 @@ interface SavedObservers {
   map: Map<InstallHost, ObserverSettingsInput>
   error: string | null
   failedProviders: string[]
+  claudeLoginFailing?: boolean
 }
+
+const LOGIN_FAILURES: ReadonlySet<string> = new Set(['auth_expired', 'not_logged_in'])
 
 async function savedObservers(env: InstallEnv, dataDir: string): Promise<SavedObservers> {
   const read = await getObserverSettings(env)
-  if (read.ok) return { map: toMap(read.view.rows), error: null, failedProviders: [] }
+  if (read.ok) {
+    // An older daemon sends no backoff list.
+    const backoff = Array.isArray(read.view.backoff) ? read.view.backoff : []
+    const claudeLoginFailing = backoff.some((entry) => entry.provider === 'claude-cli' && LOGIN_FAILURES.has(entry.errorClass))
+    return { map: toMap(read.view.rows), error: null, failedProviders: [], claudeLoginFailing }
+  }
   try {
     if (fileState(join(dataDir, DB_FILE)) === 'new') return { map: new Map(), error: null, failedProviders: [] }
     const state = readStoreState(env, dataDir)
@@ -201,6 +211,7 @@ export async function readSetupState(env: InstallEnv, options: SetupStateOptions
     observers: observers.map,
     observersError: observers.error,
     failedProviders: observers.failedProviders,
+    claudeLoginFailing: observers.claudeLoginFailing === true,
     encryption: ({ plain: 'off', encrypted: 'on', new: 'new' } as const)[fileState(join(dataDir, DB_FILE))],
     // A configured service without the port key runs the daemon on its default port.
     port: service !== null && service.isConfigured() ? (service.configuredPort() ?? DEFAULT_PORT) : readDaemonInfo(dataDir).port,

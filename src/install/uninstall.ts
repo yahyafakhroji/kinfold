@@ -21,7 +21,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { KEYCHAIN_SERVICE, isSystemCredentialRef } from '../secrets/credentials'
 import type { KeyStore } from '../secrets/key-store'
-import { DEFAULT_CREDENTIAL_REFS, OPENAI_COMPATIBLE_CREDENTIAL_REF } from '../observer/settings'
+import { CLAUDE_TOKEN_REF, DEFAULT_CREDENTIAL_REFS, OPENAI_COMPATIBLE_CREDENTIAL_REF } from '../observer/settings'
 import { getObserverSettings } from './daemon-client'
 import { type InstallEnv, errorMessage, platformOf } from './env'
 import { EXIT_BLOCKED, EXIT_FAILED, EXIT_OK, type InstallOptions, takeInstallLock } from './install'
@@ -154,6 +154,8 @@ export async function uninstall(base: InstallEnv, options: UninstallOptions): Pr
       [null, await serviceActions(env)],
       ...INSTALL_HOSTS.map((host): [string, Action[]] => [`unwiring ${profileOf(host).name}`, hostUnwireActions(env, host)]),
       [null, options.removeCredentials ? credentialActions(store, refs) : []],
+      // A token from `claude setup-token` signs in as the whole account for a year, and is minted again in a minute: it never stays behind.
+      [null, credentialActions(store, [CLAUDE_TOKEN_REF])],
       [null, hmac?.actions ?? []],
       ['removing the kinfold command', [...pathRemovalActions(env, saved), ...forgetPathActions(env, saved)]],
       // Last: until every host entry is gone, each of them still names this program.

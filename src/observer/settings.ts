@@ -19,6 +19,13 @@ export const DEFAULT_HOST_ROW = '*'
 export const OPENROUTER_CREDENTIAL_REF = 'openrouter'
 /** The key-store entry setup offers an OpenAI-compatible endpoint across the network. */
 export const OPENAI_COMPATIBLE_CREDENTIAL_REF = 'openai-compatible'
+/**
+ * The claude-cli observer's long-lived token from `claude setup-token`, when
+ * one is stored. Optional: without it the CLI uses its own login. A second
+ * Claude Code session refreshing that login can end the copy the daemon reads,
+ * and a token does not depend on it.
+ */
+export const CLAUDE_TOKEN_REF = 'claude-oauth-token'
 
 /**
  * The key-store entry each API provider reads when its row names none. The
