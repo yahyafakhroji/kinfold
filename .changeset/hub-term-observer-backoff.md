@@ -1,7 +1,0 @@
----
-"kinfold": patch
----
-
-The central hub now starts on a Mac that runs the Tailscale app. The app's command acts as a command line only when `TERM` is set, and the daemon runs without one, so every Tailscale lookup failed and the hub never listened. Kinfold now sets `TERM` for every tailscale command, and `kinfold status` says which of three things went wrong: the tailscale command failed (with its first line of output), Tailscale is not running or not signed in, or the command is not installed. A `kinfold central join` that times out now says to look for the firewall prompt on a Mac hub, and `kinfold central serve` and `invite` mention that prompt on macOS.
-
-An observer provider that keeps failing the same way no longer retries at full speed. Kinfold waits a minute after a failure, doubling up to an hour, and starts over after a success, a change to that provider's settings, a passed test in the dashboard or a new key. The claude, codex and opencode observers now read the CLI's own error text (one line, capped and redacted), so an expired login, a missing login and a usage limit each get their own name. A login problem waits the full hour, and its events stay pending, so nothing is lost while it is down. `kinfold status`, the dashboard and `kinfold watch --debug` say which provider is failing and what to do, for example: "claude-cli: the login Kinfold uses has expired; run `claude auth login` in a plain terminal (not one with CLAUDE_CONFIG_DIR set)".
