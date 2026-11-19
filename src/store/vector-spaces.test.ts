@@ -47,3 +47,13 @@ test('building the space that is already building keeps it', () => {
   const first = startBuilding(temp.store.db, { model: 'b', dims: 2 }, T0)
   expect(startBuilding(temp.store.db, { model: 'b', dims: 2 }, T0).id).toBe(first.id)
 })
+
+test('a new space never takes the id of an index table still being dropped', () => {
+  const db = temp.store.db
+  startActive(db, { model: 'a', dims: 2 }, T0)
+  const first = startBuilding(db, { model: 'b', dims: 2 }, T0)
+  // The replaced build's table is dropped a chunk at a time, after its row is gone.
+  db.run(`CREATE TABLE vec_space_${first.id} (x)`)
+  const second = startBuilding(db, { model: 'c', dims: 2 }, T0)
+  expect(second.id).toBeGreaterThan(first.id)
+})

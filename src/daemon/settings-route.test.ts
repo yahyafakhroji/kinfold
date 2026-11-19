@@ -3,7 +3,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openStore } from '../store/db'
-import { resolveObserverSettings } from '../observer/settings'
+import { CLAUDE_TOKEN_REF, resolveObserverSettings } from '../observer/settings'
+import { recordingKeyStore } from '../install/test-support'
 import { type RunningDaemon, startDaemon } from './daemon'
 import { observerSettingsView, parseSettingsPut } from './settings-route'
 import { T0, openTempStore, seedSession } from '../observer/test-support'
@@ -43,6 +44,7 @@ test('GET reports the built-in defaults for every known host before any row exis
     safety: [],
     probe: [],
     backoff: [],
+    claudeAuth: 'login',
     effective: [
       { host: 'claude-code', settings: { provider: 'claude-cli', model: 'haiku', credentialRef: null, enabled: true, source: 'built-in' } },
       { host: 'opencode', settings: { provider: 'openrouter', model: 'openrouter/auto', credentialRef: 'openrouter', enabled: true, source: 'built-in' } },
@@ -184,4 +186,59 @@ test('parseSettingsPut never pairs a provider with another provider\'s key', () 
   expect(put('openai-compatible', 'openai-compatible', 'https://api.groq.com/openai/v1')).toMatchObject({ ok: true })
   expect(put('openai-compatible', 'groq', 'https://api.groq.com/openai/v1')).toMatchObject({ ok: true })
   expect(put('openrouter', 'openai-compatible')).toEqual(refused)
+})
+
+test('the view says which login claude-cli runs on, and a login problem on a token says to make a new token', () => {
+  const temp = openTempStore('kinfold-view-token-')
+  try {
+    const session = seedSession(temp.store, 'claude-code', 's1')
+    const id = startRun(temp.store.db, { sessionId: session, host: 'claude-code', provider: 'claude-cli', model: 'haiku', eventCount: 1, startedAt: T0 })
+    finishRun(temp.store.db, id, 'failed', 'auth_expired: claude exited 1 (long-lived token): OAuth token has expired', T0 + 1_000)
+    expect(observerSettingsView(temp.store.db, [], T0 + 2_000).claudeAuth).toBe('login')
+    const view = observerSettingsView(temp.store.db, [], T0 + 2_000, 'token')
+    expect(view.claudeAuth).toBe('token')
+    expect(view.backoff[0]!.line).toContain('run `claude setup-token` again')
+  } finally {
+    temp.cleanup()
+  }
+})
+
+const TOKEN = 'sk-ant-oat01-FAKE-ROUTE-TOKEN-000000000'
+const tokenRoute = (port: number, method: string, body?: unknown): Promise<Response> =>
+  fetch(`http://127.0.0.1:${port}/observer/claude-token`, {
+    method, headers: { authorization: `Bearer ${token()}`, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+
+test('the dashboard stores and removes the claude-cli token in the key store; the token is never logged or sent back', async () => {
+  const keyStore = recordingKeyStore()
+  const lines: string[] = []
+  const other = startDaemon({ dataDir: join(root, 'with-store'), port: 0, fallbackDrainMs: 60_000, log: (line) => lines.push(line), keyStore })
+  const auth = { authorization: `Bearer ${readFileSync(join(root, 'with-store', 'daemon.token'), 'utf8').trim()}`, 'content-type': 'application/json' }
+  const call = (method: string, body?: unknown) => fetch(`http://127.0.0.1:${other.port}/observer/claude-token`, { method, headers: auth, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+  try {
+    expect(await (await call('GET')).json()).toEqual({ auth: 'login' })
+    const saved = await call('PUT', { token: `  ${TOKEN}\n` })
+    expect(saved.status).toBe(200)
+    const answer = await saved.text()
+    expect(answer).not.toContain(TOKEN)
+    expect(JSON.parse(answer)).toEqual({ auth: 'token' })
+    expect(keyStore.values.get(CLAUDE_TOKEN_REF)).toBe(TOKEN)
+    const view = await (await fetch(`http://127.0.0.1:${other.port}/observer/settings`, { headers: auth })).json() as { claudeAuth: string }
+    expect(view.claudeAuth).toBe('token')
+    const bad = await call('PUT', { token: 'has a space' })
+    expect(bad.status).toBe(400)
+    expect(await bad.text()).not.toContain('has a space')
+    expect(await (await call('DELETE')).json()).toEqual({ auth: 'login' })
+    expect(keyStore.values.has(CLAUDE_TOKEN_REF)).toBe(false)
+    expect(lines.join('\n')).not.toContain(TOKEN)
+    expect(lines).toContain('observer claude-cli token saved')
+  } finally {
+    await other.stop()
+  }
+})
+
+test('without a key store the token route says so instead of keeping the token anywhere else', async () => {
+  const response = await tokenRoute(daemon.port, 'PUT', { token: TOKEN })
+  expect(response.status).toBe(503)
+  expect(await response.text()).not.toContain(TOKEN)
 })

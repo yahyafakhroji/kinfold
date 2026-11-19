@@ -65,6 +65,29 @@ test('GET /health reports the pid the server was given', async () => {
   }
 })
 
+test('each request runs as a named step of the stall watch, by path with ids folded', async () => {
+  const real = server.startServer
+  const labels: string[] = []
+  let given: unknown
+  const serve = spyOn(server, 'startServer').mockImplementation((deps) => {
+    given = deps.step
+    return real({ ...deps, step: (label, fn) => {
+      labels.push(label)
+      return deps.step === undefined ? fn() : deps.step(label, fn)
+    } })
+  })
+  const other = startDaemon({ dataDir: join(root, 'other'), port: 0, fallbackDrainMs: 60_000, log: () => {} })
+  try {
+    await fetch(`http://127.0.0.1:${other.port}/health`)
+    await fetch(`http://127.0.0.1:${other.port}/memory/sessions/1234/header?x=secret`)
+    expect(typeof given).toBe('function')
+    expect(labels).toEqual(['route /health', 'route /memory/sessions/:id/header'])
+  } finally {
+    serve.mockRestore()
+    await other.stop()
+  }
+})
+
 test('every other route is 401 without the token or with a wrong one', async () => {
   for (const [path, method] of [['/sessions', 'GET'], ['/spool/nudge', 'POST'], ['/nope', 'GET']] as const) {
     expect((await fetch(url(path), { method })).status).toBe(401)

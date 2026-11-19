@@ -26,6 +26,7 @@ import { keyStoreOf } from '../key-store-choice'
 import {
   type Candidate,
   type ChoiceOptions,
+  type CredentialSession,
   ChoiceError,
   MAX_CHOICE_ATTEMPTS,
   OFF_LABEL,
@@ -344,11 +345,10 @@ async function askCandidate(env: InstallEnv, ask: Prompts, host: InstallHost, cu
   return { input: settingsInputFor(host, picked, model, endpoint), origin: 'prompt' }
 }
 
-async function observerFor(env: InstallEnv, ask: Prompts, host: InstallHost, flags: SetupFlags, choice: ChoiceOptions, saved: ChoiceOptions['saved'], clis: () => Promise<MissingClis>): Promise<ObserverChoice> {
+async function observerFor(env: InstallEnv, ask: Prompts, host: InstallHost, flags: SetupFlags, choice: ChoiceOptions, saved: ChoiceOptions['saved'], clis: () => Promise<MissingClis>, session: CredentialSession): Promise<ObserverChoice> {
   const row = saved?.get(host)
   const current: Candidate = row === undefined ? { input: defaultInput(host), origin: 'default' } : { input: row, origin: 'saved' }
   const flag = flags.observers.find((entry) => entry.host === host)
-  const session = newCredentialSession()
   const note = choice.observerNote?.(host) ?? null
   if (note !== null && flag === undefined) ask.say(note)
   for (let attempt = 0; attempt < MAX_CHOICE_ATTEMPTS; attempt += 1) {
@@ -368,10 +368,18 @@ async function observersStep(env: InstallEnv, ask: Prompts | null, state: SetupS
   const observerNote = (host: InstallHost): string | null => selfObserverNote(profiles[host])
   let embeddings: Promise<string | null> | null = null
   const embeddingUrl = (): Promise<string | null> => (embeddings ??= getEmbeddingSettings(env).then((settings) => (settings?.provider === 'local-llm' ? settings.llmUrl : null)))
-  const options: ChoiceOptions = { ...choice, yes: choice.yes || flags.yes, flags: flags.observers, ...(saved === undefined ? {} : { saved }), missingClis: clis, observerNote, embeddingUrl }
+  const options: ChoiceOptions = {
+    ...choice, yes: choice.yes || flags.yes, flags: flags.observers, ...(saved === undefined ? {} : { saved }), missingClis: clis, observerNote, embeddingUrl,
+    offerClaudeToken: choice.offerClaudeToken === true || state.claudeLoginFailing === true,
+  }
   if (ask === null) return chooseObservers(env, hosts, options)
+  // One session for every agent, as the plain prompt has: a key or token entered once is not asked for again.
+  const session = newCredentialSession()
   const choices: ObserverChoice[] = []
-  for (const host of hosts) choices.push(await observerFor(env, ask, host, flags, options, saved, clis))
+  for (const host of hosts) choices.push(await observerFor(env, ask, host, flags, options, saved, clis, session))
+  if (options.observerTokenStdin === true && !choices.some((choice) => choice.input.enabled && choice.input.provider === 'claude-cli')) {
+    throw new ChoiceError('--observer-token-stdin is for the claude-cli observer, and no agent here uses it')
+  }
   return choices
 }
 

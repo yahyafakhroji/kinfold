@@ -194,6 +194,22 @@ test('a non-zero exit reads the CLI\'s first stderr line, never stdout, and name
   expect(error.detail).toBe('exited 1: Error: Your access token has expired. Please log in again.')
 })
 
+test('a failed run\'s error event in stdout names a login problem, and only the error event is read', async () => {
+  const { adapter } = harness()
+  const stdout = [JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: SECRET } }), JSON.stringify({ type: 'error', message: 'Not logged in. Run `codex login`.' })].join('\n')
+  const error = await failure(runner(adapter, recordingSpawn([VERSION_OK, { exitCode: 1, stdout }])).run(PROMPT))
+  expect(error.errorClass).toBe('not_logged_in')
+  expect(error.detail).toBe('exited 1: Not logged in. Run `codex login`.')
+  expect(error.detail).not.toContain(SECRET)
+})
+
+test('a run that exits 0 with only a login error event names the login problem, not bad_response', async () => {
+  const { adapter } = harness()
+  const stdout = JSON.stringify({ type: 'error', error: { name: 'ProviderAuthError', data: { message: 'OAuth session expired and could not be refreshed' } } })
+  const error = await failure(runner(adapter, recordingSpawn([VERSION_OK, { exitCode: 0, stdout }])).run(PROMPT))
+  expect(error.errorClass).toBe('auth_expired')
+})
+
 test('a timeout throws timeout with no stdout text, runs cleanup with a null session id, and removes the folder', async () => {
   const { adapter, cleanups } = harness()
   const error = await failure(runner(adapter, recordingSpawn([VERSION_OK, { timedOut: true, exitCode: 143, stdout: SECRET }])).run(PROMPT))

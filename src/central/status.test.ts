@@ -9,7 +9,7 @@ import { type RunningDaemon, startDaemon } from '../daemon/daemon'
 import { type InstallRecord, setCentralMode, writeInstallRecord } from '../install/setup/record'
 import { loadOrCreateKey } from './client'
 import { addDevice } from './devices'
-import { centralStatusLines } from './status'
+import { centralStatusLines, reachText } from './status'
 
 const RECORD: InstallRecord = { channel: 'curl', updateCheck: true, autoUpdate: true, autoUpdateIntro: false, agentHomes: {}, firstInstalledAt: 1 }
 let dir: string
@@ -54,4 +54,17 @@ test('a device names its hub, says when it cannot be reached and how much is wai
     'central queue: 1 capture waiting for mini; it is sent when the hub is back',
     'observer: runs on mini, with the hub\'s settings for each agent',
   ])
+})
+
+test('the reach part of the line tells a busy hub from one that cannot be reached and from a refusal', () => {
+  const base = { reachable: true, failure: null, problem: null }
+  expect(reachText(base)).toBe('reachable')
+  expect(reachText({ reachable: false, failure: 'timeout', problem: "mini is busy and didn't answer in time" })).toBe("busy: mini is busy and didn't answer in time; it is asked again")
+  expect(reachText({ reachable: false, failure: 'unreachable', problem: 'could not reach the hub mini' })).toBe('not reachable: could not reach the hub mini')
+  expect(reachText({ reachable: false, failure: 'refused', problem: 'mini refused this device' })).toBe('refused: mini refused this device')
+  expect(reachText({ reachable: true, failure: 'version', problem: 'update this device' })).toBe('refused: update this device')
+  expect(reachText({ reachable: true, failure: 'hub-error', problem: 'mini had an error answering (its daemon log says why)' })).toBe('error: mini had an error answering (its daemon log says why)')
+  expect(reachText({ reachable: true, failure: 'bad-answer', problem: 'mini sent an answer Kinfold cannot read' })).toBe('error: mini sent an answer Kinfold cannot read')
+  // A daemon from before failure was sent.
+  expect(reachText({ reachable: null, problem: null })).toBe('not reachable: not asked yet')
 })

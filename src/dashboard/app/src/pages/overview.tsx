@@ -13,6 +13,7 @@ import { Info } from '../components/ui/info'
 import { Notice } from '../components/ui/notice'
 import { Skeleton } from '../components/ui/skeleton'
 import { activitySentence, problemText } from '../lib/activity'
+import { deviceNotice } from '../lib/central'
 import { errorText, get } from '../lib/api'
 import { agentName, ago, count, plural, tokens, when } from '../lib/format'
 import { useCentral, useDeviceNames, useUpdate } from '../lib/queries'
@@ -30,7 +31,8 @@ interface Look {
 export function worthALook(input: { overview: Overview; central: CentralStatus | undefined; update: UpdateView | undefined; lastBackupAt: number | null | undefined; now: number }): Look[] {
   const looks: Look[] = []
   const { overview, central, update, lastBackupAt, now } = input
-  if (central?.role === 'device' && !central.reachable) looks.push({ tone: 'bad', text: `This device cannot reach ${central.hub}${central.problem !== null ? `: ${central.problem}` : ''}. Captures wait here (${plural(central.queued, 'event', 'events')}) and are sent when it is back.` })
+  const device = central?.role === 'device' ? deviceNotice(central) : null
+  if (device !== null) looks.push(device)
   if (central?.role === 'hub' && central.error !== null) looks.push({ tone: 'bad', text: `Other devices cannot reach this hub: ${central.error}.` })
   for (const agent of overview.failing) {
     looks.push({ tone: 'bad', text: <>Summaries for {agentName(agent.host)} are failing: {problemText(agent.errorClass)}. New memories wait until it works again. <Link to="/settings" hash="agents" className="font-medium text-accent hover:underline">Check its settings</Link></> })

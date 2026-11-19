@@ -1,5 +1,6 @@
+import { CLAUDE_TOKEN_REF } from '../observer/settings'
 import { afterEach, expect, test } from 'bun:test'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DB_KEY_REF } from '../secrets/credentials'
 import { HMAC_LEGACY_REF, HMAC_MASTER_REF } from '../secrets/hmac-keys'
@@ -14,6 +15,7 @@ import { HMAC_KEY_FILE } from '../store/data-dir'
 import { runKeyCommand } from './encrypt'
 import { EXIT_FAILED, EXIT_OK, install } from './install'
 import { chooseInstallKeyStore, keyStoreRecordActions, keyStoreStatusLine, secretDeleteAction, secretSetAction } from './key-store-choice'
+import { installLogPath } from './install-log'
 import { describeAction } from './plan'
 import { fakeTerminal } from './prompt/fake-terminal'
 import { PromptCancelled, createPrompts } from './prompt/prompts'
@@ -251,7 +253,8 @@ test('every secret goes through the store', async () => {
   expect(await runKeyCommand(w.env, 'show-recovery')).toBe(EXIT_OK)
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: false, removeHmacKeys: true })).toBe(EXIT_OK)
 
-  expect(new Set(store.seen)).toEqual(new Set([DB_KEY_REF, HMAC_MASTER_REF, HMAC_LEGACY_REF, 'openrouter']))
+  // The claude-cli token is only looked up (metadata) at install and removed at uninstall; there is none here.
+  expect(new Set(store.seen)).toEqual(new Set([DB_KEY_REF, HMAC_MASTER_REF, HMAC_LEGACY_REF, 'openrouter', CLAUDE_TOKEN_REF]))
   expect(store.values.has('openrouter')).toBe(true)
   expect(store.values.has(HMAC_MASTER_REF)).toBe(false)
 })
@@ -308,4 +311,22 @@ test.skipIf(process.platform === 'win32')('a non-Keychain store never shows Keyc
   expect(w.out.some((line) => line.startsWith('hmac keys: test store master; test store hmac-master present'))).toBe(true)
   expect(w.out.some((line) => line.includes('test store: create db-key'))).toBe(true)
   expect(w.out.some((line) => line.includes('kept the test store entry hmac-master (marker refs in the data dir need it); rerun with --remove-hmac-keys to remove it'))).toBe(true)
+})
+
+test('install --observer-token-stdin stores the claude-cli token in the key store and writes it nowhere else', async () => {
+  const token = 'sk-ant-oat01-FAKE-E2E-TOKEN-000000000000'
+  const w = make({ stdin: `${token}\n` })
+  const store = recordingKeyStore()
+  store.values.set('openrouter', 'sk-or-v1-fake')
+  w.env.keyStore = store
+  w.env.security = forbiddenSecurity()
+  expect(await install(w.env, { ...YES, observerTokenStdin: true })).toBe(EXIT_OK)
+  expect(store.values.get(CLAUDE_TOKEN_REF)).toBe(token)
+  expect(w.out.join('\n')).not.toContain(token)
+  expect(readFileSync(installLogPath(w.dataDir), 'utf8')).not.toContain(token)
+  const files = readdirSync(w.dataDir, { recursive: true }).map(String).filter((path) => !path.endsWith('.db') && !path.includes('memory.db'))
+  for (const file of files) {
+    const path = join(w.dataDir, file)
+    if (statSync(path).isFile()) expect(readFileSync(path, 'utf8')).not.toContain(token)
+  }
 })

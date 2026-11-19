@@ -36,8 +36,16 @@ export function spaceOf(db: Database, space: VectorSpace): StoredSpace | null {
   return toSpace(db.query<Row, { model: string; dims: number }>(`SELECT ${COLUMNS} FROM vector_spaces WHERE model = $model AND dims = $dims`).get({ model: space.model, dims: space.dims }))
 }
 
+/** Past every listed space and every vec_space_<id> table still on disk, so a new space never inherits a table that is being dropped. */
+function nextId(db: Database): number {
+  const listed = db.query<{ id: number | null }, []>('SELECT max(id) AS id FROM vector_spaces').get()?.id ?? 0
+  const tables = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name GLOB 'vec_space_[0-9]*'").all()
+  const onDisk = tables.reduce((max, { name }) => Math.max(max, Number(/^vec_space_(\d+)/.exec(name)?.[1] ?? 0)), 0)
+  return Math.max(listed, onDisk) + 1
+}
+
 function insert(db: Database, space: VectorSpace, state: 'active' | 'building', now: number): StoredSpace {
-  db.query('INSERT INTO vector_spaces (model, dims, state, created_at) VALUES ($model, $dims, $state, $now)').run({ model: space.model, dims: space.dims, state, now })
+  db.query('INSERT INTO vector_spaces (id, model, dims, state, created_at) VALUES ($id, $model, $dims, $state, $now)').run({ id: nextId(db), model: space.model, dims: space.dims, state, now })
   return spaceOf(db, space)!
 }
 

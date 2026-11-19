@@ -3,7 +3,7 @@
 // caller records, never a reason to try another provider.
 
 import { type CredentialProvider, isSystemCredentialRef } from '../../secrets/credentials'
-import { credentialRefFor } from '../settings'
+import { CLAUDE_TOKEN_REF, credentialRefFor } from '../settings'
 import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, HTTP_API_PROVIDERS, type HttpApiProvider, ObserverError, type ObserverProvider, type ObserverRunner, type ObserverSettings } from '../types'
 import { type SpawnFn, createClaudeCliRunner } from './claude-cli'
 import { type CliAdapter, type CliObserverRunner, createCliObserverRunner } from './cli-core'
@@ -21,6 +21,8 @@ export interface RunnerDeps {
   parentEnv?: Readonly<Record<string, string | undefined>>
   /** Receives fixed, class-only lines from CLI login runners, such as a cleanup failure. */
   log?: (line: string) => void
+  /** Tests: finds a CLI binary on the child's PATH. */
+  which?: (command: string, path: string) => string | null
 }
 
 export type RunnerFactory = (settings: ObserverSettings) => ObserverRunner
@@ -35,6 +37,15 @@ function readCredential(credentials: CredentialProvider, ref: string): string {
   }
   if (value === null) throw new ObserverError('credential_missing', `no keychain entry for ${ref}`)
   return value
+}
+
+/** An entry that may be absent (null); a lookup that fails is an error, never read as absent. */
+function optionalCredential(credentials: CredentialProvider, ref: string): string | null {
+  try {
+    return credentials.get(ref)
+  } catch {
+    throw new ObserverError('credential_error', `keychain lookup for ${ref} failed`)
+  }
 }
 
 /** One adapter per CLI login provider. */
@@ -65,8 +76,10 @@ export function createRunner(settings: ObserverSettings, deps: RunnerDeps): Obse
     return createClaudeCliRunner({
       dataDir: deps.dataDir,
       model: settings.model,
+      oauthToken: () => optionalCredential(deps.credentials, CLAUDE_TOKEN_REF),
       ...(deps.spawn !== undefined ? { spawn: deps.spawn } : {}),
       ...(deps.parentEnv !== undefined ? { parentEnv: deps.parentEnv } : {}),
+      ...(deps.which !== undefined ? { which: deps.which } : {}),
     })
   }
   if (isCliLoginProvider(settings.provider)) return createCliRunner(settings, deps)

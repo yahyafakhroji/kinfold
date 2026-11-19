@@ -5,14 +5,15 @@
 // name the field, never echo its value.
 
 import type { Parsed } from '../context/types'
-import { backoffLine, providerBackoffs } from '../observer/backoff'
+import { backoffLine, clearBackoff, providerBackoffs } from '../observer/backoff'
 import type { ProbeFailure } from '../observer/safety-gate'
 import { KNOWN_HOSTS, isRecord } from '../contract/event'
 import { checkEndpoint } from '../observer/endpoint'
 import { parseGooseModel } from '../observer/runners/goose-cli'
-import { credentialRefProblem, isEndpointProvider, providerTakesKey, resolveObserverSettings } from '../observer/settings'
+import { CLAUDE_TOKEN_REF, credentialRefProblem, isEndpointProvider, providerTakesKey, resolveObserverSettings } from '../observer/settings'
 import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
-import { assertCredentialRef, isSystemCredentialRef } from '../secrets/credentials'
+import { assertCredentialRef, assertStorableValue, isSystemCredentialRef } from '../secrets/credentials'
+import type { KeyStore } from '../secrets/key-store'
 import { type SafetyRow, clearFailedSafety, listSafety } from '../store/observer-safety-store'
 import type { Database } from '../sqlite/types'
 import { type ObserverSettingsInput, type ObserverSettingsRow, listObserverSettings, upsertObserverSettings } from '../store/observer-settings-store'
@@ -38,6 +39,45 @@ export interface ObserverSettingsView {
   /** Providers that keep failing and wait between tries (observer/backoff.ts). */
   backoff: BackoffView[]
   effective: EffectiveSettings[]
+  /** What the claude-cli observer signs in with: a stored long-lived token, the CLI's own login, or unknown when the key store cannot be asked. */
+  claudeAuth: ClaudeAuth
+}
+
+export type ClaudeAuth = 'token' | 'login' | 'unknown'
+
+/** The claude-cli observer's long-lived token in the key store; the value goes in and never comes back out. */
+export interface ObserverToken {
+  auth(): ClaudeAuth
+  set(value: string): void
+  clear(): void
+}
+
+export function keyStoreToken(store: KeyStore | null): ObserverToken | null {
+  if (store === null) return null
+  return {
+    auth: () => {
+      try {
+        // Metadata only: whether an entry exists, never its value.
+        return store.exists(CLAUDE_TOKEN_REF) ? 'token' : 'login'
+      } catch {
+        return 'unknown'
+      }
+    },
+    set: (value) => store.set(CLAUDE_TOKEN_REF, value),
+    clear: () => void store.delete(CLAUDE_TOKEN_REF),
+  }
+}
+
+/** A pasted token: surrounding space and line ends go; the rest must be one storable value. The value is never echoed. */
+export function parseTokenPut(body: unknown): Parsed<string> {
+  if (!isRecord(body) || typeof body.token !== 'string') return { ok: false, error: 'token must be a string' }
+  const value = body.token.trim()
+  try {
+    assertStorableValue(value)
+  } catch {
+    return { ok: false, error: 'token must be 1 to 512 printable characters without spaces or quotes' }
+  }
+  return { ok: true, value }
 }
 
 export interface BackoffView {
@@ -55,6 +95,8 @@ export interface ObserverSettingsHandlers {
   put: (input: ObserverSettingsInput) => ObserverSettingsRow
   /** Forgets a CLI provider's failed safety rows so its next batch tests again; returns the count. */
   recheck: (provider: CliLoginProvider) => number
+  /** The claude-cli token; null when this daemon has no key store to keep it in. */
+  token: { auth: () => ClaudeAuth; save: (value: string) => void; remove: () => void } | null
 }
 
 export function isCliLoginProvider(provider: unknown): provider is CliLoginProvider {
@@ -124,20 +166,34 @@ function effectiveFor(db: Database, host: string): EffectiveSettings {
   }
 }
 
-export function observerSettingsView(db: Database, probe: readonly ProbeFailure[] = [], now: number = Date.now()): ObserverSettingsView {
+export function observerSettingsView(db: Database, probe: readonly ProbeFailure[] = [], now: number = Date.now(), claudeAuth: ClaudeAuth = 'login'): ObserverSettingsView {
   const rows = listObserverSettings(db)
   const hosts = [...new Set([...REPORTED_HOSTS, ...rows.map((row) => row.host).filter((host) => host !== '*')])]
   const safety = listSafety(db).map(({ binaryPath: _binaryPath, ...rest }) => rest)
   const backoff = providerBackoffs(db).map((entry) => ({
-    provider: entry.provider, errorClass: entry.errorClass, failures: entry.failures, since: entry.since, retryAt: entry.retryAt, line: backoffLine(entry, now),
+    provider: entry.provider, errorClass: entry.errorClass, failures: entry.failures, since: entry.since, retryAt: entry.retryAt, line: backoffLine(entry, now, { claudeToken: claudeAuth === 'token' }),
   }))
-  return { rows, safety, probe: probe.map(({ provider, errorClass }) => ({ provider, errorClass })), backoff, effective: hosts.map((host) => effectiveFor(db, host)) }
+  return { rows, safety, probe: probe.map(({ provider, errorClass }) => ({ provider, errorClass })), backoff, effective: hosts.map((host) => effectiveFor(db, host)), claudeAuth }
 }
 
 /** Logs the host and provider only. `probeFailures` is the safety gate's in-memory list, when the daemon observes. */
-export function settingsHandlers(db: Database, now: () => number, log: (line: string) => void, probeFailures: () => readonly ProbeFailure[] = () => []): ObserverSettingsHandlers {
+export function settingsHandlers(db: Database, now: () => number, log: (line: string) => void, probeFailures: () => readonly ProbeFailure[] = () => [], token: ObserverToken | null = null): ObserverSettingsHandlers {
   return {
-    list: () => observerSettingsView(db, probeFailures()),
+    list: () => observerSettingsView(db, probeFailures(), now(), token?.auth() ?? 'login'),
+    token: token === null ? null : {
+      auth: () => token.auth(),
+      save: (value) => {
+        token.set(value)
+        // A new credential is the user's answer to a login that stopped working: the next batch tries at once.
+        clearBackoff(db, 'claude-cli', now())
+        log('observer claude-cli token saved')
+      },
+      remove: () => {
+        token.clear()
+        clearBackoff(db, 'claude-cli', now())
+        log('observer claude-cli token removed')
+      },
+    },
     put: (input) => {
       const row = upsertObserverSettings(db, input, now())
       // Saving a CLI choice is the user's answer to a stopped observer, even when the row is unchanged.

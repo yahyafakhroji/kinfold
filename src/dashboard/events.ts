@@ -58,6 +58,8 @@ const NOTABLE: ReadonlyArray<readonly [method: string, path: string, text: strin
   ['POST', '/restore', 'restore started'],
   ['POST', '/restore/undo', 'restore undone'],
   ['PUT', '/observer/settings', 'observer settings changed'],
+  ['PUT', '/observer/claude-token', 'claude-cli token saved'],
+  ['DELETE', '/observer/claude-token', 'claude-cli token removed'],
   ['PUT', '/embedding/settings', 'embedding settings changed'],
   ['PUT', '/update/settings', 'update settings changed'],
   ['PUT', '/update/auto', 'automatic updates switched'],

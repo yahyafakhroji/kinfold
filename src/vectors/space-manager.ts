@@ -5,20 +5,19 @@
 // the old space until every observation has a vector in the new one and its
 // vec0 index is complete, then the new space becomes active and the old one's
 // rows and table go, a chunk per step. Each step moves at most a few hundred
-// vec0 rows, so it never holds the daemon's thread for long. Counts and model
-// names are logged, never text.
+// vec0 rows and reads only index ranges (vec-index.ts reconcileWindow), so its
+// cost does not grow with the store; a retired index goes a vector chunk at a
+// time. Counts and model names are logged, never text.
 
 import type { Database } from '../sqlite/types'
 import {
-  type StoredSpace, activeSpace, buildingSpace, promoteBuilding, removeSpace, setVecReady, spaceOf, startActive, startBuilding,
+  type StoredSpace, activeSpace, buildingSpace, promoteBuilding, removeSpace, spaceOf, startActive, startBuilding,
 } from '../store/vector-spaces'
 import { type VectorSpace, vectorCounts } from '../store/vector-store'
-import { RECONCILE_CHUNK, createVecIndex, dropVecIndex, reconcileVecIndex, vecIndexExists, writeVecRows } from './vec-index'
+import { RECONCILE_CHUNK, RECONCILE_WINDOW, createVecIndex, dropVecIndexStep, reconcileWindow, vecIndexExists, writeVecRows } from './vec-index'
 
-/** Rows of a dropped space deleted per step. */
-export const SWEEP_CHUNK = 2_000
-/** A ready active index is reconciled every this many steps, for rows purged under it. */
-export const ACTIVE_RECONCILE_EVERY = 6
+/** Rows of a dropped space removed per step; secure_delete zeroes each freed page, and a 1536-dimension row is 6 KB. */
+export const SWEEP_CHUNK = 200
 /**
  * A build switches over once fewer observations than one indexer batch wait
  * for a vector: on a busy store new ones arrive every tick, and the next
@@ -33,7 +32,8 @@ export interface SpaceStatus extends VectorSpace {
 }
 
 export interface SpaceManager {
-  step(): void
+  /** One bounded turn of upkeep; true when work is left that another turn soon would move on (a pass to finish, rows or a table to drop). */
+  step(): boolean
   /** The space search reads now; null before the first step on an empty store. */
   searchSpace(): StoredSpace | null
   /** The indexer wrote these rows into the target space. */
@@ -50,25 +50,56 @@ export interface SpaceManagerOptions {
   now: () => number
   log: (line: string) => void
   reconcileChunk?: number
+  /** Observation ids per reconcile window; default RECONCILE_WINDOW. */
+  window?: number
   /** Default PROMOTE_BACKLOG. */
   promoteBacklog?: number
+  /** Times each part of a step under a name for the daemon's stall watch; default runs it as is. */
+  step?: <T>(label: string, fn: () => T) => T
 }
 
 const same = (a: VectorSpace, b: VectorSpace): boolean => a.model === b.model && a.dims === b.dims
 const VEC_TABLE = /^vec_space_(\d+)$/
 
+/**
+ * Runs fn with secure_delete FAST, then puts back the mode it found. For the
+ * sweep of a retired space only: its rows and index hold vectors of
+ * observations the store still keeps (a purge deletes its own vectors, with
+ * secure_delete on), and zeroing them wrote a megabyte or more to the WAL per
+ * slice, so checkpoints came often and one held the thread for seconds.
+ */
+export function withFastDelete<T>(db: Database, fn: () => T): T {
+  const before = db.query<{ secure_delete: number }, []>('PRAGMA secure_delete').get()?.secure_delete ?? 1
+  db.run('PRAGMA secure_delete = FAST')
+  try {
+    return fn()
+  } finally {
+    db.run(`PRAGMA secure_delete = ${before === 0 ? 'OFF' : before === 2 ? 'FAST' : 'ON'}`)
+  }
+}
+
+interface Pass {
+  /** Where the next window starts. */
+  cursor: number
+  /** The index was ready when this pass began: losing that during the pass means a vector was deleted behind the cursor. */
+  readyAtStart: boolean
+}
+
 export function createSpaceManager(options: SpaceManagerOptions): SpaceManager {
   const { db, log, target } = options
   const chunk = options.reconcileChunk ?? RECONCILE_CHUNK
+  const window = options.window ?? RECONCILE_WINDOW
   const backlog = options.promoteBacklog ?? PROMOTE_BACKLOG
-  let steps = 0
+  const passes = new Map<number, Pass>()
+  const part = options.step ?? (<T>(_label: string, fn: () => T): T => fn())
   let sweeping = true
   // Without sqlite-vec nothing keeps the indexes current, so none may be trusted when it comes back.
   if (!options.vec0) db.run('UPDATE vector_spaces SET vec_ready = 0 WHERE vec_ready = 1')
 
+  // The row goes now; its vector rows and vec0 table go in the sweep, a chunk per step.
   const drop = (space: StoredSpace): void => {
     removeSpace(db, space.id)
-    if (options.vec0) dropVecIndex(db, space)
+    passes.delete(space.id)
     sweeping = true
   }
 
@@ -90,49 +121,68 @@ export function createSpaceManager(options: SpaceManagerOptions): SpaceManager {
     }
     if (building === null || !same(building, target)) {
       startBuilding(db, target, options.now(), (replaced) => {
-        if (options.vec0) dropVecIndex(db, replaced)
+        passes.delete(replaced.id)
         sweeping = true
       })
       log(`vectors building ${target.model} dims=${target.dims} beside ${active.model}`)
     }
   }
 
-  /** Brings a space's index a chunk closer; true when nothing was left. */
-  const upkeep = (space: StoredSpace, always: boolean): boolean => {
+  /**
+   * One window of a space's reconcile pass. A pass that reaches the end makes
+   * the index ready, unless it began ready and lost that on the way (a vector
+   * deleted behind it), or a project merge took index rows out during it
+   * (vec_ready -1); then another pass runs. `ended`: this window finished a pass.
+   */
+  const upkeep = (space: StoredSpace): { more: boolean; ended: boolean } => {
     if (!vecIndexExists(db, space)) createVecIndex(db, space)
-    if (space.vecReady && !always) return true
-    const result = reconcileVecIndex(db, space, chunk)
-    if (result.done && !space.vecReady) {
-      setVecReady(db, space.id, true)
-      log(`vectors index ready for ${space.model}`)
+    const started = passes.get(space.id)
+    // A new pass clears the merge mark, so one that lands after this point is seen at the end.
+    if (started === undefined) db.query('UPDATE vector_spaces SET vec_ready = 0 WHERE id = ? AND vec_ready = -1').run(space.id)
+    const pass = started ?? { cursor: 0, readyAtStart: space.vecReady }
+    const result = reconcileWindow(db, space, pass.cursor, { window, limit: chunk })
+    if (!result.end) {
+      passes.set(space.id, { ...pass, cursor: result.next })
+      return { more: true, ended: false }
     }
-    return result.done
+    passes.delete(space.id)
+    if (pass.readyAtStart) return { more: false, ended: true }
+    // Only from 0: 1 is already ready, and -1 means a merge took rows out behind this pass.
+    if (db.query('UPDATE vector_spaces SET vec_ready = 1 WHERE id = ? AND vec_ready = 0').run(space.id).changes === 0) return { more: false, ended: true }
+    log(`vectors index ready for ${space.model}`)
+    return { more: false, ended: true }
   }
 
-  const maybePromote = (buildDone: boolean): void => {
+  /** buildEnded: a pass over the building index ended in this step, so it holds every vector stored before the step. */
+  const maybePromote = (buildEnded: boolean): void => {
     const building = buildingSpace(db)
     if (building === null || vectorCounts(db, { model: building.model, dims: building.dims }).pending > backlog) return
-    if (options.vec0 && !(buildDone && buildingSpace(db)!.vecReady)) return
+    if (options.vec0 && !(buildEnded && building.vecReady)) return
     const old = promoteBuilding(db)
+    if (old !== null) passes.delete(old.id)
     sweeping = true
     log(`vectors switched to ${building.model}${old === null ? '' : `; dropping ${old.model}`}`)
   }
 
-  /** Rows and tables of spaces no longer listed, a chunk at a time. */
-  const sweep = (): void => {
-    if (!sweeping) return
-    const deleted = db.query(
+  /** Rows and tables of spaces no longer listed, a chunk at a time; true while any are left. */
+  const sweep = (): boolean => (sweeping ? withFastDelete(db, sweepChunk) : false)
+
+  const sweepChunk = (): boolean => {
+    const removed = db.query(
       `DELETE FROM observation_vectors WHERE id IN (SELECT v.id FROM observation_vectors v
          WHERE NOT EXISTS (SELECT 1 FROM vector_spaces s WHERE s.model = v.model AND s.dims = v.dims) LIMIT $limit)`,
     ).run({ limit: SWEEP_CHUNK }).changes
-    if (options.vec0) {
+    let tablesLeft = false
+    // Rows first, then tables: one slice never zeroes both a chunk of rows and a vector chunk.
+    if (options.vec0 && removed === 0) {
       const listed = new Set(db.query<{ id: number }, []>('SELECT id FROM vector_spaces').all().map((row) => row.id))
-      for (const { name } of db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'vec_space_%'").all()) {
-        const id = VEC_TABLE.exec(name)?.[1]
-        if (id !== undefined && !listed.has(Number(id))) dropVecIndex(db, { id: Number(id) })
-      }
+      const retired = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'vec_space_%'").all()
+        .map(({ name }) => VEC_TABLE.exec(name)?.[1]).filter((id): id is string => id !== undefined && !listed.has(Number(id)))
+      // One table a step, a vector chunk at a time, until it is gone.
+      if (retired.length > 0) tablesLeft = !dropVecIndexStep(db, { id: Number(retired[0]) }) || retired.length > 1
     }
-    if (deleted < SWEEP_CHUNK) sweeping = false
+    sweeping = removed > 0 || tablesLeft
+    return sweeping
   }
 
   const statusOf = (space: StoredSpace | null): SpaceStatus | null =>
@@ -140,18 +190,22 @@ export function createSpaceManager(options: SpaceManagerOptions): SpaceManager {
 
   return {
     step: () => {
-      steps += 1
       ensureSpaces()
-      let buildDone = true
+      let more = false
+      let buildEnded = true
       if (options.vec0) {
         const active = activeSpace(db)
-        if (active !== null) upkeep(active, steps % ACTIVE_RECONCILE_EVERY === 0)
+        // A ready active index keeps a slow pass going, for rows purged or moved under it.
+        if (active !== null) more = part(`reconcile ${active.model}`, () => upkeep(active)).more && !active.vecReady
         const building = buildingSpace(db)
-        // A space about to become active is reconciled every step, so it is complete when it switches.
-        if (building !== null) buildDone = upkeep(building, true)
+        if (building !== null) {
+          const turn = part(`reconcile ${building.model}`, () => upkeep(building))
+          more = turn.more || more
+          buildEnded = turn.ended
+        }
       }
-      maybePromote(buildDone)
-      sweep()
+      part('promote', () => maybePromote(buildEnded))
+      return part('sweep', sweep) || more
     },
     searchSpace: () => activeSpace(db),
     written: (rows) => {

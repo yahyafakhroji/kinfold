@@ -346,3 +346,19 @@ test('the install output says which keys of one repo will merge, before the daem
   ])
   expect(mergePlanLines(w.env, join(w.dataDir, 'none'), () => 'f'.repeat(40))).toEqual([])
 })
+
+test('a claude-cli login the daemon backs off on is noticed, so setup can offer a long-lived token', async () => {
+  const w = make({})
+  await markInstalled(w)
+  const realFetch = w.env.fetch
+  let backoff: unknown[] = [{ provider: 'claude-cli', errorClass: 'auth_expired', failures: 3, since: 1, retryAt: 2, line: 'x' }]
+  w.env.fetch = async (url, init) => {
+    if (new URL(url).pathname !== '/observer/settings') return realFetch(url, init)
+    return new Response(JSON.stringify({ rows: [], effective: [], backoff, safety: [], probe: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  writeFileSync(join(w.dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 1 }))
+  writeFileSync(join(w.dataDir, 'daemon.token'), 'tok')
+  expect((await readSetupState(w.env)).claudeLoginFailing).toBe(true)
+  backoff = [{ provider: 'claude-cli', errorClass: 'exit_nonzero', failures: 3, since: 1, retryAt: 2, line: 'x' }]
+  expect((await readSetupState(w.env)).claudeLoginFailing).toBe(false)
+})

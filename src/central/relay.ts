@@ -27,6 +27,8 @@ export const RELAY_BATCH_EVENTS = 200
 export const RELAY_BATCH_BYTES = 1_500_000
 export const CAPTURE_TIMEOUT_MS = 15_000
 export const READ_TIMEOUT_MS = 4_000
+/** A dashboard page: a report on a large hub can take seconds, and nobody's prompt waits on it. */
+export const VIEW_TIMEOUT_MS = 12_000
 /** What the relay leaves of the hook's wait for its own work and the loopback hop. */
 const CONTEXT_MARGIN_MS = 30
 /** A round trip over the tailnet with signing at both ends, on a home network or a nearby relay. */
@@ -44,6 +46,8 @@ export interface RelayDeps {
   now?: () => number
   /** The byte budget of one capture call; default RELAY_BATCH_BYTES. */
   batchBytes?: number
+  /** Default VIEW_TIMEOUT_MS. */
+  viewTimeoutMs?: number
 }
 
 export interface ForwardResult {
@@ -84,13 +88,15 @@ export function failureReason(failure: HubFailure, hubName: string, gap: Version
     case 'bad-answer': return `${hubName} sent an answer Kinfold cannot read`
     case 'hub-error': return `${hubName} had an error answering (its daemon log says why)`
     case 'too-large': return `${hubName} refused a request as too large`
-    case 'timeout':
+    // An answer that came too late: the hub is there but busy, which no network fix changes.
+    case 'timeout': return `${hubName} is busy and didn't answer in time`
     case 'unreachable': return `could not reach the hub ${hubName}`
   }
 }
 
 function unavailableLine(failure: HubFailure, request: ContextRequest, hubName: string, gap: VersionGap | null): string {
-  if (failure === 'unreachable' || failure === 'timeout') return request.channel === 'prompt' ? UNREACHABLE_PROMPT_LINE : UNREACHABLE_START_LINE
+  if (failure === 'timeout') return `kinfold · ${failureReason(failure, hubName, gap)}; this ${request.channel === 'prompt' ? 'prompt' : 'session'} is saved and will be sent when it answers`
+  if (failure === 'unreachable') return request.channel === 'prompt' ? UNREACHABLE_PROMPT_LINE : UNREACHABLE_START_LINE
   return `kinfold · central memory unavailable: ${failureReason(failure, hubName, gap)}`
 }
 
@@ -110,11 +116,12 @@ export function createRelay(deps: RelayDeps): Relay {
       ? { reachable: call.ok ? true : call.reason !== 'refused', failure: call.ok ? null : call.reason, gap: call.ok ? null : call.gap ?? null, lastContactAt: now() }
       : { ...state, reachable: false, failure: call.reason, gap: null }
   }
-  const ask = async (path: string, payload: unknown, timeoutMs: number): Promise<HubCall> => {
+  /** quietTimeout: a timeout is not noted, because the caller asks again before saying anything. */
+  const ask = async (path: string, payload: unknown, timeoutMs: number, quietTimeout = false): Promise<HubCall> => {
     const endpoint = deps.endpoint()
     if (endpoint === null) return { ok: false, reason: 'unpaired' }
     const call = await callHub(endpoint, path, payload, { timeoutMs })
-    note(call)
+    if (!(quietTimeout && !call.ok && call.reason === 'timeout')) note(call)
     return call
   }
   const scopedFor = (endpoint: HubEndpoint | null) => (cwd: string): ProjectKey => {
@@ -207,9 +214,13 @@ export function createRelay(deps: RelayDeps): Relay {
     },
 
     view: async (path) => {
-      const call = await ask('/central/view', { path }, READ_TIMEOUT_MS)
+      const timeoutMs = deps.viewTimeoutMs ?? VIEW_TIMEOUT_MS
+      const first = await ask('/central/view', { path }, timeoutMs, true)
+      // A page that came too late is asked for once more before the page says the hub is busy.
+      const call = !first.ok && first.reason === 'timeout' ? await ask('/central/view', { path }, timeoutMs) : first
       if (call.ok) return { status: call.status, body: call.body }
-      const reachable = call.reason !== 'unreachable' && call.reason !== 'timeout'
+      if (call.reason === 'timeout') return { status: 503, body: { error: `central memory busy: ${reasonOf(call)}`, central: { hub: deps.hubName, reachable: true, busy: true } } }
+      const reachable = call.reason !== 'unreachable'
       return { status: 503, body: { error: `central memory ${reachable ? 'unavailable' : 'unreachable'}: ${reasonOf(call)}`, central: { hub: deps.hubName, reachable } } }
     },
 

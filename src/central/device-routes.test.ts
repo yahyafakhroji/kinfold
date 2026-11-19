@@ -53,7 +53,7 @@ test('anything that changes or removes stored memory is refused on a device with
   const calls: string[] = []
   const refused = [
     ['POST', '/data/purge'], ['PUT', '/data/retention'], ['POST', '/data/findings/3/resolve'], ['PUT', '/observer/settings'], ['POST', '/observer/retry'],
-    ['POST', '/observer/test'], ['POST', '/observer/recheck'], ['PUT', '/embedding/settings'], ['GET', '/backup'], ['POST', '/restore'], ['POST', '/restore/upload'],
+    ['POST', '/observer/test'], ['POST', '/observer/recheck'], ['PUT', '/observer/claude-token'], ['DELETE', '/observer/claude-token'], ['PUT', '/embedding/settings'], ['GET', '/backup'], ['POST', '/restore'], ['POST', '/restore/upload'],
     ['POST', '/restore/undo'], ['DELETE', '/memory/observations/4'],
   ] as const
   for (const [method, path] of refused) {

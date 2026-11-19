@@ -255,6 +255,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
       skipCheck: installArgs.skipCheck,
       replaceCredential: installArgs.replaceCredential,
       credentialStdin: installArgs.credentialStdin,
+      observerTokenStdin: installArgs.observerTokenStdin,
       takeover: installArgs.takeover,
       hosts: installArgs.hosts,
       flags: installArgs.observers,

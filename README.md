@@ -180,6 +180,7 @@ Keys go in the system key store (Keychain, Credential Manager or libsecret, or a
 
 Claude Code defaults to `claude-cli` with Haiku. The others default to OpenRouter. Pick one in the wizard, with `--observer <agent>=<provider>:<model>` (for example `--observer codex=anthropic-api:claude-haiku-5-5`), or later in the dashboard. A CLI provider is offered only when its CLI is installed.
 
+- `claude-cli` uses your Claude login. If that login keeps expiring on the machine that runs the observer (another Claude Code session refreshing it can do that), give it a long-lived token instead. Run `claude setup-token` in a terminal, then paste the token into Agents and summaries on the dashboard's Settings page, or run `kinfold install --observer-token-stdin` and pass the token on stdin. Kinfold keeps it in the system key store and hands it to the observer's `claude` run only, in `CLAUDE_CODE_OAUTH_TOKEN`. `kinfold status` says which login the observer uses. The token lasts a year; when it stops working, status says to run `claude setup-token` again.
 - `openai-compatible` takes `--observer-endpoint <url>`. The address must use https, or plain http on this machine: `http://127.0.0.1:11434/v1` for Ollama, `http://127.0.0.1:1234/v1` for LM Studio. A server on this machine needs no key. Setup asks for a key for any other server; for one that needs none, clear the key name under Agents and summaries on the dashboard's Settings page. Small local models often return JSON that misses a field the observer needs; a 1.5B model did in our test, so pick a 7B model or larger.
 - `qwen-api` uses the Singapore address `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` unless you give another. A DashScope key works only with the region it was created in.
 - `goose-cli` models are `<goose provider>/<model>`, such as `anthropic/claude-haiku-5-5` or `ollama/qwen2.5:7b`. The goose provider must be one that calls a model API: `anthropic`, `openai`, `google`, `openrouter`, `xai`, `ollama` or `tetrate`. Goose providers that run another agent's CLI, such as `claude-code` or `codex`, are refused, because that agent's tools would run where Goose cannot show them.
@@ -335,7 +336,7 @@ kinfold uninstall --dry-run
 kinfold uninstall
 ```
 
-Uninstall removes the hooks, MCP entries, plugin, service and program. It also removes the `~/.local/bin/kinfold` link if it still points at Kinfold, the marked block from your shell's startup file, and the Windows `PATH` entry. Your memory stays in `~/.kinfold` until you delete it, and the stored credentials and HMAC keys stay unless you pass `--remove-credentials` or `--remove-hmac-keys`.
+Uninstall removes the hooks, MCP entries, plugin, service and program. It also removes the `~/.local/bin/kinfold` link if it still points at Kinfold, the marked block from your shell's startup file, and the Windows `PATH` entry. Your memory stays in `~/.kinfold` until you delete it, and the stored credentials and HMAC keys stay unless you pass `--remove-credentials` or `--remove-hmac-keys`. A claude-cli token from `claude setup-token` is always removed.
 
 ## Build from source
 

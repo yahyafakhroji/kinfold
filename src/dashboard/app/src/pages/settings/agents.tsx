@@ -15,6 +15,7 @@ import { problemText } from '../../lib/activity'
 import { api, errorText, get } from '../../lib/api'
 import { agentName } from '../../lib/format'
 import { useHubOnly } from '../../lib/queries'
+import { type ClaudeAuth, ClaudeToken, showsClaudeToken } from './claude-token'
 import { Field, HubOnlyNote, Section } from './section'
 
 /** The daemon's observer providers, in its order. */
@@ -49,6 +50,8 @@ export interface SettingsView {
   safety?: { provider: string; status: string; errorClass: string | null }[]
   probe?: { provider: string; errorClass: string }[]
   backoff?: { provider: string; line: string }[]
+  /** Absent from a daemon older than 0.6.0. */
+  claudeAuth?: ClaudeAuth
 }
 
 interface Entry {
@@ -175,6 +178,7 @@ export function AgentsSection() {
     <Section id="agents" title="Agents and summaries" intro="After each session, Kinfold asks a model to write down what is worth remembering. Choose which model does that for each agent; open an agent to change it. If the model fails, the session waits and nothing is lost.">
       {hubOnly ? <HubOnlyNote hub={hub} /> : null}
       {view.isError ? <Notice tone="bad">{errorText(view.error)}</Notice> : null}
+      {view.data !== undefined && showsClaudeToken(view.data) ? <ClaudeToken auth={view.data.claudeAuth ?? 'unknown'} disabled={hubOnly} /> : null}
       {view.data === undefined ? <Skeleton className="h-40 w-full" /> : <div>{hostEntries(view.data).map((entry) => <AgentForm key={entry.host} entry={entry} view={view.data} disabled={hubOnly} />)}</div>}
     </Section>
   )

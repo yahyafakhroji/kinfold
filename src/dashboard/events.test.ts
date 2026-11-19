@@ -13,6 +13,8 @@ test('a settings change, a backup or a restore that succeeded gets its own line 
   expect(notableEvent('GET', '/backup', 200)).toBe('backup downloaded')
   expect(notableEvent('POST', '/restore', 202)).toBe('restore started')
   expect(notableEvent('GET', '/observer/settings', 200)).toBeNull()
+  expect(notableEvent('PUT', '/observer/claude-token', 200)).toBe('claude-cli token saved')
+  expect(notableEvent('DELETE', '/observer/claude-token', 200)).toBe('claude-cli token removed')
 })
 
 test('the newest entries are kept', () => {

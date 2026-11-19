@@ -98,18 +98,20 @@ import { keyStoresOffForTests, processKeyStoreDeps, resolveKeyStore } from '../s
 import type { ReadRouteDeps } from './read-routes'
 import { type MemoryReader, openMemoryReader } from '../mcp/reader'
 import { MCP_SEMANTIC_TIMEOUT_MS, type SemanticClient } from '../mcp/semantic-client'
-import { settingsHandlers } from './settings-route'
+import { keyStoreToken, settingsHandlers } from './settings-route'
 import type { Embedder } from '../vectors/embedder'
 import { type EmbedderSet, NO_OPENROUTER_KEY } from '../vectors/embedders'
 import { probeLocalLlmDims } from '../vectors/local-llm-embedder'
 import { embeddingSettingsRoute } from './embedding-route'
 import { type Support, loadVec0 } from '../vectors/extension'
 import { DEFAULT_INDEX_TICK_MS, type VectorIndexer, createVectorIndexer } from '../vectors/indexer'
+import { createUpkeepTurns } from '../vectors/upkeep-turn'
 import { type SemanticAnswer, type SemanticRequest, createSemanticSearch } from '../vectors/search'
 import { createRestarter } from './restart'
 import { type StallWatch, createStallWatch } from './stall-watch'
 import { type Exclusive, type VectorQueries, inlineVectorQueries, startVectorWorker, workerOrInline } from '../vectors/vector-worker'
 import { type StoreReader, inlineStoreReader, readerOrInline, startStoreReader } from '../workers/store-reader'
+import { type Checkpointer, WAL_TRUNCATE_BYTES, startCheckpointer } from '../workers/checkpointer'
 import { type SpaceManager, createSpaceManager } from '../vectors/space-manager'
 import { LOCAL_MODEL_ID } from '../vectors/local-model'
 
@@ -187,6 +189,8 @@ interface Vectors {
   support: Support
   search: (request: SemanticRequest) => Promise<SemanticAnswer>
   timer: Timer | null
+  /** Ends upkeep before the store closes: the running turn finishes its slice, and none runs again. */
+  stopUpkeep: () => Promise<void>
   /** Closed on stop: ends the search worker when there is one. */
   queries: VectorQueries
   spaces: SpaceManager
@@ -240,15 +244,19 @@ function startVectors(store: Store, dataDir: string, dbKeys: DbKeyStore, options
   const embedder = set.target === null ? null : countedEmbedder(db, set.target, log)
   const all = [...(embedder === null ? [] : [embedder]), ...set.others.map((other) => countedEmbedder(db, other, log))]
   log(`vectors search=${support.ok ? `on (${support.detail})` : `off (${support.reason})`} embedder=${embedder === null ? `none (${set.reason})` : embedder.model}`)
-  const spaces = createSpaceManager({ db, vec0: support.ok, target: embedder === null ? null : { model: embedder.model, dims: embedder.dims }, now: Date.now, log })
-  const step = (): void => {
-    try {
-      spaces.step()
-    } catch (error: unknown) {
-      log(`vectors upkeep failed (${error instanceof Error ? error.message.slice(0, 120) : 'error'})`)
-    }
+  const spaces = createSpaceManager({
+    db, vec0: support.ok, target: embedder === null ? null : { model: embedder.model, dims: embedder.dims }, now: Date.now, log,
+    step: (label, fn) => watch.step(`vectors upkeep: ${label}`, fn),
+  })
+  const upkeepFailed = (error: unknown): void => log(`vectors upkeep failed (${error instanceof Error ? error.message.slice(0, 120) : 'error'})`)
+  // Each slice is timed on its own, so the watch names a slow one; between slices the thread answers requests.
+  const upkeep = createUpkeepTurns({ slice: () => watch.step('vectors upkeep', () => spaces.step()), onError: upkeepFailed })
+  // The first slice runs now, so the active space exists before the first search.
+  try {
+    watch.step('vectors upkeep', () => spaces.step())
+  } catch (error: unknown) {
+    upkeepFailed(error)
   }
-  watch.step('vectors upkeep', step)
   const inline = inlineVectorQueries(db)
   const queries = support.ok && all.length > 0
     ? workerOrInline(startVectorWorker({
@@ -260,12 +268,11 @@ function startVectors(store: Store, dataDir: string, dbKeys: DbKeyStore, options
     ...(embedder.model === LOCAL_MODEL_ID ? { maxBatchesPerTick: LOCAL_BATCHES_PER_TICK } : {}),
   })
   const timer = indexer === null && all.length === 0 ? null : setInterval(() => {
-    watch.step('vectors upkeep', step)
-    watch.step('vectors indexer turn', () => indexer?.tick())
+    void upkeep.run().then(() => watch.step('vectors indexer turn', () => indexer?.tick()))
   }, options?.tickMs ?? DEFAULT_INDEX_TICK_MS)
   watch.step('vectors indexer turn', () => indexer?.tick())
   const search = createSemanticSearch({ db, embedder, embedderFor: () => searchEmbedder(spaces, all, set.reason), support, queries })
-  return { indexer, support, search, timer, queries, spaces, close: async () => set.close?.() }
+  return { indexer, support, search, timer, stopUpkeep: () => upkeep.stop(), queries, spaces, close: async () => set.close?.() }
 }
 
 /** A central device's vectors: none searched, none written, and the store's spaces left as they are for the day it leaves. */
@@ -275,8 +282,9 @@ function deviceVectors(db: Database): Vectors {
     support: VECTORS_OFF,
     search: async () => ({ status: 'unavailable', reason: 'this device uses central memory; the hub searches it' }),
     timer: null,
+    stopUpkeep: async () => {},
     queries: inlineVectorQueries(db),
-    spaces: { step: () => {}, searchSpace: () => null, written: () => {}, status: () => ({ active: null, building: null }) },
+    spaces: { step: () => false, searchSpace: () => null, written: () => {}, status: () => ({ active: null, building: null }) },
     close: async () => {},
   }
 }
@@ -423,7 +431,7 @@ function passedTest(db: Database, provider: string, log: (line: string) => void)
 }
 
 /** Recovers runs a crash left open, then ticks on an interval and after every drain that inserted rows. */
-function startObserver(db: Database, options: DaemonObserverOptions, keys: HmacKeyState, afterWrite: () => void, log: (line: string) => void, trace: TraceBuffer): Observing {
+function startObserver(db: Database, options: DaemonObserverOptions, keys: HmacKeyState, afterWrite: () => void, log: (line: string) => void, trace: TraceBuffer, watch: StallWatch): Observing {
   ensureBackoffIndex(db)
   const recovered = recoverInterrupted(db, Date.now())
   if (recovered.events > 0 || recovered.runs > 0) log(`observer recovered events=${recovered.events} runs=${recovered.runs}`)
@@ -432,21 +440,24 @@ function startObserver(db: Database, options: DaemonObserverOptions, keys: HmacK
     db,
     processSession: async (sessionId) => {
       const outcome = await processSessionBatch({ db, runnerFor: options.runnerFor, log, ...(safety !== undefined ? { safety } : {}) }, sessionId)
-      rebuildAfterWrite(db, sessionId, outcome, log)
-      if (outcome.status === 'succeeded' && outcome.inserted > 0) afterWrite()
-      traceObserver(db, trace, sessionId, outcome, log)
+      watch.step('observer write', () => {
+        rebuildAfterWrite(db, sessionId, outcome, log)
+        if (outcome.status === 'succeeded' && outcome.inserted > 0) afterWrite()
+        traceObserver(db, trace, sessionId, outcome, log)
+      })
       return outcome
     },
     ...(options.schedule !== undefined ? { config: options.schedule } : {}),
     log,
   })
-  const check = (): void => resetCheck(db, options, keys, observer, log)
+  const check = (): void => watch.step('observer reset check', () => resetCheck(db, options, keys, observer, log))
+  const tick = (): void => void watch.step('observer tick', () => observer.tick())
   const timers = [
-    setInterval(() => observer.tick(), options.tickMs ?? DEFAULT_OBSERVER_TICK_MS),
+    setInterval(tick, options.tickMs ?? DEFAULT_OBSERVER_TICK_MS),
     setInterval(check, options.resetCheckMs ?? DEFAULT_RESET_CHECK_MS),
   ]
   check()
-  observer.tick()
+  tick()
   return { observer, timers, safety }
 }
 
@@ -546,7 +557,7 @@ export const REPORTS_CACHE_KIB = 16_384
 /** The delta reads a few index pages and rows per prompt. */
 export const DELTA_CACHE_KIB = 4_096
 
-interface Readers {
+export interface Readers {
   /** The prompt path's keyword and row reads (src/context/recall-reads.ts). */
   recall: StoreReader
   /** The prompt path's delta read, apart so it never waits behind a keyword read and the two are asked at once. */
@@ -573,6 +584,55 @@ function startReaders(store: Store, dataDir: string, dbKeys: DbKeyStore, log: (l
   }
 }
 
+interface Checkpoints {
+  hold(): Promise<() => void>
+  close(): Promise<void>
+}
+
+/** SQLite's own default, for a connection that checkpoints itself again. */
+const DEFAULT_AUTOCHECKPOINT_PAGES = 1_000
+
+/**
+ * The checkpoint worker of one store core. Once it is up the daemon's
+ * connection stops checkpointing; until then, and if it stops, that
+ * connection checkpoints as SQLite does by default. A hold or a close waits
+ * for a start under way, so nothing runs beside a worker that starts late.
+ */
+function startCheckpoints(store: Store, dbKeys: DbKeyStore, log: (line: string) => void, isOpen: () => boolean): Checkpoints {
+  // A WAL that grew in a burst is cut back to this when it is reset, so a large one does not stay large.
+  store.db.run(`PRAGMA journal_size_limit = ${WAL_TRUNCATE_BYTES}`)
+  let worker: Checkpointer | null = null
+  const selfCheckpoint = (): void => {
+    if (isOpen()) store.db.run(`PRAGMA wal_autocheckpoint = ${DEFAULT_AUTOCHECKPOINT_PAGES}`)
+  }
+  const ready = startCheckpointer({
+    dbPath: store.path, key: dbKeys.read(), libraryOverride: readEnv(process.env, 'SQLITE3MC_LIB') ?? null, log,
+    onStopped: () => {
+      worker = null
+      selfCheckpoint()
+    },
+  }).then((started) => {
+    if (!started.ok) return log(`checkpoint worker off (${started.reason}); the daemon connection checkpoints`)
+    // Started after the core stopped: closed before the stop that waits on this goes on, so no handle outlives the store.
+    if (!isOpen()) return started.checkpointer.close()
+    worker = started.checkpointer
+    store.db.run('PRAGMA wal_autocheckpoint = 0')
+    log('checkpoint worker on; the daemon connection no longer checkpoints')
+  }).catch((error: unknown) => log(`checkpoint worker off (${error instanceof Error ? error.message.slice(0, 120) : 'it failed to start'}); the daemon connection checkpoints`))
+  return {
+    hold: async () => {
+      await ready
+      return worker?.hold() ?? (() => {})
+    },
+    close: async () => {
+      await ready
+      const current = worker
+      worker = null
+      await current?.close()
+    },
+  }
+}
+
 /** A central device asks the hub for recall and reads its own kept store only for its dashboard's local pages: no workers. */
 function deviceReaders(store: Store): Readers {
   const inline = inlineStoreReader(store.db, store.path)
@@ -582,11 +642,12 @@ function deviceReaders(store: Store): Readers {
 /**
  * Purge, retention and resolve end with a TRUNCATE checkpoint, which waits
  * for every reader to leave the WAL: the vector worker's and both store
- * readers' reads are held back together while one runs.
+ * readers' reads are held back together while one runs, and so is the
+ * checkpoint worker, since only one checkpoint can run at a time.
  */
-export function exclusiveOverAll(vectors: VectorQueries, readers: Readers): Exclusive {
+export function exclusiveOverAll(vectors: VectorQueries, readers: Readers, holdCheckpoints: () => Promise<() => void> = async () => () => {}): Exclusive {
   return async (fn) => {
-    const releases = await Promise.all([readers.recall.hold(), readers.delta.hold(), readers.reports.hold()])
+    const releases = await Promise.all([readers.recall.hold(), readers.delta.hold(), readers.reports.hold(), holdCheckpoints()])
     try {
       return await vectors.exclusive(fn)
     } finally {
@@ -700,16 +761,17 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     const scheduler = createDrainScheduler(() => watch.step('drain', drain), (error) => log(`drain failed: ${errorMessage(error)}`), options.debounceMs)
     watch.step('drain', drain)
     const interval = setInterval(() => scheduler.request(), options.fallbackDrainMs ?? FALLBACK_DRAIN_MS)
-    const observing = options.observer !== undefined && relay === null ? startObserver(store.db, options.observer, hmacKeys, () => vectors.indexer?.tick(), log, trace) : null
+    const observing = options.observer !== undefined && relay === null ? startObserver(store.db, options.observer, hmacKeys, () => vectors.indexer?.tick(), log, trace, watch) : null
     observer = observing?.observer ?? null
     const readers = relay === null ? startReaders(store, dataDir, dbKeys, log) : deviceReaders(store)
     // Off the start path: one git call per project folder; a hub can only read its own folders, devices send theirs.
     let storeOpen = true
-    const backfill = relay !== null ? null : setTimeout(() => void mergeSameRepos(store.db, backfillGit, log, () => storeOpen), 0)
-    const exclusive = exclusiveOverAll(vectors.queries, readers)
+    const checkpoints = relay !== null ? null : startCheckpoints(store, dbKeys, log, () => storeOpen)
+    const backfill = relay !== null ? null : setTimeout(() => void watch.step('repo merge', () => mergeSameRepos(store.db, backfillGit, log, () => storeOpen)), 0)
+    const exclusive = exclusiveOverAll(vectors.queries, readers, () => checkpoints?.hold() ?? Promise.resolve(() => {}))
     // Bound once the data handlers exist, a few lines on; a retention run cannot come before that.
     let sizeChanged = (): void => {}
-    const dataTicks = relay !== null ? { stop: () => {} } : startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, exclusive, onRemoved: () => sizeChanged(), ...options.dataControl })
+    const dataTicks = relay !== null ? { stop: () => {} } : startDataTicks({ db: store.db, markerKey: hmacKeys.marker, log, exclusive, onRemoved: () => sizeChanged(), step: watch.step, ...options.dataControl })
 
     // The hooks cannot open the store, so they read the display switches from a file this daemon keeps in step.
     const publishDisplay = (settings: DisplaySettings): void => {
@@ -738,10 +800,10 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     const data = dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log, holdoutHosts: HOLDOUT_HOSTS, onDisplay: publishDisplay, reports: readers.reports })
     // Measured once the start has settled, so `kinfold size` and the Data page find a report instead of waiting on dbstat.
     // The dashboard's kept reports are measured then too, so its first page finds them ready.
-    const sizeWarm = relay !== null ? null : setTimeout(() => {
+    const sizeWarm = relay !== null ? null : setTimeout(() => watch.step('size warm', () => {
       data.warmSize?.()
       void routes.memory.views?.warm()
-    }, SIZE_WARM_DELAY_MS)
+    }), SIZE_WARM_DELAY_MS)
     const routes: CoreRoutes = {
       schemaVersion: store.schemaVersion,
       vectorSearch: vectors.support.ok ? 'on' : 'off',
@@ -750,7 +812,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       listSessions: (projectKey) => listRecentSessions(store.db, projectKey),
       context: relay === null ? context : deviceContext(relay),
       retryFailed: (target) => retryFailed(store.db, target, observer, log),
-      observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? []),
+      observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? [],
+        keyStoreToken(options.keyStore !== undefined ? options.keyStore : defaultKeyStore(dataDir))),
       data,
       exclusive,
       memory: memoryHandlers(store.db, log, readers.reports, { deviceNames: () => pairedDeviceNames(dataDir, log) }),
@@ -770,7 +833,15 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       }),
     }
     // Off the thread that answers hooks; on this connection if the worker cannot start.
-    const snapshot = (dest: string): Promise<number> =>
+    const snapshot = async (dest: string): Promise<number> => {
+      const release = await (checkpoints?.hold() ?? Promise.resolve(() => {}))
+      try {
+        return await snapshotFile(dest)
+      } finally {
+        release()
+      }
+    }
+    const snapshotFile = (dest: string): Promise<number> =>
       snapshotInWorker({ dbPath: store.path, key: dbKeys.read(), dest, libraryOverride: readEnv(process.env, 'SQLITE3MC_LIB') ?? null }).catch((error: unknown) => {
         log(`backup snapshot worker off (${error instanceof Error ? error.message : 'it failed'}); copying on the daemon connection`)
         return snapshotInto(store.db, dest)
@@ -784,6 +855,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       if (observing !== null) stopObserver(observing)
       if (vectors.timer !== null) clearInterval(vectors.timer)
       vectors.indexer?.stop()
+      await vectors.stopUpkeep()
       scheduler.stop()
       await vectors.indexer?.whenIdle()
       reads.close()
@@ -791,6 +863,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       await vectors.queries.close()
       await Promise.all([readers.recall.close(), readers.delta.close(), readers.reports.close()])
       await vectors.close()
+      // Before the store closes, which then checkpoints what is left on its own connection.
+      await checkpoints?.close()
       store.db.close()
     }
     const central = mode?.role !== 'hub' ? null : hubCore({
@@ -925,6 +999,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     backup,
     unavailable: () => (restarter.down() ? RESTORING : null),
     log,
+    step: watch.step,
     ...(relay !== null && deviceMode !== null ? { device: { relay, hubName: deviceMode.hubName, watchUpdate } } : {}),
     centralStatus: async (check) => {
       if (check && relay !== null) await relay.hello()
@@ -958,7 +1033,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const infoPath = join(dataDir, DAEMON_INFO_FILE)
   const info: DaemonInfo = { pid: process.pid, port: server.port }
   writePrivateFile(infoPath, JSON.stringify(info), false)
-  const rotation = setInterval(hmacKeys.tick, options.hmac?.rotationTickMs ?? ROTATION_TICK_MS)
+  const rotation = setInterval(() => watch.step('hmac rotation', hmacKeys.tick), options.hmac?.rotationTickMs ?? ROTATION_TICK_MS)
   const updateChecks = startUpdateChecks({
     dataDir,
     version,

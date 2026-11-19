@@ -16,7 +16,7 @@ export type AccessResult = { ok: true; via: Credential } | { ok: false; status: 
 
 export const REQUEST_HEADER = 'x-sam-request'
 const SAFE_METHODS = new Set(['GET', 'HEAD'])
-const EITHER_EXACT = new Set(['/central/status', '/observer/settings', '/embedding/settings', '/observer/test', '/observer/recheck', '/observer/models', '/metrics/summary', '/update', '/update/auto', '/update/settings', '/update/install', '/backup', '/restore', '/restore/upload', '/restore/undo', '/restore/status'])
+const EITHER_EXACT = new Set(['/central/status', '/observer/settings', '/embedding/settings', '/observer/test', '/observer/recheck', '/observer/models', '/observer/claude-token', '/metrics/summary', '/update', '/update/auto', '/update/settings', '/update/install', '/backup', '/restore', '/restore/upload', '/restore/undo', '/restore/status'])
 const EITHER_PREFIXES = ['/data/', '/memory/']
 // The claim is public like the session exchange: it carries no credential, and createSession's own-page check guards both.
 const PUBLIC_DASHBOARD = new Set(['/dashboard/login', '/dashboard/session', '/dashboard/claim'])

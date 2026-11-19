@@ -26,6 +26,8 @@ export interface DataTickOptions {
   exclusive?: Exclusive
   /** After a retention run that removed rows: the kept size report is out of date. */
   onRemoved?: () => void
+  /** Times each tick under a name for the daemon's stall watch; default runs it as is. */
+  step?: <T>(label: string, fn: () => T) => T
 }
 
 export interface DataTicks {
@@ -43,8 +45,9 @@ export function startDataTicks(options: DataTickOptions): DataTicks {
   const now = options.now ?? Date.now
   const { db, log } = options
   let idle = false
+  const step = options.step ?? (<T>(_label: string, fn: () => T): T => fn())
 
-  const scanTick = (): boolean => {
+  const scanBatchNow = (): boolean => {
     try {
       const result = scanBatch(db, { ...options.markerKey(), now, batchSize: options.scanBatchSize ?? DEFAULT_SCAN_BATCH })
       // Log work, and the first idle tick after it; a fully scanned store stays quiet.
@@ -56,9 +59,10 @@ export function startDataTicks(options: DataTickOptions): DataTicks {
       return false
     }
   }
+  const scanTick = (): boolean => step('data scan', scanBatchNow)
   const exclusive = options.exclusive ?? runNow
   const retentionTick = (): void => {
-    void exclusive(() => {
+    void exclusive(() => step('data retention', () => {
       try {
         const line = describeRetention(applyRetention(db, now()))
         if (line !== null) {
@@ -68,7 +72,7 @@ export function startDataTicks(options: DataTickOptions): DataTicks {
       } catch (error: unknown) {
         log(`data retention failed: ${errorMessage(error)}`)
       }
-    })
+    }))
   }
   const timers = [
     setInterval(scanTick, options.scanTickMs ?? DEFAULT_SCAN_TICK_MS),

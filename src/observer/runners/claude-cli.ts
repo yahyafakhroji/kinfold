@@ -10,7 +10,7 @@ import { isRecord } from '../../contract/event'
 import { DATA_DIR_MODE } from '../../store/data-dir'
 import { LEGACY_OBSERVER_ENV_FLAG, OBSERVER_ENV_FLAG } from '../env'
 import { ObserverError, type ObserverPrompt, type ObserverRunner, type RunnerResult } from '../types'
-import { cliErrorText, cliFailure } from './cli-error'
+import { classifyCliError, cliErrorText, cliFailure } from './cli-error'
 import { withCmdShims } from './windows-shim'
 
 export interface SpawnRequest {
@@ -39,7 +39,15 @@ export interface ClaudeCliOptions {
   which?: (command: string, path: string) => string | null
   parentEnv?: Readonly<Record<string, string | undefined>>
   timeoutMs?: number
+  /**
+   * The long-lived token from `claude setup-token`, read for each run; null
+   * runs on the CLI's own login. Throws an ObserverError when the lookup fails.
+   */
+  oauthToken?: () => string | null
 }
+
+/** Claude Code reads a `claude setup-token` token from this variable, ahead of its own stored login. */
+export const CLAUDE_TOKEN_ENV = 'CLAUDE_CODE_OAUTH_TOKEN'
 
 export const OBSERVER_DIR = 'observer'
 export const DEFAULT_CLI_TIMEOUT_MS = 180_000
@@ -108,15 +116,21 @@ function numberAt(record: Record<string, unknown>, key: string): number | undefi
   return typeof value === 'number' ? value : undefined
 }
 
+/** Output that is not one result object: a login or usage-limit error in it still names itself. */
+function unreadable(stdout: string, detail: string): ObserverError {
+  const text = cliErrorText(stdout, '')
+  return text !== '' && classifyCliError(text) !== null ? cliFailure('claude reported an error', text) : new ObserverError('bad_response', detail)
+}
+
 /** Reads `--output-format json`: one result object whose `result` holds the model's text. */
 export function parseCliResult(stdout: string, configuredModel: string): RunnerResult {
   let value: unknown
   try {
     value = JSON.parse(stdout)
   } catch {
-    throw new ObserverError('bad_response', 'claude output is not JSON')
+    throw unreadable(stdout, 'claude output is not JSON')
   }
-  if (!isRecord(value) || value.type !== 'result') throw new ObserverError('bad_response', 'claude output has no result object')
+  if (!isRecord(value) || value.type !== 'result') throw unreadable(stdout, 'claude output has no result object')
   if (value.is_error === true || value.subtype !== 'success') {
     const what = `claude reported ${typeof value.subtype === 'string' && value.subtype !== 'success' ? value.subtype : 'an error'}`
     throw cliFailure(what, typeof value.result === 'string' ? value.result : '', 'bad_response')
@@ -142,10 +156,12 @@ export function createClaudeCliRunner(options: ClaudeCliOptions): ObserverRunner
   const run = async (prompt: ObserverPrompt): Promise<RunnerResult> => {
     const binary = which('claude', env.PATH ?? '')
     if (binary === null) throw new ObserverError('cli_missing', 'claude not found on PATH')
+    const token = options.oauthToken?.() ?? null
+    // The token is in this child's environment only: never argv (other users can list it), stdin, a file or a log.
     const request: SpawnRequest = {
       cmd: claudeCliArgs(binary, options.model, prompt.system),
       cwd: ensureObserverDir(options.dataDir),
-      env,
+      env: token === null ? env : { ...env, [CLAUDE_TOKEN_ENV]: token },
       stdin: prompt.user,
       timeoutMs: options.timeoutMs ?? DEFAULT_CLI_TIMEOUT_MS,
     }
@@ -158,7 +174,7 @@ export function createClaudeCliRunner(options: ClaudeCliOptions): ObserverRunner
       throw new ObserverError(code === 'ENOENT' ? 'cli_missing' : 'internal', `claude could not start (${code})`)
     }
     if (result.timedOut) throw new ObserverError('timeout', `claude did not finish in ${request.timeoutMs} ms`)
-    if (result.exitCode !== 0) throw cliFailure(`claude exited ${result.exitCode}`, cliErrorText(result.stdout, result.stderr ?? ''))
+    if (result.exitCode !== 0) throw cliFailure(`claude exited ${result.exitCode}${token === null ? '' : ' (long-lived token)'}`, cliErrorText(result.stdout, result.stderr ?? ''))
     return parseCliResult(result.stdout, options.model)
   }
   return { run }

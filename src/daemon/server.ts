@@ -31,7 +31,7 @@ import { type MemoryHandlers, memoryRoute } from './memory-routes'
 import type { ObserverModelsRoute } from './observer-models-route'
 import type { ObserverTestRoute } from './observer-test'
 import type { EmbeddingRoute } from './embedding-route'
-import { type ObserverSettingsHandlers, parseRecheck, parseSettingsPut } from './settings-route'
+import { type ObserverSettingsHandlers, parseRecheck, parseSettingsPut, parseTokenPut } from './settings-route'
 import { type SemanticAnswer, type SemanticRequest, parseSemanticRequest } from '../vectors/search'
 import type { Exclusive } from '../vectors/vector-worker'
 import type { AutoUpdateView } from '../update/auto'
@@ -43,6 +43,8 @@ import { type DeviceRouting, deviceRoute } from '../central/device-routes'
 export interface ServerDeps {
   /** 0 picks a free port. */
   port: number
+  /** Times each request's synchronous part under `route <path>` for the stall watch; default runs it as is. */
+  step?: <T>(label: string, fn: () => T) => T
   token: string
   version: string
   schemaVersion: number
@@ -208,6 +210,23 @@ async function postJson<T>(request: Request, parse: (body: unknown) => Parsed<T>
   return parsed.ok ? answer(parsed.value) : json(400, { error: parsed.error })
 }
 
+/** GET, PUT and DELETE /observer/claude-token: answers only which login is in use, never the token. */
+async function claudeTokenRoute(request: Request, handlers: ObserverSettingsHandlers): Promise<Response> {
+  const token = handlers.token
+  if (token === null) return json(503, { error: 'this daemon has no key store to keep a token in' })
+  if (request.method === 'GET') return json(200, { auth: token.auth() })
+  if (request.method === 'DELETE') {
+    token.remove()
+    return json(200, { auth: token.auth() })
+  }
+  if (request.method !== 'PUT') return json(405, { error: 'method not allowed' })
+  const body = await readJson(request)
+  const parsed = body.ok ? parseTokenPut(body.value) : body
+  if (!parsed.ok) return json(400, { error: parsed.error })
+  token.save(parsed.value)
+  return json(200, { auth: token.auth() })
+}
+
 async function observerSettingsRoute(request: Request, handlers: ObserverSettingsHandlers): Promise<Response> {
   if (request.method === 'GET') return json(200, handlers.list())
   if (request.method !== 'PUT') return json(405, { error: 'method not allowed' })
@@ -234,6 +253,7 @@ async function semanticRoute(request: Request, deps: ServerDeps): Promise<Respon
 
 async function route(request: Request, url: URL, deps: ServerDeps, via: Credential): Promise<Response> {
   if (url.pathname === '/observer/settings') return observerSettingsRoute(request, deps.observerSettings)
+  if (url.pathname === '/observer/claude-token') return claudeTokenRoute(request, deps.observerSettings)
   if (url.pathname === '/observer/recheck') {
     return postJson(request, parseRecheck, (provider) => json(200, { ok: true, cleared: deps.observerSettings.recheck(provider) }))
   }
@@ -519,6 +539,17 @@ export async function handleRequest(request: Request, port: number, deps: Server
 /** Seconds a request may go without a byte either way before the server drops it. */
 export const SERVER_IDLE_TIMEOUT_S = 30
 
+/** The path with numeric segments folded, so a stall line names the route and never an id or a query. */
+export function routeLabel(requestUrl: string): string {
+  let path: string
+  try {
+    path = new URL(requestUrl).pathname
+  } catch {
+    return 'route ?'
+  }
+  return `route ${path.split('/').map((segment) => (/^\d+$/.test(segment) ? ':id' : segment)).join('/').slice(0, 80)}`
+}
+
 export function startServer(deps: ServerDeps): RunningServer {
   const server = Bun.serve({
     hostname: LOOPBACK_HOST,
@@ -527,7 +558,10 @@ export function startServer(deps: ServerDeps): RunningServer {
     maxRequestBodySize: MAX_UPLOAD_BYTES,
     // Past every client's own wait (the CLI waits 15 s): Bun's 10 s default dropped a slow report's connection, which the CLI could only call a TypeError.
     idleTimeout: SERVER_IDLE_TIMEOUT_S,
-    fetch: (request, self) => handleRequest(request, self.port ?? deps.port, deps),
+    fetch: (request, self) => {
+      const handle = (): Promise<Response> => handleRequest(request, self.port ?? deps.port, deps)
+      return deps.step === undefined ? handle() : deps.step(routeLabel(request.url), handle)
+    },
     error: (error) => {
       // The name only: a SQLite message can echo query fragments, and prompt terms are query fragments.
       deps.log(`request failed: ${error.name}`)
