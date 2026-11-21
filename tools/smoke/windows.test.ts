@@ -118,7 +118,7 @@ describe('windows smoke platform', () => {
         }
       }
       expect(await failure(async () => new Response('{}'))).toBe('daemon.json or daemon.token could not be read')
-      writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 40_123 }))
+      writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 40_123 }))
       writeFileSync(join(dataDir, 'daemon.token'), `${TOKEN}\n`)
 
       const calls: { url: string; auth: string | null; cookie: string | null; body: string }[] = []

@@ -15,6 +15,7 @@ import { deviceProof, normalizeCode, proofKey, verifierFor, verifyHubProof } fro
 import { bodyHash, newKeyPair, verifyReply } from './keys'
 import { writeFileAtomic } from '../fs/atomic'
 import { DATA_FILE_MODE } from '../store/data-dir'
+import { plainName } from './mode'
 import { centralDir, centralPath } from './paths'
 import { type VersionGap, versionGap } from './version-rule'
 
@@ -213,7 +214,7 @@ export async function pairWithHub(input: PairInput): Promise<Result<Paired>> {
   const nonce = randomBytes(18).toString('base64url')
   const key = proofKey(verifierFor(code, salt))
   const fields = { deviceId, devicePublicKey: keys.publicKey, nonce }
-  const deviceName = (input.deviceName ?? hostname()).replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 64) || 'device'
+  const deviceName = plainName(input.deviceName ?? hostname()) || 'device'
   const pair = await postPlain(input, '/central/pair', { ...fields, deviceName, proof: deviceProof(key, fields), version: input.version }, PAIR_LATE)
   if (!pair.ok) return pair
   const answer = pair.value.value as Record<string, unknown>
@@ -225,5 +226,5 @@ export async function pairWithHub(input: PairInput): Promise<Result<Paired>> {
   }
   if (!verifyHubProof(key, { hubPublicKey, devicePublicKey: keys.publicKey, nonce }, proof)) return { ok: false, error: 'the hub could not prove it knows the code; nothing was saved' }
   saveKey(input.dataDir, 'device-key.pem', keys.privateKey)
-  return { ok: true, value: { deviceId, hubPublicKey, hubName: hubName.slice(0, 64), version } }
+  return { ok: true, value: { deviceId, hubPublicKey, hubName: plainName(hubName) || 'the hub', version } }
 }

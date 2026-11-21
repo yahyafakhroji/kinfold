@@ -213,7 +213,7 @@ test('the port comes from the plist, its default when the plist names none, else
   writePlist(w, withPort)
   expect((await readSetupState(w.env)).port).toBe(4511)
   mkdirSync(w.dataDir, { recursive: true })
-  writeFileSync(join(w.dataDir, DAEMON_INFO_FILE), JSON.stringify({ pid: 1, port: 4242 }))
+  writeFileSync(join(w.dataDir, DAEMON_INFO_FILE), JSON.stringify({ pid: process.pid, port: 4242 }))
   writePlist(w)
   expect((await readSetupState(w.env)).port).toBe(DEFAULT_PORT)
   rmSync(installPaths(w.env).launchAgentPlist)

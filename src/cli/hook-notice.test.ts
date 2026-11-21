@@ -15,7 +15,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'kinfold-hook-notice-'))
   dataDir = join(root, 'data')
   mkdirSync(dataDir, { recursive: true })
-  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 4 }))
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 4 }))
   writeFileSync(join(dataDir, 'daemon.token'), 'a'.repeat(64))
   // The recall line has its own tests (hook-recall.test.ts); with it off, these pin the notice alone.
   writeFileSync(join(dataDir, 'display.json'), '{"showRecall":false}')

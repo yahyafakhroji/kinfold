@@ -64,3 +64,15 @@ test('libraryFor uses the override unchecked, else the checked manifest build, e
   const file = place('library bytes')
   expect(libraryFor(join(dataDir, 'memory.db'), {})).toBe(join(libDir(dataDir), file))
 })
+
+test('outside tests the override is not read: no variable can point the program, and so the database key, at another library', () => {
+  const override = join(dataDir, 'planted.dylib')
+  writeFileSync(override, 'x')
+  const production = false
+  expect(() => libraryFor(join(dataDir, 'memory.db'), { [SQLITE3MC_LIB_ENV]: override }, production)).toThrow(`${SQLITE3MC_LIB_ENV} is set but is read only under NODE_ENV=test`)
+  expect(() => libraryFor(join(dataDir, 'memory.db'), { SAM_SQLITE3MC_LIB: override }, production)).toThrow(expect.objectContaining({ kind: 'library' }))
+  const file = place('library bytes')
+  expect(libraryFor(join(dataDir, 'memory.db'), { [SQLITE3MC_LIB_ENV]: override }, production)).toBe(join(libDir(dataDir), file))
+  // A child a test starts says it is one in the environment it is handed.
+  expect(libraryFor(join(dataDir, 'memory.db'), { [SQLITE3MC_LIB_ENV]: override, NODE_ENV: 'test' }, undefined)).toBe(override)
+})

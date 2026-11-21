@@ -5,8 +5,10 @@
 // build or the new one, never a library with a hash that does not match. The
 // hash check catches a truncated or swapped file; it is no defence against
 // someone who can write the data dir, since that person can write the
-// manifest too. KINFOLD_SQLITE3MC_LIB points tests and development at another
-// build, unchecked.
+// manifest too. KINFOLD_SQLITE3MC_LIB points tests at another build,
+// unchecked, and is read only under NODE_ENV=test (as `bun test` sets it): the
+// library is handed the database key on every open, so no variable in a
+// production environment may choose it.
 
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
@@ -122,10 +124,20 @@ export function checkLibrary(dataDir: string): { ok: true; path: string; manifes
 
 const checked = new Map<string, string>()
 
-/** The library for a DB file inside a data dir: the env override, or the manifest's build, checked once per process. */
-export function libraryFor(dbPath: string, env: Readonly<Record<string, string | undefined>> = process.env): string {
+/** A worker thread is handed only the override, so the process's own NODE_ENV counts as well as the environment's. */
+function underTest(env: Readonly<Record<string, string | undefined>>): boolean {
+  return env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
+}
+
+/**
+ * The library for a DB file inside a data dir: under test the env override,
+ * else the manifest's build, checked once per process. Outside tests a set
+ * override is ignored, and named (never its value) if the lookup then fails.
+ */
+export function libraryFor(dbPath: string, env: Readonly<Record<string, string | undefined>> = process.env, isTest: boolean = underTest(env)): string {
   const override = readEnv(env, 'SQLITE3MC_LIB')
-  if (override !== undefined && override !== '') {
+  const overridden = override !== undefined && override !== ''
+  if (overridden && isTest) {
     if (!existsSync(override)) throw new SqliteError(`${SQLITE3MC_LIB_ENV} names a missing file`, 'SQLITE_CANTOPEN', 14, 'library')
     return override
   }
@@ -133,6 +145,7 @@ export function libraryFor(dbPath: string, env: Readonly<Record<string, string |
   const known = checked.get(dataDir)
   if (known !== undefined) return known
   const result = checkLibrary(dataDir)
+  if (!result.ok && overridden) throw new SqliteError(`${result.reason} (${SQLITE3MC_LIB_ENV} is set but is read only under NODE_ENV=test)`, 'SQLITE_CANTOPEN', 14, 'library')
   if (!result.ok) throw new SqliteError(result.reason, 'SQLITE_CANTOPEN', 14, 'library')
   checked.set(dataDir, result.path)
   return result.path

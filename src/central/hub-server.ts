@@ -9,7 +9,8 @@
 // Bodies are read only after the device is known, and by counting: 16 KB for
 // every route but the capture batch and the import, which carry many events.
 
-import { type AuthDeps, HEADER, sameNode, verifyCentralRequest } from './auth'
+import { type AuthDeps, HEADER, checkSender, sameNode, verifyCentralRequest } from './auth'
+import { isPlainName } from './mode'
 import { hubProof, proofKey, verifyDeviceProof } from './code'
 import { addDevice, findDevice } from './devices'
 import { pendingInvite, redeemInvite } from './invites'
@@ -115,7 +116,6 @@ const NONCE = /^[A-Za-z0-9_-]{16,64}$/
 /** Base64 of the 44-byte Ed25519 SPKI DER. */
 const PUBLIC_KEY = /^[A-Za-z0-9+/]{59}=$/
 const PROOF = /^[A-Za-z0-9+/=]{1,128}$/
-const NAME = /^[^\u0000-\u001f\u007f]{1,64}$/
 
 interface PairBody {
   deviceId: string
@@ -131,7 +131,7 @@ function parsePair(value: unknown): PairBody | null {
   const body = value as Record<string, unknown>
   const { deviceId, deviceName, devicePublicKey, nonce, proof, version } = body
   if (typeof deviceId !== 'string' || !ID.test(deviceId)) return null
-  if (typeof deviceName !== 'string' || !NAME.test(deviceName)) return null
+  if (typeof deviceName !== 'string' || !isPlainName(deviceName)) return null
   if (typeof devicePublicKey !== 'string' || !PUBLIC_KEY.test(devicePublicKey)) return null
   if (typeof nonce !== 'string' || !NONCE.test(nonce)) return null
   if (typeof proof !== 'string' || !PROOF.test(proof)) return null
@@ -214,6 +214,13 @@ export async function handleHubRequest(request: Request, address: string, deps: 
   const deviceId = request.headers.get(HEADER.device) ?? ''
   const device = ID.test(deviceId) ? findDevice(deps.dataDir, deviceId) : null
   if (device === null) return json(401, { error: 'unpaired' })
+  // The cheap checks first: headers, clock, and that the sender is the device's own node. Only that node gets a body read
+  // and hashed, so knowing a device id is not enough to make the hub buffer megabytes.
+  const sender = await checkSender(request.headers, address, deps.auth)
+  if (!sender.ok) {
+    deps.log(`central request refused status=${sender.status} reason=${sender.reason}`)
+    return json(sender.status, { error: sender.reason })
+  }
   const route = Object.hasOwn(deps.routes, url.pathname) ? deps.routes[url.pathname] : undefined
   const bytes = await readCapped(request, route?.cap ?? MAX_BODY_BYTES)
   if (bytes === null) return json(413, { error: 'body too large' })

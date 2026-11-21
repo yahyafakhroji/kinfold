@@ -259,13 +259,13 @@ posixOnly('file modes')('the move plans no key, data folder or database action, 
   expect(await install(w.env, programOptions(move))).toBe(EXIT_OK)
   expect(keychainWrites(w.securityCalls, securityCalls)).toEqual([])
   expect([...w.keychain].sort()).toEqual(refsBefore)
-  // A move that copies the program restarts the daemon, so daemon.json and the
-  // store's WAL change with the new process. Every other file in the data dir
+  // A move that copies the program restarts the daemon, so daemon.json, the
+  // token each start makes and the store's WAL change with the new process. Every other file in the data dir
   // keeps its bytes and mode, none appears or disappears, and the store file
   // itself is the same file rather than a new one.
   const dataAfter = snapshotTree(w.dataDir)
   // The install log gains this run's lines.
-  const runtime = new Set([DAEMON_INFO_FILE, DB_FILE, `${DB_FILE}-shm`, `${DB_FILE}-wal`, 'install.json', join('logs', 'install.log')])
+  const runtime = new Set([DAEMON_INFO_FILE, 'daemon.token', DB_FILE, `${DB_FILE}-shm`, `${DB_FILE}-wal`, 'install.json', join('logs', 'install.log')])
   const outsideBin = Object.keys({ ...dataBefore, ...dataAfter }).filter((path) => path !== '.' && path !== 'bin' && !path.startsWith('bin/'))
   expect(outsideBin.filter((path) => dataAfter[path] === undefined)).toEqual([])
   for (const path of outsideBin) {

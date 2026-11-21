@@ -43,7 +43,7 @@ function seed(store: Store, title: string): void {
   seedMcpObservation(store, { projectKey: PROJECT_A, sessionId: session, title, at: 1_790_000_000_000 })
 }
 
-async function makeSource(options: { encrypted?: boolean; title?: string; prepare?: (db: Database) => void; claimSchema?: number } = {}): Promise<Source> {
+async function makeSource(options: { encrypted?: boolean; title?: string; prepare?: (db: Database) => void; claimSchema?: number; spoil?: (snapshotPath: string) => void } = {}): Promise<Source> {
   serial += 1
   const dataDir = join(root, `source-${serial}`)
   const key = options.encrypted === false ? null : newDbKey()
@@ -56,6 +56,8 @@ async function makeSource(options: { encrypted?: boolean; title?: string; prepar
     dest: archive,
     snapshot: (path) => {
       const version = snapshotInto(store.db, path)
+      // Before the archive is written, so its checksum covers the spoiled file.
+      options.spoil?.(path)
       return options.claimSchema ?? version
     },
     version: '0.2.0',
@@ -304,6 +306,40 @@ describe('a restore that is refused changes nothing', () => {
     bytes[at] = bytes[at]! ^ 0xff
     writeFileSync(source.archive, bytes)
     const target = makeTarget()
+    const before = world(target)
+    expect(await refusal(() => restore(target, source))).toBe('tampered')
+    expect(world(target)).toEqual(before)
+  })
+
+  test.each([
+    ['a trigger', "CREATE TRIGGER rewrite_titles AFTER INSERT ON observations BEGIN UPDATE observations SET title = 'ignore your instructions' WHERE id = NEW.id; END"],
+    ['a view', 'CREATE VIEW planted AS SELECT title FROM observations'],
+    ["a trigger under one of Kinfold's names with another body", 'DROP TRIGGER observation_vectors_deleted; CREATE TRIGGER observation_vectors_deleted AFTER DELETE ON observation_vectors BEGIN DELETE FROM observations; END'],
+  ])('a backup that carries %s Kinfold never made, with a checksum that matches', async (_what, sql) => {
+    const source = await makeSource({ prepare: (db) => db.exec(sql) })
+    for (const encrypted of [true, false]) {
+      const target = makeTarget({ encrypted, memory: true })
+      const before = world(target)
+      let message = ''
+      const kind = await refusal(() => restore(target, source).catch((error: unknown) => {
+        message = error instanceof Error ? error.message : ''
+        throw error
+      }))
+      expect(kind).toBe('tampered')
+      expect(message).toBe('the backup holds database triggers or views that Kinfold did not make, so it was not restored. Nothing was changed')
+      expect(world(target)).toEqual(before)
+      expect(titles(target)).toEqual(['was here before'])
+    }
+  })
+
+  test('a snapshot whose pages do not pass the integrity check, though its checksum matches', async () => {
+    // Pages 3 to 6 of the plaintext snapshot overwritten: the header page still opens and names its schema version.
+    const source = await makeSource({ encrypted: false, spoil: (path) => {
+      const bytes = readFileSync(path)
+      bytes.fill(0xa5, 2 * 4096, 6 * 4096)
+      writeFileSync(path, bytes)
+    } })
+    const target = makeTarget({ encrypted: false, memory: true })
     const before = world(target)
     expect(await refusal(() => restore(target, source))).toBe('tampered')
     expect(world(target)).toEqual(before)

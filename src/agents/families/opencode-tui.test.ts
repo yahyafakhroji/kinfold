@@ -115,7 +115,7 @@ test("the TUI part starts from now, then toasts each new OpenCode prompt's line 
       return Response.json(answers.shift() ?? { cursor: 6, rows: [] })
     },
   })
-  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: server.port }))
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: server.port }))
   writeFileSync(join(dataDir, 'daemon.token'), 'tok-123\n')
   try {
     answers.push({ cursor: 6, rows: [
@@ -146,6 +146,25 @@ test("the TUI part starts from now, then toasts each new OpenCode prompt's line 
   }
 })
 
+test('the TUI part sends the token to nobody when daemon.json names a process that is gone', async () => {
+  const dataDir = join(world.root, 'data-crashed')
+  mkdirSync(dataDir, { recursive: true })
+  let asked = 0
+  const squatter = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => (asked += 1, Response.json({ cursor: 1, rows: [] })) })
+  const gone = Bun.spawnSync([process.execPath, '--version'])
+  expect(gone.exitCode).toBe(0)
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: gone.pid, port: squatter.port }))
+  writeFileSync(join(dataDir, 'daemon.token'), 'tok')
+  try {
+    const part = await loadPart(dataDir, 'part-crashed')
+    await settle(150)
+    part.stop()
+    expect(asked).toBe(0)
+  } finally {
+    await squatter.stop(true)
+  }
+})
+
 test('with the recall line off, or with no daemon, the TUI part shows nothing and does not throw', async () => {
   const dataDir = join(world.root, 'data-off')
   mkdirSync(dataDir, { recursive: true })
@@ -156,7 +175,7 @@ test('with the recall line off, or with no daemon, the TUI part shows nothing an
 
   let answers: unknown[] = [{ cursor: 1, rows: [] }, { cursor: 2, rows: [{ line: 'kinfold · nothing recalled', hostSessionId: 's' }] }]
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json(answers.shift() ?? { cursor: 2, rows: [] }) })
-  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: server.port }))
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: server.port }))
   writeFileSync(join(dataDir, 'daemon.token'), 'tok')
   writeFileSync(join(dataDir, 'display.json'), JSON.stringify({ showRecall: false }))
   try {
@@ -188,7 +207,7 @@ test("the TUI part toasts a new session's list once, and holds the first prompt'
       return Response.json(answers.shift() ?? { cursor: 5, rows: [], startCursor: 11, starts: [] })
     },
   })
-  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: server.port }))
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: server.port }))
   writeFileSync(join(dataDir, 'daemon.token'), 'tok')
   try {
     const part = await loadPart(dataDir, 'part-starts')
@@ -220,7 +239,7 @@ test('a toast still waiting behind a list is dropped when the TUI part stops', a
     { cursor: 2, rows: [{ line: 'kinfold · nothing recalled', hostSessionId: 's' }], startCursor: 2, starts: [{ id: 2, hostSessionId: 's', list: 'kinfold · repo · 1 memory' }] },
   ]
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json(answers.shift() ?? { cursor: 2, rows: [], startCursor: 2, starts: [] }) })
-  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: server.port }))
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: server.port }))
   writeFileSync(join(dataDir, 'daemon.token'), 'tok')
   try {
     const part = await loadPart(dataDir, 'part-stop')
@@ -240,7 +259,7 @@ test('the TUI part toasts an update notice once, with the recall line on or off,
   const update = { version: '0.6.0', message: 'Kinfold 0.6.0 is ready · 3 changes · kinfold update to install' }
   const answers: unknown[] = [{ cursor: 1, rows: [], update }, { cursor: 1, rows: [], update }, { cursor: 1, rows: [], update: { version: '0.7.0', message: 'Kinfold 0.7.0 is ready' } }]
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json(answers.shift() ?? { cursor: 1, rows: [], update: null }) })
-  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: server.port }))
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: server.port }))
   writeFileSync(join(dataDir, 'daemon.token'), 'tok\n')
   writeFileSync(join(dataDir, 'display.json'), JSON.stringify({ showRecall: false }))
   try {

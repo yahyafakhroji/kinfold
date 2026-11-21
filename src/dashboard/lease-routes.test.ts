@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -114,13 +115,18 @@ test('lease routes take the token only, and refuse a malformed id or mode', asyn
   expect((await rig.bearer('GET', `/dashboard/lease/${LEASE}`)).status).toBe(405)
 })
 
-async function claim(options: { bare?: boolean } = {}): Promise<Response> {
-  return rig.page('POST', '/dashboard/claim', options)
+const CLAIM = 'c'.repeat(43)
+const digestOf = (secret: string): string => createHash('sha256').update(secret).digest('hex')
+const offer = (lease: string = LEASE, secret: string = CLAIM): Promise<Response> => rig.bearer('POST', '/dashboard/offer', { lease, claim: digestOf(secret) })
+
+async function claim(options: { bare?: boolean; secret?: string | null } = {}): Promise<Response> {
+  const secret = options.secret === undefined ? CLAIM : options.secret
+  return rig.page('POST', '/dashboard/claim', { ...(options.bare === true ? { bare: true } : {}), ...(secret === null ? {} : { body: { claim: secret } }) })
 }
 
-test('the command offers a sign-in with the token; the page claims it once, with no secret in any URL', async () => {
+test('the command offers a sign-in with the token and its secret\'s digest; the page claims it once with the secret', async () => {
   await rig.bearer('PUT', `/dashboard/lease/${LEASE}`, { mode: 'live' })
-  const offered = await rig.bearer('POST', '/dashboard/offer', { lease: LEASE })
+  const offered = await offer()
   expect(offered.status).toBe(200)
   expect(await offered.json()).toEqual({ expiresInMs: 60_000 })
   const claimed = await claim()
@@ -132,22 +138,38 @@ test('the command offers a sign-in with the token; the page claims it once, with
   expect(again.headers.get('set-cookie')).toBeNull()
 })
 
-test('a claim needs our Origin and header; an offer needs the token and a live lease', async () => {
+test('a local program that sends our Origin and header but not the secret gets no session, and the real page still signs in', async () => {
   await rig.bearer('PUT', `/dashboard/lease/${LEASE}`, { mode: 'live' })
-  await rig.bearer('POST', '/dashboard/offer', { lease: LEASE })
+  await offer()
+  // What `curl -H 'Origin: ...' -H 'x-sam-request: 1'` could send while the offer waits.
+  for (const secret of [null, 'd'.repeat(43), digestOf(CLAIM), '', 'short']) {
+    const taken = await claim({ secret })
+    expect(taken.status).toBe(401)
+    expect(taken.headers.get('set-cookie')).toBeNull()
+  }
+  expect((await rig.page('POST', '/dashboard/claim', { body: { claim: CLAIM, extra: 1 } })).status).toBe(401)
+  expect(rig.logs.join('\n')).not.toContain(CLAIM)
+  expect((await claim()).status).toBe(204)
+})
+
+test('a claim needs our Origin and header; an offer needs the token, a live lease and a digest', async () => {
+  await rig.bearer('PUT', `/dashboard/lease/${LEASE}`, { mode: 'live' })
+  await offer()
   expect((await claim({ bare: true })).status).toBe(403)
-  expect((await rig.page('POST', '/dashboard/claim', { headers: { origin: 'https://evil.example' } })).status).toBe(403)
+  expect((await rig.page('POST', '/dashboard/claim', { headers: { origin: 'https://evil.example' }, body: { claim: CLAIM } })).status).toBe(403)
   expect((await rig.page('GET', '/dashboard/claim')).status).toBe(405)
   expect((await claim()).status).toBe(204)
-  expect((await rig.page('POST', '/dashboard/offer', { body: { lease: LEASE } })).status).toBe(401)
-  const closed = await rig.bearer('POST', '/dashboard/offer', { lease: 'M'.repeat(43) })
+  expect((await rig.page('POST', '/dashboard/offer', { body: { lease: LEASE, claim: digestOf(CLAIM) } })).status).toBe(401)
+  // The body an older command sends, the secret itself, and a short digest: none is an offer.
+  for (const body of [{ lease: LEASE }, { lease: LEASE, claim: CLAIM }, { lease: LEASE, claim: digestOf(CLAIM).slice(2) }]) expect((await rig.bearer('POST', '/dashboard/offer', body)).status).toBe(400)
+  const closed = await offer('M'.repeat(43))
   expect(closed.status).toBe(409)
   expect(((await closed.json()) as { error: string }).error).toBe(CLOSED_MESSAGE)
 })
 
 test('a claim after the command ended (Ctrl-C) is refused', async () => {
   await rig.bearer('PUT', `/dashboard/lease/${LEASE}`, { mode: 'live' })
-  await rig.bearer('POST', '/dashboard/offer', { lease: LEASE })
+  await offer()
   await rig.bearer('DELETE', `/dashboard/lease/${LEASE}`)
   expect((await claim()).status).toBe(401)
 })

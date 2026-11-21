@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { runKinfold } from '../cli/kinfold'
 import { startDaemon } from '../daemon/daemon'
 import type { CommandRequest } from '../install/env'
 import { parseDashboardArgs } from '../install/args'
 import { EXIT_USAGE } from '../install/install'
 import { type FakeWorld, createWorld } from '../install/test-support'
-import { runDashboard } from './cli'
+import { OPEN_FILE, SIGN_IN_GRACE_MS, runDashboard } from './cli'
 import { CLOSED_MESSAGE } from './routes'
 
 let world: FakeWorld
@@ -44,31 +46,51 @@ function signIn(port: number, code: string): Promise<Response> {
 const pageGet = (port: number, path: string, cookie: string): Promise<Response> =>
   fetch(`http://127.0.0.1:${port}${path}`, { headers: { cookie }, redirect: 'manual' })
 
-function claim(port: number): Promise<Response> {
-  return fetch(`http://127.0.0.1:${port}/dashboard/claim`, { method: 'POST', headers: { origin: `http://127.0.0.1:${port}`, 'x-sam-request': '1' } })
+/** A claim as the login page sends it; without a secret, as any other local program could. */
+function claim(port: number, secret?: string): Promise<Response> {
+  return fetch(`http://127.0.0.1:${port}/dashboard/claim`, {
+    method: 'POST',
+    headers: { origin: `http://127.0.0.1:${port}`, 'x-sam-request': '1', 'content-type': 'application/json' },
+    body: JSON.stringify(secret === undefined ? {} : { claim: secret }),
+  })
 }
 
-const OPENERS: ReadonlyArray<readonly [NodeJS.Platform, (url: string) => string[]]> = [
-  ['darwin', (url) => ['open', url]],
-  ['linux', (url) => ['xdg-open', url]],
-  ['win32', (url) => ['rundll32', 'url.dll,FileProtocolHandler', url]],
+const CLAIM_URL = /http:\/\/127\.0\.0\.1:(\d+)\/dashboard\/login#claim=([A-Za-z0-9_-]{43})/
+const openFile = (): string => join(world.dataDir, OPEN_FILE)
+/** The claim secret in the page the opener was given, as the browser it opens would read it. */
+function secretInOpenFile(port: number): string {
+  const match = CLAIM_URL.exec(readFileSync(openFile(), 'utf8'))
+  expect(match?.[1]).toBe(String(port))
+  return match![2]!
+}
+
+const OPENERS: ReadonlyArray<readonly [NodeJS.Platform, (target: string) => string[]]> = [
+  ['darwin', (target) => ['open', target]],
+  ['linux', (target) => ['xdg-open', target]],
+  ['win32', (target) => ['rundll32', 'url.dll,FileProtocolHandler', target]],
 ]
 
 for (const [platform, argvFor] of OPENERS) {
-  test(`${platform}: the opener gets the plain login address only; the page claims the sign-in once, and Ctrl-C signs out and closes the dashboard`, async () => {
+  test(`${platform}: the opener gets a private file, never the secret; the page claims the sign-in once with it, and Ctrl-C signs out and closes the dashboard`, async () => {
     const port = startWorldDaemon()
     const opened: CommandRequest[] = []
     const stop = new AbortController()
-    const env = { ...world.env, platform, sleep: tick, run: async (request: CommandRequest) => (opened.push(request), { exitCode: 0, stdout: '' }) }
+    // A fixed clock: the late fallback, which prints the address, has its own test.
+    const env = { ...world.env, platform, now: () => 0, sleep: tick, run: async (request: CommandRequest) => (opened.push(request), { exitCode: 0, stdout: '' }) }
     const running = runDashboard(env, { command: 'dashboard', print: false, close: false }, { stop: stop.signal })
 
     await until(() => opened.length === 1, 'the browser to open')
-    const plain = `http://127.0.0.1:${port}/dashboard/login`
-    expect(opened[0]!.argv).toEqual(argvFor(plain))
+    expect(opened[0]!.argv).toEqual(argvFor(openFile()))
     expect(opened[0]!.argv.some((arg) => ANY_CODE.test(arg))).toBe(false)
-    const signedIn = await claim(port)
+    if (process.platform !== 'win32') expect(statSync(openFile()).mode & 0o777).toBe(0o600)
+    const secret = secretInOpenFile(port)
+    // Another local program asking first, with our Origin and header but no secret, gets nothing and spoils nothing.
+    const stolen = await claim(port)
+    expect(stolen.status).toBe(401)
+    expect(stolen.headers.get('set-cookie')).toBeNull()
+    const signedIn = await claim(port, secret)
     expect(signedIn.status).toBe(204)
-    expect((await claim(port)).status).toBe(401)
+    expect((await claim(port, secret)).status).toBe(401)
     const cookie = (signedIn.headers.get('set-cookie') ?? '').split(';')[0]!
     expect((await pageGet(port, '/data/size', cookie)).status).toBe(200)
     await until(() => world.out.some((line) => line.includes('GET /data/size 200')), 'the request line')
@@ -81,9 +103,31 @@ for (const [platform, argvFor] of OPENERS) {
     expect(after.status).toBe(401)
     expect(await after.json()).toEqual({ error: CLOSED_MESSAGE, closed: true })
     expect(world.out.some((line) => ANY_CODE.test(line))).toBe(false)
+    expect(existsSync(openFile())).toBe(false)
     world.out.length = 0
   })
 }
+
+test('a browser that was opened but does not sign in gets the address printed once, after a few seconds', async () => {
+  const port = startWorldDaemon()
+  const stop = new AbortController()
+  let at = 0
+  let opened = false
+  const env = { ...world.env, now: () => at, sleep: tick, run: async () => ((opened = true), { exitCode: 0, stdout: '' }) }
+  const running = runDashboard(env, { command: 'dashboard', print: false, close: false }, { stop: stop.signal })
+  await until(() => opened, 'the browser to open')
+  for (let i = 0; i < 5; i += 1) await tick()
+  expect(world.out.some((line) => CLAIM_URL.test(line))).toBe(false)
+  at = SIGN_IN_GRACE_MS
+  await until(() => world.out.some((line) => line.startsWith('the browser has not signed in yet')), 'the late fallback line')
+  const printed = world.out.filter((line) => CLAIM_URL.test(line))
+  expect(printed).toEqual([`http://127.0.0.1:${port}/dashboard/login#claim=${secretInOpenFile(port)}`])
+  expect((await claim(port, CLAIM_URL.exec(printed[0]!)![2]!)).status).toBe(204)
+  for (let i = 0; i < 5; i += 1) await tick()
+  expect(world.out.filter((line) => CLAIM_URL.test(line))).toHaveLength(1)
+  stop.abort()
+  expect(await running).toBe(0)
+})
 
 test('a claim after the command ended is refused, even if its offer was never taken', async () => {
   const port = startWorldDaemon()
@@ -92,22 +136,27 @@ test('a claim after the command ended is refused, even if its offer was never ta
   const env = { ...world.env, sleep: tick, run: async () => ((opened = true), { exitCode: 0, stdout: '' }) }
   const running = runDashboard(env, { command: 'dashboard', print: false, close: false }, { stop: stop.signal })
   await until(() => opened, 'the browser to open')
+  const secret = secretInOpenFile(port)
   stop.abort()
   await running
-  expect((await claim(port)).status).toBe(401)
+  expect((await claim(port, secret)).status).toBe(401)
+  expect(existsSync(openFile())).toBe(false)
 })
 
-test('when no browser can be opened the command prints the plain address to open within 60 s, and nothing secret', async () => {
+test('when no browser can be opened the command prints the address with the claim secret in its fragment, to open within 60 s', async () => {
   const port = startWorldDaemon()
   const stop = new AbortController()
   const env = { ...world.env, platform: 'darwin' as const, sleep: tick, run: async () => ({ exitCode: 1, stdout: '' }) }
   const running = runDashboard(env, { command: 'dashboard', print: false, close: false }, { stop: stop.signal })
   await until(() => world.out.some((line) => line.startsWith('could not open a browser')), 'the fallback line')
-  expect(world.out).toContain(`http://127.0.0.1:${port}/dashboard/login`)
-  expect((await claim(port)).status).toBe(204)
+  const printed = world.out.filter((line) => CLAIM_URL.test(line))
+  expect(printed).toHaveLength(1)
+  expect(printed[0]).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${port}/dashboard/login#claim=[A-Za-z0-9_-]{43}$`))
+  expect(existsSync(openFile())).toBe(false)
+  expect((await claim(port)).status).toBe(401)
+  expect((await claim(port, CLAIM_URL.exec(printed[0]!)![2]!)).status).toBe(204)
   stop.abort()
   expect(await running).toBe(0)
-  expect(world.out.some((line) => ANY_CODE.test(line))).toBe(false)
 })
 
 test('a daemon that stops answering is waited for, and the lease is held again when it is back', async () => {

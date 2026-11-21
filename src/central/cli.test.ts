@@ -8,7 +8,7 @@ import { insertObservation } from '../store/observer-store'
 import { openStore } from '../store/db'
 import { upsertProject, upsertSession } from '../store/writes'
 import { parseCentralArgs, runCentralCommand } from './cli'
-import { listDevices } from './devices'
+import { addDevice, listDevices } from './devices'
 import { centralModeOf } from './mode'
 import type { Tailscale, TailscaleIdentity } from './tailscale'
 
@@ -45,13 +45,16 @@ test('the commands parse, with the hub port defaulting and taken from host:port 
   expect(parse('central serve')).toEqual({ ok: true, value: { command: 'serve', port: 37_812, off: false } })
   expect(parse('central serve --port 40000')).toEqual({ ok: true, value: { command: 'serve', port: 40_000, off: false } })
   expect(parse('central serve --off')).toEqual({ ok: true, value: { command: 'serve', port: 37_812, off: true } })
-  expect(parse('central join mini KF-4821-9TQX')).toEqual({ ok: true, value: { command: 'join', hub: 'mini', port: 37_812, code: 'KF-4821-9TQX' } })
-  expect(parse('central join 100.64.0.2:40000 KF-4821-9TQX')).toEqual({ ok: true, value: { command: 'join', hub: '100.64.0.2', port: 40_000, code: 'KF-4821-9TQX' } })
-  expect(parse('central join [fd7a:115c:a1e0::2]:40000 KF-4821-9TQX')).toEqual({ ok: true, value: { command: 'join', hub: 'fd7a:115c:a1e0::2', port: 40_000, code: 'KF-4821-9TQX' } })
+  expect(parse('central join mini KF-4821-9TQX')).toEqual({ ok: true, value: { command: 'join', hub: 'mini', port: 37_812, code: 'KF-4821-9TQX', codeInArgs: true } })
+  expect(parse('central join 100.64.0.2:40000 KF-4821-9TQX')).toEqual({ ok: true, value: { command: 'join', hub: '100.64.0.2', port: 40_000, code: 'KF-4821-9TQX', codeInArgs: true } })
+  expect(parse('central join [fd7a:115c:a1e0::2]:40000 KF-4821-9TQX')).toEqual({ ok: true, value: { command: 'join', hub: 'fd7a:115c:a1e0::2', port: 40_000, code: 'KF-4821-9TQX', codeInArgs: true } })
+  // The code is a secret, so the command is given without it and asks.
+  expect(parse('central join mini')).toEqual({ ok: true, value: { command: 'join', hub: 'mini', port: 37_812, code: null } })
+  expect(parse('central join mini --port 40001')).toEqual({ ok: true, value: { command: 'join', hub: 'mini', port: 40_001, code: null } })
   expect(parse('central join mini.tail.ts.net KF-4821-9TQX --port 40001')).toMatchObject({ ok: true, value: { hub: 'mini.tail.ts.net', port: 40_001 } })
   expect(parse('central remove laptop')).toEqual({ ok: true, value: { command: 'remove', device: 'laptop' } })
   expect(parse('central import --project github.com/a/b')).toEqual({ ok: true, value: { command: 'import', project: 'github.com/a/b' } })
-  for (const bad of ['central', 'central join', 'central join mini', 'central remove', 'central import', 'central nope', 'central serve --port 80', 'central join mini;rm KF-1']) {
+  for (const bad of ['central', 'central join', 'central remove', 'central import', 'central nope', 'central serve --port 80', 'central join mini;rm KF-1']) {
     expect(parse(bad)?.ok).toBe(false)
   }
 })
@@ -61,7 +64,9 @@ test('serve makes this machine the hub, restarts the service and shows a code wi
   expect(centralModeOf(hubWorld.dataDir)).toEqual({ role: 'hub', port: 37_812 })
   expect(existsSync(join(hubWorld.dataDir, 'central', 'hub-key.pem'))).toBe(true)
   const code = hubWorld.out.find((line) => line.startsWith('Code: '))!.slice('Code: '.length, 'Code: '.length + 12)
-  expect(hubWorld.out).toContain(`On the device: kinfold central join mini.tail1234.ts.net ${code}`)
+  expect(hubWorld.out).toContain('On the device: kinfold central join mini.tail1234.ts.net   (it asks for the code)')
+  // The code is shown once, on its own line, never inside a command to paste: a command line is readable by other programs.
+  expect(hubWorld.out.filter((line) => line.includes(code))).toEqual([`Code: ${code} (valid 10 minutes, for one device)`])
   expect(hubWorld.out).toContain('Restarted the FakeService to open the hub port.')
   hubWorld.out.length = 0
   expect(await runCentralCommand(hubWorld.env, { command: 'invite' }, { tailscale })).toBe(0)
@@ -142,6 +147,37 @@ test('join pairs, imports the projects the hub lacks, keeps the hub\'s version o
   kept.db.close()
 })
 
+test('join asks for the code, or reads it from stdin in a pipe, and warns when it was put on the command line', async () => {
+  hub = startDaemon({ dataDir: hubWorld.dataDir, port: 0, fallbackDrainMs: 60_000, version: '0.6.1', log: () => {}, central: { mode: { role: 'hub', port: 0 }, tailscale, allowLoopback: true } })
+  await hub.central.hub!.ready
+  const port = Number(hub.central.hub!.state().listening!.split(':').at(-1))
+  setCentralMode(hubWorld.dataDir, { role: 'hub', port })
+  const deps = { version: '0.6.0', allowLoopback: true }
+  const asked: string[] = []
+  const withIo = (io: Partial<typeof deviceWorld.env.io>) => ({ ...deviceWorld.env, io: { ...deviceWorld.env.io, ...io } })
+  const WARNING = 'The code was on the command line, where other programs on this machine can read it. Next time run kinfold central join <hub> and type the code when asked.'
+
+  // Nothing typed and nothing piped: no request is made.
+  expect(await runCentralCommand(withIo({ interactive: false, readStdin: async () => '\n' }), { command: 'join', hub: '127.0.0.1', port, code: null }, deps)).toBe(1)
+  expect(deviceWorld.out.at(-1)).toBe('No code given. Run kinfold central join <hub> and type the code the hub shows, or pipe it in.')
+  // Typed at the prompt, echo off, wrong: the hub refuses it.
+  const typedWrong = withIo({ interactive: true, askSecret: async (question) => (asked.push(question), 'KF-0000-0000') })
+  expect(await runCentralCommand(typedWrong, { command: 'join', hub: '127.0.0.1', port, code: null }, deps)).toBe(1)
+  expect(asked).toEqual(['Code from the hub (KF-XXXX-XXXX): '])
+  expect(deviceWorld.out).not.toContain(WARNING)
+  // Piped in, right.
+  await runCentralCommand(hubWorld.env, { command: 'invite' }, { tailscale })
+  const code = hubWorld.out.filter((line) => line.startsWith('Code: ')).at(-1)!.slice(6, 18)
+  expect(await runCentralCommand(withIo({ interactive: false, readStdin: async () => `${code}\n` }), { command: 'join', hub: '127.0.0.1', port, code: null }, deps)).toBe(0)
+  expect(deviceWorld.out).not.toContain(WARNING)
+  expect(await runCentralCommand(deviceWorld.env, { command: 'leave' }, deps)).toBe(0)
+  // The old form still pairs, and says why not to use it.
+  await runCentralCommand(hubWorld.env, { command: 'invite' }, { tailscale })
+  const next = hubWorld.out.filter((line) => line.startsWith('Code: ')).at(-1)!.slice(6, 18)
+  expect(await runCentralCommand(deviceWorld.env, { command: 'join', hub: '127.0.0.1', port, code: next, codeInArgs: true }, deps)).toBe(0)
+  expect(deviceWorld.out).toContain(WARNING)
+})
+
 test('join refuses a wrong code and saves nothing', async () => {
   hub = startDaemon({ dataDir: hubWorld.dataDir, port: 0, fallbackDrainMs: 60_000, version: '0.6.1', log: () => {}, central: { mode: { role: 'hub', port: 0 }, tailscale, allowLoopback: true } })
   await hub.central.hub!.ready
@@ -151,6 +187,15 @@ test('join refuses a wrong code and saves nothing', async () => {
   expect(await runCentralCommand(deviceWorld.env, { command: 'join', hub: '127.0.0.1', port, code: 'KF-0000-0000' }, { version: '0.6.0', allowLoopback: true })).toBe(1)
   expect(deviceWorld.out.at(-1)).toBe('the hub refused the code: wrong code')
   expect(centralModeOf(deviceWorld.dataDir)).toBeNull()
+})
+
+test('a name stored before names were checked is printed without its control and text-direction characters', async () => {
+  setCentralMode(hubWorld.dataDir, { role: 'hub', port: 37_812 })
+  addDevice(hubWorld.dataDir, { id: 'dev-9', name: 'lap\u009b2J\u202etop', publicKey: 'k', nodeId: 'n', userId: 'u', pairedAt: Date.UTC(2026, 10, 1) })
+  expect(await runCentralCommand(hubWorld.env, { command: 'devices' })).toBe(0)
+  expect(hubWorld.out.at(-1)).toBe('lap2Jtop  dev-9  paired 2026-11-01')
+  expect(await runCentralCommand(hubWorld.env, { command: 'remove', device: 'dev-9' })).toBe(0)
+  expect(hubWorld.out.at(-1)).toBe('Removed lap2Jtop (dev-9); it can no longer read or capture.')
 })
 
 test('devices and remove manage the paired list on the hub only', async () => {

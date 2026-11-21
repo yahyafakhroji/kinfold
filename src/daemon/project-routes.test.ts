@@ -20,7 +20,7 @@ beforeEach(() => {
 afterEach(() => temp.cleanup())
 
 const deps = (device = false) => ({ db: temp.store.db, now: () => T0 + 1, log: (line: string) => logs.push(line), device })
-const body = (value: unknown) => async () => value
+const body = (value: unknown) => async () => ({ ok: true as const, value })
 const get = (path: string, device = false) => projectRoute('GET', new URL(`http://x${path}`), body(undefined), deps(device))
 const post = (path: string, value: unknown, device = false) => projectRoute('POST', new URL(`http://x${path}`), body(value), deps(device))
 

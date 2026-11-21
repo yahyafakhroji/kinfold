@@ -7,6 +7,7 @@
 // the member through sqlite3mc (src/install/sqlite3mc-install.ts), which
 // allows extensions, so no other SQLite is needed.
 
+import { readBodyCapped } from '../fs/capped-body'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
@@ -78,8 +79,13 @@ export async function installVec0(env: InstallEnv, path: string, asset: Vec0Asse
     throw new Error(`could not download sqlite-vec (${error instanceof Error ? error.name : 'error'}); nothing was written`)
   }
   if (!response.ok) throw new Error(`the sqlite-vec download answered ${response.status}; nothing was written`)
-  const tarball = new Uint8Array(await response.arrayBuffer())
-  if (tarball.length > MAX_VEC0_TARBALL_BYTES) throw new Error('the sqlite-vec download is far larger than the release; nothing was written')
+  let tarball: Uint8Array<ArrayBuffer> | null
+  try {
+    tarball = await readBodyCapped(response, MAX_VEC0_TARBALL_BYTES)
+  } catch (error: unknown) {
+    throw new Error(`could not download sqlite-vec (${error instanceof Error ? error.name : 'error'}); nothing was written`)
+  }
+  if (tarball === null) throw new Error('the sqlite-vec download is far larger than the release; nothing was written')
   if (sha256(tarball) !== asset.tarballSha256) throw new Error('the sqlite-vec download does not match the pinned sha256; nothing was written')
   const member = tarMember(Bun.gunzipSync(tarball), asset.member)
   if (member === null) throw new Error(`the sqlite-vec tarball has no ${asset.member}; nothing was written`)

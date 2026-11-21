@@ -24,7 +24,7 @@ import type { InstallEnv } from '../env'
 import { keyStoreOf } from '../key-store-choice'
 import { ChoiceError, type ObserverFlag } from '../observer-choice'
 import { serviceOf } from '../service/control'
-import { type InstallChannel, currentChannel, readInstallRecord } from './record'
+import { DEFAULT_AUTO_UPDATE, type InstallChannel, currentChannel, readInstallRecord } from './record'
 import { isWired, overlapState, profileOf } from '../../agents/install-profiles'
 
 export interface SetupState {
@@ -216,7 +216,7 @@ export async function readSetupState(env: InstallEnv, options: SetupStateOptions
     // A configured service without the port key runs the daemon on its default port.
     port: service !== null && service.isConfigured() ? (service.configuredPort() ?? DEFAULT_PORT) : readDaemonInfo(dataDir).port,
     updateCheck: record?.updateCheck ?? true,
-    autoUpdate: record?.autoUpdate ?? true,
+    autoUpdate: record?.autoUpdate ?? DEFAULT_AUTO_UPDATE,
     beta: record?.beta === true,
     autoUpdateIntro: record?.autoUpdateIntro ?? false,
     channel: currentChannel(env, record),

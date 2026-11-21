@@ -66,9 +66,10 @@ export interface CentralRequest {
 }
 
 export type AuthFailure = 'unsigned' | 'unpaired' | 'clock' | 'bad-signature' | 'replay' | 'identity'
-export type AuthResult = { ok: true; deviceId: string; version: string } | { ok: false; status: 401 | 403; reason: AuthFailure }
+export type AuthRefusal = { ok: false; status: 401 | 403; reason: AuthFailure }
+export type AuthResult = { ok: true; deviceId: string; version: string } | AuthRefusal
 
-const refuse = (reason: AuthFailure): AuthResult => ({ ok: false, status: reason === 'identity' ? 403 : 401, reason })
+const refuse = (reason: AuthFailure): AuthRefusal => ({ ok: false, status: reason === 'identity' ? 403 : 401, reason })
 
 /** True when the node at `address` is the device's own node, owned by the hub's user. */
 export async function sameNode(deps: Pick<AuthDeps, 'hub' | 'whois'>, address: string, expectedNodeId: string | null): Promise<TailscaleIdentity | null> {
@@ -79,17 +80,47 @@ export async function sameNode(deps: Pick<AuthDeps, 'hub' | 'whois'>, address: s
   return expectedNodeId === null || node.nodeId === expectedNodeId ? node : null
 }
 
-export async function verifyCentralRequest(request: CentralRequest, deps: AuthDeps): Promise<AuthResult> {
-  const get = (name: string): string => request.headers.get(name) ?? ''
+interface SignedHeaders {
+  deviceId: string
+  time: number
+  nonce: string
+  signature: string
+  version: string
+}
+
+function readHeaders(headers: Headers): SignedHeaders | null {
+  const get = (name: string): string => headers.get(name) ?? ''
   const deviceId = get(HEADER.device)
   const timeText = get(HEADER.time)
   const nonce = get(HEADER.nonce)
   const signature = get(HEADER.signature)
   const version = get(HEADER.version)
-  if (!ID.test(deviceId) || !/^\d{13}$/.test(timeText) || !NONCE.test(nonce) || !SIGNATURE.test(signature) || !VERSION.test(version)) return refuse('unsigned')
+  if (!ID.test(deviceId) || !/^\d{13}$/.test(timeText) || !NONCE.test(nonce) || !SIGNATURE.test(signature) || !VERSION.test(version)) return null
+  return { deviceId, time: Number(timeText), nonce, signature, version }
+}
+
+/**
+ * What can be checked before a request's body is read: the headers' shape,
+ * that the device is paired, the clock, and that the sender is the device's
+ * own node (the lookup is cached). verifyCentralRequest checks all of it again
+ * with the body.
+ */
+export async function checkSender(headers: Headers, address: string, deps: AuthDeps): Promise<{ ok: true } | AuthRefusal> {
+  const read = readHeaders(headers)
+  if (read === null) return refuse('unsigned')
+  const device = findDevice(deps.dataDir, read.deviceId)
+  if (device === null) return refuse('unpaired')
+  if (Math.abs(deps.now() - read.time) > SKEW_MS) return refuse('clock')
+  if ((await sameNode(deps, address, device.nodeId)) === null) return refuse('identity')
+  return { ok: true }
+}
+
+export async function verifyCentralRequest(request: CentralRequest, deps: AuthDeps): Promise<AuthResult> {
+  const read = readHeaders(request.headers)
+  if (read === null) return refuse('unsigned')
+  const { deviceId, time, nonce, signature, version } = read
   const device = findDevice(deps.dataDir, deviceId)
   if (device === null) return refuse('unpaired')
-  const time = Number(timeText)
   if (Math.abs(deps.now() - time) > SKEW_MS) return refuse('clock')
   const signed = { method: request.method, path: request.path, deviceId, time, nonce, bodySha256: bodyHash(request.body) }
   if (!verifyRequest(device.publicKey, signed, signature)) return refuse('bad-signature')

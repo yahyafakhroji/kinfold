@@ -147,7 +147,20 @@ function readJson(name) {
 function endpoint() {
   const info = readJson('daemon.json');
   const token = (readText('daemon.token') ?? '').trim();
-  return info !== null && Number.isInteger(info.port) && token !== '' ? { port: info.port, token } : null;
+  return info !== null && Number.isInteger(info.port) && token !== '' && running(info.pid) ? { port: info.port, token } : null;
+}
+
+// False only when the system says no process has daemon.json's pid: files a crashed daemon left
+// name no daemon, so the token goes to nothing that has since taken the port. In a WSL distro the
+// file may be the Windows daemon's, whose pid means nothing there.
+function running(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || process.env.WSL_DISTRO_NAME) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== 'ESRCH';
+  }
 }
 
 // The recall line is a setting: display.json says whether to show it. Missing means shown.

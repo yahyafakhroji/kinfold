@@ -4,7 +4,10 @@
 // --print lease lasts 12 h or until `kinfold dashboard --close`. The daemon
 // token never reaches a browser: the command trades it for a one-time login
 // code (60 s, single use) under its lease, and the login page trades the code
-// for a session cookie (12 h). A session counts only while the lease it was
+// for a session cookie (12 h). The running command instead offers one sign-in
+// bound to a claim secret it made itself: the daemon is given only the
+// secret's SHA-256, and the page that was opened with the secret in its
+// address fragment claims the session with it (60 s, single use). A session counts only while the lease it was
 // made under is live. A lapse is not a revocation: the command that made the
 // id can renew it after a daemon restart longer than 15 s or a suspended
 // terminal, and its sessions count again; only the id's holder knows it.
@@ -15,7 +18,7 @@
 // lookup's timing says nothing about the secret itself, and every map is
 // capped so a stream of requests cannot grow it without bound.
 
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeFileAtomic } from '../fs/atomic'
@@ -128,13 +131,19 @@ export interface DashboardAuth {
   /** A new single-use code under a live lease, or null; the oldest outstanding code is dropped past the cap. */
   issueCode(lease: string): IssuedCode | null
   /**
-   * The running command offers one sign-in under its live lease, so the
-   * browser it opens at a plain address can claim it: no secret travels in a
-   * URL or a process's arguments. A new offer replaces the lease's older one.
+   * The running command offers one sign-in under its live lease, bound to the
+   * SHA-256 (hex) of a claim secret only it and the page it opens know. Null
+   * without a live lease or for a malformed digest. A new offer replaces the
+   * lease's older one.
    */
-  offerSignIn(lease: string): { expiresInMs: number } | null
-  /** The newest live offer becomes a session; null when none is left. Each offer is claimed once. */
-  claimSignIn(): string | null
+  offerSignIn(lease: string, claimDigest: string): { expiresInMs: number } | null
+  /**
+   * The live offer made for this claim secret becomes a session, once. Null
+   * for a wrong, used or expired secret, which leaves every offer as it was:
+   * a secret this long cannot be guessed, and dropping the offer on a wrong
+   * one would let any local process cancel the user's sign-in.
+   */
+  claimSignIn(claimSecret: string | null): string | null
   /** 'closed' when the session's own lease ended or lapsed, even while another lease keeps the dashboard open. */
   sessionState(secret: string | null): SessionState
   /** The new session secret, or null for a wrong, used or expired code or a lease that ended. The code is gone either way. */
@@ -166,8 +175,8 @@ const without = <V>(entries: ReadonlyMap<string, V>, drop: (key: string, value: 
 export function createDashboardAuth(now: () => number = Date.now, store: SessionStore = memoryStore): DashboardAuth {
   const saved = store.load()
   let codes = new Map<string, { expiresAt: number; lease: string }>()
-  // Keyed by lease, newest last; holds no secret, since claiming one is what makes the session secret.
-  let offers = new Map<string, { expiresAt: number }>()
+  // Keyed by lease, newest last; holds the claim secret's digest, never the secret.
+  let offers = new Map<string, { expiresAt: number; claimDigest: Buffer }>()
   // Sessions a released lease ended, kept until they would have expired so their page can say the dashboard closed. Memory only.
   let closedSessions = new Map<string, { expiresAt: number }>()
   let sessions = without(saved.sessions, (_, record) => record.expiresAt <= now())
@@ -230,16 +239,20 @@ export function createDashboardAuth(now: () => number = Date.now, store: Session
       if (issued === undefined || issued.expiresAt <= now() || !leaseLive(issued.lease)) return null
       return startSession(issued.lease)
     },
-    offerSignIn: (lease) => {
-      if (!leaseLive(lease)) return null
-      offers = new Map([...without(offers, (other, offer) => other === lease || offer.expiresAt <= now()), [lease, { expiresAt: now() + PENDING_SIGN_IN_TTL_MS }]])
+    offerSignIn: (lease, claimDigest) => {
+      if (!leaseLive(lease) || !DIGEST_PATTERN.test(claimDigest)) return null
+      const offer = { expiresAt: now() + PENDING_SIGN_IN_TTL_MS, claimDigest: Buffer.from(claimDigest, 'hex') }
+      offers = new Map([...without(offers, (other, old) => other === lease || old.expiresAt <= now()), [lease, offer]])
       return { expiresInMs: PENDING_SIGN_IN_TTL_MS }
     },
-    claimSignIn: () => {
-      const live = [...offers].filter(([lease, offer]) => offer.expiresAt > now() && leaseLive(lease))
-      const newest = live.at(-1)
-      offers = new Map(live.slice(0, -1))
-      return newest === undefined ? null : startSession(newest[0])
+    claimSignIn: (claimSecret) => {
+      offers = without(offers, (lease, offer) => offer.expiresAt <= now() || !leaseLive(lease))
+      if (!valid(claimSecret)) return null
+      const given = createHash('sha256').update(claimSecret).digest()
+      const claimed = [...offers].find(([, offer]) => timingSafeEqual(offer.claimDigest, given))
+      if (claimed === undefined) return null
+      offers = without(offers, (lease) => lease === claimed[0])
+      return startSession(claimed[0])
     },
     sessionState: (secret) => {
       if (!valid(secret)) return 'none'

@@ -70,12 +70,18 @@ export function spaceForSettings(settings: EmbeddingSettings): VectorSpace | nul
   return { model: `${LOCAL_LLM_PREFIX}${settings.llmModel}`, dims: settings.llmDims }
 }
 
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
+
 const isLoopbackV4 = (host: string): boolean => {
   const parts = host.split('.')
   return parts.length === 4 && parts[0] === '127' && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
 }
 
-/** http(s) on 127.0.0.0/8, localhost or ::1, with no user name or password. */
+/**
+ * http(s) on 127.0.0.0/8, localhost or ::1, with no user name or password and
+ * no query or fragment: /embeddings is added to the path, and the address is
+ * named in errors and logs, where a `?api_key=` would be a secret.
+ */
 export function isLoopbackUrl(value: string): boolean {
   let url: URL
   try {
@@ -85,6 +91,7 @@ export function isLoopbackUrl(value: string): boolean {
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
   if (url.username !== '' || url.password !== '') return false
+  if (url.search !== '' || url.hash !== '' || value.includes('?') || value.includes('#')) return false
   const host = url.hostname
   return host === 'localhost' || host === '[::1]' || isLoopbackV4(host)
 }
@@ -105,7 +112,8 @@ export function parseEmbeddingSettings(body: unknown): Parsed<EmbeddingSettings>
   if (typeof llmUrl !== 'string' || llmUrl.length > MAX_URL_CHARS || !isLoopbackUrl(llmUrl)) {
     return { ok: false, error: 'llmUrl must be an http address on this machine (127.0.0.1, localhost or ::1)' }
   }
-  if (typeof llmModel !== 'string' || llmModel.trim() === '' || llmModel.length > MAX_MODEL_CHARS) return { ok: false, error: 'llmModel must be a non-empty model name' }
+  // The model names the vector space in the daemon log, so it may not carry a line break or another control character.
+  if (typeof llmModel !== 'string' || llmModel.trim() === '' || llmModel.length > MAX_MODEL_CHARS || CONTROL_CHARS.test(llmModel)) return { ok: false, error: 'llmModel must be a non-empty model name' }
   if (llmDims !== undefined && llmDims !== null && !(Number.isInteger(llmDims) && (llmDims as number) >= 1 && (llmDims as number) <= MAX_LLM_DIMS)) {
     return { ok: false, error: `llmDims must be an integer from 1 to ${MAX_LLM_DIMS}` }
   }

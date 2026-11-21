@@ -113,17 +113,24 @@ export const UPDATE_LEVELS = ['off', 'notify', 'patch'] as const
 /** off: no checks. notify: check daily and tell. patch: patch releases install themselves; anything bigger is downloaded and offered. */
 export type UpdateLevel = (typeof UPDATE_LEVELS)[number]
 
+/** A new install's level, and the auto-update switch that goes with it. */
+export const DEFAULT_UPDATE_LEVEL: UpdateLevel = 'notify'
+export const DEFAULT_AUTO_UPDATE = false
+
 export function isUpdateLevel(value: unknown): value is UpdateLevel {
   return typeof value === 'string' && (UPDATE_LEVELS as readonly string[]).includes(value)
 }
 
 /**
  * The level the two older switches spell: the check off is off, auto-update
- * off is notify, else patch. No record reads as the default, patch. They stay
- * the saved form so an older program reads the same choice.
+ * off is notify, else patch. No record reads as the default, notify: a release
+ * is checked only against the checksum list published beside it, which whoever
+ * can publish a release can also write, so until releases are signed nothing
+ * installs by itself unless the user chose that. They stay the saved form so
+ * an older program reads the same choice.
  */
 export function updateLevel(record: Pick<InstallRecord, 'updateCheck' | 'autoUpdate'> | null): UpdateLevel {
-  if (record === null) return 'patch'
+  if (record === null) return DEFAULT_UPDATE_LEVEL
   return !record.updateCheck ? 'off' : record.autoUpdate ? 'patch' : 'notify'
 }
 

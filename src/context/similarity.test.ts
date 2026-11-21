@@ -39,3 +39,9 @@ test('empty titles never merge', () => {
   expect(jaccard(titleTokens(''), titleTokens(''))).toBe(0)
   expect(jaccard(titleTokens('the of'), titleTokens('a an'))).toBe(0)
 })
+
+test('words that name Object.prototype members are plain tokens, not a crash', () => {
+  expect(titleTokens('Fix constructor injection in UserService')).toEqual(new Set(['fix', 'constructor', 'injection', 'userservice']))
+  for (const title of ['constructor', 'tostring', '__proto__', 'valueOf hasOwnProperty']) expect(() => titleTokens(title)).not.toThrow()
+  expect(titleTokens('__proto__')).toEqual(new Set(['proto']))
+})

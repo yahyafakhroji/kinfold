@@ -83,7 +83,7 @@ test('the fallback reads the host profile pack and returns null for an unknown p
 
 test('with the daemon down, fetchContext falls back to the stored pack within the budget', async () => {
   seedStoreAndClose()
-  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 1 }))
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 1 }))
   writeFileSync(join(dataDir, 'daemon.token'), 'a'.repeat(64))
   const before = snapshot()
   const fetched = await fetchContext(dataDir, { host: 'claude-code', cwd: CWD, hostSessionId: 's', channel: 'session_start' }, { log: (line) => logs.push(line) })

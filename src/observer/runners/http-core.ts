@@ -56,6 +56,8 @@ export async function postJson(request: JsonPost): Promise<unknown> {
       headers: { ...request.headers, 'content-type': 'application/json' },
       body: JSON.stringify(request.body),
       signal: AbortSignal.timeout(request.timeoutMs),
+      // The endpoint was checked (https, or this machine); a redirect could name one that was not, so none is followed.
+      redirect: 'error',
     })
   } catch (error: unknown) {
     throw requestFailure(error)

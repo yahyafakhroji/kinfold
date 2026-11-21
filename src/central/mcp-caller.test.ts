@@ -25,7 +25,7 @@ test('a central device reads through its daemon; a local or hub install reads it
 })
 
 test('a tool call posts the arguments and cwd to the daemon with its token, and returns the outcome', async () => {
-  writeFileSync(join(dir, 'daemon.json'), JSON.stringify({ pid: 1, port: 40_001 }))
+  writeFileSync(join(dir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 40_001 }))
   writeFileSync(join(dir, 'daemon.token'), 't'.repeat(64))
   const seen: { url: string; init: RequestInit }[] = []
   const outcome = { result: { content: [{ type: 'text' as const, text: 'found' }], structuredContent: { rows: 1 } }, count: 1 }
@@ -45,7 +45,7 @@ test('with the daemon down the answer says so, with no memory', async () => {
   const outcome = await call('search', { query: 'x' })
   expect(outcome?.count).toBe(0)
   expect(outcome?.result.content[0]?.text).toBe('central memory is unavailable: the Kinfold daemon on this device is not running (kinfold status says why)')
-  writeFileSync(join(dir, 'daemon.json'), JSON.stringify({ pid: 1, port: 40_001 }))
+  writeFileSync(join(dir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 40_001 }))
   writeFileSync(join(dir, 'daemon.token'), 't'.repeat(64))
   const refused = centralToolCaller({ dataDir: dir, cwd: '/w', fetch: async () => { throw Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }) } })
   expect((await refused('search', {}))?.result.content[0]?.text).toBe('central memory is unavailable: the Kinfold daemon on this device is not running (kinfold status says why)')

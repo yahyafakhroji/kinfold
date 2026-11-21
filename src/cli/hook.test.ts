@@ -78,7 +78,7 @@ test('with the daemon down the event is spooled, stdout stays empty and the exit
 
 test('a stale daemon.json pointing at a closed port still exits 0 within the budget', async () => {
   mkdirSync(dataDir, { recursive: true })
-  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 1 }))
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 1 }))
   writeFileSync(join(dataDir, 'daemon.token'), 'a'.repeat(64))
   const run = await runHook(fixture('post-tool-use.bash.json'))
   expect(run).toMatchObject({ exitCode: 0, stdout: '' })
@@ -198,7 +198,7 @@ test('a daemon that never answers costs at most the 300 ms budget, prints nothin
   const hung = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Promise<Response>(() => {}) })
   try {
     mkdirSync(dataDir, { recursive: true })
-    writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: hung.port }))
+    writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: hung.port }))
     writeFileSync(join(dataDir, 'daemon.token'), 'a'.repeat(64))
     const fetched = await fetchContext(dataDir, { host: 'claude-code', cwd: root, hostSessionId: 's', channel: 'session_start' })
     expect(fetched).toMatchObject({ source: 'none', result: null })
@@ -233,7 +233,7 @@ test('a prompt asks for recall with its own words first and no paste id, cut to 
   })
   try {
     mkdirSync(dataDir, { recursive: true })
-    writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: recorder.port }))
+    writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: recorder.port }))
     writeFileSync(join(dataDir, 'daemon.token'), 'a'.repeat(64))
     const paste = 'log line '.repeat(400)
     const payload = JSON.stringify({ ...JSON.parse(fixture('user-prompt-submit.json')), cwd: root, prompt: `<pasted_content id="bb24">${paste}</pasted_content id="bb24"> why does the build fail` })

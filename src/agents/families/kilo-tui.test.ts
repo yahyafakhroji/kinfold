@@ -144,7 +144,7 @@ test("the part toasts a new session's list and each prompt's line through api.ui
       return Response.json(answers.shift() ?? { cursor: 2, rows: [], startCursor: 2, starts: [] })
     },
   })
-  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: server.port }))
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: server.port }))
   writeFileSync(join(dataDir, 'daemon.token'), 'tok')
   const dir = join(world.root, 'part-kilo')
   mkdirSync(dir, { recursive: true })

@@ -152,6 +152,8 @@ test('an event spooled while the daemon was down lands after the next start, onc
   await daemon.stop()
   const sessionId = spoolFixture('written while down')
   daemon = startDaemon({ dataDir, port: 0, fallbackDrainMs: 60_000, log: (line) => logs.push(line) })
+  // Each start makes a new token.
+  token = readFileSync(join(dataDir, 'daemon.token'), 'utf8').trim()
 
   // The start did not wait on the spool: the server is up and the entry still waits for the first scheduled drain.
   expect(countSpool(join(dataDir, 'spool'))).toBe(1)
@@ -238,4 +240,34 @@ test('the server refuses a body over the cap before reading it', async () => {
   expect((await post('€'.repeat(6_000))).status).toBe(413)
   expect((await post('x'.repeat(server.MAX_BODY_BYTES))).status).toBe(413)
   expect((await post('x'.repeat(6_000))).status).toBe(400)
+})
+
+test('POST /projects/merge and /projects/split read the request body, not its wrapper', async () => {
+  const post = (path: string, body: unknown): Promise<Response> => fetch(url(path), authed({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }))
+  const merge = await post('/projects/merge', { from: '/no/such/project', into: '/nor/this' })
+  expect(merge.status).toBe(409)
+  expect(await merge.json()).toMatchObject({ ok: false })
+  expect((await post('/projects/split', { key: '/no/such/project' })).status).toBe(409)
+  expect((await post('/projects/merge', { from: 'only one key' })).status).toBe(400)
+  const broken = await fetch(url('/projects/merge'), authed({ method: 'POST', body: '{not json' }))
+  expect(broken.status).toBe(400)
+})
+
+test('each start makes a new token, so one captured while the daemon was down stops working', async () => {
+  const dir = join(root, 'restarted')
+  const first = startDaemon({ dataDir: dir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
+  const old = readFileSync(join(dir, 'daemon.token'), 'utf8').trim()
+  await first.stop()
+  const second = startDaemon({ dataDir: dir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
+  try {
+    const now = readFileSync(join(dir, 'daemon.token'), 'utf8').trim()
+    expect(now).toMatch(/^[0-9a-f]{64}$/)
+    expect(now).not.toBe(old)
+    const ask = (token: string): Promise<Response> => fetch(`http://127.0.0.1:${second.port}/sessions`, { headers: { authorization: `Bearer ${token}` } })
+    expect((await ask(old)).status).toBe(401)
+    expect((await ask(now)).status).toBe(200)
+    if (process.platform !== 'win32') expect(statSync(join(dir, 'daemon.token')).mode & 0o777).toBe(0o600)
+  } finally {
+    await second.stop()
+  }
 })

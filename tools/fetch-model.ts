@@ -5,6 +5,7 @@
 // it. It prints KINFOLD_TEST_MODEL_DIR and, in CI, adds it to GITHUB_ENV.
 
 import { createHash } from 'node:crypto'
+import { readBodyCapped } from '../src/fs/capped-body'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { LOCAL_MODEL_FILES, type PinnedFile } from '../src/vectors/local-model'
@@ -25,7 +26,10 @@ async function download(file: PinnedFile): Promise<Uint8Array> {
   if (file.url === undefined) throw new Error(`${file.name} has no download URL`)
   const response = await fetch(file.url, { redirect: 'follow', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
   if (!response.ok) throw new Error(`${file.name} download answered ${response.status}; nothing was written`)
-  return checked(file, new Uint8Array(await response.arrayBuffer()), 'the download')
+  // The pinned size is the ceiling, held while the body downloads.
+  const bytes = await readBodyCapped(response, file.bytes)
+  if (bytes === null) throw new Error(`${file.name} download is larger than the pinned file; nothing was written`)
+  return checked(file, bytes, 'the download')
 }
 
 async function bytesOf(file: PinnedFile): Promise<Uint8Array> {

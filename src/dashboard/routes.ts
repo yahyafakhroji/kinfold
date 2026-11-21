@@ -15,7 +15,7 @@ import { type EmbeddedAssets, embeddedAssets, safeDashboardName } from '../runti
 import { isOwnPageRequest } from './access'
 import { APP_ASSETS, APP_DIST, ASSET_NAME, listAssets } from './app-files'
 import { type DashboardAuth, type LeaseMode, clearedSessionCookie, sessionCookie, sessionFromCookie } from './auth'
-import type { DashboardEvents } from './events'
+import { type DashboardEvents, SIGNED_IN_NOTE } from './events'
 
 export const CLOSED_MESSAGE = 'dashboard closed; run kinfold dashboard'
 export const LEASE_PREFIX = '/dashboard/lease/'
@@ -160,7 +160,7 @@ async function createSession(request: Request, deps: DashboardDeps): Promise<Res
     return json(401, { error: 'this login link is wrong, used or expired; run `kinfold dashboard` again' })
   }
   deps.log('dashboard session created')
-  deps.events.note('signed in from a browser')
+  deps.events.note(SIGNED_IN_NOTE)
   deps.onSignIn?.()
   return new Response(null, { status: 204, headers: { 'set-cookie': sessionCookie(secret) } })
 }
@@ -178,36 +178,56 @@ export function parseCodeRequest(body: unknown): Parsed<string> {
   return { ok: true, value: body.lease }
 }
 
-/** The running command's offer of one sign-in, under its live lease, for the page it is about to open at a plain address. */
+const CLAIM_DIGEST = /^[0-9a-f]{64}$/
+const CLAIM_SECRET = /^[A-Za-z0-9_-]{43}$/
+
+/** The offer names the lease and the SHA-256 of the claim secret; the secret itself stays with the command and the page it opens. */
+export function parseOfferRequest(body: unknown): Parsed<{ lease: string; claim: string }> {
+  if (!isRecord(body) || typeof body.lease !== 'string' || typeof body.claim !== 'string' || !CLAIM_DIGEST.test(body.claim) || Object.keys(body).length !== 2) {
+    return { ok: false, error: 'body must be {"lease": "<lease id>", "claim": "<sha-256 of the claim secret, hex>"}' }
+  }
+  return { ok: true, value: { lease: body.lease, claim: body.claim } }
+}
+
+export function parseClaimBody(body: unknown): Parsed<string> {
+  if (!isRecord(body) || typeof body.claim !== 'string' || !CLAIM_SECRET.test(body.claim) || Object.keys(body).length !== 1) return { ok: false, error: 'body must be {"claim": "<claim secret>"}' }
+  return { ok: true, value: body.claim }
+}
+
+/** The running command's offer of one sign-in, under its live lease, for the page it is about to open with the claim secret in its address fragment. */
 async function offer(request: Request, deps: DashboardDeps): Promise<Response> {
   if (request.method !== 'POST') return json(405, { error: 'method not allowed' })
   const body = await deps.readBody()
-  const leaseId = body.ok ? parseCodeRequest(body.value) : body
-  if (!leaseId.ok) return json(400, { error: leaseId.error })
-  const offered = deps.auth.offerSignIn(leaseId.value)
+  const parsed = body.ok ? parseOfferRequest(body.value) : body
+  if (!parsed.ok) return json(400, { error: parsed.error })
+  const offered = deps.auth.offerSignIn(parsed.value.lease, parsed.value.claim)
   if (offered === null) return json(409, { error: CLOSED_MESSAGE })
   deps.log('dashboard sign-in offered')
   return json(200, offered)
 }
 
 /**
- * The login page claims the offer the command made. Only a page served from
- * this daemon's own origin can send the Origin and header this needs, and
- * each offer is claimed once, so a second tab or a late claim gets nothing.
+ * The login page claims the offer the command made, with the claim secret the
+ * command put in the page's address fragment. The Origin and header only stop
+ * other web pages: any local program can send them, so the secret is what
+ * ties the session to the browser the command opened. Each offer is claimed
+ * once, so a second tab or a late claim gets nothing.
  */
-function claim(request: Request, deps: DashboardDeps): Response {
+async function claim(request: Request, deps: DashboardDeps): Promise<Response> {
   if (request.method !== 'POST') return json(405, { error: 'method not allowed' })
   if (!isOwnPageRequest(request, deps.port)) {
     deps.log('dashboard claim refused reason=origin')
     return json(403, { error: 'forbidden origin' })
   }
-  const secret = deps.auth.claimSignIn()
+  const body = await deps.readBody()
+  const claimSecret = body.ok ? parseClaimBody(body.value) : body
+  const secret = claimSecret.ok ? deps.auth.claimSignIn(claimSecret.value) : null
   if (secret === null) {
-    deps.log('dashboard claim refused reason=none')
-    return json(401, { error: 'no sign-in is waiting; run `kinfold dashboard` in a terminal' })
+    deps.log(`dashboard claim refused reason=${claimSecret.ok ? 'secret' : 'body'}`)
+    return json(401, { error: 'this sign-in is wrong, used or expired; run `kinfold dashboard` in a terminal' })
   }
   deps.log('dashboard session created')
-  deps.events.note('signed in from a browser')
+  deps.events.note(SIGNED_IN_NOTE)
   deps.onSignIn?.()
   return new Response(null, { status: 204, headers: { 'set-cookie': sessionCookie(secret) } })
 }

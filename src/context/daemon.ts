@@ -41,6 +41,8 @@ export async function askDaemon(dataDir: string, request: ContextRequest, timeou
       headers: { authorization: `Bearer ${endpoint.token}`, 'content-type': 'application/json' },
       body: JSON.stringify(request),
       signal: AbortSignal.timeout(timeoutMs),
+      // The daemon never redirects; following one would hand the token and the prompt to another address.
+      redirect: 'error',
     })
     if (response.status !== 200) return { reason: `daemon answered ${response.status}`, answered: true, down: false }
     return parseContextResult(await response.json()) ?? { reason: 'daemon reply malformed', answered: true, down: false }

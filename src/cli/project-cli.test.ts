@@ -14,7 +14,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'kinfold-project-cli-'))
   dataDir = join(root, 'data')
   mkdirSync(dataDir, { recursive: true })
-  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 1 }))
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 1 }))
   writeFileSync(join(dataDir, 'daemon.token'), 'a'.repeat(64))
   lines = []
   asked = []

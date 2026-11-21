@@ -1,12 +1,17 @@
 // `kinfold dashboard [--print | --close]`. The dashboard is open only while
 // this command runs. It holds a lease on the daemon (renewed every second; it
 // lapses 15 s after the last renewal, so a killed terminal closes the
-// dashboard on its own), offers the daemon one sign-in under that lease, and
-// opens the browser at the plain address
-// http://127.0.0.1:<port>/dashboard/login. The login page claims the offer
-// (once, within 60 s, only from this daemon's own origin), so no code or
-// token travels in a URL, a process's arguments or the terminal on any
-// platform. While running, each renewal brings back the dashboard's log,
+// dashboard on its own), makes a random claim secret, and offers the daemon
+// one sign-in under that lease bound to the secret's SHA-256. The browser is
+// sent to http://127.0.0.1:<port>/dashboard/login#claim=<secret>, and the
+// login page claims the offer with the secret (once, within 60 s), so another
+// local program that asks first gets nothing. A fragment never reaches the
+// server or a log. To keep the secret out of every process's arguments too,
+// the opener is given a private file (0600, in the data folder) that sends
+// the browser on to that address, never the address itself; the file is
+// removed when the command ends. Where no browser opens, or the opened one
+// has not signed in after a few seconds (a sandboxed browser cannot read the
+// file), the address is printed for the user to open. While running, each renewal brings back the dashboard's log,
 // which is printed: requests by method, path, status and time, and steps
 // such as a sign-in or a backup. Ctrl-C, a closed terminal or SIGTERM ends
 // the lease, which signs out every page it opened.
@@ -17,15 +22,18 @@
 // exits. --close ends the leases --print holds. The token itself never leaves
 // this process.
 
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import { rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { isRecord } from '../contract/event'
 import { readDaemonEndpoint } from '../daemon/daemon-info'
+import { writeFileAtomic } from '../fs/atomic'
 import type { DashboardArgs } from '../install/args'
 import type { CommandRequest, InstallEnv } from '../install/env'
 import type { LeaseMode } from './auth'
-import type { DashboardEvent } from './events'
+import { type DashboardEvent, SIGNED_IN_NOTE } from './events'
 
-export type DashboardCliEnv = Pick<InstallEnv, 'dataDir' | 'fetch' | 'out' | 'run' | 'platform' | 'sleep'> & Partial<Pick<InstallEnv, 'ui'>>
+export type DashboardCliEnv = Pick<InstallEnv, 'dataDir' | 'fetch' | 'out' | 'run' | 'platform' | 'sleep' | 'now'> & Partial<Pick<InstallEnv, 'ui'>>
 
 export interface DashboardDeps {
   /** Aborted by Ctrl-C, SIGHUP or SIGTERM; the command then ends its lease and exits 0. */
@@ -42,6 +50,10 @@ const CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/
 const LEASE_BYTES = 32
 export const SIGNED_OUT = 'Signed out; the dashboard is closed.'
 const OFFER_SECONDS = 60
+/** How long an opened browser gets to sign in before the address is printed as well. */
+export const SIGN_IN_GRACE_MS = 8_000
+export const OPEN_FILE = 'dashboard-open.html'
+const OPEN_FILE_MODE = 0o600
 
 type Endpoint = { port: number; token: string }
 
@@ -49,24 +61,30 @@ export function loginUrl(port: number, code: string): string {
   return `http://127.0.0.1:${port}/dashboard/login#code=${code}`
 }
 
-export function plainLoginUrl(port: number): string {
-  return `http://127.0.0.1:${port}/dashboard/login`
+export function claimLoginUrl(port: number, claimSecret: string): string {
+  return `http://127.0.0.1:${port}/dashboard/login#claim=${claimSecret}`
+}
+
+/** The page the opener is given: it sends the browser on to the sign-in address. The secret is base64url, so it needs no escaping. */
+export function openPage(url: string): string {
+  return `<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>Kinfold</title><script>location.replace(${JSON.stringify(url)})</script><noscript><a href="${url}">Open the Kinfold dashboard</a></noscript>\n`
 }
 
 /**
- * Each platform's own way to open an address in the default browser. The
- * address is plain, so nothing here needs keeping out of argv. Windows uses
- * the URL handler directly: `start` is a cmd built-in, and going through cmd
- * would need its quoting.
+ * Each platform's own way to open a file or address in the default browser.
+ * The target is the private file's path, never the sign-in address, so the
+ * claim secret is in no process's arguments. Windows uses the URL handler
+ * directly: `start` is a cmd built-in, and going through cmd would need its
+ * quoting.
  */
-const OPENERS: Readonly<Partial<Record<NodeJS.Platform, (url: string) => CommandRequest>>> = {
-  darwin: (url) => ({ argv: ['open', url], timeoutMs: OPEN_TIMEOUT_MS }),
-  linux: (url) => ({ argv: ['xdg-open', url], timeoutMs: OPEN_TIMEOUT_MS }),
-  win32: (url) => ({ argv: ['rundll32', 'url.dll,FileProtocolHandler', url], timeoutMs: OPEN_TIMEOUT_MS }),
+const OPENERS: Readonly<Partial<Record<NodeJS.Platform, (target: string) => CommandRequest>>> = {
+  darwin: (target) => ({ argv: ['open', target], timeoutMs: OPEN_TIMEOUT_MS }),
+  linux: (target) => ({ argv: ['xdg-open', target], timeoutMs: OPEN_TIMEOUT_MS }),
+  win32: (target) => ({ argv: ['rundll32', 'url.dll,FileProtocolHandler', target], timeoutMs: OPEN_TIMEOUT_MS }),
 }
 
-export function openRequest(platform: NodeJS.Platform, url: string): CommandRequest | null {
-  return OPENERS[platform]?.(url) ?? null
+export function openRequest(platform: NodeJS.Platform, target: string): CommandRequest | null {
+  return OPENERS[platform]?.(target) ?? null
 }
 
 function newLeaseId(): string {
@@ -161,16 +179,31 @@ function pause(env: DashboardCliEnv, ms: number, stop: AbortSignal | undefined):
   })
 }
 
-async function openBrowser(env: DashboardCliEnv, url: string): Promise<readonly string[]> {
-  const request = openRequest(env.platform, url)
-  const opened = request === null ? null : await env.run(request)
-  if (opened?.exitCode === 0) return ['opened the dashboard in your browser, signed in']
-  return [`could not open a browser here; open this address within ${OFFER_SECONDS} s and it signs in:`, url]
+const openFilePath = (env: DashboardCliEnv): string => join(env.dataDir, OPEN_FILE)
+
+function removeOpenFile(env: DashboardCliEnv): void {
+  rmSync(openFilePath(env), { force: true })
 }
 
-async function offerSignIn(env: DashboardCliEnv, endpoint: Endpoint, lease: string): Promise<{ ok: true } | { ok: false; error: string }> {
+/** True when a browser was asked to open the sign-in; false when none could be, and the file is gone again. */
+async function openBrowser(env: DashboardCliEnv, url: string): Promise<boolean> {
+  const request = openRequest(env.platform, openFilePath(env))
+  if (request === null) return false
   try {
-    const response = await call(env, endpoint, 'POST', '/dashboard/offer', { lease })
+    writeFileAtomic(openFilePath(env), openPage(url), OPEN_FILE_MODE)
+    if ((await env.run(request)).exitCode === 0) return true
+  } catch {
+    // An unwritable data folder or a missing opener both end at the printed address.
+  }
+  removeOpenFile(env)
+  return false
+}
+
+async function offerSignIn(env: DashboardCliEnv, endpoint: Endpoint, lease: string, claimSecret: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const response = await call(env, endpoint, 'POST', '/dashboard/offer', { lease, claim: createHash('sha256').update(claimSecret).digest('hex') })
+    // A daemon from before claim secrets takes an offer of the lease alone and refuses this body.
+    if (response.status === 400) return { ok: false, error: OLDER_BUILD }
     return response.status === 200 ? { ok: true } : { ok: false, error: `POST /dashboard/offer answered ${response.status}` }
   } catch (error: unknown) {
     return { ok: false, error: `POST /dashboard/offer failed (${error instanceof Error ? error.name : 'error'})` }
@@ -191,13 +224,20 @@ async function runForeground(env: DashboardCliEnv, endpoint: Endpoint, deps: Das
   const lease = newLeaseId()
   const first = await holdLease(env, endpoint, lease, 'live', null)
   if (!first.ok) return fail(first.error)
-  const offered = await offerSignIn(env, endpoint, lease)
+  // The same alphabet and length as a lease id; only its SHA-256 goes to the daemon.
+  const claimSecret = newLeaseId()
+  const offered = await offerSignIn(env, endpoint, lease, claimSecret)
   if (!offered.ok) {
     await release(env, env.dataDir, lease)
     return fail(offered.error)
   }
   env.out(`dashboard open at http://127.0.0.1:${endpoint.port}/dashboard/ while this runs; Ctrl-C closes it`)
-  for (const line of await openBrowser(env, plainLoginUrl(endpoint.port))) env.out(line)
+  const signInUrl = claimLoginUrl(endpoint.port, claimSecret)
+  const opened = await openBrowser(env, signInUrl)
+  if (opened) env.out('opened the dashboard in your browser; it signs in on its own')
+  else for (const line of [`could not open a browser here; open this address within ${OFFER_SECONDS} s and it signs in:`, signInUrl]) env.out(line)
+  // Null once the address is printed or a browser signed in: nothing more to say.
+  let graceEndsAt: number | null = opened ? env.now() + SIGN_IN_GRACE_MS : null
 
   let at = first.at
   let waiting = false
@@ -223,7 +263,13 @@ async function runForeground(env: DashboardCliEnv, endpoint: Endpoint, deps: Das
     waiting = false
     at = held.at
     for (const event of held.events) env.out(eventLine(event))
+    if (held.events.some((event) => event.kind === 'event' && event.text === SIGNED_IN_NOTE)) graceEndsAt = null
+    if (graceEndsAt !== null && env.now() >= graceEndsAt) {
+      graceEndsAt = null
+      for (const line of [`the browser has not signed in yet; if it shows nothing, open this address (it works once, for ${OFFER_SECONDS} s after this command started):`, signInUrl]) env.out(line)
+    }
   }
+  removeOpenFile(env)
   const released = await release(env, env.dataDir, lease)
   if (refused !== null) return fail(refused)
   const last = released ? SIGNED_OUT : 'the daemon did not answer; the dashboard closes on its own within 15 s'

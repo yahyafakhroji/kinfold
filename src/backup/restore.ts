@@ -31,7 +31,7 @@ import { fileState, maintenancePath, openEncrypted, openPlain } from '../sqlite/
 import { type Database, SqliteError } from '../sqlite/types'
 import { DATA_DIR_MODE, DB_FILE } from '../store/data-dir'
 import { openStore } from '../store/db'
-import { LATEST_SCHEMA_VERSION } from '../store/schema'
+import { LATEST_SCHEMA_VERSION, MIGRATIONS } from '../store/schema'
 import { type ArchiveHeader, type BackupManifest, BackupError, extractSnapshot, readArchive } from './archive'
 import { type PreviousStore, type RestoreJournal, readRestoreJournal, writeRestoreJournal } from './journal'
 
@@ -158,6 +158,25 @@ function fixedKeys(key: string | null): { name: string; read: () => string | nul
   return { name: 'restore', read: () => key, exists: () => key !== null }
 }
 
+const sameText = (sql: string): string => sql.replace(/\s+/g, ' ').trim()
+
+/** Every trigger any schema version of Kinfold has made, as its whole statement; Kinfold makes no views. */
+const OWN_TRIGGERS: ReadonlySet<string> = new Set(
+  MIGRATIONS.flatMap((sql) => [...sql.matchAll(/CREATE\s+TRIGGER\s[\s\S]*?\bEND(?=\s*;)/g)].map((match) => sameText(match[0]))),
+)
+
+/**
+ * A trigger or view runs inside the daemon on every write or read it is
+ * attached to, so one the backup brought along could rewrite or delete memory
+ * long after the restore. Kinfold's own triggers are known by their whole
+ * text, since a name alone could be kept over a different body; any other
+ * trigger, and any view, refuses the backup.
+ */
+function hasForeignSchemaCode(db: Database): boolean {
+  const rows = db.query<{ type: string; sql: string | null }, []>("SELECT type, sql FROM sqlite_master WHERE type IN ('trigger', 'view')").all()
+  return rows.some((row) => row.type !== 'trigger' || row.sql === null || !OWN_TRIGGERS.has(sameText(row.sql)))
+}
+
 /** Runs this build's migrations on the staged copy and leaves it as one file in rollback-journal mode, so a rename moves all of it. */
 function migrateStaged(dir: string, key: string | null): void {
   const store = openStore(dir, { keys: fixedKeys(key) })
@@ -200,13 +219,19 @@ export async function stageSnapshot(input: StageInput): Promise<Staged> {
       throw encrypted ? new BackupError('code', 'that recovery code does not open this backup. Nothing was changed') : damaged()
     }
     let schemaVersion: number
+    let foreign: boolean
     try {
       schemaVersion = db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0
-    } catch {
-      throw damaged()
+      // The archive's checksum only says the file arrived whole; anyone who edits a backup can write a new one.
+      // So the snapshot must be a sound database before this build's migrations run in it.
+      if (db.query<{ integrity_check: string }, []>('PRAGMA integrity_check(1)').get()?.integrity_check !== 'ok') throw damaged()
+      foreign = hasForeignSchemaCode(db)
+    } catch (error: unknown) {
+      throw error instanceof BackupError ? error : damaged()
     } finally {
       db.close()
     }
+    if (foreign) throw new BackupError('tampered', 'the backup holds database triggers or views that Kinfold did not make, so it was not restored. Nothing was changed')
     // The manifest is advice; the snapshot's own version is what migrations would meet.
     if (schemaVersion > LATEST_SCHEMA_VERSION) throw newerSchema(schemaVersion)
     try {

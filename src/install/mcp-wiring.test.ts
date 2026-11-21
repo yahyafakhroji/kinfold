@@ -1,5 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { posixOnly } from '../../test/platform-guards'
 import { EXIT_OK, install } from './install'
 import { MCP_SERVER_NAME, claudeMcpEntry, openCodeMcpEntry } from './mcp-config'
 import { claudeAddArgv, claudeMcpInstallActions, mcpPaths, mcpTarget, rollbackSafe } from './mcp-wiring'
@@ -19,6 +21,30 @@ const both = (): FakeWorld => {
 
 const mcpCommands = (w: FakeWorld): string[][] =>
   w.commands.map((request) => [...request.argv]).filter((argv) => argv[0] === 'claude' && argv[1] === 'mcp')
+
+posixOnly('file modes')('an OpenCode folder the user locked keeps its mode when opencode.json is added to it', async () => {
+  const w = both()
+  const paths = mcpPaths(w.env)
+  mkdirSync(paths.opencodeDir, { recursive: true, mode: 0o700 })
+  chmodSync(paths.opencodeDir, 0o700)
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(JSON.parse(readFileSync(paths.opencodeConfig, 'utf8')).mcp[MCP_SERVER_NAME]).toEqual(openCodeMcpEntry(mcpTarget(w.env)))
+  expect(statSync(paths.opencodeDir).mode & 0o777).toBe(0o700)
+})
+
+posixOnly('file modes')('settings kept in opencode.jsonc are left alone: no second opencode.json, no change to the folder, and the entry to add by hand', async () => {
+  const w = both()
+  const paths = mcpPaths(w.env)
+  mkdirSync(paths.opencodeDir, { recursive: true, mode: 0o700 })
+  chmodSync(paths.opencodeDir, 0o700)
+  const jsonc = join(paths.opencodeDir, 'opencode.jsonc')
+  writeFileSync(jsonc, '{ // mine\n  "provider": {} }')
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(existsSync(paths.opencodeConfig)).toBe(false)
+  expect(readFileSync(jsonc, 'utf8')).toBe('{ // mine\n  "provider": {} }')
+  expect(statSync(paths.opencodeDir).mode & 0o777).toBe(0o700)
+  expect(w.out.some((line) => line.startsWith(`opencode: ${jsonc} found; add the kinfold MCP server under "mcp" there by hand`))).toBe(true)
+})
 
 test('install registers through `claude mcp add-json` and merges the OpenCode entry, keeping foreign keys', async () => {
   const w = both()

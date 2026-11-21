@@ -4,6 +4,7 @@
 // dryRun: false. On a central device they are refused: the hub holds the
 // memory and decides. Logs carry the reason and counts; never a key or name.
 
+import type { Parsed } from '../context/types'
 import type { Database } from '../sqlite/types'
 import { type MaintenanceAnswer, listProjects, mergeProjects, recentMerges, splitProject } from '../store/project-merge'
 import type { RouteAnswer } from './data-routes'
@@ -42,7 +43,7 @@ function answered(answer: MaintenanceAnswer, reason: string, log: ProjectRouteDe
 }
 
 /** Null when the path is not a /projects route. */
-export async function projectRoute(method: string, url: URL, readBody: () => Promise<unknown>, deps: ProjectRouteDeps): Promise<RouteAnswer | null> {
+export async function projectRoute(method: string, url: URL, readBody: () => Promise<Parsed<unknown>>, deps: ProjectRouteDeps): Promise<RouteAnswer | null> {
   const path = url.pathname
   if (path !== '/projects' && path !== '/projects/merge' && path !== '/projects/split') return null
   if (deps.device) return { status: 409, body: { error: DEVICE_REFUSAL } }
@@ -52,7 +53,9 @@ export async function projectRoute(method: string, url: URL, readBody: () => Pro
   }
   if (method !== 'POST') return { status: 405, body: { error: 'method not allowed' } }
   const merging = path === '/projects/merge'
-  const parsed = parseBody(await readBody(), merging ? ['from', 'into'] : ['key'])
+  const body = await readBody()
+  if (!body.ok) return { status: 400, body: { error: body.error } }
+  const parsed = parseBody(body.value, merging ? ['from', 'into'] : ['key'])
   if (parsed === null) {
     return { status: 400, body: { error: merging ? 'body must be {"from": key, "into": key, "dryRun"?: boolean}' : 'body must be {"key": key, "dryRun"?: boolean}' } }
   }

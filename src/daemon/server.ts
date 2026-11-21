@@ -81,7 +81,7 @@ export interface ServerDeps {
   /** GET /metrics/summary. */
   metrics: (window: string | null) => Promise<RouteAnswer>
   /** GET /projects, POST /projects/merge and /projects/split (`kinfold project`); null for any other path. Absent: 404. */
-  projects?: (method: string, url: URL, readBody: () => Promise<unknown>) => Promise<RouteAnswer | null>
+  projects?: (method: string, url: URL, readBody: () => Promise<Parsed<unknown>>) => Promise<RouteAnswer | null>
   /** GET /memory/sessions and /memory/sessions/:id/turns (the dashboard's Sessions view); null for any other path. Absent: those paths are 404. */
   sessions?: (method: string, url: URL) => RouteAnswer | null
   /** GET /watch (token only): the prompts since a cursor with what was recalled for each, for `kinfold watch`. Absent: 404. */

@@ -32,7 +32,8 @@ async function post(fetchFn: FetchFn, endpoint: string, model: string, texts: re
     })
   } catch (error: unknown) {
     const kind = name(error) === 'TimeoutError' || name(error) === 'AbortError' ? 'timeout' : 'http_error'
-    throw new EmbedError(kind, `the local LLM did not answer at ${endpoint} (${name(error)})`)
+    // The origin only: this text reaches the daemon log.
+    throw new EmbedError(kind, `the local LLM did not answer at ${new URL(endpoint).origin} (${name(error)})`)
   }
   if (!response.ok) {
     await response.body?.cancel().catch(() => {})

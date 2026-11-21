@@ -32,7 +32,8 @@ import { envName, readEnv } from '../env-names'
 import { type DbKeyStore, dbKeyStoreFor, rememberedDbKeys } from '../sqlite/keys'
 import { plaintextBesideKey } from '../sqlite/open'
 import type { Database } from '../sqlite/types'
-import { DAEMON_INFO_FILE, SPOOL_DIR, TOKEN_FILE, ensureDataDir, readOrCreateSecret, writePrivateFile } from '../store/data-dir'
+import { writeFileAtomic } from '../fs/atomic'
+import { DAEMON_INFO_FILE, DATA_FILE_MODE, SPOOL_DIR, TOKEN_FILE, ensureDataDir, newSecret, writePrivateFile } from '../store/data-dir'
 import { type Store, openStore } from '../store/db'
 import { type AsyncGitRunner, DAEMON_GIT_TIMEOUT_MS, asyncGitRunnerWithTimeout, createProjectKeyResolver, gitRunnerWithTimeout, rootCommitOfAsync } from '../store/project-key'
 import { backfillRoots, unrootedFolders } from '../store/project-merge'
@@ -687,7 +688,10 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const agentEvent = (): void => {
     lastEventAt = updateNow()
   }
-  const token = readOrCreateSecret(join(dataDir, TOKEN_FILE))
+  // New at every start, and written only once the port is ours (below). A token that leaked while the
+  // daemon was down, to whatever had taken its port, is dead as soon as the daemon is back, and a second
+  // daemon that fails to bind never replaces the running one's token.
+  const token = newSecret()
   const hmacKeys = createHmacKeys({ dataDir, keychain: options.keychain ?? NO_CREDENTIALS, now: options.hmac?.now ?? Date.now, log })
   // With each folder's first commit, so one repo under two keys (a renamed remote, a fork) becomes one project.
   const daemonGit = gitRunnerWithTimeout(DAEMON_GIT_TIMEOUT_MS)
@@ -1041,6 +1045,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   })
   const infoPath = join(dataDir, DAEMON_INFO_FILE)
   const info: DaemonInfo = { pid: process.pid, port: server.port }
+  // The token first: a client that reads the new daemon.json must find the token that goes with it.
+  writeFileAtomic(join(dataDir, TOKEN_FILE), token, DATA_FILE_MODE)
   writePrivateFile(infoPath, JSON.stringify(info), false)
   const rotation = setInterval(() => watch.step('hmac rotation', hmacKeys.tick), options.hmac?.rotationTickMs ?? ROTATION_TICK_MS)
   const updateChecks = startUpdateChecks({

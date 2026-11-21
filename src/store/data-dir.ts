@@ -101,6 +101,11 @@ function readSecret(path: string): string {
   return value
 }
 
+/** A new 32-byte hex secret, as readOrCreateSecret makes one, kept in memory by the caller until it writes it. */
+export function newSecret(): string {
+  return randomBytes(SECRET_BYTES).toString('hex')
+}
+
 function isAlreadyExists(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'EEXIST'
 }
@@ -112,7 +117,7 @@ function isAlreadyExists(error: unknown): boolean {
 export function readOrCreateSecret(path: string): string {
   if (existsSync(path)) return readSecret(path)
   try {
-    writePrivateFile(path, randomBytes(SECRET_BYTES).toString('hex'), true)
+    writePrivateFile(path, newSecret(), true)
   } catch (error: unknown) {
     if (!isAlreadyExists(error)) throw error
   }

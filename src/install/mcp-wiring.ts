@@ -5,6 +5,7 @@
 // OpenCode reads opencode.json once per start, so we merge our `mcp` entry
 // into it with a backup, as claude-hooks.ts does for settings.json.
 
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { isRecord } from '../contract/event'
 import type { InstallEnv } from './env'
@@ -12,7 +13,7 @@ import { entryCommand, entryIdentity } from './entry'
 import { plannedBackup, readJsonObject, serializeJson } from './files'
 import { LEGACY_MCP_SERVER_NAME } from '../names'
 import { MCP_HOST_ENV } from '../mcp/read-reporter'
-import { MCP_SERVER_NAME, type McpEntryState, type McpTarget, claudeMcpEntry, hasOurMcpEntryNamed, inspectMcpEntry, mergeMcpEntry, removeMcpEntry, removeMcpEntryNamed } from './mcp-config'
+import { MCP_SERVER_NAME, type McpEntryState, type McpTarget, claudeMcpEntry, hasOurMcpEntryNamed, openCodeMcpEntry, inspectMcpEntry, mergeMcpEntry, removeMcpEntry, removeMcpEntryNamed } from './mcp-config'
 import type { Action } from './plan'
 
 /** Same modes install.ts gives the files it creates in a host's config dir. */
@@ -126,6 +127,12 @@ export function claudeMcpInstallActions(env: InstallEnv): Action[] {
 export function opencodeMcpInstallActions(env: InstallEnv): Action[] {
   const paths = mcpPaths(env)
   const file = readJsonObject(paths.opencodeConfig)
+  // Settings kept in opencode.jsonc are the user's file, and Kinfold never edits JSONC: a second opencode.json beside it would only confuse.
+  const jsonc = join(paths.opencodeDir, 'opencode.jsonc')
+  if (!file.exists && existsSync(jsonc)) {
+    env.out(`opencode: ${jsonc} found; add the kinfold MCP server under "mcp" there by hand, no opencode.json was written: ${JSON.stringify({ [MCP_SERVER_NAME]: openCodeMcpEntry(mcpTarget(env)) })}`)
+    return []
+  }
   const config = file.exists ? file.value : {}
   const state = file.exists ? inspectMcpEntry(config, 'opencode', mcpTarget(env)) : 'no'
   const legacy = hasOurMcpEntryNamed(config, 'opencode', LEGACY_MCP_SERVER_NAME)
@@ -145,7 +152,8 @@ export function opencodeMcpInstallActions(env: InstallEnv): Action[] {
     'every other key kept',
   ].filter((part) => part !== '')
   return [
-    ...(file.exists ? [] : [{ kind: 'mkdir', path: paths.opencodeDir, mode: DIR_MODE } as const]),
+    // Only a folder that is not there is made: the mkdir step sets the mode, and a folder the user locked must stay as it is.
+    ...(existsSync(paths.opencodeDir) ? [] : [{ kind: 'mkdir', path: paths.opencodeDir, mode: DIR_MODE } as const]),
     ...(backup !== null ? [{ kind: 'backup', from: paths.opencodeConfig, to: backup } as const] : []),
     {
       kind: 'write',

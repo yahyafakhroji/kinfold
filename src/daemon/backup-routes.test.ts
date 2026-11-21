@@ -161,7 +161,9 @@ test('the download takes the dashboard cookie too, and nothing without a credent
   const { rig } = box({ titles: ['one'] })
   expect((await fetch(rig.url('/backup'))).status).toBe(401)
   const cookie = await rig.login()
-  const response = await rig.page('GET', '/backup', { cookie, bare: true })
+  // The page's Download link is a same-origin navigation; the cookie alone, as another local page could send it, is not enough.
+  expect((await rig.page('GET', '/backup', { cookie, bare: true })).status).toBe(403)
+  const response = await rig.page('GET', '/backup', { cookie, bare: true, headers: { 'sec-fetch-site': 'same-origin' } })
   expect(response.status).toBe(200)
   await response.arrayBuffer()
   expect((await rig.bearer('POST', '/backup')).status).toBe(405)

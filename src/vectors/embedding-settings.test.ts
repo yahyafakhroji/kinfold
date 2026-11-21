@@ -75,6 +75,13 @@ describe('parseEmbeddingSettings', () => {
       .toEqual({ ok: true, value: { provider: 'local-llm', llmUrl: 'http://127.0.0.1:11434/v1', llmModel: 'nomic-embed-text', llmDims: null } })
     expect(parseEmbeddingSettings({ provider: 'local-llm', llmUrl: 'http://10.0.0.2:11434', llmModel: 'm' })).toEqual({ ok: false, error: 'llmUrl must be an http address on this machine (127.0.0.1, localhost or ::1)' })
     expect(parseEmbeddingSettings({ provider: 'local-llm', llmUrl: 'http://127.0.0.1:1', llmModel: '' })).toEqual({ ok: false, error: 'llmModel must be a non-empty model name' })
+    // A model name is written to the daemon log, and so is the address when the server does not answer.
+    for (const llmModel of ['m\nforged log line', 'm\u0000', 'm\u001b[2J', 'm\u007f']) {
+      expect(parseEmbeddingSettings({ provider: 'local-llm', llmUrl: 'http://127.0.0.1:1', llmModel })).toEqual({ ok: false, error: 'llmModel must be a non-empty model name' })
+    }
+    for (const llmUrl of ['http://127.0.0.1:1/v1?api_key=abc', 'http://127.0.0.1:1/v1#frag', 'http://localhost:1/?x']) {
+      expect(parseEmbeddingSettings({ provider: 'local-llm', llmUrl, llmModel: 'm' })).toEqual({ ok: false, error: 'llmUrl must be an http address on this machine (127.0.0.1, localhost or ::1)' })
+    }
     expect(parseEmbeddingSettings({ provider: 'local-llm', llmUrl: 'http://127.0.0.1:1', llmModel: 'm', llmDims: 0 })).toEqual({ ok: false, error: 'llmDims must be an integer from 1 to 8192' })
   })
 

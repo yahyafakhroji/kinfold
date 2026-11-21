@@ -13,7 +13,7 @@ afterEach(() => rmSync(dataDir, { recursive: true, force: true }))
 
 const QUERY = { query: 'parser quotes', project: 'p', k: 5, filters: { type: null, host: null, evidence: null } }
 const daemonUp = () => {
-  writeFileSync(join(dataDir, DAEMON_INFO_FILE), JSON.stringify({ pid: 1, port: 40_123 }))
+  writeFileSync(join(dataDir, DAEMON_INFO_FILE), JSON.stringify({ pid: process.pid, port: 40_123 }))
   writeFileSync(join(dataDir, TOKEN_FILE), 'tok')
 }
 

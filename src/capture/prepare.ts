@@ -4,7 +4,7 @@
 
 import type { NormalizedEvent, RedactionNote, ToolCall, WithheldReason } from '../contract/event'
 import { type RedactOptions, type Redacted, redactJson, redactText } from '../redaction/redact'
-import { isSensitiveCommand, isSensitivePath } from '../redaction/rules'
+import { commandNamesSensitivePath, isSensitiveCommand, isSensitivePath } from '../redaction/rules'
 
 declare const redactedBrand: unique symbol
 
@@ -88,16 +88,52 @@ export function cleanText(text: string, field: string, options: PrepareOptions):
   return { value: capped.value, notes: [...privateNote, ...redacted.notes, ...capped.notes] }
 }
 
+const WITHHELD_INPUT = /^<withheld reason="[a-z_]+" chars="\d+"\/>$/
+const withheldInput = (reason: WithheldReason, text: string): string => `<withheld reason="${reason}" chars="${text.length}"/>`
+
+/**
+ * A Write or Edit carries the file's contents in its input, and a command that
+ * names a sensitive file may be writing it, so withholding the output alone
+ * would keep the secret. For a sensitive path every string but the path is
+ * replaced by its length; for a sensitive command, each command that names
+ * such a file. Returns the input and how many values were withheld.
+ */
+function withholdInput(input: unknown, reason: WithheldReason): { value: unknown; withheld: number } {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return { value: input, withheld: 0 }
+  let withheld = 0
+  const replace = (text: string): string => {
+    withheld += 1
+    return withheldInput(reason, text)
+  }
+  const strip = (node: unknown): unknown => {
+    // The daemon runs this again at ingest, and the leak scanner over stored rows: a value already withheld stays as it is.
+    if (typeof node === 'string') return WITHHELD_INPUT.test(node) ? node : replace(node)
+    if (Array.isArray(node)) return node.map(strip)
+    if (node !== null && typeof node === 'object') return Object.fromEntries(Object.entries(node).map(([key, child]) => [key, strip(child)]))
+    return node
+  }
+  const kept: readonly string[] = reason === 'sensitive_path' ? [...PATH_KEYS, 'paths'] : []
+  const value = Object.fromEntries(Object.entries(input).map(([key, child]) => {
+    if (reason === 'sensitive_path') return [key, kept.includes(key) ? child : strip(child)]
+    const names = (COMMAND_KEYS as readonly string[]).includes(key) && typeof child === 'string' && commandNamesSensitivePath(child)
+    return [key, names ? replace(child as string) : child]
+  }))
+  return { value, withheld }
+}
+
 function prepareTool(tool: ToolCall, options: PrepareOptions): Redacted<ToolCall> {
-  const redactedInput = redactJson(tool.input, 'tool.input', options)
+  const reason = withheldReason(tool, options)
+  const kept = reason === undefined ? { value: tool.input, withheld: 0 } : withholdInput(tool.input, reason)
+  // A sensitive command that stays readable is read strictly: any random string in it is taken for a secret.
+  const redactedInput = redactJson(kept.value, 'tool.input', reason === 'sensitive_command' ? { ...options, entropyMode: 'strict' } : options)
   const input = capJsonStrings(redactedInput.value, 'tool.input', options.maxFieldChars ?? DEFAULT_MAX_FIELD_CHARS)
   const inputNotes = [...redactedInput.notes, ...input.notes]
 
-  const reason = withheldReason(tool, options)
   if (reason !== undefined) {
+    const withheldNote: RedactionNote[] = kept.withheld > 0 ? [{ field: 'tool.input', rule: reason, count: kept.withheld }] : []
     return {
       value: { ...tool, input: input.value, output: withheldOutput(reason, tool.output), withheld: reason },
-      notes: [...inputNotes, { field: 'tool.output', rule: reason, count: 1 }],
+      notes: [...inputNotes, ...withheldNote, { field: 'tool.output', rule: reason, count: 1 }],
     }
   }
 

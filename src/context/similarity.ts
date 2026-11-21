@@ -42,7 +42,7 @@ export function titleTokens(title: string, ignore: ReadonlySet<string> = new Set
   const words = title.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').split(' ')
   const tokens = words
     .filter((word) => word !== '')
-    .map((word) => NUMBER_WORDS[word] ?? word)
+    .map((word) => (Object.hasOwn(NUMBER_WORDS, word) ? NUMBER_WORDS[word]! : word))
     .filter((word) => !NOISE_WORDS.has(word) && !ignore.has(word))
     .map(stem)
   return new Set(tokens)
