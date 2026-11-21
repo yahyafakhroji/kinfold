@@ -56,6 +56,25 @@ test('uninstall removes only our hooks, the shim and the LaunchAgent; the data d
   expect(w.out.some((line) => line.startsWith(`kept the data dir ${w.dataDir}`))).toBe(true)
 })
 
+test("an agent config that is not valid JSON is skipped and named; the service, the other agents and the program are still removed", async () => {
+  const w = await installed()
+  const paths = installPaths(w.env)
+  // Cursor was never wired here; its hooks file is simply broken.
+  mkdirSync(paths.cursorDir, { recursive: true })
+  writeFileSync(paths.cursorHooks, '{ "hooks": ')
+  w.out.length = 0
+
+  expect(await uninstall(w.env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
+
+  expect(w.out).toContain(`Cursor: skipped; ${paths.cursorHooks} is not valid JSON; leaving it untouched`)
+  expect(readFileSync(paths.cursorHooks, 'utf8')).toBe('{ "hooks": ')
+  expect(JSON.parse(readFileSync(paths.claudeSettings, 'utf8'))).toEqual(USER_SETTINGS)
+  expect(existsSync(paths.opencodePlugin)).toBe(false)
+  expect(existsSync(paths.launchAgentPlist)).toBe(false)
+  expect(existsSync(join(w.dataDir, 'bin'))).toBe(false)
+  expect(w.commands.some((c) => c.argv[0] === LAUNCHCTL && c.argv[1] === 'bootout')).toBe(true)
+})
+
 test('uninstall removes a program-mode plugin file and leaves other plugins alone', async () => {
   const w = await installed()
   const paths = installPaths(w.env)

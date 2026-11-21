@@ -62,12 +62,13 @@ export function eventStages(db: Database, since: number, limit: number = METRICS
 
 /** One row per turn_end that occurred at or after `since` and has been observed. */
 export function turnLags(db: Database, since: number, limit: number = METRICS_SAMPLE_LIMIT): TurnLagRow[] {
-  return db.query<TurnLagRow, { since: number; limit: number }>(
-    `SELECT r.host, r.provider, r.finished_at - t.occurred_at AS lagMs
+  return db.query<TurnLagRow, { since: number; limit: number }>(TURN_LAGS_SQL).all({ since, limit })
+}
+
+/** The inner read walks the events_turn_end index (v19), newest first; `kind` is written as a literal so the planner can match that index. */
+export const TURN_LAGS_SQL = `SELECT r.host, r.provider, r.finished_at - t.occurred_at AS lagMs
      FROM (SELECT session_id, occurred_at, ingested_at FROM events
            WHERE kind = 'turn_end' AND occurred_at >= $since ORDER BY occurred_at DESC LIMIT $limit) t
      JOIN observer_runs r ON r.id = (
        SELECT id FROM observer_runs WHERE session_id = t.session_id AND status = 'succeeded'
-         AND started_at >= t.ingested_at ORDER BY started_at, id LIMIT 1)`,
-  ).all({ since, limit })
-}
+         AND started_at >= t.ingested_at ORDER BY started_at, id LIMIT 1)`

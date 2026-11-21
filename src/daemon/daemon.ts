@@ -50,13 +50,14 @@ import { getObserverSession, recoverInterrupted } from '../store/observer-store'
 import { type RetryTarget, resetFailedEvents } from '../store/observer-reset'
 import { DEFAULT_RESET_CHECK_MS, checkFailedResets } from './failed-reset'
 import { type HmacKeyState, ROTATION_TICK_MS, createHmacKeys } from './hmac-rotation'
-import { type DrainOptions, type DrainResult, drainSpool } from './ingest'
+import { createSpoolCursor } from '../spool/spool'
+import { type DrainOptions, type DrainResult, drainBatch } from './ingest'
 import { logLine } from './log-line'
 import { DEFAULT_OBSERVER_TICK_MS, type ObserverScheduleConfig, type ObserverScheduler, createObserverScheduler } from './observer-scheduler'
 import { type DrainScheduler, createDrainScheduler } from './scheduler'
 import { createDashboardAuth, fileSessionStore } from '../dashboard/auth'
 import { createDashboardEvents } from '../dashboard/events'
-import { metricsRoute } from '../dashboard/metrics'
+import { keptMetricsRoute } from '../dashboard/metrics'
 import { writeDisplayFile } from '../context/display-file'
 import { watchRoute } from '../watch/reads'
 import { type TurnEnd, type TurnUsage, freshTurnEnds, recordTurnUsage } from './transcript-usage'
@@ -721,7 +722,8 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     warnIfPlaintextBesideKey(store.path, log, dbKeys)
     // A device's recall queries are embedded on the hub, and its own store is kept as it was: nothing here touches its vectors.
     const vectors = relay === null ? watch.step('vectors start', () => startVectors(store, dataDir, dbKeys, options.vectors, log, watch)) : deviceVectors(store.db)
-    const reads = daemonReads(dataDir, dbKeys, projectKeyFor, vectors)
+    // A read waits on this lookup, as a prompt does: the key alone, never the history walk.
+    const reads = daemonReads(dataDir, dbKeys, projectKeyFor.keyOnly, vectors)
     const drainOptions = (): DrainOptions => ({ spoolDir: join(dataDir, SPOOL_DIR), ...hmacKeys.marker(), projectKeyFor })
 
     let observer: ObserverScheduler | null = null
@@ -733,9 +735,13 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
         (error: unknown) => log(`relay failed: ${errorMessage(error)}`),
       )
     }
+    // One listing of the spool serves a whole backlog, batch after batch.
+    const spool = createSpoolCursor(join(dataDir, SPOOL_DIR))
+    // One batch per run: a backlog is stored in turns, and requests are answered between them.
     const drain = (): void => {
       if (relay !== null) return forward(relay)
-      const result = drainSpool(store.db, drainOptions())
+      const result = drainBatch(store.db, drainOptions(), spool)
+      if (result.more) scheduler.request()
       const line = describeDrain(result)
       if (line !== null) log(line)
       if (result.inserted > 0) observer?.tick()
@@ -759,7 +765,10 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       }
     }
     const scheduler = createDrainScheduler(() => watch.step('drain', drain), (error) => log(`drain failed: ${errorMessage(error)}`), options.debounceMs)
-    watch.step('drain', drain)
+    // What waits in the spool is stored once the server answers, not before: a backlog must not keep /health silent.
+    // The marker key is made now all the same, as the first drain made it: a hook that finds none marks with a throwaway key.
+    if (relay === null) hmacKeys.marker()
+    scheduler.request()
     const interval = setInterval(() => scheduler.request(), options.fallbackDrainMs ?? FALLBACK_DRAIN_MS)
     const observing = options.observer !== undefined && relay === null ? startObserver(store.db, options.observer, hmacKeys, () => vectors.indexer?.tick(), log, trace, watch) : null
     observer = observing?.observer ?? null
@@ -817,7 +826,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       data,
       exclusive,
       memory: memoryHandlers(store.db, log, readers.reports, { deviceNames: () => pairedDeviceNames(dataDir, log) }),
-      metrics: (window) => metricsRoute(readers.reports, window),
+      metrics: keptMetricsRoute(readers.reports, { onError: (error) => log(`metrics refresh failed: ${error instanceof Error ? error.name : 'error'}`) }),
       projects: (method, url, readBody) => projectRoute(method, url, readBody, { db: store.db, now: Date.now, log, device: relay !== null }),
       watch: (method, url) => watchRoute(store.db, method, url, Date.now()),
       debugWatch: (method, url) => debugWatchRoute(trace, method, url, Date.now()),

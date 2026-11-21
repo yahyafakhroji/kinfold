@@ -40,15 +40,26 @@ interface Pending {
   reject: (error: Error) => void
 }
 
+/** What the embedder uses of its worker. */
+export interface EmbedWorker {
+  onmessage: ((event: MessageEvent<EmbedWorkerReply>) => void) | null
+  onerror: ((event: ErrorEvent) => void) | null
+  postMessage(message: EmbedWorkerRequest): void
+  terminate(): void
+  addEventListener(type: 'close', listener: () => void): void
+}
+
 export interface LocalEmbedderOptions {
   paths: ModelPaths
   startTimeoutMs?: number
   /** Ends a load in progress: a core that stops must not wait for the model to finish loading. */
   signal?: AbortSignal
+  /** The worker to run the model in; tests pass a stand-in. */
+  createWorker?: () => EmbedWorker
 }
 
 export async function startLocalEmbedder(options: LocalEmbedderOptions): Promise<{ ok: true; embedder: LocalEmbedder; ms: number } | { ok: false; reason: string }> {
-  const worker = new Worker(workerUrl())
+  const worker: EmbedWorker = options.createWorker?.() ?? (new Worker(workerUrl()) as EmbedWorker)
   const pending = new Map<number, Pending>()
   let stopped: string | null = null
   let nextId = 1
@@ -74,6 +85,11 @@ export async function startLocalEmbedder(options: LocalEmbedderOptions): Promise
     stop(`the local embed worker stopped (${event.message.slice(0, 120)})`)
     onStart?.({ kind: 'started', ok: false, reason: 'the local embed worker stopped while starting' })
   }
+  // An exit with no error event would otherwise leave every embed in flight, and the indexer's pass with it, waiting forever.
+  worker.addEventListener('close', () => {
+    stop('the local embed worker exited')
+    onStart?.({ kind: 'started', ok: false, reason: 'the local embed worker stopped while starting' })
+  })
 
   const started = await new Promise<EmbedWorkerReply>((resolve) => {
     const timer = setTimeout(() => resolve({ kind: 'started', ok: false, reason: 'the local model did not load in time' }), options.startTimeoutMs ?? EMBED_START_TIMEOUT_MS)

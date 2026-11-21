@@ -107,6 +107,53 @@ export function readSpool(dir: string, limit: number = Number.POSITIVE_INFINITY)
   return { entries, quarantined }
 }
 
+export interface SpoolCursor {
+  /** The next entries, oldest first, up to `limit`; `more` is false once a listing has been used up. */
+  next(limit: number): SpoolRead & { more: boolean }
+  /** Forgets the listing, so entries handed out but still on disk (a batch that did not commit) are read again. */
+  reset(): void
+}
+
+function listEntries(dir: string): string[] {
+  return existsSync(dir) ? readdirSync(dir).filter((file) => ENTRY_NAME.test(file)).sort() : []
+}
+
+/**
+ * readSpool in batches over one listing: the directory is listed and sorted
+ * only when the names from the last listing are used up, so a backlog of N
+ * files costs one listing, not one per batch. Entries written meanwhile are
+ * found by the next listing.
+ */
+export function createSpoolCursor(dir: string, list: (dir: string) => string[] = listEntries): SpoolCursor {
+  let names: string[] = []
+  let at = 0
+  return {
+    next: (limit) => {
+      if (at >= names.length) {
+        names = list(dir)
+        at = 0
+      }
+      const entries: SpoolEntry[] = []
+      const quarantined: QuarantinedEntry[] = []
+      while (at < names.length && entries.length < limit) {
+        const name = names[at]!
+        at += 1
+        const path = join(dir, name)
+        // Listed a while ago: an entry removed since then is neither read nor quarantined.
+        if (!existsSync(path)) continue
+        const parsed = parseEntry(path)
+        if ('event' in parsed) entries.push({ path, event: parsed.event })
+        else quarantined.push({ path: quarantine(dir, name), reason: parsed.reason })
+      }
+      return { entries, quarantined, more: at < names.length }
+    },
+    reset: () => {
+      names = []
+      at = 0
+    },
+  }
+}
+
 /** Moves one entry into quarantine, beside the ones readSpool set aside; it is never read again. */
 export function quarantineSpoolEntry(path: string): string {
   return quarantine(dirname(path), basename(path))
