@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { EmbedError } from './embedder'
 import { LOCAL_MODEL_DIMS, LOCAL_MODEL_FILES, LOCAL_MODEL_ID } from './local-model'
-import { localModelPaths, startLocalEmbedder } from './local-embedder'
+import type { EmbedWorkerReply, EmbedWorkerRequest } from './local-embed-protocol'
+import { type EmbedWorker, localModelPaths, startLocalEmbedder } from './local-embedder'
 import { testModelDir } from './local-test-support'
 
 describe('localModelPaths', () => {
@@ -21,6 +22,46 @@ describe('localModelPaths', () => {
 test('a worker that cannot load the files answers the reason', async () => {
   const started = await startLocalEmbedder({ paths: { model: '/nowhere/m', vocab: '/nowhere/v', wasm: '/nowhere/w' } })
   expect(started.ok).toBe(false)
+})
+
+/** A worker that loads at once and then does only what the test tells it: it can exit with no error event. */
+function quietWorker(): { worker: EmbedWorker; exit: () => void; posted: EmbedWorkerRequest[] } {
+  const target = new EventTarget()
+  const posted: EmbedWorkerRequest[] = []
+  const worker: EmbedWorker = {
+    onmessage: null,
+    onerror: null,
+    postMessage: (message: EmbedWorkerRequest) => {
+      posted.push(message)
+      if (message.kind === 'start') queueMicrotask(() => worker.onmessage?.({ data: { kind: 'started', ok: true, ms: 1 } } as MessageEvent<EmbedWorkerReply>))
+    },
+    terminate: () => {},
+    addEventListener: (type: string, listener: () => void) => target.addEventListener(type, listener),
+  }
+  return { worker, exit: () => target.dispatchEvent(new Event('close')), posted }
+}
+
+const NO_PATHS = { model: '/nowhere/m', vocab: '/nowhere/v', wasm: '/nowhere/w' }
+
+test('a worker that exits with no error event fails the embed in flight and every later one, instead of leaving them waiting', async () => {
+  const quiet = quietWorker()
+  const started = await startLocalEmbedder({ paths: NO_PATHS, createWorker: () => quiet.worker })
+  expect(started.ok).toBe(true)
+  if (!started.ok) return
+  const inFlight = started.embedder.embed(['one batch'], undefined, 'index')
+  expect(quiet.posted.at(-1)).toMatchObject({ kind: 'embed', texts: ['one batch'] })
+
+  quiet.exit()
+
+  await expect(inFlight).rejects.toMatchObject({ kind: 'unavailable', message: 'the local embed worker exited' })
+  await expect(started.embedder.embed(['the next batch'])).rejects.toBeInstanceOf(EmbedError)
+})
+
+test('a worker that exits while the model loads answers the start instead of waiting out the load timeout', async () => {
+  const quiet = quietWorker()
+  const silent: EmbedWorker = { ...quiet.worker, postMessage: () => queueMicrotask(quiet.exit) }
+  const started = await startLocalEmbedder({ paths: NO_PATHS, createWorker: () => silent, startTimeoutMs: 60_000 })
+  expect(started).toEqual({ ok: false, reason: 'the local embed worker stopped while starting' })
 })
 
 const modelDir = testModelDir()

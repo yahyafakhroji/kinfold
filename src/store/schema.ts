@@ -595,11 +595,26 @@ CREATE INDEX activity_by_time ON activity(at DESC, id DESC);
 CREATE INDEX activity_by_kind ON activity(kind, at DESC, id DESC);
 `
 
+export const CONTRADICTED_INDEX = 'observations_by_contradicted'
+export const TURN_END_INDEX = 'events_turn_end'
+
+// v19: two lookups that scanned a whole table.
+//   observations.contradicted_by is a foreign key with ON DELETE SET NULL:
+//     without an index on it every deleted observation scanned the table for
+//     rows it had hidden, so a purge or a retention pass cost deleted x total.
+//     Most rows hold NULL there, so the index keeps only the ones that do not.
+//   The metrics page reads the newest turn_end events by time; no index led
+//     with kind or a plain occurred_at, so it scanned and sorted every event.
+const V19_SCAN_INDEXES = `
+CREATE INDEX ${CONTRADICTED_INDEX} ON observations(contradicted_by) WHERE contradicted_by IS NOT NULL;
+CREATE INDEX ${TURN_END_INDEX} ON events(occurred_at) WHERE kind = 'turn_end';
+`
+
 /** Index i holds the migration that takes user_version from i to i + 1. */
 export const MIGRATIONS: readonly string[] = [
   V1_CORE + V1_MEMORY + V1_DELIVERY, V2_OBSERVER, V3_CONTEXT, V4_DATA_CONTROL, V5_LINKS, V6_USAGE, V7_SHARED_SUMMARIES, V8_VECTORS, V9_RELATED_SERVED,
   V10_OBSERVER_SAFETY, V11_VECTOR_SPACE_INDEX, V12_VISIBLE, V13_LATE_AND_INDEXES,
-  V14_OBSERVER_ENDPOINT, V15_EMBEDDING_SPACES, V16_PROJECT_MERGES, V17_RECALL_INDEX, V18_DASHBOARD_RECORDS,
+  V14_OBSERVER_ENDPOINT, V15_EMBEDDING_SPACES, V16_PROJECT_MERGES, V17_RECALL_INDEX, V18_DASHBOARD_RECORDS, V19_SCAN_INDEXES,
 ]
 
 /**

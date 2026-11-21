@@ -152,17 +152,26 @@ export const FORMAT_RULES: readonly FormatRule[] = [
 
 // ---- Secrets after a prefix: group 1 is kept, group 2 is the secret --------
 
-const KEY_NAME = String.raw`[A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|credential)s?[A-Za-z0-9_.-]*|[A-Za-z0-9_]+_pwd`
+// A key name is a run of [A-Za-z0-9_.-] holding one of these words, or a word ending in _pwd.
+// Both patterns below start at the word, not at the start of the run: a pattern that first
+// ate the run and then backed up looking for the word did so again from every position in
+// it, which on a long dotted or base64url run took seconds to minutes (the capture hook was
+// killed and the event lost). The rest of the name after the word is capped at
+// KEY_NAME_TAIL_CHARS for the same reason; no real key name comes near it.
+const KEY_WORD = String.raw`password|passwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|credential`
+const KEY_NAME_TAIL_CHARS = 256
 
-/** A key name that suggests its value is a secret. */
-export const SECRET_KEY_NAME = new RegExp(String.raw`(?:^|[^A-Za-z0-9])(?:${KEY_NAME})(?:$|[^A-Za-z0-9])|^(?:${KEY_NAME})$`, 'i')
+/** A key name that suggests its value is a secret: the word anywhere in the text, or a name ending in _pwd. */
+export const SECRET_KEY_NAME = new RegExp(String.raw`${KEY_WORD}|[A-Za-z0-9_]_pwd(?![A-Za-z0-9])`, 'i')
 
 export const PREFIXED_RULES: readonly FormatRule[] = [
-  { name: 'url_credentials', pattern: /(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)([^\s@/]+)(?=@)/gi },
+  // Starts at `://` and looks back for the scheme, for the reason above: eating a dotted run first and then looking for `://` was quadratic.
+  { name: 'url_credentials', pattern: /((?<=\b[a-z][a-z0-9+.-]*):\/\/[^\s:/@]+:)([^\s@/]+)(?=@)/gi },
   { name: 'bearer_token', pattern: /(\b(?:Bearer|Basic)\s+)([A-Za-z0-9._~+/=-]{16,})/g },
   {
     name: 'keyed_value',
-    pattern: new RegExp(String.raw`(\b(?:${KEY_NAME})\b\s*["']?\s*[:=]\s*["']?)([^\s"'\x60,;{}<>]+)`, 'gi'),
+    // Group 1 starts at the word; the part of the name before it is left in place either way, since group 1 is kept.
+    pattern: new RegExp(String.raw`((?:(?:${KEY_WORD})s?[A-Za-z0-9_.-]{0,${KEY_NAME_TAIL_CHARS}}|(?<=[A-Za-z0-9_])_pwd)\b\s*(?:["']\s*)?[:=]\s*["']?)([^\s"'\x60,;{}<>]+)`, 'gi'),
   },
 ]
 

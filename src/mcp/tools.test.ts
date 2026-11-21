@@ -79,6 +79,30 @@ test('quotes, NEAR( and OR as words: matches stay literal', async () => {
   expect(resultIds(result)).toContain(fixture.ids.spool!)
 })
 
+test('any-term results page past the first page: the offset the first page names leads to the next rows, in the same mode', async () => {
+  const whole = await call('search', { query: 'parser OR spool', limit: 20 })
+  expect(resultIds(whole).length).toBeGreaterThan(1)
+
+  const paged: number[] = []
+  let offset: number | null = 0
+  while (offset !== null) {
+    const page: ToolResult = await call('search', { query: 'parser OR spool', limit: 1, offset })
+    expect(page.structuredContent.mode).toBe('any')
+    expect(text(page)).toContain('these match any term')
+    expect(resultIds(page)).toHaveLength(1)
+    paged.push(...resultIds(page))
+    offset = page.structuredContent.nextOffset as number | null
+  }
+  expect(paged).toEqual(resultIds(whole))
+})
+
+test('a query whose every term matches some row stays in every-term mode past its last page', async () => {
+  const first = await call('search', { query: 'parser drops' })
+  expect(first.structuredContent.mode).toBe('all')
+  const past = await call('search', { query: 'parser drops', offset: 20 })
+  expect(past.structuredContent).toMatchObject({ mode: 'all', hasMore: false, results: [] })
+})
+
 test('an empty query is a usage error with isError', async () => {
   const result = await call('search', { query: '  ' })
   expect(result.isError).toBe(true)

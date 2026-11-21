@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, posix, win32 } from 'node:path'
-import { type GitRunner, GitTimeoutError, PROJECT_KEY_TTL_MS, createProjectKeyResolver, gitRunnerWithTimeout, nativeTopLevel, remoteSlug, resolveProjectKey } from './project-key'
+import { GIT_RETRY_AFTER_TIMEOUT_MS, type GitRunner, GitTimeoutError, PROJECT_KEY_TTL_MS, ROOT_RETRY_AFTER_TIMEOUT_MS, createProjectKeyResolver, gitRunnerWithTimeout, nativeTopLevel, remoteSlug, resolveProjectKey } from './project-key'
 
 let root: string
 beforeEach(() => {
@@ -72,7 +72,7 @@ test('a real git timeout is reported as GitTimeoutError, not as "no repo"', () =
   expect(() => gitRunnerWithTimeout(1)(tmpdir(), ['-c', 'alias.slow=!sleep 1', 'slow'])).toThrow(GitTimeoutError)
 })
 
-test('a timeout is retried once and a key from a timeout is never cached', () => {
+test('a timeout is retried once, and the path key it falls back to is kept only until git is asked again a little later', () => {
   let timeouts = 2
   const calls: string[] = []
   const flaky: GitRunner = (cwd, args) => {
@@ -83,11 +83,80 @@ test('a timeout is retried once and a key from a timeout is never cached', () =>
     }
     return args[0] === 'config' ? 'git@github.com:acme/widgets.git' : null
   }
-  const resolve = createProjectKeyResolver(flaky)
+  let clock = 0
+  const resolve = createProjectKeyResolver(flaky, { now: () => clock })
   expect(resolve('/a')).toMatchObject({ key: '/a', kind: 'path' })
+  clock = GIT_RETRY_AFTER_TIMEOUT_MS + 1
   expect(resolve('/a')).toMatchObject({ key: 'github.com/acme/widgets', kind: 'git-remote' })
   expect(resolve('/a')).toMatchObject({ kind: 'git-remote' })
   expect(calls).toEqual(['/a config', '/a config', '/a config'])
+})
+
+test('a folder whose git keeps timing out is asked twice, not once per event, until the retry time has passed', () => {
+  let calls = 0
+  const stuck: GitRunner = () => {
+    calls += 1
+    throw new GitTimeoutError(3_000)
+  }
+  let clock = 0
+  const resolve = createProjectKeyResolver(stuck, { withRoot: true, now: () => clock })
+  for (let event = 0; event < 200; event += 1) expect(resolve('/slow')).toMatchObject({ key: '/slow', kind: 'path' })
+  for (let prompt = 0; prompt < 50; prompt += 1) expect(resolve.keyOnly('/slow').kind).toBe('path')
+  expect(calls).toBe(2)
+  clock = GIT_RETRY_AFTER_TIMEOUT_MS + 1
+  resolve('/slow')
+  resolve('/slow')
+  expect(calls).toBe(4)
+})
+
+test('the key alone remembers a timeout too, so a prompt does not wait on a stuck git every time', () => {
+  let calls = 0
+  const stuck: GitRunner = () => {
+    calls += 1
+    throw new GitTimeoutError(3_000)
+  }
+  let clock = 0
+  const resolve = createProjectKeyResolver(stuck, { now: () => clock })
+  for (let prompt = 0; prompt < 50; prompt += 1) expect(resolve.keyOnly('/slow')).toMatchObject({ key: '/slow', kind: 'path' })
+  expect(calls).toBe(1)
+  clock = GIT_RETRY_AFTER_TIMEOUT_MS + 1
+  resolve.keyOnly('/slow')
+  expect(calls).toBe(2)
+})
+
+test('a key git already gave is not replaced by the path key when a later lookup times out', () => {
+  let stuck = false
+  const fake: GitRunner = (_cwd, args) => {
+    if (stuck) throw new GitTimeoutError(3_000)
+    return args[0] === 'config' ? 'git@github.com:acme/widgets.git' : null
+  }
+  const resolve = createProjectKeyResolver(fake, { withRoot: true, now: () => 0 })
+  expect(resolve.keyOnly('/a').key).toBe('github.com/acme/widgets')
+  stuck = true
+  // The capture path has no key of its own yet and git is stuck: it uses the one a read just found, as later reads do.
+  expect(resolve('/a')).toMatchObject({ key: 'github.com/acme/widgets', kind: 'git-remote' })
+  expect(resolve.keyOnly('/a').key).toBe('github.com/acme/widgets')
+})
+
+test('a history walk that timed out is not repeated at every refresh of the key', () => {
+  const calls: string[] = []
+  const fake: GitRunner = (_cwd, args) => {
+    calls.push(args[0]!)
+    if (args[0] === 'config') return 'git@github.com:me/kinfold.git'
+    if (args[0] === 'rev-list') throw new GitTimeoutError(3_000)
+    return null
+  }
+  let clock = 0
+  const resolver = createProjectKeyResolver(fake, { withRoot: true, now: () => clock })
+  expect(resolver('/big')).toEqual({ key: 'github.com/me/kinfold', kind: 'git-remote', displayName: 'kinfold' })
+  for (let refresh = 1; refresh <= 5; refresh += 1) {
+    clock = refresh * (PROJECT_KEY_TTL_MS + 1)
+    expect(resolver('/big').key).toBe('github.com/me/kinfold')
+  }
+  expect(calls.filter((call) => call === 'rev-list')).toHaveLength(1)
+  clock = ROOT_RETRY_AFTER_TIMEOUT_MS + 1
+  resolver('/big')
+  expect(calls.filter((call) => call === 'rev-list')).toHaveLength(2)
 })
 
 test('the resolver runs git once per cwd', () => {

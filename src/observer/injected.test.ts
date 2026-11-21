@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { dropEchoes, injectedObservations } from './injected'
+import { MAX_KNOWN_OBSERVATIONS, dropEchoes, injectedObservations } from './injected'
 import { processSessionBatch } from './process'
 import { BEGIN_KNOWN, buildObserverPrompt } from './prompt'
 import { PROJECT, type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from './test-support'
@@ -65,6 +65,22 @@ test('a SessionStart injection matches on host and host session id; other sessio
     { id: a, title: 'Adapter tests pass', projectKey: PROJECT },
     { id: b, title: 'Spool drains in order', projectKey: PROJECT },
   ])
+})
+
+test('a long session keeps the memory it was handed most recently, not the oldest', () => {
+  const session = seedSession(temp.store, 'claude-code', 'cc-long')
+  const ids = Array.from({ length: MAX_KNOWN_OBSERVATIONS + 5 }, (_, index) => seedObservation(session, `fact number ${index}`))
+  // One injection per prompt, oldest first, the last two prompts repeating an id already handed out.
+  for (const id of ids) seedInjection(session, 'claude-code', 'cc-long', [id])
+  seedInjection(session, 'claude-code', 'cc-long', [ids[0]!, ids.at(-1)!])
+
+  const known = injectedObservations(temp.store.db, session).map((row) => row.id)
+  expect(known).toHaveLength(MAX_KNOWN_OBSERVATIONS)
+  expect(known).toContain(ids.at(-1)!)
+  // Handed out again by the newest injection, so it counts as recent.
+  expect(known).toContain(ids[0]!)
+  expect(known).not.toContain(ids[1]!)
+  expect(known).toEqual([...known].sort((a, b) => a - b))
 })
 
 test('a session with no injection knows nothing', () => {

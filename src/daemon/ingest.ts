@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto'
 import { DEFAULT_MAX_FIELD_CHARS, type PrepareOptions, type RedactedEvent, prepareForSpool } from '../capture/prepare'
 import type { NormalizedEvent } from '../contract/event'
-import { type QuarantinedEntry, type SpoolEntry, type SpoolRead, readSpool, removeSpoolEntry } from '../spool/spool'
+import { type QuarantinedEntry, type SpoolCursor, type SpoolEntry, type SpoolRead, createSpoolCursor, removeSpoolEntry } from '../spool/spool'
 import type { Database } from '../sqlite/types'
 import { HOLDOUT_HOSTS } from '../context/holdout'
 import { stampInjectionPrompts } from '../store/context-store'
@@ -157,12 +157,20 @@ function ingestEvent(db: Database, raw: NormalizedEvent, options: DrainOptions, 
   return inserted
 }
 
-/** One batch in one transaction. The turn ends are handed back only when it commits, so nothing is read for rows that rolled back. */
+/**
+ * One batch in one transaction. The turn ends are handed back only when it commits, so nothing is read for rows that rolled back.
+ * Each folder's project key is asked for once, before the transaction opens: the lookup can run git, and a slow git must not hold the write lock.
+ */
 function commitBatch(db: Database, entries: readonly SpoolEntry[], options: DrainOptions): { inserted: number; turnEnds: TurnEnd[] } {
   const now = (options.now ?? Date.now)()
+  const keys = new Map<string, ProjectKey>()
+  for (const entry of entries) {
+    if (!keys.has(entry.event.cwd)) keys.set(entry.event.cwd, options.projectKeyFor(entry.event.cwd))
+  }
+  const resolved: DrainOptions = { ...options, projectKeyFor: (cwd) => keys.get(cwd) ?? options.projectKeyFor(cwd) }
   return db.transaction(() => {
     const turnEnds: TurnEnd[] = []
-    const inserted = entries.filter((entry) => ingestEvent(db, entry.event, options, now, turnEnds)).length
+    const inserted = entries.filter((entry) => ingestEvent(db, entry.event, resolved, now, turnEnds)).length
     return { inserted, turnEnds }
   })()
 }
@@ -192,36 +200,54 @@ export function ingestResolved(db: Database, items: readonly ResolvedEvent[], op
   return { inserted, duplicates: items.length - inserted }
 }
 
-/** Drains until the spool is empty or a batch fails. Quarantined entries are reported, never ingested. */
+export interface BatchResult extends DrainResult {
+  /** Entries from the cursor's listing still wait: the caller runs another batch, after letting other work through. */
+  more: boolean
+}
+
+/**
+ * Stores one batch (batchSize entries at most) from `cursor` and stops, so a
+ * caller with other work to answer (the daemon) can do it between batches. A
+ * read or commit that fails resets the cursor: those entries are still on disk.
+ */
+export function drainBatch(db: Database, options: DrainOptions, cursor: SpoolCursor): BatchResult {
+  const empty: DrainResult = { read: 0, inserted: 0, duplicates: 0, removed: 0, quarantined: [], turnEnds: [] }
+  let batch: SpoolRead & { more: boolean }
+  try {
+    batch = cursor.next(options.batchSize ?? DEFAULT_BATCH_SIZE)
+  } catch (error: unknown) {
+    cursor.reset()
+    return { ...empty, more: false, error: `spool read failed: ${errorMessage(error)}` }
+  }
+  const read = { ...empty, read: batch.entries.length, quarantined: batch.quarantined }
+  if (batch.entries.length === 0) return { ...read, more: batch.more }
+
+  let inserted: number
+  let turnEnds: TurnEnd[]
+  try {
+    ;({ inserted, turnEnds } = commitBatch(db, batch.entries, options))
+  } catch (error: unknown) {
+    cursor.reset()
+    return { ...read, more: false, error: `batch rolled back: ${errorMessage(error)}` }
+  }
+  for (const entry of batch.entries) removeSpoolEntry(entry.path)
+  return { ...read, inserted, duplicates: batch.entries.length - inserted, removed: batch.entries.length, turnEnds, more: batch.more }
+}
+
+/** Drains until the spool's listing is used up or a batch fails. Quarantined entries are reported, never ingested. */
 export function drainSpool(db: Database, options: DrainOptions): DrainResult {
-  const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE
-  let result: DrainResult = { read: 0, inserted: 0, duplicates: 0, removed: 0, quarantined: [], turnEnds: [] }
+  const cursor = createSpoolCursor(options.spoolDir)
+  const result: DrainResult = { read: 0, inserted: 0, duplicates: 0, removed: 0, quarantined: [], turnEnds: [] }
 
   for (;;) {
-    let batch: SpoolRead
-    try {
-      batch = readSpool(options.spoolDir, batchSize)
-    } catch (error: unknown) {
-      return { ...result, error: `spool read failed: ${errorMessage(error)}` }
-    }
-    result = { ...result, read: result.read + batch.entries.length, quarantined: [...result.quarantined, ...batch.quarantined] }
-    if (batch.entries.length === 0) return result
-
-    let inserted: number
-    let turnEnds: TurnEnd[]
-    try {
-      ;({ inserted, turnEnds } = commitBatch(db, batch.entries, options))
-    } catch (error: unknown) {
-      return { ...result, error: `batch rolled back: ${errorMessage(error)}` }
-    }
-    for (const entry of batch.entries) removeSpoolEntry(entry.path)
-    result = {
-      ...result,
-      inserted: result.inserted + inserted,
-      duplicates: result.duplicates + batch.entries.length - inserted,
-      removed: result.removed + batch.entries.length,
-      turnEnds: [...result.turnEnds, ...turnEnds],
-    }
-    if (batch.entries.length < batchSize) return result
+    const { more, error, ...batch } = drainBatch(db, options, cursor)
+    result.read += batch.read
+    result.inserted += batch.inserted
+    result.duplicates += batch.duplicates
+    result.removed += batch.removed
+    result.quarantined.push(...batch.quarantined)
+    result.turnEnds.push(...batch.turnEnds)
+    if (error !== undefined) return { ...result, error }
+    if (!more) return result
   }
 }

@@ -198,10 +198,16 @@ function pathKey(cwd: string): ProjectKey {
 /**
  * One git lookup per cwd per PROJECT_KEY_TTL_MS; the daemon keeps one.
  * A timeout is retried once; if git times out again the event gets the path
- * key, which is not cached, so the next event in that cwd asks git again.
+ * key, kept only for GIT_RETRY_AFTER_TIMEOUT_MS: every event of a stuck
+ * folder asking git again held the daemon for the timeout each time, while a
+ * key kept for good left a live repo on its path key.
  */
 /** How long the daemon keeps a folder's key before asking git again: a remote renamed under a running daemon is seen within this. */
 export const PROJECT_KEY_TTL_MS = 5 * 60_000
+/** How long a folder whose git timed out waits before git is asked again. */
+export const GIT_RETRY_AFTER_TIMEOUT_MS = 30_000
+/** How long a folder whose history walk timed out waits before the walk is tried again; the walk would most likely time out again. */
+export const ROOT_RETRY_AFTER_TIMEOUT_MS = 60 * 60_000
 
 export interface ResolverOptions extends ResolveOptions {
   now?: () => number
@@ -219,16 +225,31 @@ export interface CachingProjectKeyResolver extends ProjectKeyResolver {
 
 export function createProjectKeyResolver(git: GitRunner = runGit, options: ResolverOptions = {}): CachingProjectKeyResolver {
   const now = options.now ?? Date.now
-  const cache = new Map<string, { key: ProjectKey; at: number }>()
+  /** `until` is when git is asked again: a refresh for a key git gave, sooner for one a timeout left. */
+  type Kept = { key: ProjectKey; until: number }
+  const cache = new Map<string, Kept>()
   // A folder's first commit never changes, and finding it walks the whole history: asked once per folder.
   const roots = new Map<string, string>()
+  /** Folders whose history walk timed out, and when to try it again. */
+  const rootRetryAt = new Map<string, number>()
   const rootFor = (cwd: string, key: ProjectKey): ProjectKey => {
     if (options.withRoot !== true || key.kind === 'path') return key
     const known = roots.get(cwd)
     if (known !== undefined) return { ...key, rootCommit: known }
-    const found = withRootCommit(cwd, git, key)
-    if (found.rootCommit !== undefined) roots.set(cwd, found.rootCommit)
-    return found
+    const retryAt = rootRetryAt.get(cwd)
+    if (retryAt !== undefined && now() < retryAt) return key
+    try {
+      const root = rootCommitOf(cwd, git)
+      rootRetryAt.delete(cwd)
+      if (root === null) return key
+      roots.set(cwd, root)
+      return { ...key, rootCommit: root }
+    } catch (error: unknown) {
+      if (!(error instanceof GitTimeoutError)) throw error
+      // A long history can outlast the timeout, and would again at the next refresh; the key found already stands without it.
+      rootRetryAt.set(cwd, now() + ROOT_RETRY_AFTER_TIMEOUT_MS)
+      return key
+    }
   }
   const attempt = (cwd: string): ProjectKey | null => {
     try {
@@ -238,32 +259,36 @@ export function createProjectKeyResolver(git: GitRunner = runGit, options: Resol
       throw error
     }
   }
-  const keysOnly = new Map<string, { key: ProjectKey; at: number }>()
+  const keysOnly = new Map<string, Kept>()
   const keyOnly: ProjectKeyResolver = (cwd) => {
     const at = now()
-    const fresh = [cache.get(cwd), keysOnly.get(cwd)].find((entry) => entry !== undefined && at - entry.at < PROJECT_KEY_TTL_MS)
+    const fresh = [cache.get(cwd), keysOnly.get(cwd)].find((entry) => entry !== undefined && at < entry.until)
     if (fresh !== undefined) return fresh.key
     try {
       const key = resolveProjectKey(cwd, git)
-      keysOnly.set(cwd, { key, at })
+      keysOnly.set(cwd, { key, until: at + PROJECT_KEY_TTL_MS })
       return key
     } catch (error: unknown) {
-      if (error instanceof GitTimeoutError) return cache.get(cwd)?.key ?? keysOnly.get(cwd)?.key ?? pathKey(cwd)
-      throw error
+      if (!(error instanceof GitTimeoutError)) throw error
+      const key = cache.get(cwd)?.key ?? keysOnly.get(cwd)?.key ?? pathKey(cwd)
+      keysOnly.set(cwd, { key, until: at + GIT_RETRY_AFTER_TIMEOUT_MS })
+      return key
     }
   }
   const resolver = (cwd: string): ProjectKey => {
     const at = now()
     const cached = cache.get(cwd)
-    if (cached !== undefined && at - cached.at < PROJECT_KEY_TTL_MS) return cached.key
+    if (cached !== undefined && at < cached.until) return cached.key
     const resolved = attempt(cwd) ?? attempt(cwd)
     if (resolved === null) {
-      // A slow git keeps the key it had, and is not asked again until the next refresh.
-      if (cached === undefined) return pathKey(cwd)
-      cache.set(cwd, { key: cached.key, at })
-      return cached.key
+      // A slow git keeps the key it had until the next refresh. With no key yet, the path key stands in, for a short while only.
+      // A key the key-only lookup got from git stands in before the path key does: both lookups then name one project.
+      const known = cached !== undefined && cached.key.kind !== 'path' ? cached.key : keysOnly.get(cwd)?.key
+      const kept: Kept = known === undefined || known.kind === 'path' ? { key: pathKey(cwd), until: at + GIT_RETRY_AFTER_TIMEOUT_MS } : { key: known, until: cached?.key === known ? at + PROJECT_KEY_TTL_MS : at + GIT_RETRY_AFTER_TIMEOUT_MS }
+      cache.set(cwd, kept)
+      return kept.key
     }
-    cache.set(cwd, { key: resolved, at })
+    cache.set(cwd, { key: resolved, until: at + PROJECT_KEY_TTL_MS })
     return resolved
   }
   return Object.assign(resolver, { keyOnly })

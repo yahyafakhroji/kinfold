@@ -149,10 +149,21 @@ export async function uninstall(base: InstallEnv, options: UninstallOptions): Pr
     const store = read.ok ? read.store : null
     const hmac = read.ok && options.removeHmacKeys === true ? hmacRemoval(env, options.dryRun) : null
     const saved = readInstallRecord(env.dataDir)
+    // One agent's config that cannot be read (broken JSON, perhaps of an agent Kinfold never wired) is left as it is and named:
+    // it must not keep the service running, the other agents wired and the program in place.
+    const skippedHosts: string[] = []
+    const unwire = (host: InstallHost): Action[] => {
+      try {
+        return hostUnwireActions(env, host)
+      } catch (error: unknown) {
+        skippedHosts.push(`${profileOf(host).name}: skipped; ${errorMessage(error)}`)
+        return []
+      }
+    }
     // Each part with the bar's words for it; null leaves every action its own short label.
     const parts: [string | null, Action[]][] = [
       [null, await serviceActions(env)],
-      ...INSTALL_HOSTS.map((host): [string, Action[]] => [`unwiring ${profileOf(host).name}`, hostUnwireActions(env, host)]),
+      ...INSTALL_HOSTS.map((host): [string, Action[]] => [`unwiring ${profileOf(host).name}`, unwire(host)]),
       [null, options.removeCredentials ? credentialActions(store, refs) : []],
       // A token from `claude setup-token` signs in as the whole account for a year, and is minted again in a minute: it never stays behind.
       [null, credentialActions(store, [CLAUDE_TOKEN_REF])],
@@ -173,7 +184,7 @@ export async function uninstall(base: InstallEnv, options: UninstallOptions): Pr
       lock.release()
     }
     const keyNotes = read.ok ? (hmac?.notes ?? hmacKeptNotes(env)) : unknownStoreNote(read.reason, options)
-    const notes = [...keptNotes(env, store, refs, options.removeCredentials), ...keyNotes]
+    const notes = [...skippedHosts, ...keptNotes(env, store, refs, options.removeCredentials), ...keyNotes]
     for (const note of notes) env.out(note)
     const skippedDeletes = !read.ok && (options.removeCredentials || options.removeHmacKeys === true)
     // On a terminal the notes went to the log; a run that ends as failed has to show why.

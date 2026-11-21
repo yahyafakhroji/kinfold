@@ -21,6 +21,7 @@ import { type InjectionDuration, type InjectionTotals, type RunRow, type StateCo
 import { relatedServedSince } from '../store/related-served-store'
 import { type HitRateSummary, summarizeHitRate } from './hit-rate'
 import { type ImpactSummary, impactSummary } from './impact'
+import { type KeptReport, keptReport } from './kept-report'
 
 export interface Percentiles {
   samples: number
@@ -196,4 +197,25 @@ export async function metricsRoute(reports: StoreReader, window: string | null, 
   const parsed = parseMetricsWindow(window)
   if (parsed === null) return { status: 400, body: { error: 'window must be 24h or 7d' } }
   return { status: 200, body: await reports.run('metricsSummary', { window: parsed, now: now() }) }
+}
+
+/** How long a metrics summary is served before it is read again. */
+export const METRICS_MAX_AGE_MS = 30_000
+
+/**
+ * metricsRoute with each window's summary kept (see kept-report.ts): a page
+ * that polls, or a hub relaying several devices' asks, pays for one read per
+ * METRICS_MAX_AGE_MS instead of one per request. The body is the summary, as before.
+ */
+export function keptMetricsRoute(reports: StoreReader, options: { now?: () => number; onError?: (error: unknown) => void } = {}): (window: string | null) => Promise<{ status: number; body: unknown }> {
+  const now = options.now ?? Date.now
+  const kept = new Map<MetricsWindow, KeptReport<MetricsSummary>>((Object.keys(METRICS_WINDOWS) as MetricsWindow[]).map((window) => [
+    window,
+    keptReport(() => reports.run('metricsSummary', { window, now: now() }), { maxAgeMs: METRICS_MAX_AGE_MS, now, ...(options.onError !== undefined ? { onError: options.onError } : {}) }),
+  ]))
+  return async (window) => {
+    const parsed = parseMetricsWindow(window)
+    if (parsed === null) return { status: 400, body: { error: 'window must be 24h or 7d' } }
+    return { status: 200, body: (await kept.get(parsed)!.get()).value }
+  }
 }

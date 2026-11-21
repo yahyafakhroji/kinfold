@@ -150,18 +150,16 @@ export function createContextInjector(options: ContextInjectorOptions): ContextI
     const prompt = pending.get(sessionId)
     if (entry === undefined || (prompt === undefined && now() - entry.askedAt < interval)) return
     pending.delete(sessionId)
-    cache.set(sessionId, { ...entry, askedAt: now() })
+    // The entry is changed in place, as packFor changes it. Swapping in a copy here left a pack ask in flight
+    // writing to the entry it replaced, and the copy holding that ask's promise for good: no pack was asked for again.
+    entry.askedAt = now()
     const delta = await ask(sessionId, 'prompt', prompt)
-    const current = cache.get(sessionId)
-    // Compaction may have dropped the session meanwhile; its next pack covers this delta.
-    if (current === undefined) return
+    // Compaction may have dropped the session meanwhile, and a later request may have started a new one; its pack covers this delta.
+    if (cache.get(sessionId) !== entry) return
     const relatedText = delta?.relatedText ?? ''
     const deltaText = delta === null ? '' : delta.text.slice(0, delta.text.length - relatedText.length).replace(/\n$/, '')
-    cache.set(sessionId, {
-      ...current,
-      deltas: deltaText === '' ? current.deltas : [...current.deltas, deltaText].slice(-MAX_DELTAS_PER_SESSION),
-      related: prompt === undefined ? current.related : relatedText,
-    })
+    if (deltaText !== '') entry.deltas = [...entry.deltas, deltaText].slice(-MAX_DELTAS_PER_SESSION)
+    if (prompt !== undefined) entry.related = relatedText
   }
 
   const onContext = async (event: unknown): Promise<void> => {

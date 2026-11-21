@@ -30,8 +30,11 @@ export type PurgeTarget =
   | { kind: 'event'; eventId: string }
   | { kind: 'prompt'; id: number }
   | { kind: 'summary'; id: number }
-  /** Retention: rows of one table older than a cutoff (summaries by last use, see EXPIRE_WHERE). A range stays on occurred_at. */
-  | { kind: 'expire'; table: 'observations' | 'summaries'; before: number }
+  /**
+   * Retention: rows of one table older than a cutoff (summaries by last use, see EXPIRE_WHERE). A range stays on occurred_at.
+   * With `limit`, only that many of them, oldest first: retention deletes a long history in batches, not in one transaction.
+   */
+  | { kind: 'expire'; table: 'observations' | 'summaries'; before: number; limit?: number }
 
 /** Delete order: every table after the ones that point at it. */
 export const PURGE_TABLES = ['injections', 'activity', 'mcp_reads', 'observer_runs', 'summaries', 'events', 'turn_usage', 'prompts', 'observations', 'sessions', 'context_packs', 'projects'] as const
@@ -43,6 +46,9 @@ export interface PurgeScope {
   where: Readonly<Record<PurgeTable, string>>
   params: Readonly<Record<string, string | number>>
 }
+
+/** A fixed order for a batch: observations oldest first, in the order of their occurred_at index, so a batch reads only its own rows; summaries by id. */
+const EXPIRE_ORDER: Readonly<Record<'observations' | 'summaries', string>> = { observations: 'occurred_at, id', summaries: 'id' }
 
 const NONE = '0'
 const EMPTY: Record<PurgeTable, string> = Object.fromEntries(PURGE_TABLES.map((table) => [table, NONE])) as Record<PurgeTable, string>
@@ -120,8 +126,12 @@ function baseScope(target: PurgeTarget): { where: Record<PurgeTable, string>; pa
       return { where: only('prompts', 'id = $id'), params: { id: target.id } }
     case 'summary':
       return { where: only('summaries', 'id = $id'), params: { id: target.id } }
-    case 'expire':
-      return { where: only(target.table, EXPIRE_WHERE[target.table]), params: { before: target.before } }
+    case 'expire': {
+      if (target.limit === undefined) return { where: only(target.table, EXPIRE_WHERE[target.table]), params: { before: target.before } }
+      // A fixed order, so every statement of the purge names the same rows until the one that deletes them.
+      const batch = `id IN (SELECT id FROM ${target.table} WHERE ${EXPIRE_WHERE[target.table]} ORDER BY ${EXPIRE_ORDER[target.table]} LIMIT $limit)`
+      return { where: only(target.table, batch), params: { before: target.before, limit: target.limit } }
+    }
     case 'session':
       return { where: bySessions('SELECT id FROM sessions WHERE id = $id'), params: { id: target.id } }
     case 'host':

@@ -32,14 +32,23 @@ export function createRestarter<C extends RestartableCore>(deps: RestarterDeps<C
   let down = false
   let restarting: Promise<void> | null = null
 
+  /** Set by a fatal failure: the process is on its way out, and nothing more may stop, step or open a core. */
+  let fatal = false
+  const failFatal = (reason: string): void => {
+    fatal = true
+    deps.onFatal(reason)
+  }
+
   const restartNow = async (between: () => Promise<void>): Promise<void> => {
+    // A restart that waited behind a fatal one: the old core may still hold the store.
+    if (fatal) throw new Error('the daemon is stopping after a failed restart')
     down = true
     let failure: unknown = null
     try {
       await deps.current().stop()
     } catch (error: unknown) {
       // The store may still be open under the old core: neither the step nor a new core may run.
-      deps.onFatal(`the store could not be closed for the restore (${error instanceof Error ? error.name : 'error'})`)
+      failFatal(`the store could not be closed for the restore (${error instanceof Error ? error.name : 'error'})`)
       throw error
     }
     try {
@@ -51,7 +60,7 @@ export function createRestarter<C extends RestartableCore>(deps: RestarterDeps<C
       deps.adopt(deps.start())
       down = false
     } catch (error: unknown) {
-      deps.onFatal(`memory.db could not be opened again (${error instanceof Error ? error.name : 'error'})`)
+      failFatal(`memory.db could not be opened again (${error instanceof Error ? error.name : 'error'})`)
       throw failure ?? error
     }
     if (failure !== null) throw failure
@@ -59,8 +68,11 @@ export function createRestarter<C extends RestartableCore>(deps: RestarterDeps<C
 
   return {
     restart(between) {
-      const run = restartNow(between).finally(() => {
-        restarting = null
+      // One at a time: two restarts at once each stopped the same core and each opened one, and the one not adopted kept its writer and timers.
+      // The first still closes the store before this returns; one behind another waits for it, whether it succeeded or not.
+      const before = restarting
+      const run = (before === null ? restartNow(between) : before.catch(() => {}).then(() => restartNow(between))).finally(() => {
+        if (restarting === run) restarting = null
       })
       restarting = run
       return run

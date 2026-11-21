@@ -38,6 +38,11 @@ export interface PurgeReport {
 export interface PurgeOptions {
   dryRun: boolean
   now: () => number
+  /**
+   * Leaves the FTS merge and the scrub to the caller: retention purges in
+   * batches and does both once at the end (optimizeFts, scrub), not once per batch.
+   */
+  deferCleanup?: boolean
 }
 
 /** Purged text must be overwritten, not just unlinked; refuse to run on a connection without it. */
@@ -69,12 +74,12 @@ export function purge(db: Database, target: PurgeTarget, options: PurgeOptions):
     if (options.dryRun) return { counts: countScope(db, scope, ids), packsRebuilt: 0 }
     const projects = affectedProjects(db, scope)
     const counts = deleteScope(db, scope, ids)
-    if (ids.length > 0) optimizeFts(db)
+    if (ids.length > 0 && options.deferCleanup !== true) optimizeFts(db)
     const now = options.now()
     const packsRebuilt = removed(counts) === 0 ? 0 : projects.reduce((sum, key) => sum + rebuildProjectPacks(db, key, now), 0)
     return { counts, packsRebuilt }
   })()
-  const scrubbed = options.dryRun || removed(outcome.counts) === 0 ? null : scrub(db)
+  const scrubbed = options.dryRun || options.deferCleanup === true || removed(outcome.counts) === 0 ? null : scrub(db)
   return { dryRun: options.dryRun, target: target.kind, ...outcome, scrub: scrubbed, ms: Date.now() - startedAt }
 }
 

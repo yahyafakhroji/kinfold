@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { metricsRoute } from '../dashboard/metrics'
+import { METRICS_MAX_AGE_MS, keptMetricsRoute, metricsRoute } from '../dashboard/metrics'
 import { type TempStore, openTempStore } from '../observer/test-support'
 import { type StoreReader, inlineStoreReader } from '../workers/store-reader'
 import { dataHandlers } from './data-routes'
@@ -34,4 +34,21 @@ test('the metrics summary is read through the reports reader, and a bad window i
   expect((await metricsRoute(reports, '7d', () => 1_000)).status).toBe(200)
   expect(await metricsRoute(reports, 'forever')).toEqual({ status: 400, body: { error: 'window must be 24h or 7d' } })
   expect(asked).toEqual(['metricsSummary'])
+})
+
+test('the kept metrics route reads each window once per max age, however often it is asked, and serves the old summary while a new one is read', async () => {
+  let clock = 1_000
+  const route = keptMetricsRoute(reports, { now: () => clock })
+  const first = await route('7d')
+  expect(first.status).toBe(200)
+  expect((first.body as { latency: { window: string } }).latency.window).toBe('7d')
+  for (let ask = 0; ask < 5; ask += 1) expect(await route('7d')).toEqual(first)
+  expect(asked).toEqual(['metricsSummary'])
+  await route(null)
+  expect(asked).toEqual(['metricsSummary', 'metricsSummary'])
+  expect(await route('forever')).toEqual({ status: 400, body: { error: 'window must be 24h or 7d' } })
+
+  clock += METRICS_MAX_AGE_MS + 1
+  expect(await route('7d')).toEqual(first)
+  expect(asked).toHaveLength(3)
 })

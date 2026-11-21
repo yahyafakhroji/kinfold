@@ -49,8 +49,9 @@ export function injectedObservations(db: Database, sessionId: number): KnownObse
   const rows = db.query<{ ids: string }, { sessionId: number }>(
     `SELECT i.observation_ids AS ids FROM injections i JOIN sessions s ON s.id = $sessionId
      WHERE (i.session_id = s.id OR (i.session_id IS NULL AND i.host = s.host AND i.host_session_id = s.host_session_id)) AND i.late = 0
-     ORDER BY i.id`,
+     ORDER BY i.id DESC`,
   ).all({ sessionId })
+  // Newest injection first: in a long session the memory handed out last is what the next batch restates.
   const ids = [...new Set(rows.flatMap((row) => parseIds(row.ids)))].slice(0, MAX_KNOWN_OBSERVATIONS)
   if (ids.length === 0) return []
   const placeholders = ids.map(() => '?').join(', ')
