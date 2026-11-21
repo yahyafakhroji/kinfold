@@ -20,6 +20,21 @@ function fakeFetch(replies: Record<string, Reply>) {
 }
 const download = (impl: typeof fetch, token?: string) => downloadPinned({ label: 'test asset', releaseUrl: RELEASE, apiUrl: API, sha256: sha, maxBytes: 1000, fetch: impl, token })
 
+test('a body past maxBytes is dropped while it downloads, and one that declares too much is not read at all', async () => {
+  let pulls = 0
+  const body = (): ReadableStream<Uint8Array> => new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls += 1
+      controller.enqueue(new Uint8Array(512))
+    },
+  }, { highWaterMark: 0 })
+  await expect(download(fakeFetch({ [RELEASE]: new Response(body()) }).impl)).rejects.toThrow('far larger than the release')
+  expect(pulls).toBeLessThanOrEqual(4)
+  pulls = 0
+  await expect(download(fakeFetch({ [RELEASE]: new Response(body(), { headers: { 'content-length': '1001' } }) }).impl)).rejects.toThrow('far larger than the release')
+  expect(pulls).toBe(0)
+})
+
 test('takes the release URL when it answers', async () => {
   const { impl, calls } = fakeFetch({ [RELEASE]: new Response(GOOD) })
   expect(await download(impl)).toEqual(GOOD)

@@ -15,7 +15,7 @@ let temp: TempStore
 beforeEach(() => {
   temp = openTempStore('kinfold-watch-debug-')
   // runWatch reads where the daemon listens; nothing listens there, the fetch below answers.
-  writeFileSync(join(temp.dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 1 }))
+  writeFileSync(join(temp.dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 1 }))
   writeFileSync(join(temp.dataDir, 'daemon.token'), 'a'.repeat(64))
 })
 afterEach(() => temp.cleanup())

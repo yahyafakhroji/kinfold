@@ -8,7 +8,7 @@ import { REQUEST_TIMEOUT_MS, daemonCall } from './cli'
 let dataDir: string
 beforeEach(() => {
   dataDir = mkdtempSync(join(tmpdir(), 'kinfold-daemon-call-'))
-  writeFileSync(join(dataDir, DAEMON_INFO_FILE), JSON.stringify({ pid: 1, port: 40_000 }))
+  writeFileSync(join(dataDir, DAEMON_INFO_FILE), JSON.stringify({ pid: process.pid, port: 40_000 }))
   writeFileSync(join(dataDir, TOKEN_FILE), 'token')
 })
 afterEach(() => rmSync(dataDir, { recursive: true, force: true }))

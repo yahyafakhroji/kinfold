@@ -20,6 +20,7 @@ import type { Database } from '../sqlite/types'
 import { linkTargets, settleContradictions } from './observation-links'
 import { EXPIRE_WHERE } from './retention-store'
 import { recountSummaries } from './summary-share'
+import { dropIndexedVectors } from './vector-store'
 
 export type PurgeTarget =
   | { kind: 'observation'; id: number }
@@ -248,6 +249,8 @@ export function deleteScope(db: Database, scope: PurgeScope, purgedIds: readonly
   for (const table of PURGE_TABLES.slice(1)) deleteWhere(db, table, scope.where[table], params)
   settleContradictions(db, revealed)
   recountSummaries(db, recount)
+  // The index's copy of each purged embedding, so the scrub after this transaction wipes it too.
+  dropIndexedVectors(db, purgedIds)
   return counts
 }
 

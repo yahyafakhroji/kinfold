@@ -66,7 +66,7 @@ const call = (method: string, path: string, body?: unknown): Promise<Response> =
 
 test('GET /update reports that auto-update is on, or why it is off', async () => {
   start()
-  expect(await (await call('GET', '/update')).json()).toEqual({ notice: null, auto: { on: false, reason: 'no install record', ...NO_AUTO_STATE }, release: null, settings: { level: 'patch', beta: false }, install: null })
+  expect(await (await call('GET', '/update')).json()).toEqual({ notice: null, auto: { on: false, reason: 'no install record', ...NO_AUTO_STATE }, release: null, settings: { level: 'notify', beta: false }, install: null })
   install()
   expect(await (await call('GET', '/update')).json()).toMatchObject({ notice: null, auto: { on: true, reason: null, ...NO_AUTO_STATE } })
   install({ ...RECORD, updateCheck: false })

@@ -6,6 +6,7 @@
 
 import { join } from 'node:path'
 import { DATA_DIR_NAME } from '../../names'
+import { osOf } from '../../platform/platform'
 import { DB_KEY_REF } from '../../secrets/credentials'
 import { fileState } from '../../sqlite/open'
 import { DB_FILE } from '../../store/data-dir'
@@ -174,14 +175,28 @@ export async function applySetup(env: InstallEnv, state: SetupState, answers: Se
   }
 }
 
-const quoted = (value: string): string => (/\s/.test(value) ? JSON.stringify(value) : value)
+const PLAIN_ARGUMENT = /^[A-Za-z0-9_./:@%+=,\\-]+$/
+
+/**
+ * A path as one argument of a command the user may paste. Single quotes, in
+ * which neither a POSIX shell nor PowerShell expands anything; a quote inside
+ * is closed, escaped and reopened for sh, doubled for PowerShell.
+ */
+function quoted(value: string, windows: boolean): string {
+  // A Windows short name (RUNNER~1) has a tilde inside it, which PowerShell leaves alone; only a leading one means home.
+  const plain = windows ? !value.startsWith('~') && PLAIN_ARGUMENT.test(value.replaceAll('~', '')) : PLAIN_ARGUMENT.test(value) && !value.includes('\\')
+  if (plain) return value
+  return windows ? `'${value.replaceAll("'", "''")}'` : `'${value.replaceAll("'", "'\\''")}'`
+}
 
 /** What a user types to run Kinfold on this install: the installed program, or the checkout's script, with the folder unless it is the default. */
 function commandPrefix(env: InstallEnv): string {
   // Run by hand, either one reads ~/.kinfold unless told otherwise.
-  const folder = env.dataDir === join(env.homeDir, DATA_DIR_NAME) ? '' : ` --data-dir ${quoted(env.dataDir)}`
-  const program = env.mode.kind === 'checkout' ? 'bun src/cli/kinfold.ts' : quoted(env.mode.binPath)
-  return `${program}${folder}`
+  const windows = osOf(env.platform) === 'windows'
+  const folder = env.dataDir === join(env.homeDir, DATA_DIR_NAME) ? '' : ` --data-dir ${quoted(env.dataDir, windows)}`
+  const program = env.mode.kind === 'checkout' ? 'bun src/cli/kinfold.ts' : quoted(env.mode.binPath, windows)
+  // PowerShell reads a quoted path as a string; the call operator runs it.
+  return `${windows && program.startsWith("'") ? '& ' : ''}${program}${folder}`
 }
 
 export const SHOW_RECOVERY_LINE = 'Encryption is on: run kinfold key show-recovery in a terminal to see your recovery code.'

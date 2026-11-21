@@ -209,3 +209,32 @@ test('no served page, asset or answer contains the daemon token, and logs hold n
   for (const secret of [rig.token, code, cookie.split('=')[1]!, 'distinctquerytext']) expect(log).not.toContain(secret)
   expect(rig.logs.some((line) => /^dashboard GET \/memory\/observations status=200 ms=\d+$/.test(line))).toBe(true)
 })
+
+test('a cookie GET that changes something is refused from a page on another 127.0.0.1 port, which the cookie alone cannot tell apart', async () => {
+  const cookie = await rig.login()
+  const fromPage = (path: string, headers: Record<string, string>): Promise<Response> => rig.page('GET', path, { cookie, bare: true, headers })
+  for (const path of ['/backup', '/update', '/central/status?check=1']) {
+    // What <img src> or a no-cors fetch on http://127.0.0.1:<other port> sends: the cookie, and a browser-set same-site.
+    expect((await fromPage(path, { 'sec-fetch-site': 'same-site' })).status).toBe(403)
+    expect((await fromPage(path, { 'sec-fetch-site': 'cross-site' })).status).toBe(403)
+    expect((await fromPage(path, { 'sec-fetch-site': 'same-site', referer: `${rig.origin}/dashboard/` })).status).toBe(403)
+    // A browser from before Sec-Fetch-Site: only a Referer naming our page will do.
+    expect((await fromPage(path, {})).status).toBe(403)
+    expect((await fromPage(path, { referer: 'http://127.0.0.1:1/evil' })).status).toBe(403)
+    expect((await fromPage(path, { referer: `${rig.origin}.evil.example/` })).status).toBe(403)
+  }
+  expect(rig.logs.filter((line) => line.startsWith('backup written'))).toEqual([])
+  // Our own page: the Download link is a same-origin navigation, and the page's fetches carry its header.
+  const ownPage: Record<string, string>[] = [{ 'sec-fetch-site': 'same-origin' }, { referer: `${rig.origin}/dashboard/` }]
+  for (const headers of ownPage) {
+    const download = await fromPage('/backup', headers)
+    expect(download.status).toBe(200)
+    await download.arrayBuffer()
+    expect((await fromPage('/update', headers)).status).toBe(200)
+    expect((await fromPage('/central/status?check=1', headers)).status).toBe(200)
+  }
+  expect((await rig.page('GET', '/update', { cookie })).status).toBe(200)
+  // Reads that change nothing, and the token, are as before.
+  expect((await fromPage('/data/size', { 'sec-fetch-site': 'same-site' })).status).toBe(200)
+  expect((await rig.bearer('GET', '/update')).status).toBe(200)
+})

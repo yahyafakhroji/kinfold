@@ -159,6 +159,31 @@ export function dropVector(db: Database, observationId: number): void {
   db.query('DELETE FROM observation_vectors WHERE observation_id = $id').run({ id: observationId })
 }
 
+/**
+ * Takes these observations out of every sqlite-vec index (vec_space_<id>,
+ * vec-index.ts), which each hold a copy of the embedding. A purge or a
+ * redaction calls this in its own transaction, so the copy is gone before the
+ * scrub that follows; left to the reconcile pass it would outlive the scrub.
+ * sqlite-vec zeroes a row's vector when the row is deleted (checked against
+ * 0.1.9 in data-control/vec-index-purge.test.ts). A connection without
+ * sqlite-vec cannot touch an index: there the reconcile still removes the
+ * rows once the daemon runs it, as before.
+ */
+export function dropIndexedVectors(db: Database, observationIds: readonly number[]): void {
+  if (observationIds.length === 0) return
+  const tables = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name GLOB 'vec_space_[0-9]*'").all()
+  const ids = JSON.stringify(observationIds)
+  for (const { name } of tables) {
+    if (!/^vec_space_\d+$/.test(name)) continue
+    try {
+      db.query(`DELETE FROM ${name} WHERE observation_id IN (SELECT value FROM json_each($ids))`).run({ ids })
+    } catch (error: unknown) {
+      // Only a connection without sqlite-vec is let off; anything else must stop a purge that would otherwise say the data is gone.
+      if (!(error instanceof Error && error.message.includes('no such module'))) throw error
+    }
+  }
+}
+
 /** At most this many ids get a distance outside the top k; the prompt path asks for its keyword candidates. */
 export const MAX_DISTANCE_IDS = 50
 

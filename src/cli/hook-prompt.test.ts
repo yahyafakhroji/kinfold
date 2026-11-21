@@ -102,7 +102,7 @@ test('a daemon that answers but refuses the prompt channel (an older build) gets
   learnLater(other, 'Must not leak through the fallback')
   const refusing = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ error: 'channel must be session_start or request' }, { status: 400 }) })
   try {
-    writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: refusing.port }))
+    writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: refusing.port }))
     expect(await hook('user-prompt-submit.json')).toBeNull()
     expect(stderr.some((line) => line.includes('no fallback for the prompt channel'))).toBe(true)
   } finally {

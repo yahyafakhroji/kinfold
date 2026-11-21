@@ -101,7 +101,7 @@ function quietWorld(answer: (url: string, init: RequestInit) => Response | Promi
   world = w
   mkdirSync(w.dataDir, { recursive: true })
   if (files) {
-    writeFileSync(join(w.dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 40_123 }))
+    writeFileSync(join(w.dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 40_123 }))
     writeFileSync(join(w.dataDir, 'daemon.token'), 'a'.repeat(64))
   }
   w.env = { ...w.env, fetch: async (url, init) => answer(url, init) }
@@ -129,7 +129,7 @@ test('no daemon, an older daemon, or an answer that is not a time all read as no
 
 test('project merge lines name each recent merge once, and say nothing when there is none or the daemon cannot say', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'kinfold-merge-lines-'))
-  writeFileSync(join(dir, 'daemon.json'), JSON.stringify({ pid: 1, port: 40_123 }))
+  writeFileSync(join(dir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 40_123 }))
   writeFileSync(join(dir, 'daemon.token'), 'a'.repeat(64))
   const lines = (body: unknown, status = 200) => projectMergeLines({ dataDir: dir, fetch: async () => Response.json(body, { status }) } as never)
   expect(await lines({ projects: [], merges: [{ from: 'shared-agent-memory', into: 'kinfold', fromKey: 'a', intoKey: 'b', reason: 'same-repo', at: 1 }, { from: 'rea', into: 'kinfold', fromKey: 'c', intoKey: 'b', reason: 'manual', at: 2 }] }))

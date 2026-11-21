@@ -52,7 +52,7 @@ test('the action sends the change to the daemon with the token and reports a ref
   world = createWorld({})
   // A daemon endpoint on disk; the fetch below answers for it.
   mkdirSync(world.dataDir, { recursive: true })
-  writeFileSync(join(world.dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 4 }))
+  writeFileSync(join(world.dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 4 }))
   writeFileSync(join(world.dataDir, 'daemon.token'), 'a'.repeat(64))
   const seen: { url: string; method: string | undefined; body: unknown; auth: string | null }[] = []
   let status = 200

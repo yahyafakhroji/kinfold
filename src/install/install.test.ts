@@ -435,12 +435,18 @@ test.skipIf(process.platform === 'win32')('hostStatusLines returns exactly the m
   ])
 })
 
-test('install records auto-update as on, --no-auto-update as off, and keeps the notice an older install is owed', async () => {
+test('install records auto-update as off unless it is asked for, --no-auto-update as off, and keeps the notice an older install is owed', async () => {
   const w = both()
   const record = (): unknown => JSON.parse(readFileSync(join(w.dataDir, 'install.json'), 'utf8'))
+  // Releases are not signed yet, so a new install checks and tells, and installs nothing by itself.
   expect(await install(w.env, YES)).toBe(EXIT_OK)
-  expect(record()).toMatchObject({ updateCheck: true, autoUpdate: true })
+  expect(record()).toMatchObject({ updates: 'notify', updateCheck: true, autoUpdate: false })
   expect(record()).not.toHaveProperty('autoUpdateIntro')
+  expect(await install(w.env, { ...YES, updates: 'patch' })).toBe(EXIT_OK)
+  expect(record()).toMatchObject({ updates: 'patch', autoUpdate: true })
+  // The choice is kept by a later plain run.
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  expect(record()).toMatchObject({ autoUpdate: true })
   expect(await install(w.env, { ...YES, noAutoUpdate: true })).toBe(EXIT_OK)
   expect(record()).toMatchObject({ autoUpdate: false })
   // A later plain run keeps the saved choice.

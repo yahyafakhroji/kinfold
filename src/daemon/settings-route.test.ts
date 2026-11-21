@@ -188,6 +188,14 @@ test('parseSettingsPut never pairs a provider with another provider\'s key', () 
   expect(put('openrouter', 'openai-compatible')).toEqual(refused)
 })
 
+test('no API provider may read the Claude login token as its key, least of all one that names its own address', () => {
+  const put = (provider: string, endpoint?: string) => parseSettingsPut({ host: '*', provider, model: 'm', credentialRef: 'claude-oauth-token', ...(endpoint === undefined ? {} : { endpoint }) })
+  const refused = { ok: false, error: 'credentialRef names the key of another provider' } as const
+  expect(put('openai-compatible', 'https://evil.example/v1')).toEqual(refused)
+  expect(put('qwen-api', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1')).toEqual(refused)
+  for (const provider of ['openrouter', 'anthropic-api', 'openai-api', 'gemini-api']) expect(put(provider)).toEqual(refused)
+})
+
 test('the view says which login claude-cli runs on, and a login problem on a token says to make a new token', () => {
   const temp = openTempStore('kinfold-view-token-')
   try {

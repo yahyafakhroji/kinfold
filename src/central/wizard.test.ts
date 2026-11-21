@@ -28,17 +28,18 @@ test('saying no keeps this device\'s own memory', async () => {
   const { world, joins, join } = setup(['n'], true)
   expect(await offerCentral(world.env, { hub: 'mini:40000', code: null, yes: false, dryRun: false }, join)).toBe(0)
   expect(joins).toEqual([])
-  expect(world.out).toContain('Kept this device\'s own memory. kinfold central join mini:40000 <code> switches later.')
+  expect(world.out).toContain('Kept this device\'s own memory. kinfold central join mini:40000 switches later.')
 })
 
 test('with --yes and a code it joins without asking; without a code it says what to run', async () => {
   const withCode = setup([], false)
   expect(await offerCentral(withCode.world.env, { hub: 'mini:40000', code: 'KF-4821-9TQX', yes: true, dryRun: false }, withCode.join)).toBe(0)
-  expect(withCode.joins).toEqual([{ command: 'join', hub: 'mini', port: 40_000, code: 'KF-4821-9TQX' }])
+  // A code from --central-code was on the command line, so the join says so, as it does for its own positional code.
+  expect(withCode.joins).toEqual([{ command: 'join', hub: 'mini', port: 40_000, code: 'KF-4821-9TQX', codeInArgs: true }])
   await withCode.world.cleanup()
   const noCode = setup([], false)
   expect(await offerCentral(noCode.world.env, { hub: 'mini', code: null, yes: true, dryRun: false }, noCode.join)).toBe(1)
-  expect(noCode.world.out).toContain('To use central memory on mini, run kinfold central serve there for a code, then: kinfold central join mini <code> (or install again with --central-code <code>).')
+  expect(noCode.world.out).toContain('To use central memory on mini, run kinfold central serve there for a code, then: kinfold central join mini (or install again with --central-code <code>).')
 })
 
 test('a dry run only says what it would do', async () => {

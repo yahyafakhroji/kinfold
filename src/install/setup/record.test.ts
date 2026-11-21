@@ -190,7 +190,8 @@ const writeRaw = (dir: string, fields: Record<string, unknown>): void => {
 }
 
 test('the updates level maps from the older switches: check off is off, auto-update off is notify, else patch', () => {
-  expect(updateLevel(null)).toBe('patch')
+  // Releases are not signed yet, so nothing installs by itself unless the user chose that.
+  expect(updateLevel(null)).toBe('notify')
   expect(updateLevel(RECORD)).toBe('patch')
   expect(updateLevel({ ...RECORD, autoUpdate: false })).toBe('notify')
   expect(updateLevel({ ...RECORD, updateCheck: false })).toBe('off')

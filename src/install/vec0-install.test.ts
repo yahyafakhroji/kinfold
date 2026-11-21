@@ -5,7 +5,7 @@ import { vec0Path } from '../vectors/extension'
 import type { Vec0Asset } from '../vectors/vec0-release'
 import type { InstallEnv } from './env'
 import { type FakeWorld, createWorld, placeBuiltLibrary } from './test-support'
-import { installVec0, tarMember, vec0InstallActions, vectorStatusLine } from './vec0-install'
+import { MAX_VEC0_TARBALL_BYTES, installVec0, tarMember, vec0InstallActions, vectorStatusLine } from './vec0-install'
 import { posixOnly } from '../../test/platform-guards'
 
 let w: FakeWorld
@@ -70,6 +70,24 @@ test.each([
   const { env } = envServing(body, status)
   const path = vec0Path(w.dataDir)
   await expect(installVec0(env, path, asset)).rejects.toThrow(message)
+  expect(existsSync(path)).toBe(false)
+})
+
+test('a download that never ends is dropped once it passes the size of the release, not buffered until memory runs out', async () => {
+  let pulls = 0
+  const body = (): ReadableStream<Uint8Array> => new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls += 1
+      controller.enqueue(new Uint8Array(1024 * 1024))
+    },
+  }, { highWaterMark: 0 })
+  const path = vec0Path(w.dataDir)
+  await expect(installVec0({ ...w.env, fetch: async () => new Response(body()) }, path, ASSET)).rejects.toThrow('far larger than the release')
+  expect(pulls).toBeLessThanOrEqual(MAX_VEC0_TARBALL_BYTES / (1024 * 1024) + 2)
+  pulls = 0
+  const declared = new Response(body(), { headers: { 'content-length': String(MAX_VEC0_TARBALL_BYTES + 1) } })
+  await expect(installVec0({ ...w.env, fetch: async () => declared }, path, ASSET)).rejects.toThrow('far larger than the release')
+  expect(pulls).toBe(0)
   expect(existsSync(path)).toBe(false)
 })
 

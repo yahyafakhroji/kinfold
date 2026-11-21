@@ -26,6 +26,8 @@ export interface DashboardEvents {
 }
 
 export const MAX_EVENTS = 200
+/** The step noted when a browser signs in; `kinfold dashboard` waits for it before it prints the address as well. */
+export const SIGNED_IN_NOTE = 'signed in from a browser'
 const EPOCH_BYTES = 9
 
 type EventBody = { kind: 'request'; method: string; path: string; status: number; ms: number } | { kind: 'event'; text: string }

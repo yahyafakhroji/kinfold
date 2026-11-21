@@ -63,7 +63,8 @@ const DEFAULT_MODELS: Readonly<Partial<Record<ObserverProvider, string>>> = {
  */
 export function credentialRefProblem(provider: ObserverProvider, ref: string): string | null {
   const own = provider === 'openai-compatible' ? OPENAI_COMPATIBLE_CREDENTIAL_REF : DEFAULT_CREDENTIAL_REFS[provider]
-  const taken = [...Object.values(DEFAULT_CREDENTIAL_REFS), OPENAI_COMPATIBLE_CREDENTIAL_REF]
+  // The Claude login token is no API provider's key: only the claude-cli observer reads it, into its own child process.
+  const taken = [...Object.values(DEFAULT_CREDENTIAL_REFS), OPENAI_COMPATIBLE_CREDENTIAL_REF, CLAUDE_TOKEN_REF]
   return ref !== own && taken.includes(ref) ? 'names the key of another provider' : null
 }
 

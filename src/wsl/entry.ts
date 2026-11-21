@@ -18,7 +18,7 @@ import { EXIT_FAILED, EXIT_OK, agentWiringActions } from '../install/install'
 import type { InstallOptions } from '../install/install'
 import { type Action, runPlan } from '../install/plan'
 import { programInstallActions } from '../install/self-install'
-import { currentChannel, installRecordAction, readInstallRecord, switchesFor } from '../install/setup/record'
+import { DEFAULT_AUTO_UPDATE, currentChannel, installRecordAction, readInstallRecord, switchesFor } from '../install/setup/record'
 import { hostStatusLines } from '../install/status'
 import { hostUnwireActions } from '../install/uninstall'
 import type { UninstallOptions } from '../install/uninstall'
@@ -81,7 +81,7 @@ async function hookActions(env: InstallEnv, hosts: readonly InstallHost[], optio
 
 function recordActions(env: InstallEnv, wslHome: string, options: InstallOptions): Action[] {
   const saved = readInstallRecord(wslHome)
-  const autoUpdate = options.noAutoUpdate === true ? false : options.autoUpdate === true ? true : (saved?.autoUpdate ?? true)
+  const autoUpdate = options.noAutoUpdate === true ? false : options.autoUpdate === true ? true : (saved?.autoUpdate ?? DEFAULT_AUTO_UPDATE)
   const switches = options.updates !== undefined ? switchesFor(options.updates, autoUpdate) : { updateCheck: options.noUpdateCheck === true ? false : (saved?.updateCheck ?? true), autoUpdate }
   const beta = options.beta ?? saved?.beta === true
   const record = {

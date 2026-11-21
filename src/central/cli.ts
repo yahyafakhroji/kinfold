@@ -20,7 +20,7 @@ import { DEFAULT_HUB_PORT } from './hub-server'
 import { hubPublicKey } from './hub-daemon'
 import { exportProject, listLocalProjects, openLocalStore } from './import'
 import { INVITE_LIFE_MS, cancelInvite, createInvite } from './invites'
-import { type CentralMode, centralModeOf } from './mode'
+import { type CentralMode, centralModeOf, plainName } from './mode'
 import { DEVICE_KEY_FILE, removeCentralFile } from './paths'
 import { centralProjectKey } from './project-key'
 import { failureReason } from './relay'
@@ -33,7 +33,8 @@ export type CentralArgs =
   | { command: 'invite' }
   | { command: 'devices' }
   | { command: 'remove'; device: string }
-  | { command: 'join'; hub: string; port: number; code: string }
+  /** `code` null: the command asks for it, or reads it from stdin. `codeInArgs`: it was typed on the command line, the old form. */
+  | { command: 'join'; hub: string; port: number; code: string | null; codeInArgs?: true }
   | { command: 'leave' }
   | { command: 'import'; project: string }
 
@@ -43,7 +44,7 @@ export const CENTRAL_USAGE = [
   'kinfold central invite               a new code for another device (valid 10 minutes, single use)',
   'kinfold central devices              list paired devices',
   'kinfold central remove <device>      revoke a device at once',
-  'kinfold central join <hub> <code>    use the hub\'s memory on this device',
+  'kinfold central join <hub>           use the hub\'s memory on this device; asks for the code, or reads it from stdin',
   'kinfold central leave                go back to this device\'s own memory',
   'kinfold central import --project <key>  copy a kept local project into the hub',
 ].join('\n')
@@ -94,11 +95,11 @@ export function parseCentralArgs(argv: readonly string[]): Parsed<CentralArgs> |
     case 'join': {
       const [address, code] = rest.filter((arg, index) => !arg.startsWith('--') && rest[index - 1] !== '--port')
       const where = address === undefined ? null : splitHub(address)
-      if (where === null || code === undefined) return usage
+      if (where === null) return usage
       const portText = flag('--port')
       const port = portText !== undefined ? portOf(portText) : where.port ?? DEFAULT_HUB_PORT
       if (port === null) return { ok: false, error: '--port must be a number from 1024 to 65535' }
-      return { ok: true, value: { command: 'join', hub: where.hub, port, code } }
+      return { ok: true, value: { command: 'join', hub: where.hub, port, ...(code === undefined ? { code: null } : { code, codeInArgs: true as const }) } }
     }
     default: return usage
   }
@@ -153,7 +154,8 @@ async function hubAddress(ctx: Context, port: number): Promise<string> {
 async function printInvite(ctx: Context, port: number): Promise<void> {
   const code = createInvite(ctx.env.dataDir, ctx.env.now())
   ctx.env.out(`Code: ${code} (valid ${INVITE_LIFE_MS / 60_000} minutes, for one device)`)
-  ctx.env.out(`On the device: kinfold central join ${await hubAddress(ctx, port)} ${code}`)
+  // The code is never part of the command: a command line can be read by other programs on the device and stays in shell history.
+  ctx.env.out(`On the device: kinfold central join ${await hubAddress(ctx, port)}   (it asks for the code)`)
   if (osOf(ctx.env.platform) === 'macos') ctx.env.out(MAC_FIREWALL_NOTE)
 }
 
@@ -197,7 +199,7 @@ function hubOnly(ctx: Context): Extract<CentralMode, { role: 'hub' }> | null {
 function deviceOnly(ctx: Context): Extract<CentralMode, { role: 'device' }> | null {
   const mode = centralModeOf(ctx.env.dataDir)
   if (mode?.role === 'device') return mode
-  ctx.env.out('This device does not use central memory; run kinfold central join <hub> <code> first.')
+  ctx.env.out('This device does not use central memory; run kinfold central join <hub> first.')
   return null
 }
 
@@ -263,6 +265,8 @@ async function resolveAll(name: string): Promise<string[]> {
   return (await lookup(name, { all: true })).map((entry) => entry.address)
 }
 
+const CODE_IN_ARGS_WARNING = 'The code was on the command line, where other programs on this machine can read it. Next time run kinfold central join <hub> and type the code when asked.'
+
 async function join(ctx: Context, args: Extract<CentralArgs, { command: 'join' }>): Promise<number> {
   const mode = centralModeOf(ctx.env.dataDir)
   if (mode?.role === 'hub') {
@@ -279,7 +283,13 @@ async function join(ctx: Context, args: Extract<CentralArgs, { command: 'join' }
     ctx.env.out(`${args.hub} does not resolve to a Tailscale address; use the hub's Tailscale name or its 100.x address, with Tailscale up on this device.`)
     return EXIT_FAILED
   }
-  const paired = await pairWithHub({ dataDir: ctx.env.dataDir, hub: address, port: args.port, code: args.code, version: ctx.version, ...(ctx.deps.fetch !== undefined ? { fetch: ctx.deps.fetch } : {}) })
+  if (args.codeInArgs === true) ctx.env.out(CODE_IN_ARGS_WARNING)
+  const code = args.code ?? (ctx.env.io.interactive ? await ctx.env.io.askSecret('Code from the hub (KF-XXXX-XXXX): ') : await ctx.env.io.readStdin()).trim()
+  if (code === '') {
+    ctx.env.out('No code given. Run kinfold central join <hub> and type the code the hub shows, or pipe it in.')
+    return EXIT_FAILED
+  }
+  const paired = await pairWithHub({ dataDir: ctx.env.dataDir, hub: address, port: args.port, code, version: ctx.version, ...(ctx.deps.fetch !== undefined ? { fetch: ctx.deps.fetch } : {}) })
   if (!paired.ok) {
     ctx.env.out(paired.error)
     return EXIT_FAILED
@@ -357,13 +367,13 @@ export async function runCentralCommand(env: InstallEnv, args: CentralArgs, deps
       if (hubOnly(ctx) === null) return EXIT_FAILED
       const devices = listDevices(env.dataDir)
       if (devices.length === 0) env.out('No paired devices.')
-      for (const device of devices) env.out(`${device.name}  ${device.id}  paired ${new Date(device.pairedAt).toISOString().slice(0, 10)}`)
+      for (const device of devices) env.out(`${plainName(device.name)}  ${device.id}  paired ${new Date(device.pairedAt).toISOString().slice(0, 10)}`)
       return 0
     }
     case 'remove': {
       if (hubOnly(ctx) === null) return EXIT_FAILED
       const removed = removeDevice(env.dataDir, args.device)
-      env.out(removed === null ? `No paired device named ${args.device}.` : `Removed ${removed.name} (${removed.id}); it can no longer read or capture.`)
+      env.out(removed === null ? `No paired device named ${args.device}.` : `Removed ${plainName(removed.name)} (${removed.id}); it can no longer read or capture.`)
       return removed === null ? EXIT_FAILED : 0
     }
     case 'join': return join(ctx, args)

@@ -35,19 +35,20 @@ export async function offerCentral(env: InstallEnv, offer: CentralOffer, join: (
   }
   if (!offer.yes) {
     if (!env.io.interactive) {
-      env.out(`To use central memory on ${offer.hub}, run kinfold central join ${offer.hub} <code>.`)
+      env.out(`To use central memory on ${offer.hub}, run kinfold central join ${offer.hub}.`)
       return 0
     }
     const answer = (await env.io.ask(`Use central memory on ${offer.hub}? This device's own memory is kept. [Y/n] `)).trim().toLowerCase()
     if (answer === 'n' || answer === 'no') {
-      env.out(`Kept this device's own memory. kinfold central join ${offer.hub} <code> switches later.`)
+      env.out(`Kept this device's own memory. kinfold central join ${offer.hub} switches later.`)
       return 0
     }
   }
   const code = offer.code ?? (env.io.interactive ? (await env.io.ask('Code from the hub (KF-XXXX-XXXX): ')).trim() : '')
   if (code === '') {
-    env.out(`To use central memory on ${where.hub}, run kinfold central serve there for a code, then: kinfold central join ${offer.hub} <code> (or install again with --central-code <code>).`)
+    env.out(`To use central memory on ${where.hub}, run kinfold central serve there for a code, then: kinfold central join ${offer.hub} (or install again with --central-code <code>).`)
     return EXIT_FAILED
   }
-  return join({ command: 'join', hub: where.hub, port: where.port ?? DEFAULT_HUB_PORT, code })
+  // A code from --central-code was on the command line, and the join says so.
+  return join({ command: 'join', hub: where.hub, port: where.port ?? DEFAULT_HUB_PORT, code, ...(offer.code !== null ? { codeInArgs: true as const } : {}) })
 }

@@ -13,7 +13,7 @@ import type { Database } from '../sqlite/types'
 import { type Finding, getFinding, resolveRowFindings } from '../store/findings-store'
 import { type PurgeTarget, optimizeFts } from '../store/purge-store'
 import { SCAN_TABLES, type ScanTable, readScanRow, rewriteRow, writeEventRedactions } from '../store/scan-store'
-import { dropVector } from '../store/vector-store'
+import { dropIndexedVectors, dropVector } from '../store/vector-store'
 import { redactRow } from './detect'
 import { type PurgeReport, ensureSecureDelete, purge, scrub } from './purge'
 
@@ -57,6 +57,7 @@ function redactInPlace(db: Database, table: ScanTable, rowId: string, deps: Reso
     if (table === 'observations') {
       // Its vector came from the old text; dropping it here lets the scrub below wipe it with the text.
       dropVector(db, Number(rowId))
+      dropIndexedVectors(db, [Number(rowId)])
       optimizeFts(db)
     }
     const project = packProject(db, table, rowId)

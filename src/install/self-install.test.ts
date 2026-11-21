@@ -452,7 +452,9 @@ test('a kept newer program leaves the rest of the install to run, pointed at it'
   expect(await install(w.env, installOptions(source))).toBe(EXIT_OK)
   expect(readFileSync(binPath, 'utf8')).toBe('installed program\n')
   expect(w.out.join('\n')).toContain('newer than this development build; kept it')
-  expect(w.out).toContain(`installed. Check it with: ${binPath} status`)
+  // The world is macOS wherever the tests run. On a Windows runner its temp path has backslashes, which a POSIX shell needs quoted.
+  const typed = /[\\~]/.test(binPath) ? `'${binPath}'` : binPath
+  expect(w.out).toContain(`installed. Check it with: ${typed} status`)
 })
 
 test('replacing the program plans a service stop before the copy', async () => {

@@ -240,9 +240,10 @@ test('the done screen names the next steps', async () => {
   const env: InstallEnv = { ...w.env, mode: { kind: 'program', binPath } }
   const state = await readSetupState(env)
   const lines = doneLines(env, keeping(state, { hosts: ['claude-code'], encryption: { kind: 'new-encrypted', key: null } }), state)
-  expect(lines).toContain(`installed. Check it with: ${binPath} status`)
-  expect(lines).toContain(`Open the dashboard with: ${binPath} dashboard`)
-  expect(lines.join('\n')).toContain('kinfold dashboard')
+  // The world is macOS wherever the tests run. On a Windows runner its temp path has backslashes, which a POSIX shell needs quoted.
+  const typed = /[\\~]/.test(binPath) ? `'${binPath}'` : binPath
+  expect(lines).toContain(`installed. Check it with: ${typed} status`)
+  expect(lines).toContain(`Open the dashboard with: ${typed} dashboard`)
   expect(lines.join('\n')).toContain('run kinfold key show-recovery in a terminal to see your recovery code')
   const shown = doneLines(env, keeping(state, { hosts: ['claude-code'], encryption: { kind: 'new-encrypted', key: newDbKey() } }), state)
   expect(shown.join('\n')).not.toContain('show-recovery')
@@ -252,7 +253,35 @@ test('a checkout install on another folder prints a usable status command', asyn
   const w = make()
   const env = envForDataDir(w.env, '/x y')
   const state = { ...(await readSetupState(w.env)), dataDir: '/x y' }
-  expect(doneLines(env, keeping(state), state)[0]).toBe('installed. Check it with: bun src/cli/kinfold.ts --data-dir "/x y" status')
+  expect(doneLines(env, keeping(state), state)[0]).toBe("installed. Check it with: bun src/cli/kinfold.ts --data-dir '/x y' status")
+})
+
+test('a folder or program path with shell characters is quoted so the printed command runs nothing else when pasted', async () => {
+  const w = make()
+  const first = async (dataDir: string, platform: NodeJS.Platform = 'darwin'): Promise<string> => {
+    const env = { ...envForDataDir(w.env, dataDir), platform }
+    const state = { ...(await readSetupState(w.env)), dataDir }
+    return doneLines(env, keeping(state), state)[0]!
+  }
+  const prefix = 'installed. Check it with: bun src/cli/kinfold.ts --data-dir '
+  expect(await first('/data/$(touch x)')).toBe(`${prefix}'/data/$(touch x)' status`)
+  expect(await first('/data/a;b&c|d`e`')).toBe(`${prefix}'/data/a;b&c|d\`e\`' status`)
+  expect(await first("/data/it's here")).toBe(`${prefix}'/data/it'\\''s here' status`)
+  expect(await first('/plain/path-1.2_x')).toBe(`${prefix}/plain/path-1.2_x status`)
+  // PowerShell: single quotes, a quote inside doubled.
+  expect(await first("C:\\Users\\o'brien\\k $x", 'win32')).toBe(`${prefix}'C:\\Users\\o''brien\\k $x' status`)
+  const program: InstallEnv = { ...w.env, mode: { kind: 'program', binPath: '/opt/my tools/$(id)/kinfold' } }
+  const state = await readSetupState(program)
+  expect(doneLines(program, keeping(state), state)[0]).toBe("installed. Check it with: '/opt/my tools/$(id)/kinfold' status")
+  // A Windows short name has a tilde inside it, which PowerShell leaves alone; only a leading one means home.
+  expect(await first('C:\\Users\\RUNNER~1\\k', 'win32')).toBe(`${prefix}C:\\Users\\RUNNER~1\\k status`)
+  expect(await first('~\\k', 'win32')).toBe(`${prefix}'~\\k' status`)
+  expect(await first('/home/a~b')).toBe(`${prefix}'/home/a~b' status`)
+  // PowerShell runs a quoted path only behind its call operator.
+  const windowsProgram: InstallEnv = { ...w.env, platform: 'win32', mode: { kind: 'program', binPath: 'C:\\my tools\\kinfold.exe' } }
+  expect(doneLines(windowsProgram, keeping(state), state)[0]).toBe("installed. Check it with: & 'C:\\my tools\\kinfold.exe' status")
+  const shortName: InstallEnv = { ...w.env, platform: 'win32', mode: { kind: 'program', binPath: 'C:\\Users\\RUNNER~1\\bin\\kinfold.exe' } }
+  expect(doneLines(shortName, keeping(state), state)[0]).toBe('installed. Check it with: C:\\Users\\RUNNER~1\\bin\\kinfold.exe status')
 })
 
 /** A terminal and env.out writing into one log, so the order across both shows. */

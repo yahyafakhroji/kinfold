@@ -62,8 +62,16 @@ test('observer output is checked once on its own, since no rule ran over it on w
   expect(listFindings(temp.store.db, { action: 'pending', limit: 10 })).toEqual([expect.objectContaining({ table: 'observations', rowId: String(id), field: 'title' })])
 })
 
+test('a row stored before file bodies were withheld from input is a finding, so its secret can be redacted', () => {
+  const output = '<withheld reason="sensitive_path" lines="1" chars="12"/>'
+  seedEvent(temp.store, session, { kind: 'tool_result', at: T0, tool: { name: 'Write', input: { file_path: '/repo/.env', content: 'STRIPE_KEY=plain-value-no-rule-knows' }, output, withheld: 'sensitive_path' } })
+  seedEvent(temp.store, session, { kind: 'tool_result', at: T0 + 1, tool: { name: 'Write', input: { file_path: '/repo/.env', content: '<withheld reason="sensitive_path" chars="35"/>' }, output, withheld: 'sensitive_path' } })
+  markV1(temp, 'events')
+  expect(scanBatch(temp.store.db, options)).toMatchObject({ scanned: 2, findings: 1, byRule: { sensitive_path: 1 } })
+})
+
 test('an intact withheld marker and existing redaction markers are not findings', () => {
-  seedEvent(temp.store, session, { kind: 'tool_result', at: T0, tool: { name: 'Bash', input: { command: 'cat .env' }, output: '<withheld reason="sensitive_command" lines="3" chars="90"/>', withheld: 'sensitive_command' } })
+  seedEvent(temp.store, session, { kind: 'tool_result', at: T0, tool: { name: 'Bash', input: { command: 'printenv' }, output: '<withheld reason="sensitive_command" lines="3" chars="90"/>', withheld: 'sensitive_command' } })
   seedEvent(temp.store, session, { kind: 'tool_result', at: T0 + 1, tool: { name: 'Bash', output: 'token <redacted type="openrouter_key" ref="0a1b2c3d"/> used' } })
   markV1(temp, 'events')
   expect(scanBatch(temp.store.db, options)).toMatchObject({ scanned: 2, findings: 0 })

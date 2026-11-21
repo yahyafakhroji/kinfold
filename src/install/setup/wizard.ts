@@ -13,7 +13,7 @@ import { readDisplayFile } from '../../context/display-file'
 import { HOLDOUT_HOSTS } from '../../context/holdout'
 import { encodeRecoveryCode } from '../../sqlite/recovery'
 import { newDbKey } from '../../sqlite/keys'
-import { checkHealth, getEmbeddingSettings, readDaemonInfo } from '../daemon-client'
+import { getEmbeddingSettings, readDaemonInfo } from '../daemon-client'
 import { type EmbeddingProvider, type EmbeddingSettings, LOCAL_SETTINGS, isLoopbackUrl } from '../../vectors/embedding-settings'
 import { STALE_DB_KEY, staleDbKey, storedDbKey } from '../db-encryption'
 import { encryptKeyExists, isProcessAlive } from '../encrypt'
@@ -142,10 +142,14 @@ async function ownDaemonHolds(env: InstallEnv, port: number): Promise<boolean> {
   return holder === null || holder === String(info.pid)
 }
 
-/** Free to bind, or already held by our own daemon, which an install restarts anyway. */
+/**
+ * Free to bind, or already held by our own daemon, which an install restarts
+ * anyway. A /health that answers proves nothing about whose daemon it is (any
+ * program can answer it), so ownership is what daemon.json's live pid and the
+ * system's own word on the port's holder say.
+ */
 async function portAvailable(env: InstallEnv, port: number): Promise<boolean> {
   if (await (env.portFree ?? bindFree)(port)) return true
-  if ((await checkHealth(env, port)).up) return true
   return ownDaemonHolds(env, port)
 }
 

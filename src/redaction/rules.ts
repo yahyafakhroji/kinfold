@@ -1,7 +1,7 @@
 // What the edge pipeline treats as secret. Bump RULES_VERSION whenever a rule
 // changes, so the leak scanner knows to re-check rows stored under older rules.
 
-export const RULES_VERSION = 2
+export const RULES_VERSION = 3
 
 export type EntropyMode = 'keyed' | 'strict'
 
@@ -110,9 +110,21 @@ function isEnvDump(head: string, args: readonly string[]): boolean {
   }
 }
 
+function namesSensitivePath(segment: string): boolean {
+  return wordsOf(segment).some((word) => !word.startsWith('-') && !BARE_EXTENSION.test(word) && isSensitivePath(word))
+}
+
+/**
+ * Whether a command names a sensitive file. Such a command may be writing the
+ * file (`echo KEY=... >> .env`, a heredoc), so its own text can hold the secret.
+ */
+export function commandNamesSensitivePath(command: string): boolean {
+  return command.split(SEGMENT_SEPARATOR).some(namesSensitivePath)
+}
+
 function isSensitiveSegment(segment: string): boolean {
   const words = wordsOf(segment)
-  if (words.some((word) => !word.startsWith('-') && !BARE_EXTENSION.test(word) && isSensitivePath(word))) return true
+  if (namesSensitivePath(segment)) return true
 
   const command = withoutWrappers(words)
   const [head, ...args] = command
@@ -134,8 +146,25 @@ export interface FormatRule {
   readonly pattern: RegExp
 }
 
+/** A line break inside a key: a real one, or the backslash-n a JSON string holds. */
+const PEM_BREAK = String.raw`(?:\r?\n|(?:\\r)?\\n)`
+/** The line number a file reader puts before each line: `     2<tab>` or `2→`. */
+const LINE_NUMBER = String.raw`(?:[ \t]*\d+(?:\t|→))?`
+/**
+ * A whole key block, or one cut off before its END line (a Read with a limit,
+ * `head`, part of an Edit): then every following line that is only base64,
+ * and nothing after them. A passphrase-protected key has `Proc-Type:` and
+ * `DEK-Info:` lines and a blank one before its body, which are taken with it.
+ * The header alone, as prose mentions it, is no key.
+ */
+const PEM_HEADERS = String.raw`(?:${PEM_BREAK}${LINE_NUMBER}[ \t]*[A-Za-z-]{1,32}: [^\r\n\\"]{0,200}){1,4}(?:${PEM_BREAK}${LINE_NUMBER}[ \t]*)?`
+const PEM_PRIVATE_KEY = new RegExp(
+  String.raw`-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----|(?:${PEM_HEADERS})?(?:${PEM_BREAK}${LINE_NUMBER}[ \t]*[A-Za-z0-9+/=]+[ \t]*(?=${PEM_BREAK}|"|$))+)`,
+  'g',
+)
+
 export const FORMAT_RULES: readonly FormatRule[] = [
-  { name: 'pem_private_key', pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g },
+  { name: 'pem_private_key', pattern: PEM_PRIVATE_KEY },
   { name: 'anthropic_key', pattern: /\bsk-ant-[A-Za-z0-9_-]{20,}/g },
   { name: 'openrouter_key', pattern: /\bsk-or-(?:v1-)?[A-Za-z0-9]{32,}/g },
   { name: 'openai_key', pattern: /\bsk-(?!ant-|or-)(?:proj-)?[A-Za-z0-9_-]{20,}/g },

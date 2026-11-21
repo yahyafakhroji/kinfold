@@ -47,7 +47,7 @@ test('fire and forget: the reply comes back before the post starts and is the sa
     return new Response('{}', { status: 201 })
   }
   mkdirSync(temp.dataDir, { recursive: true })
-  writeFileSync(join(temp.dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 1 }))
+  writeFileSync(join(temp.dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 1 }))
   writeFileSync(join(temp.dataDir, 'daemon.token'), 'a'.repeat(64))
   const reporter = createReadReporter({ dataDir: temp.dataDir, host: 'claude-code', fetch: fetchSpy, schedule: (task) => queued.push(task) })
   const { server, ids } = serverWith(reporter)
@@ -67,7 +67,7 @@ test('fire and forget: the reply comes back before the post starts and is the sa
 
 test('a fetch that throws at once still leaves the reply alone and only counts a drop', async () => {
   mkdirSync(temp.dataDir, { recursive: true })
-  writeFileSync(join(temp.dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 1 }))
+  writeFileSync(join(temp.dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 1 }))
   writeFileSync(join(temp.dataDir, 'daemon.token'), 'a'.repeat(64))
   const reporter = createReadReporter({ dataDir: temp.dataDir, host: null, fetch: () => { throw new Error('boom') } })
   const logs: string[] = []
@@ -94,7 +94,7 @@ test('a daemon that never answers costs one 200 ms timeout per report, off the r
   const hung = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Promise<Response>(() => {}) })
   try {
     mkdirSync(temp.dataDir, { recursive: true })
-    writeFileSync(join(temp.dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: hung.port }))
+    writeFileSync(join(temp.dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: hung.port }))
     writeFileSync(join(temp.dataDir, 'daemon.token'), 'a'.repeat(64))
     const reporter = createReadReporter({ dataDir: temp.dataDir, host: 'opencode' })
     const startedAt = performance.now()

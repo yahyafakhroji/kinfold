@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +12,11 @@ function clock(start: number = 1_000_000): { now: () => number; advance: (ms: nu
 
 const LEASE = 'L'.repeat(43)
 const OTHER_LEASE = 'M'.repeat(43)
+// Claim secrets as `kinfold dashboard` makes them; the daemon is handed their SHA-256 only.
+const CLAIM = 'c'.repeat(43)
+const OTHER_CLAIM = 'd'.repeat(43)
+const REPLACED_CLAIM = 'e'.repeat(43)
+const digestOf = (secret: string): string => createHash('sha256').update(secret).digest('hex')
 
 /** A code under a print lease, which lasts 12 h: these tests are about codes and sessions, not leases. */
 function codeFor(auth: DashboardAuth, lease: string = LEASE): string {
@@ -168,49 +174,65 @@ describe('leases: the dashboard is open only while a kinfold dashboard command h
   })
 })
 
-describe('pending sign-ins: the browser opens a plain address and claims what the command offered', () => {
-  test('a pending sign-in is claimed once; a second claim gets nothing', () => {
+describe('pending sign-ins: the page claims what the command offered, with the claim secret only the two of them know', () => {
+  test('a pending sign-in is claimed once, by its secret; a second claim gets nothing', () => {
     const auth = createDashboardAuth()
     auth.holdLease(LEASE, 'live')
-    expect(auth.offerSignIn(LEASE)).toEqual({ expiresInMs: PENDING_SIGN_IN_TTL_MS })
-    const session = auth.claimSignIn()
+    expect(auth.offerSignIn(LEASE, digestOf(CLAIM))).toEqual({ expiresInMs: PENDING_SIGN_IN_TTL_MS })
+    const session = auth.claimSignIn(CLAIM)
     expect(session).toMatch(/^[A-Za-z0-9_-]{43}$/)
     expect(auth.hasSession(session)).toBe(true)
-    expect(auth.claimSignIn()).toBeNull()
+    expect(auth.claimSignIn(CLAIM)).toBeNull()
+  })
+
+  test('a claim with no secret, a wrong one, the digest itself or a malformed one gets no session, and the offer stays for its owner', () => {
+    const auth = createDashboardAuth()
+    auth.holdLease(LEASE, 'live')
+    auth.offerSignIn(LEASE, digestOf(CLAIM))
+    for (const guess of [null, '', OTHER_CLAIM, digestOf(CLAIM), `${CLAIM}x`, CLAIM.slice(1)]) expect(auth.claimSignIn(guess)).toBeNull()
+    expect(auth.claimSignIn(CLAIM)).toMatch(/^[A-Za-z0-9_-]{43}$/)
+  })
+
+  test('the daemon is given the digest only: an offer naming anything else is refused', () => {
+    const auth = createDashboardAuth()
+    auth.holdLease(LEASE, 'live')
+    for (const bad of ['', CLAIM, 'A'.repeat(64), digestOf(CLAIM).slice(1)]) expect(auth.offerSignIn(LEASE, bad)).toBeNull()
+    expect(auth.claimSignIn(CLAIM)).toBeNull()
   })
 
   test('no offer without a live lease, and none to claim after the lease ends (Ctrl-C)', () => {
     const auth = createDashboardAuth()
-    expect(auth.offerSignIn(LEASE)).toBeNull()
+    expect(auth.offerSignIn(LEASE, digestOf(CLAIM))).toBeNull()
     auth.holdLease(LEASE, 'live')
-    auth.offerSignIn(LEASE)
+    auth.offerSignIn(LEASE, digestOf(CLAIM))
     auth.releaseLease(LEASE)
-    expect(auth.claimSignIn()).toBeNull()
+    expect(auth.claimSignIn(CLAIM)).toBeNull()
   })
 
   test('an offer expires, and one whose lease lapsed cannot be claimed', () => {
     const time = clock()
     const auth = createDashboardAuth(time.now)
     auth.holdLease(LEASE, 'live')
-    auth.offerSignIn(LEASE)
+    auth.offerSignIn(LEASE, digestOf(CLAIM))
     time.advance(PENDING_SIGN_IN_TTL_MS)
     auth.holdLease(LEASE, 'live')
-    expect(auth.claimSignIn()).toBeNull()
-    auth.offerSignIn(LEASE)
+    expect(auth.claimSignIn(CLAIM)).toBeNull()
+    auth.offerSignIn(LEASE, digestOf(CLAIM))
     time.advance(LIVE_LEASE_TTL_MS)
-    expect(auth.claimSignIn()).toBeNull()
+    expect(auth.claimSignIn(CLAIM)).toBeNull()
   })
 
-  test('each command offers its own; the newest offer is claimed first, and a new offer replaces the old one of the same lease', () => {
+  test('each command claims its own offer whatever the order, and a new offer replaces the old one of the same lease', () => {
     const auth = createDashboardAuth()
     auth.holdLease(LEASE, 'live')
     auth.holdLease(OTHER_LEASE, 'live')
-    auth.offerSignIn(LEASE)
-    auth.offerSignIn(LEASE)
-    auth.offerSignIn(OTHER_LEASE)
-    const theirs = auth.claimSignIn()!
-    const mine = auth.claimSignIn()!
-    expect(auth.claimSignIn()).toBeNull()
+    auth.offerSignIn(LEASE, digestOf(REPLACED_CLAIM))
+    auth.offerSignIn(LEASE, digestOf(CLAIM))
+    auth.offerSignIn(OTHER_LEASE, digestOf(OTHER_CLAIM))
+    expect(auth.claimSignIn(REPLACED_CLAIM)).toBeNull()
+    const mine = auth.claimSignIn(CLAIM)!
+    const theirs = auth.claimSignIn(OTHER_CLAIM)!
+    expect(auth.claimSignIn(OTHER_CLAIM)).toBeNull()
     auth.releaseLease(OTHER_LEASE)
     expect(auth.hasSession(theirs)).toBe(false)
     expect(auth.hasSession(mine)).toBe(true)
@@ -223,10 +245,10 @@ describe('a session whose own command ended reads as closed, even while another 
     const auth = createDashboardAuth(time.now)
     auth.holdLease(LEASE, 'live')
     auth.holdLease(OTHER_LEASE, 'print')
-    auth.offerSignIn(LEASE)
-    const released = auth.claimSignIn()!
-    auth.offerSignIn(OTHER_LEASE)
-    const live = auth.claimSignIn()!
+    auth.offerSignIn(LEASE, digestOf(CLAIM))
+    const released = auth.claimSignIn(CLAIM)!
+    auth.offerSignIn(OTHER_LEASE, digestOf(OTHER_CLAIM))
+    const live = auth.claimSignIn(OTHER_CLAIM)!
     expect(auth.sessionState(released)).toBe('live')
     auth.releaseLease(LEASE)
     expect(auth.isOpen()).toBe(true)
@@ -235,8 +257,8 @@ describe('a session whose own command ended reads as closed, even while another 
     expect(auth.sessionState('Z'.repeat(43))).toBe('none')
     expect(auth.sessionState(null)).toBe('none')
     auth.holdLease(LEASE, 'live')
-    auth.offerSignIn(LEASE)
-    const lapsing = auth.claimSignIn()!
+    auth.offerSignIn(LEASE, digestOf(CLAIM))
+    const lapsing = auth.claimSignIn(CLAIM)!
     time.advance(LIVE_LEASE_TTL_MS)
     expect(auth.sessionState(lapsing)).toBe('closed')
     auth.endSession(live)

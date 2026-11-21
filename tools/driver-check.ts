@@ -22,7 +22,8 @@ if (library === undefined) {
   process.exit(1)
 }
 
-const env = { ...process.env, KINFOLD_SQLITE3MC_LIB: resolve(library) }
+// The override is read only under NODE_ENV=test; this check is one, of a library no install has placed yet.
+const env = { ...process.env, NODE_ENV: 'test', KINFOLD_SQLITE3MC_LIB: resolve(library) }
 let workDir: string | null = null
 
 try {

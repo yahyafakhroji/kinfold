@@ -9,6 +9,45 @@ describe('redactText', () => {
     expect(redactText(leakyOutput(), 'tool.output', options).value).not.toContain(secret)
   })
 
+  test('a private key cut off before its END line is redacted as far as it goes', () => {
+    const begin = '-----BEGIN ' + 'RSA PRIVATE KEY-----'
+    const body = [FAKE_SECRETS.pemBody.slice(0, 64), `${FAKE_SECRETS.pemBody.slice(10, 50)}/+ab`, FAKE_SECRETS.pemBody.slice(0, 20)]
+    const cut = redactText(`${begin}\n${body.join('\n')}`, 'tool.output', options)
+    for (const line of body) expect(cut.value).not.toContain(line)
+    // As a file reader prints it, each line behind its number.
+    for (const numbered of [(line: string, at: number) => `     ${at + 2}\t${line}`, (line: string, at: number) => `${at + 2}→${line}`]) {
+      const read = redactText(`     1\t${begin}\n${body.map(numbered).join('\n')}`, 'tool.output', options)
+      for (const line of body) expect(read.value).not.toContain(line)
+    }
+    expect(cut.notes).toEqual([{ field: 'tool.output', rule: 'pem_private_key', count: 1 }])
+    const windows = redactText(`${begin}\r\n${body.join('\r\n')}\r\n`, 'f', options)
+    for (const line of body) expect(windows.value).not.toContain(line)
+    // As a JSON string holds it: the line breaks are the two characters backslash and n.
+    const escaped = redactText(`{"private_key_pem": "${begin}\\n${body.join('\\n')}\\n"}`, 'f', options)
+    for (const line of body) expect(escaped.value).not.toContain(line)
+    expect(escaped.value.endsWith('"}')).toBe(true)
+  })
+
+  test('a cut-off key that is passphrase-protected loses its body too, past the header lines', () => {
+    const begin = '-----BEGIN ' + 'RSA PRIVATE KEY-----'
+    const body = [FAKE_SECRETS.pemBody.slice(0, 64), FAKE_SECRETS.pemBody.slice(0, 20)]
+    const headers = ['Proc-Type: 4,ENCRYPTED', 'DEK-Info: AES-128-CBC,0123456789ABCDEF0123456789ABCDEF', '']
+    const cut = redactText([begin, ...headers, ...body].join('\n'), 'tool.output', options)
+    for (const line of body) expect(cut.value).not.toContain(line)
+    const escaped = redactText(`{"key": "${[begin, ...headers, ...body].join('\\n')}"}`, 'f', options)
+    for (const line of body) expect(escaped.value).not.toContain(line)
+    expect(escaped.value.endsWith('"}')).toBe(true)
+  })
+
+  test('a cut-off key takes its own lines only: the text after it stays', () => {
+    const begin = '-----BEGIN ' + 'PRIVATE KEY-----'
+    const { value } = redactText(`${begin}\n${FAKE_SECRETS.pemBody}\n\nThe deploy then failed with exit code 3.\n`, 'f', options)
+    expect(value).not.toContain(FAKE_SECRETS.pemBody)
+    expect(value).toContain('The deploy then failed with exit code 3.')
+    const mention = `the header is ${begin} and nothing follows\nnor here`
+    expect(redactText(mention, 'f', options)).toEqual({ value: mention, notes: [] })
+  })
+
   test('keeps ordinary text, config numbers and commit hashes', () => {
     const { value } = redactText(leakyOutput(), 'tool.output', options)
     expect(value).toContain('Loaded config for app')

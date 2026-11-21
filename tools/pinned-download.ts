@@ -4,6 +4,7 @@
 // served them, so a fallback never makes a file more trusted.
 
 import { createHash } from 'node:crypto'
+import { readBodyCapped } from '../src/fs/capped-body'
 
 export interface PinnedDownload {
   /** Names the asset in error messages. */
@@ -21,6 +22,7 @@ export interface PinnedDownload {
 const DEFAULT_TIMEOUT_MS = 60_000
 
 class Unavailable extends Error {}
+class TooLarge extends Error {}
 
 async function fetchOnce(url: string, headers: Record<string, string>, input: PinnedDownload): Promise<Uint8Array<ArrayBuffer>> {
   if ('Authorization' in headers && new URL(url).host !== 'api.github.com') throw new Error('the token is only sent to api.github.com')
@@ -31,9 +33,12 @@ async function fetchOnce(url: string, headers: Record<string, string>, input: Pi
     if (response.status >= 500) throw new Unavailable(`answered ${response.status}`)
     if (!response.ok) throw new Error(`answered ${response.status}`)
     // The body read sits inside the try so a timeout or reset mid-download also counts as unavailable.
-    return new Uint8Array(await response.arrayBuffer())
+    const bytes = await readBodyCapped(response, input.maxBytes)
+    // Refused while it downloads, so maxBytes bounds the memory used and not only what is kept.
+    if (bytes === null) throw new TooLarge(`the ${input.label} download is far larger than the release; nothing was written`)
+    return bytes
   } catch (error) {
-    if (error instanceof Unavailable) throw error
+    if (error instanceof Unavailable || error instanceof TooLarge) throw error
     if (response !== undefined && !response.ok) throw error
     throw new Unavailable(`${error instanceof Error ? error.message : String(error)}`)
   }

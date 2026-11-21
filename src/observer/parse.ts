@@ -7,6 +7,7 @@
 // is dropped and counted, never stored.
 
 import { isRecord } from '../contract/event'
+import { oneLine } from './prompt'
 import type { EvidenceStrength } from '../evidence'
 import {
   EVIDENCE_STRENGTHS,
@@ -98,7 +99,7 @@ function parseObservation(value: unknown, index: number, allowed: Allowed): Pars
   if (!isRecord(value)) throw new ShapeError(`${where} must be an object`)
   const type = value.type
   if (!OBSERVATION_TYPES.includes(type as ObservationType)) return { observation: null, dropped: 0, droppedRelations: 0 }
-  const title = requireString(value, 'title', where).trim()
+  const title = oneLine(requireString(value, 'title', where))
   if (title === '') throw new ShapeError(`${where}.title must not be empty`)
   const evidence = parseEvidence(value.evidence, where)
   const { eventIds, knownIds } = allowed

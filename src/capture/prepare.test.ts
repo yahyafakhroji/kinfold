@@ -35,6 +35,59 @@ describe('prepareForSpool', () => {
     expect(prepared.redactions).toContainEqual({ field: 'tool.output', rule: 'sensitive_path', count: 1 })
   })
 
+  // A value in no known format under a name no rule calls secret: only withholding stops it.
+  const PLAIN_VALUE = 'plain-value-no-rule-knows-0001'
+  const withheldInput = (chars: number): string => `<withheld reason="sensitive_path" chars="${chars}"/>`
+
+  test('a Write to a sensitive path keeps the path and withholds the body', () => {
+    const content = `STRIPE_KEY=${PLAIN_VALUE}\nA=1`
+    for (const input of [{ file_path: '/repo/.env', content }, { filePath: '/home/dev/.ssh/id_rsa', content }]) {
+      const prepared = prepareForSpool(toolEvent('Write', input, 'File created'), options)
+      expect(JSON.stringify(prepared)).not.toContain(PLAIN_VALUE)
+      expect(prepared.tool?.input).toEqual({ ...input, content: withheldInput(content.length) })
+      expect(prepared.tool?.withheld).toBe('sensitive_path')
+      expect(prepared.redactions).toContainEqual({ field: 'tool.input', rule: 'sensitive_path', count: 1 })
+    }
+  })
+
+  test('an Edit or MultiEdit to a sensitive path withholds every string but the path', () => {
+    const edit = { file_path: '/repo/.env', old_string: 'STRIPE_KEY=old', new_string: `STRIPE_KEY=${PLAIN_VALUE}`, replace_all: false }
+    const edited = prepareForSpool(toolEvent('Edit', edit, 'ok'), options)
+    expect(edited.tool?.input).toEqual({ file_path: '/repo/.env', old_string: withheldInput(14), new_string: withheldInput(edit.new_string.length), replace_all: false })
+    const multi = { file_path: '/repo/certs/server.pem', edits: [{ old_string: 'a', new_string: PLAIN_VALUE }, { old_string: 'b', new_string: 'c' }] }
+    const prepared = prepareForSpool(toolEvent('MultiEdit', multi, 'ok'), options)
+    expect(JSON.stringify(prepared)).not.toContain(PLAIN_VALUE)
+    expect(prepared.tool?.input).toMatchObject({ file_path: '/repo/certs/server.pem', edits: [{ old_string: withheldInput(1) }, { new_string: withheldInput(1) }] })
+    expect(prepared.redactions).toContainEqual({ field: 'tool.input', rule: 'sensitive_path', count: 4 })
+  })
+
+  test('a command that names a sensitive path is withheld whole; other sensitive commands stay readable', () => {
+    const command = `echo STRIPE_KEY=${PLAIN_VALUE} >> .env`
+    const written = prepareForSpool(toolEvent('Bash', { command, description: 'add the key' }, ''), options)
+    expect(JSON.stringify(written)).not.toContain(PLAIN_VALUE)
+    expect(written.tool?.input).toEqual({ command: `<withheld reason="sensitive_command" chars="${command.length}"/>`, description: 'add the key' })
+    expect(written.redactions).toContainEqual({ field: 'tool.input', rule: 'sensitive_command', count: 1 })
+    const dumped = prepareForSpool(toolEvent('Bash', { command: 'printenv | sort' }, 'A=1'), options)
+    expect(dumped.tool?.input).toEqual({ command: 'printenv | sort' })
+    expect(dumped.tool?.withheld).toBe('sensitive_command')
+  })
+
+  test('withholding input a second time, as the daemon does at ingest, changes nothing and notes nothing new', () => {
+    const write = toolEvent('Write', { file_path: '/repo/.env', content: `K=${PLAIN_VALUE}` }, 'ok')
+    const shell = toolEvent('Bash', { command: `echo K=${PLAIN_VALUE} > /repo/.env` }, '')
+    for (const event of [write, shell]) {
+      const once = prepareForSpool(event, options)
+      const twice = prepareForSpool(once, options)
+      expect(twice.tool?.input).toEqual(once.tool?.input)
+      expect((twice.redactions ?? []).filter((note) => note.field === 'tool.input')).toEqual([])
+    }
+  })
+
+  test('a write to an ordinary path keeps its body', () => {
+    const prepared = prepareForSpool(toolEvent('Write', { file_path: '/repo/src/a.ts', content: 'export const a = 1' }, 'ok'), options)
+    expect(prepared.tool?.input).toEqual({ file_path: '/repo/src/a.ts', content: 'export const a = 1' })
+  })
+
   test('keeps a .env.example read and redacts inside it', () => {
     const prepared = prepareForSpool(toolEvent('Read', { file_path: '/repo/.env.example' }, leakyOutput()), options)
     expect(prepared.tool?.withheld).toBeUndefined()

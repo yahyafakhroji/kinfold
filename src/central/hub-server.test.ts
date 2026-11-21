@@ -228,3 +228,46 @@ test('a stranger learns nothing about the hub\'s version from a pairing attempt'
   expect(response.status).toBe(403)
   expect(JSON.stringify(await response.json())).not.toContain('0.6.1')
 })
+
+test('a sender that is not the paired device\'s node, has no signature headers or a stale clock is refused before any of its body is read', async () => {
+  await pair()
+  const { request } = signed('/central/capture', {})
+  let pulled = 0
+  const unread = (headers: Headers): Request => new Request('http://hub/central/capture', {
+    method: 'POST',
+    headers,
+    body: new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1
+        controller.enqueue(new Uint8Array(64 * 1024))
+      },
+      // Nothing is produced until someone reads.
+    }, { highWaterMark: 0 }),
+    duplex: 'half',
+  } as RequestInit)
+  const pulledBy = async (headers: Headers, address: string): Promise<number> => {
+    pulled = 0
+    const response = await handleHubRequest(unread(headers), address, deps)
+    expect([401, 403]).toContain(response.status)
+    return pulled
+  }
+  // The right device id and well-formed headers, as anyone on the tailnet who learned the id could send them.
+  expect(await pulledBy(new Headers(request.headers), '100.64.0.9')).toBe(0)
+  expect(await pulledBy(new Headers({ [HEADER.device]: 'dev-1' }), '100.64.0.5')).toBe(0)
+  const stale = new Headers(request.headers)
+  stale.set(HEADER.time, String(Date.now() - 3_600_000))
+  expect(await pulledBy(stale, '100.64.0.5')).toBe(0)
+  expect(captured).toEqual([])
+})
+
+test('a device name with terminal control or text-direction characters is not accepted at pairing', async () => {
+  const live = createInvite(dir, Date.now())
+  const invite = readJsonFile(join(dir, 'central', 'invites.json')) as { salt: string }
+  const fields = { deviceId: 'dev-1', devicePublicKey: device.publicKey, nonce: 'pair-nonce-0000001' }
+  for (const deviceName of ['lap\u009b2Jtop', 'lap‮top', 'lap⁦top', 'lap​top', '﻿laptop']) {
+    const body = JSON.stringify({ ...fields, deviceName, proof: deviceProof(proofKey(verifierFor(live, invite.salt)), fields), version: '0.6.0' })
+    const response = await handleHubRequest(new Request('http://hub/central/pair', { method: 'POST', body }), '100.64.0.5', deps)
+    expect(response.status).toBe(400)
+  }
+  expect(listDevices(dir)).toEqual([])
+})

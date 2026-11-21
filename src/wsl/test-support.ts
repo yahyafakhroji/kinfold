@@ -68,11 +68,11 @@ export function stand(options: StandOptions = {}): Stand & { cleanup: () => Prom
   const xml = taskXml({ user: 'PC\\José', program: `${WIN_DATA_DIR}\\bin\\kinfold.exe`, dataDir: WIN_DATA_DIR, port: PORT, logFile: `${WIN_DATA_DIR}\\logs\\daemon.log` })
   writeFileSync(join(appData, 'Kinfold', 'kinfold-daemon.xml'), encodeText(xml, 'utf16le'))
   writeFileSync(join(dataDir, 'install.json'), '{"channel":"powershell","updateCheck":true,"firstInstalledAt":1}\n')
-  if (options.daemonJson ?? true) writeFileSync(join(dataDir, 'daemon.json'), `${JSON.stringify({ pid: 4242, port: PORT })}\n`)
+  if (options.daemonJson ?? true) writeFileSync(join(dataDir, 'daemon.json'), `${JSON.stringify({ pid: process.pid, port: PORT })}\n`)
   const fetch: InstallEnv['fetch'] = async (url) => {
     world.fetches.push(`GET ${new URL(url).pathname}`)
     if (state.daemon !== 'up' || new URL(url).port !== String(PORT)) throw new TypeError('connection refused (test world)')
-    return Response.json({ ok: true, version: '1.2.3', schemaVersion: 7, pid: 4242 })
+    return Response.json({ ok: true, version: '1.2.3', schemaVersion: 7, pid: process.pid })
   }
   const env: InstallEnv = { ...world.env, platform: 'linux', wsl: true, fetch, unflaggedDataDir: world.dataDir, diskCheck: stubDiskCheck('test disk') }
   const programSource = join(world.root, 'kinfold-build')

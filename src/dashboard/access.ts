@@ -4,7 +4,11 @@
 // sends the cookie on its own, so a state-changing cookie request must also
 // prove it came from our page: an exact Origin and a custom header that a
 // cross-site form or a simple fetch cannot add without a CORS preflight,
-// which this server never answers.
+// which this server never answers. A few GETs change something too (a backup
+// download records a backup, the update view uses up its banner, the central
+// check calls the hub), and the cookie's SameSite rule ignores the port, so a
+// page on another 127.0.0.1 port could send them with the cookie. Those GETs
+// must come from our own origin as the browser itself reports it.
 
 import { type DashboardAuth, sessionFromCookie } from './auth'
 
@@ -18,7 +22,7 @@ export const REQUEST_HEADER = 'x-sam-request'
 const SAFE_METHODS = new Set(['GET', 'HEAD'])
 const EITHER_EXACT = new Set(['/central/status', '/observer/settings', '/embedding/settings', '/observer/test', '/observer/recheck', '/observer/models', '/observer/claude-token', '/metrics/summary', '/update', '/update/auto', '/update/settings', '/update/install', '/backup', '/restore', '/restore/upload', '/restore/undo', '/restore/status'])
 const EITHER_PREFIXES = ['/data/', '/memory/']
-// The claim is public like the session exchange: it carries no credential, and createSession's own-page check guards both.
+// The claim is public like the session exchange: each carries its own single-use secret in the body, and the own-page check keeps other web pages out.
 const PUBLIC_DASHBOARD = new Set(['/dashboard/login', '/dashboard/session', '/dashboard/claim'])
 
 export function accessFor(path: string): Access {
@@ -43,6 +47,23 @@ export function isStateChanging(method: string): boolean {
   return !SAFE_METHODS.has(method)
 }
 
+/** GETs with a side effect: /backup snapshots the store and records a backup, /update shows its banner once, /central/status?check=1 calls the hub. */
+const SIDE_EFFECT_READS = new Set(['/backup', '/update', '/central/status'])
+
+/**
+ * Whether a GET came from our own page. Sec-Fetch-Site is set by the browser
+ * and a page cannot change it; a page on another port of 127.0.0.1 reads
+ * `same-site`, never `same-origin`. A browser too old to send it must show
+ * our page's header and Origin, or a Referer on our origin (the Download
+ * link is a plain navigation, which carries neither of the first two).
+ */
+export function isOwnPageRead(request: Request, port: number): boolean {
+  const site = request.headers.get('sec-fetch-site')
+  if (site !== null) return site === 'same-origin'
+  if (isOwnPageRequest(request, port)) return true
+  return request.headers.get('referer')?.startsWith(`${dashboardOrigin(port)}/`) === true
+}
+
 export interface AccessDeps {
   port: number
   hasToken: (header: string | null) => boolean
@@ -64,5 +85,6 @@ export function checkAccess(request: Request, access: Access, deps: AccessDeps):
     return { ok: false, status: 401, error: 'unauthorized' }
   }
   if (isStateChanging(request.method) && !isOwnPageRequest(request, deps.port)) return { ok: false, status: 403, error: 'forbidden origin' }
+  if (!isStateChanging(request.method) && SIDE_EFFECT_READS.has(new URL(request.url).pathname) && !isOwnPageRead(request, deps.port)) return { ok: false, status: 403, error: 'forbidden origin' }
   return { ok: true, via: 'cookie' }
 }

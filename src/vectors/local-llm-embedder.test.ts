@@ -56,6 +56,6 @@ describe('probeLocalLlmDims', () => {
 
   test('names a server that is not there', async () => {
     const answer = await probeLocalLlmDims({ url: 'http://127.0.0.1:1', model: 'm', fetch: async () => Promise.reject(new TypeError('connect refused')) })
-    expect(answer).toEqual({ ok: false, reason: 'the local LLM did not answer at http://127.0.0.1:1/embeddings (TypeError)' })
+    expect(answer).toEqual({ ok: false, reason: 'the local LLM did not answer at http://127.0.0.1:1 (TypeError)' })
   })
 })

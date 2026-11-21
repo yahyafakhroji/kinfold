@@ -45,7 +45,7 @@ const payload = (host: string, name: string, extra: Record<string, unknown> = {}
 
 /** A daemon endpoint on disk and a fetch that answers for it, so a test fixes exactly what the daemon said. */
 function fakeDaemon(): void {
-  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: 1, port: 4 }))
+  writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ pid: process.pid, port: 4 }))
   writeFileSync(join(dataDir, 'daemon.token'), 'a'.repeat(64))
 }
 
