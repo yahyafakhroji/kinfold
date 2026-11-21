@@ -5,12 +5,14 @@ import { join } from 'node:path'
 import { normalizeClaudeCode } from '../adapters/claude-code'
 import { captureEvent } from '../capture/capture'
 import { ulid } from '../contract/ulid'
+import { countSpool } from '../spool/spool'
 import { loadHmacKey } from '../store/hmac-key'
 import { type RunningDaemon, startDaemon } from './daemon'
 import * as ingest from './ingest'
 import * as readRoutes from './read-routes'
 import * as server from './server'
 import { openStore } from '../store/db'
+import type { CachingProjectKeyResolver } from '../store/project-key'
 import { type DbKeyStore, newDbKey } from '../sqlite/keys'
 import { PROJECT_A, seedMcpObservation, seedMcpSession } from '../mcp/test-support'
 import { LATEST_SCHEMA_VERSION } from '../store/schema'
@@ -146,10 +148,16 @@ posixOnly('file modes')('daemon.json names the port and pid, and it and the toke
   for (const file of ['daemon.json', 'daemon.token', 'hmac.key']) expect(statSync(join(dataDir, file)).mode & 0o777).toBe(0o600)
 })
 
-test('an event spooled while the daemon was down lands on the next start', async () => {
+test('an event spooled while the daemon was down lands after the next start, once the server is already answering', async () => {
   await daemon.stop()
   const sessionId = spoolFixture('written while down')
   daemon = startDaemon({ dataDir, port: 0, fallbackDrainMs: 60_000, log: (line) => logs.push(line) })
+
+  // The start did not wait on the spool: the server is up and the entry still waits for the first scheduled drain.
+  expect(countSpool(join(dataDir, 'spool'))).toBe(1)
+  expect((await fetch(url('/health'))).status).toBe(200)
+  await daemon.scheduler.whenIdle()
+  expect(countSpool(join(dataDir, 'spool'))).toBe(0)
 
   const body = (await (await fetch(url('/sessions'), authed())).json()) as { sessions: { hostSessionId: string }[] }
   expect(body.sessions.map((session) => session.hostSessionId)).toEqual([sessionId])
@@ -176,14 +184,17 @@ test('a /read/ path answers 404 when no read route takes it, and the route answe
   }
 })
 
-test('the daemon hands the read routes its reader and resolver', async () => {
+test("the daemon hands the read routes its reader and the resolver's key-only lookup, which never walks a repo's history", async () => {
   const serve = spyOn(server, 'startServer')
-  const drain = spyOn(ingest, 'drainSpool')
+  const drain = spyOn(ingest, 'drainBatch')
   const otherDir = join(root, 'other')
   const other = startDaemon({ dataDir: otherDir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
   try {
+    await other.scheduler.whenIdle()
     const reads = serve.mock.calls[0]![0].reads!
-    expect(reads.projectKeyFor).toBe(drain.mock.calls[0]![1].projectKeyFor)
+    // The daemon every test starts with drains too; this one's call is the one on its own spool.
+    const resolver = drain.mock.calls.find((call) => call[1].spoolDir === join(otherDir, 'spool'))![1].projectKeyFor as CachingProjectKeyResolver
+    expect(reads.projectKeyFor).toBe(resolver.keyOnly)
     const writer = openStore(otherDir)
     const sessionId = seedMcpSession(writer, PROJECT_A, 'claude-code', 'r-1')
     const id = seedMcpObservation(writer, { sessionId, projectKey: PROJECT_A, title: 'Seen through the daemon reader', at: Date.now() })

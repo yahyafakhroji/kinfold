@@ -84,10 +84,24 @@ function marker(rule: string, secret: string, options: RedactOptions): string {
   return `<redacted type="${rule}" ref="${formatRef(secretRef(secret, options.hmacKey), options.epoch ?? 0)}"/>`
 }
 
-function lineAround(text: string, offset: number): string {
-  const start = text.lastIndexOf('\n', offset) + 1
-  const end = text.indexOf('\n', offset)
-  return text.slice(start, end === -1 ? undefined : end)
+/**
+ * Whether the line around an offset passes `test`, asked once per line while
+ * offsets go forward (as a replace over the text hands them out). Copying and
+ * testing the whole line for every token on it made one long line cost
+ * tokens x length.
+ */
+export function lineVerdicts(text: string, test: (line: string) => boolean): (offset: number) => boolean {
+  let start = 0
+  let end = -1
+  let verdict = false
+  return (offset) => {
+    if (offset >= start && offset < end) return verdict
+    start = text.lastIndexOf('\n', offset) + 1
+    const newline = text.indexOf('\n', offset)
+    end = newline === -1 ? text.length : newline
+    verdict = test(text.slice(start, end))
+    return verdict
+  }
 }
 
 export function redactText(input: string, field: string, options: RedactOptions): Redacted<string> {
@@ -111,9 +125,10 @@ export function redactText(input: string, field: string, options: RedactOptions)
       return prefix + marker(rule.name, secret, options)
     })
   }
-  text = text.replace(ENTROPY_TOKEN, (token: string, offset: number, whole: string) => {
+  const namesSecret = lineVerdicts(text, (line) => SECRET_KEY_NAME.test(line))
+  text = text.replace(ENTROPY_TOKEN, (token: string, offset: number) => {
     if (!looksRandom(token, mode)) return token
-    if (mode === 'strict' || SECRET_KEY_NAME.test(lineAround(whole, offset))) {
+    if (mode === 'strict' || namesSecret(offset)) {
       hit('high_entropy')
       return marker('high_entropy', token, options)
     }

@@ -6,9 +6,9 @@ import { FAKE_SECRETS } from '../../test/fixtures/secrets'
 import { captureEvent } from '../capture/capture'
 import { type NormalizedEvent, SCHEMA_VERSION } from '../contract/event'
 import { ulid } from '../contract/ulid'
-import { QUARANTINE_DIR } from '../spool/spool'
+import { QUARANTINE_DIR, createSpoolCursor } from '../spool/spool'
 import { type Store, openStore } from '../store/db'
-import { contentHash, drainSpool, secondPass } from './ingest'
+import { contentHash, drainBatch, drainSpool, secondPass } from './ingest'
 
 const HMAC = 'test-key'
 let root: string
@@ -132,6 +132,60 @@ test('several batches drain in order until the spool is empty', () => {
   spool(event(), event(), event(), event(), event())
   expect(drain(2)).toMatchObject({ read: 5, inserted: 5, removed: 5 })
   expect(readdirSync(spoolDir).filter((name) => name.endsWith('.json'))).toEqual([])
+})
+
+test('one call stores one batch and says more is waiting, and the whole backlog costs one directory listing', () => {
+  spool(...Array.from({ length: 7 }, () => event()))
+  let listings = 0
+  const cursor = createSpoolCursor(spoolDir, (dir) => {
+    listings += 1
+    return readdirSync(dir).filter((name) => name.endsWith('.json')).sort()
+  })
+  const options = { spoolDir, hmacKey: HMAC, projectKeyFor: () => ({ key: 'org/repo', kind: 'git-remote' as const, displayName: 'repo' }), batchSize: 3 }
+
+  const first = drainBatch(store.db, options, cursor)
+  expect(first).toMatchObject({ read: 3, inserted: 3, removed: 3, more: true })
+  expect(readdirSync(spoolDir)).toHaveLength(4)
+  expect(rows('SELECT event_id FROM events')).toHaveLength(3)
+
+  expect(drainBatch(store.db, options, cursor)).toMatchObject({ read: 3, inserted: 3, more: true })
+  expect(drainBatch(store.db, options, cursor)).toMatchObject({ read: 1, inserted: 1, more: false })
+  expect(readdirSync(spoolDir)).toEqual([])
+  expect(listings).toBe(1)
+
+  // An entry written after the listing was used up is found by the next one.
+  spool(event())
+  expect(drainBatch(store.db, options, cursor)).toMatchObject({ read: 1, inserted: 1, more: false })
+  expect(listings).toBe(2)
+})
+
+test('a batch that fails to commit is read again by the next call', () => {
+  spool(event(), event())
+  const cursor = createSpoolCursor(spoolDir)
+  const options = { spoolDir, hmacKey: HMAC, projectKeyFor: () => ({ key: 'org/repo', kind: 'git-remote' as const, displayName: 'repo' }) }
+  store.db.run(`CREATE TRIGGER fail_once BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT, 'boom'); END`)
+  expect(drainBatch(store.db, options, cursor).error).toContain('batch rolled back')
+  store.db.run('DROP TRIGGER fail_once')
+  expect(drainBatch(store.db, options, cursor)).toMatchObject({ inserted: 2, removed: 2, more: false })
+})
+
+test("a batch asks for each folder's project key once, before its write transaction opens", () => {
+  spool(event(), event({ kind: 'user_prompt', promptText: 'a' }), event({ cwd: '/work/other' }), event({ kind: 'user_prompt', promptText: 'b' }), event({ cwd: '/work/other', kind: 'session_end' }))
+  const asked: string[] = []
+  const result = drainSpool(store.db, {
+    spoolDir,
+    hmacKey: HMAC,
+    projectKeyFor: (cwd) => {
+      asked.push(cwd)
+      // Throws inside a transaction: a slow git must not hold the write lock.
+      store.db.run('BEGIN IMMEDIATE')
+      store.db.run('ROLLBACK')
+      return { key: cwd, kind: 'path', displayName: cwd }
+    },
+  })
+  expect(result).toMatchObject({ inserted: 5 })
+  expect(result.error).toBeUndefined()
+  expect(asked.sort()).toEqual(['/work/other', '/work/repo'])
 })
 
 test('stored rows keep redaction, the withheld marker and a content hash', () => {

@@ -161,12 +161,14 @@ KINFOLD_INSTALL_CHANNEL=curl
 export KINFOLD_INSTALL_CHANNEL
 
 # Under `curl | sh` stdin is the script, so the wizard reads its answers from
-# the terminal. A caller that pipes a key in keeps its stdin, and so does a
-# run with no terminal at all (opening /dev/tty then fails).
+# the terminal. A caller that pipes a key or an observer token in keeps its
+# stdin, and so does a run with no terminal at all (opening /dev/tty then fails).
 tty_path=${KINFOLD_TTY:-/dev/tty}
 use_tty=1
 for argument in "$@"; do
-  [ "$argument" = --credential-stdin ] && use_tty=0
+  case "$argument" in
+    --credential-stdin|--observer-token-stdin) use_tty=0 ;;
+  esac
 done
 if [ "$use_tty" -eq 1 ] && ( : < "$tty_path" ) 2>/dev/null; then
   "$program" install "$@" < "$tty_path"

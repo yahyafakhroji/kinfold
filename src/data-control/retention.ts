@@ -12,6 +12,7 @@ import { type DataSettings, type DataSettingsChange, RETENTION_TABLES, type Rete
 import { resolveRowFindings } from '../store/findings-store'
 import { expireRelatedServed } from '../store/related-served-store'
 import { type ExpiringRows, countExpiring, expireEventPayloads, expireMcpReads, expirePromptTexts } from '../store/retention-store'
+import { optimizeFts } from '../store/purge-store'
 import { ensureSecureDelete, purge, scrub } from './purge'
 
 export const DAY_MS = 86_400_000
@@ -65,7 +66,30 @@ function cutoffFor(days: number | null, now: number): number | null {
   return days === null ? null : now - days * DAY_MS
 }
 
-export function applyRetention(db: Database, now: number): RetentionOutcome {
+export interface RetentionLimits {
+  /** Rows one transaction deletes. */
+  batch: number
+  /** Transactions per table per run. */
+  maxBatches: number
+}
+
+/**
+ * Deletes a table's expired rows through the purge path, `limits.batch` rows
+ * per transaction and `limits.maxBatches` transactions per run, oldest first:
+ * a long history trimmed for the first time must not hold the daemon's
+ * thread and the write lock for all of it. The next tick carries on.
+ */
+function expireRows(db: Database, table: 'observations' | 'summaries', cutoff: number, now: number, limits: RetentionLimits): number {
+  let rows = 0
+  for (let batch = 0; batch < limits.maxBatches; batch += 1) {
+    const deleted = purge(db, { kind: 'expire', table, before: cutoff, limit: limits.batch }, { dryRun: false, now: () => now, deferCleanup: true }).counts[table]
+    rows += deleted
+    if (deleted < limits.batch) break
+  }
+  return rows
+}
+
+export function applyRetention(db: Database, now: number, limits: RetentionLimits = { batch: RETENTION_BATCH, maxBatches: MAX_BATCHES }): RetentionOutcome {
   const startedAt = Date.now()
   const { retention } = readDataSettings(db)
   ensureSecureDelete(db)
@@ -75,11 +99,13 @@ export function applyRetention(db: Database, now: number): RetentionOutcome {
   const prompts = promptsCutoff === null ? { rows: 0, findings: 0 } : expireText(db, 'prompts', expirePromptTexts, promptsCutoff, now)
   const deleted = (['observations', 'summaries'] as const).map((table) => {
     const cutoff = cutoffFor(retention[table], now)
-    return cutoff === null ? 0 : purge(db, { kind: 'expire', table, before: cutoff }, { dryRun: false, now: () => now }).counts[table]
+    return cutoff === null ? 0 : expireRows(db, table, cutoff, now, limits)
   })
+  // Deleted terms leave the search index's pages in one merge for the whole run.
+  if ((deleted[0] ?? 0) > 0) optimizeFts(db)
   const mcpReads = eventsCutoff === null ? 0 : expireReads(db, eventsCutoff)
-  // purge scrubs after its own deletes; text expiry and read deletes need one of their own.
-  if (events.rows + prompts.rows + mcpReads > 0) scrub(db)
+  // One scrub for everything this run removed: the batches above leave theirs to it.
+  if (events.rows + prompts.rows + mcpReads + (deleted[0] ?? 0) + (deleted[1] ?? 0) > 0) scrub(db)
   return {
     events: events.rows,
     prompts: prompts.rows,

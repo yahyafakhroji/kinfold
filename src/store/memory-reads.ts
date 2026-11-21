@@ -78,10 +78,14 @@ const detailSql = (hasLinks: boolean): string => `SELECT ${indexColumns(hasLinks
       o.recall_count AS recallCount, (SELECT device FROM sessions WHERE id = o.session_id) AS device
     FROM observations o LEFT JOIN projects p ON p.key = o.project_key WHERE o.id = $id`
 
+/** Two lookups, each through its own index; one OR over both scanned the table. */
+export const RELATED_SQL = `SELECT id, title, evidence, 'contradicted_by' AS relation FROM observations WHERE id = $by
+    UNION ALL SELECT id, title, evidence, 'contradicts' AS relation FROM observations WHERE contradicted_by = $id AND id <> $by
+    ORDER BY id`
+
 const SQL = {
   total: `SELECT count(*) AS n FROM observations o WHERE ${FILTERED}`,
-  related: `SELECT id, title, evidence, CASE WHEN id = $by THEN 'contradicted_by' ELSE 'contradicts' END AS relation
-    FROM observations WHERE id = $by OR contradicted_by = $id ORDER BY id`,
+  related: RELATED_SQL,
   projects: `SELECT o.project_key AS value, coalesce(p.display_name, o.project_key) AS label, count(*) AS observations
     FROM observations o LEFT JOIN projects p ON p.key = o.project_key GROUP BY o.project_key ORDER BY observations DESC, value`,
   hosts: 'SELECT host AS value, host AS label, count(*) AS observations FROM observations GROUP BY host ORDER BY observations DESC, value',

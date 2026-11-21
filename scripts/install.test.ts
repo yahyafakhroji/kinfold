@@ -120,6 +120,8 @@ async function runInstall(options: {
   extraEnv?: Record<string, string>
   fakeNetwork?: boolean
   restrictedTools?: boolean
+  /** Piped to the script, as `printf ... | sh install.sh` does; nothing is piped when absent. */
+  stdin?: string
 }): Promise<InstallRun> {
   const root = temp('kinfold-install-')
   const bin = join(root, 'bin')
@@ -155,7 +157,7 @@ async function runInstall(options: {
       KINFOLD_TTY: join(root, 'no-terminal'),
       ...options.extraEnv,
     },
-    stdin: 'ignore',
+    stdin: options.stdin === undefined ? 'ignore' : new TextEncoder().encode(options.stdin),
     stdout: 'pipe',
     stderr: 'pipe',
   })
@@ -237,6 +239,22 @@ shellTest('--credential-stdin keeps the caller stdin even when a terminal is rea
 
   expect(run.exitCode).toBe(0)
   expect(readFileSync(join(run.root, 'stdin.txt'), 'utf8')).toBe('')
+})
+
+shellTest('--observer-token-stdin reads the piped token, not the terminal, even when a terminal is readable', async () => {
+  const program = fakeProgram()
+  const release = releaseServer({
+    '/release/SHA256SUMS': sumsFor({ 'kinfold-linux-x64': program }),
+    '/release/kinfold-linux-x64': program,
+  })
+  const terminal = join(temp('kinfold-tty-'), 'tty')
+  writeFileSync(terminal, 'typed at the terminal\n')
+
+  const run = await runInstall({ base: release.url, args: ['--observer-token-stdin'], extraEnv: { KINFOLD_TTY: terminal }, stdin: 'placeholder piped by the caller\n' })
+
+  expect(run.exitCode).toBe(0)
+  expect(run.received).toEqual(['install', '--observer-token-stdin'])
+  expect(readFileSync(join(run.root, 'stdin.txt'), 'utf8')).toBe('placeholder piped by the caller\n')
 })
 
 shellTest('Darwin arm64 picks the darwin arm64 asset', async () => {

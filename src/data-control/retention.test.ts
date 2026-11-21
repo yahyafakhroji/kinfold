@@ -78,6 +78,35 @@ test('prompts, observations and summaries follow their own settings', () => {
   expect(applyRetention(temp.store.db, NOW)).toMatchObject({ prompts: 0, observations: 0 })
 })
 
+test('expired observations and summaries go in bounded batches: one run deletes a capped number, oldest first, and the next carries on', () => {
+  const ids = Array.from({ length: 10 }, (_, index) =>
+    seedObservation(temp.store, { sessionId: session, projectKey: 'org/repo', host: 'claude-code', title: `Old fact ${index}`, at: NOW - (30 - index) * DAY_MS }))
+  const kept = seedObservation(temp.store, { sessionId: session, projectKey: 'org/repo', host: 'claude-code', title: 'New fact', at: NOW })
+  writeDataSettings(temp.store.db, { retention: { observations: 7 } }, NOW)
+  const remaining = (): number[] => temp.store.db.query<{ id: number }, []>('SELECT id FROM observations ORDER BY id').all().map((found) => found.id)
+  // Counts transactions that deleted observations, and the most rows any one of them took.
+  const sizes: number[] = []
+  const transaction = temp.store.db.transaction.bind(temp.store.db)
+  temp.store.db.transaction = ((fn: (...args: unknown[]) => unknown) => transaction((...args: unknown[]) => {
+    const before = remaining().length
+    const result = fn(...args)
+    if (remaining().length < before) sizes.push(before - remaining().length)
+    return result
+  })) as typeof temp.store.db.transaction
+
+  const limits = { batch: 3, maxBatches: 2 }
+  expect(applyRetention(temp.store.db, NOW, limits)).toMatchObject({ observations: 6 })
+  expect(sizes).toEqual([3, 3])
+  expect(remaining()).toEqual([...ids.slice(6), kept])
+
+  expect(applyRetention(temp.store.db, NOW, limits)).toMatchObject({ observations: 4 })
+  expect(sizes).toEqual([3, 3, 3, 1])
+  expect(remaining()).toEqual([kept])
+  expect(applyRetention(temp.store.db, NOW, limits)).toMatchObject({ observations: 0 })
+  // The search index lost the expired rows with them.
+  expect(temp.store.db.query<{ n: number }, []>("SELECT count(*) AS n FROM observations_fts WHERE observations_fts MATCH 'fact'").get()?.n).toBe(1)
+})
+
 test('keep (null) turns a table off again', () => {
   writeDataSettings(temp.store.db, { retention: { events: null }, warnBytes: 1_000 }, NOW)
   seedEvent(temp.store, session, { kind: 'tool_result', at: T0, tool: { name: 'Bash', output: 'kept' } })

@@ -72,6 +72,83 @@ test('a pack missed while the daemon is down is retried after 30 s, not on every
   expect(packAsks()).toBe(2)
 })
 
+/** A fetcher whose every answer the test hands out by hand, so asks can overlap in a chosen order. */
+function heldRig() {
+  const clock = { now: 1_000_000 }
+  const held: { channel: string; answer: (result: ContextResult | null) => void }[] = []
+  const injector = createContextInjector({
+    host: 'opencode', cwd: '/work/repo', log: () => {}, now: () => clock.now,
+    fetch: (request) => new Promise((resolve) => held.push({ channel: request.channel, answer: resolve })),
+  })
+  const context = (): { done: Promise<void>; system: { type: string; text?: string }[] } => {
+    const system: { type: string; text?: string }[] = []
+    return { done: injector.onContext({ sessionID: 's1', system }), system }
+  }
+  const answer = async (channel: 'request' | 'prompt', result: ContextResult | null): Promise<void> => {
+    const index = held.findIndex((ask) => ask.channel === channel)
+    held.splice(index, 1)[0]!.answer(result)
+    // Lets the awaiting request run on to its next ask.
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve()
+  }
+  return { clock, injector, context, answer, asks: () => held.map((ask) => ask.channel) }
+}
+
+test('a pack ask that overlaps a delta ask does not leave the session without a pack for good', async () => {
+  const r = heldRig()
+  // The daemon is down: the first pack ask fails, and the waiting prompt's delta ask hangs.
+  r.injector.onPrompt({ sessionID: 's1', prompt: { text: 'why did the build break' } })
+  const first = r.context()
+  await r.answer('request', null)
+  expect(r.asks()).toEqual(['prompt'])
+
+  // A second request arrives after the retry wait and asks for the pack again, while the delta ask is still out.
+  r.clock.now += PACK_RETRY_INTERVAL_MS + 1
+  const second = r.context()
+  await Promise.resolve()
+  expect(r.asks()).toEqual(['prompt', 'request'])
+  await r.answer('prompt', null)
+  await r.answer('request', null)
+  // The delta interval has passed as well, so a request may ask for one more delta on its way out.
+  while (r.asks().includes('prompt')) await r.answer('prompt', null)
+  await Promise.all([first.done, second.done])
+
+  // The daemon is back. The next request after the retry wait must ask again and get the pack.
+  r.clock.now += PACK_RETRY_INTERVAL_MS + 1
+  const third = r.context()
+  await Promise.resolve()
+  expect(r.asks()).toEqual(['request'])
+  await r.answer('request', PACK)
+  while (r.asks().includes('prompt')) await r.answer('prompt', null)
+  await third.done
+  expect(third.system.map((part) => part.text)).toEqual([PACK.text])
+})
+
+test('a delta that comes back after compaction is dropped: the fresh cache does not carry text from before it', async () => {
+  const r = heldRig()
+  const warm = r.context()
+  await r.answer('request', PACK)
+  await warm.done
+
+  r.injector.onPrompt({ sessionID: 's1', prompt: { text: 'what changed' } })
+  const before = r.context()
+  await Promise.resolve()
+  expect(r.asks()).toEqual(['prompt'])
+
+  // Compaction drops the session, and a new request builds a fresh cache while the old delta ask is still out.
+  r.injector.onCompaction({ sessionID: 's1' })
+  const after = r.context()
+  await Promise.resolve()
+  await r.answer('request', PACK)
+  await after.done
+  await r.answer('prompt', { ...delta(1), relatedText: '' })
+  await before.done
+
+  const next = r.context()
+  await next.done
+  expect(r.asks()).toEqual([])
+  expect(next.system.map((part) => part.text)).toEqual([PACK.text])
+})
+
 test('no delta is asked for within 30 s of the pack, then at most one per 30 s per session', async () => {
   const r = rig([delta(1), delta(2)])
   expect((await r.context()).map((part) => part.text)).toEqual(['host system prompt', PACK.text])

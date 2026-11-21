@@ -98,11 +98,17 @@ function summaryJson(row: SummaryItem): Record<string, unknown> {
 
 type Filters = Omit<SearchFilters, 'limit' | 'offset'>
 
-/** Every term first; when that finds nothing on the first page, any term. */
+/**
+ * Every term first; when no row at all matches every term, any term. The mode
+ * comes from the whole result, not from this page: a later page of an any-term
+ * result is empty in every-term mode too, and must not fall back to it.
+ */
 function keywordRows(reader: MemoryReader, terms: readonly string[], filters: Filters, limit: number, offset: number): { mode: FtsMode; rows: IndexRow[] } {
   const run = (mode: FtsMode) => reader.search(ftsMatch(terms, mode), { ...filters, limit, offset })
   const rows = run('all')
-  return rows.length === 0 && terms.length > 1 && offset === 0 ? { mode: 'any', rows: run('any') } : { mode: 'all', rows }
+  if (rows.length > 0 || terms.length < 2) return { mode: 'all', rows }
+  const everyTermMatches = offset > 0 && reader.search(ftsMatch(terms, 'all'), { ...filters, limit: 1, offset: 0 }).length > 0
+  return everyTermMatches ? { mode: 'all', rows } : { mode: 'any', rows: run('any') }
 }
 
 /** The vector hits that pass the filters, in the daemon's distance order. */
