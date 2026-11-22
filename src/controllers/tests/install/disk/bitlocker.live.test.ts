@@ -53,8 +53,8 @@ describe.skipIf(!LIVE)('BitLocker (live)', () => {
       const script = join(dir, 'check.ts')
       const out = join(dir, 'line.txt')
       writeFileSync(script, [
-        `import { bitlockerCheck } from ${moduleUrl('bitlocker.ts')}`,
-        `import { diskEncryptionLine } from ${moduleUrl('check.ts')}`,
+        `import { bitlockerCheck } from ${moduleUrl('../../../install/disk/bitlocker.ts')}`,
+        `import { diskEncryptionLine } from ${moduleUrl('../../../install/disk/check.ts')}`,
         `import { createCommandRunner } from ${moduleUrl('../../../install/system.ts')}`,
         'const env: Record<string, string> = {}',
         'for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value',

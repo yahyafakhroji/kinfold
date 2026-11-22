@@ -45,7 +45,7 @@ const moduleUrl = (file: string): string => pathToFileURL(join(import.meta.dir, 
 const STAND_IN = [
   "import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'",
   "import { join } from 'node:path'",
-  `import { detachPlan, spawnDetached } from ${JSON.stringify(moduleUrl('detach.ts'))}`,
+  `import { detachPlan, spawnDetached } from ${JSON.stringify(moduleUrl('../../update/detach.ts'))}`,
   `import { currentPlatform } from ${JSON.stringify(moduleUrl('../../../system/platform/platform.ts'))}`,
   "const flag = process.argv.indexOf('--data-dir')",
   "const dataDir = (flag >= 0 ? process.argv[flag + 1] : process.env.KINFOLD_DATA_DIR) ?? ''",
