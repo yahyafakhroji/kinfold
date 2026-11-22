@@ -9,9 +9,9 @@ import { basename, dirname, join, resolve } from 'node:path'
 
 const ROOT = join(import.meta.dir, '..')
 
-export const PLUGIN_ENTRY = join(ROOT, 'src', 'plugins', 'opencode.ts')
+export const PLUGIN_ENTRY = join(ROOT, 'src', 'plugins', 'plugins', 'opencode.ts')
 /** Kilo Code's plugin: a file of its own, since Kilo runs OpenCode's 1.x plugin contract. */
-export const KILO_PLUGIN_ENTRY = join(ROOT, 'src', 'plugins', 'kilo.ts')
+export const KILO_PLUGIN_ENTRY = join(ROOT, 'src', 'plugins', 'plugins', 'kilo.ts')
 
 /**
  * Bare names Bun emits for Node builtins, plus everything that may appear

@@ -5,7 +5,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { DEVELOPMENT_VERSION } from '../src/install/self-install'
+import { DEVELOPMENT_VERSION } from '../src/controllers/install/self-install'
 import { NO_CHANGELOG, changelogSection } from './changesets'
 
 export class ReleaseNotesError extends Error {

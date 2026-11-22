@@ -12,8 +12,8 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, win32 } from 'node:path'
-import { TASK_NAME, taskConfigPath } from '../../src/install/service/scheduled-task-service'
-import { windowsSystemTool } from '../../src/install/windows-system-path'
+import { TASK_NAME, taskConfigPath } from '../../src/controllers/install/service/scheduled-task-service'
+import { windowsSystemTool } from '../../src/controllers/install/windows-system-path'
 import { windowsLeftoversScript, windowsNewShellScript } from './command'
 import { SmokeError } from './platform'
 import type { SmokePlatform, SmokeResult, SmokeWorld } from './platform'

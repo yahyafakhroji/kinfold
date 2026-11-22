@@ -84,11 +84,11 @@ describe('windows smoke platform', () => {
       expect(script).toContain(flag)
     }
     for (const file of [
-      './src/secrets/stores/credential-manager.live.test.ts',
-      './src/install/disk/bitlocker.live.test.ts',
-      './src/install/access/windows-acl.live.test.ts',
-      './src/install/service/scheduled-task-service.live.test.ts',
-      './src/observer/runners/windows-shim.live.test.ts',
+      './src/resources/tests/secrets/stores/credential-manager.live.test.ts',
+      './src/controllers/tests/install/disk/bitlocker.live.test.ts',
+      './src/controllers/tests/install/access/windows-acl.live.test.ts',
+      './src/controllers/tests/install/service/scheduled-task-service.live.test.ts',
+      './src/resources/tests/observer/runners/windows-shim.live.test.ts',
     ]) {
       expect(script).toContain(file)
       expect(existsSync(join(import.meta.dir, '..', '..', file))).toBe(true)

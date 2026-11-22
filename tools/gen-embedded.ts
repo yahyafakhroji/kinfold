@@ -1,5 +1,5 @@
 // Writes the module a release build compiles into the `kinfold` program:
-// src/runtime/embedded.generated.ts. Every asset is imported with
+// src/system/runtime/embedded.generated.ts. Every asset is imported with
 // `with { type: 'file' }`, so Bun carries the bytes inside the program and
 // `Bun.file` reads them back at run time.
 //
@@ -7,7 +7,7 @@
 //   .cache/sqlite3mc/libsqlite3mc.<ext>  (bun tools/build-sqlite3mc.ts)
 //   .cache/vec0/vec0.<ext>               (bun tools/fetch-vec0.ts)
 //   .cache/embed-model/*                 (bun tools/fetch-model.ts)
-// plus src/plugins/opencode.ts. It builds the dashboard app (src/dashboard/app)
+// plus src/plugins/plugins/opencode.ts. It builds the dashboard app (src/ui/dashboard)
 // and bundles the plugin, so the program can serve the pages and write a
 // self-contained file for OpenCode.
 //
@@ -18,15 +18,15 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
-import { SQLITE3MC_ZIP_SHA256, sqlite3mcLibraryExtension } from '../src/sqlite/release'
-import { vec0AssetFor } from '../src/vectors/vec0-release'
-import { vec0FileName } from '../src/vectors/extension'
-import { LOCAL_MODEL_FILES, MAX_ADDED_BYTES } from '../src/vectors/local-model'
-import { APP_ASSETS, APP_DIST, APP_PAGES, buildApp, listAssets } from '../src/dashboard/app-files'
+import { SQLITE3MC_ZIP_SHA256, sqlite3mcLibraryExtension } from '../src/resources/sqlite/release'
+import { vec0AssetFor } from '../src/resources/vectors/vec0-release'
+import { vec0FileName } from '../src/resources/vectors/extension'
+import { LOCAL_MODEL_FILES, MAX_ADDED_BYTES } from '../src/resources/vectors/local-model'
+import { APP_ASSETS, APP_DIST, APP_PAGES, buildApp, listAssets } from '../src/controllers/dashboard/app-files'
 import { KILO_PLUGIN_ENTRY, PLUGIN_ENTRY, bundlePlugin } from './bundle-plugin'
 
 const ROOT = join(import.meta.dir, '..')
-const OUT = join(ROOT, 'src', 'runtime', 'embedded.generated.ts')
+const OUT = join(ROOT, 'src', 'system', 'runtime', 'embedded.generated.ts')
 const CACHE_DIR = join(ROOT, '.cache')
 
 interface Target {

@@ -1,0 +1,236 @@
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test'
+import { createHash } from 'node:crypto'
+import * as fs from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { createDashboardAuth } from '../../dashboard/auth'
+import { createDashboardEvents } from '../../dashboard/events'
+import { APP_DIST, ensureAppBuilt, listAssets } from '../../dashboard/app-files'
+import { dashboardRoute } from '../../dashboard/routes'
+import type { DashboardDeps } from '../../dashboard/routes'
+import { type FakeWorld, createWorld } from '../install/test-support'
+import { runPlan } from '../../../resources/install-plan/plan'
+import { sqlite3mcInstallActions } from '../../install/sqlite3mc-install'
+import { installEmbeddedVec0, vec0InstallActions, vectorStatusLine } from '../../install/vec0-install'
+import { libDir, libraryFileName, manifestPath, readManifest } from '../../../resources/sqlite/library'
+import { SQLITE3MC_ZIP_SHA256 } from '../../../resources/sqlite/release'
+import { vec0Path } from '../../../resources/vectors/extension'
+import { type EmbeddedAssets, embeddedAssets, safeDashboardName } from '../../../system/runtime/embedded'
+
+const sha = (bytes: Uint8Array | string): string => createHash('sha256').update(bytes).digest('hex')
+
+const SQLITE3MC = new TextEncoder().encode('embedded sqlite3mc build')
+const VEC0 = new TextEncoder().encode('embedded sqlite-vec build')
+const NO_HEALTH = { up: false, reason: 'not running' } as const
+
+/**
+ * The assets a release program carries. Tests swap one recorded hash or the
+ * bytes to prove the check, and the fake dashboard serves one page whatever the
+ * route asks for, so a path check has to refuse before it is called.
+ */
+const EMBEDDED_DASHBOARD = ['index.html', 'login.html', 'index-0a1b2c3d.js', 'style-4e5f6a7b.css']
+
+function fakeAssets(overrides: { sqlite3mcSha256?: string; vec0Sha256?: string; sqlite3mcSourceSha256?: string } = {}): EmbeddedAssets {
+  return {
+    sqlite3mc: {
+      bytes: async () => SQLITE3MC,
+      sha256: overrides.sqlite3mcSha256 ?? sha(SQLITE3MC),
+      sourceSha256: overrides.sqlite3mcSourceSha256 ?? SQLITE3MC_ZIP_SHA256,
+    },
+    vec0: { bytes: async () => VEC0, sha256: overrides.vec0Sha256 ?? sha(VEC0) },
+    dashboardFile: (name) => (EMBEDDED_DASHBOARD.includes(name) ? new Blob([`embedded ${name}`]) : null),
+    dashboardNames: () => [...EMBEDDED_DASHBOARD],
+    opencodePlugin: async () => 'embedded opencode plugin',
+    kiloPlugin: async () => 'embedded kilo plugin',
+  }
+}
+
+function dashboardDeps(assets: EmbeddedAssets | null): DashboardDeps {
+  return {
+    port: 1,
+    auth: createDashboardAuth(),
+    readBody: async () => ({ ok: true, value: {} }),
+    events: createDashboardEvents(),
+    log: () => {},
+    assets,
+  }
+}
+
+let w: FakeWorld
+beforeEach(() => {
+  w = createWorld({ withLibrary: false })
+})
+afterEach(async () => {
+  await w.cleanup()
+})
+
+test('a developer checkout has no embedded assets', () => {
+  expect(embeddedAssets()).toBeNull()
+})
+
+test('a compiled program serves the assets its build carries, and nothing else', async () => {
+  const deps = dashboardDeps(fakeAssets())
+  const asset = await dashboardRoute(new Request('http://127.0.0.1:1/dashboard/assets/index-0a1b2c3d.js'), '/dashboard/assets/index-0a1b2c3d.js', deps)
+  expect([asset?.status, await asset?.text(), asset?.headers.get('content-type')]).toEqual([200, 'embedded index-0a1b2c3d.js', 'text/javascript; charset=utf-8'])
+  expect(await dashboardRoute(new Request('http://127.0.0.1:1/dashboard/assets/other-00000000.js'), '/dashboard/assets/other-00000000.js', deps)).toBeNull()
+  // The pages are served by their own routes, never as assets.
+  expect(await dashboardRoute(new Request('http://127.0.0.1:1/dashboard/assets/index.html'), '/dashboard/assets/index.html', deps)).toBeNull()
+})
+
+test('an embedded library is written under its hash with the manifest, with no compiler and no network', async () => {
+  const assets = fakeAssets()
+  const plan = sqlite3mcInstallActions(w.env, assets)
+  expect(plan.restartDaemon).toBe(true)
+  expect(plan.actions.map((action) => action.kind)).toEqual(['install-sqlite3mc-embedded'])
+
+  let networkCalls = 0
+  let builds = 0
+  const env = {
+    ...w.env,
+    fetch: async () => {
+      networkCalls += 1
+      throw new Error('the embedded install must not download')
+    },
+    buildSqlite3mc: () => {
+      builds += 1
+      return ''
+    },
+  }
+  await runPlan(env, plan.actions, false)
+
+  const file = libraryFileName(sha(SQLITE3MC), 'darwin')!
+  expect(new Uint8Array(readFileSync(join(libDir(w.dataDir), file)))).toEqual(SQLITE3MC)
+  expect(readManifest(w.dataDir)).toEqual({ file, sha256: sha(SQLITE3MC), sourceSha256: SQLITE3MC_ZIP_SHA256 })
+  expect(networkCalls).toBe(0)
+  expect(builds).toBe(0)
+})
+
+test('a second install with the same hash plans no action', async () => {
+  const assets = fakeAssets()
+  await runPlan(w.env, sqlite3mcInstallActions(w.env, assets).actions, false)
+  expect(sqlite3mcInstallActions(w.env, assets)).toEqual({ actions: [], restartDaemon: false })
+})
+
+test('a lib holding an older build gets the new file and a swapped manifest, and the daemon restarts', async () => {
+  const older = sha('older sqlite3mc build')
+  const olderFile = libraryFileName(older, 'darwin')!
+  mkdirSync(libDir(w.dataDir), { recursive: true })
+  writeFileSync(join(libDir(w.dataDir), olderFile), 'older sqlite3mc build')
+  writeFileSync(manifestPath(w.dataDir), JSON.stringify({ file: olderFile, sha256: older, sourceSha256: SQLITE3MC_ZIP_SHA256 }))
+
+  const plan = sqlite3mcInstallActions(w.env, fakeAssets())
+  expect(plan.restartDaemon).toBe(true)
+  expect(plan.actions.map((action) => action.kind)).toEqual(['install-sqlite3mc-embedded'])
+  await runPlan(w.env, plan.actions, false)
+
+  const file = libraryFileName(sha(SQLITE3MC), 'darwin')!
+  expect(readManifest(w.dataDir)).toEqual({ file, sha256: sha(SQLITE3MC), sourceSha256: SQLITE3MC_ZIP_SHA256 })
+  expect(readdirSync(libDir(w.dataDir)).sort()).toEqual([file, 'sqlite3mc.json'].sort())
+})
+
+test('an old build that cannot be removed now is left for the next install, and the install still succeeds', async () => {
+  const older = sha('older sqlite3mc build')
+  const olderFile = libraryFileName(older, 'darwin')!
+  const olderPath = join(libDir(w.dataDir), olderFile)
+  mkdirSync(libDir(w.dataDir), { recursive: true })
+  writeFileSync(olderPath, 'older sqlite3mc build')
+
+  const realRmSync = fs.rmSync
+  const busy = spyOn(fs, 'rmSync').mockImplementation(((path: fs.PathLike, options?: fs.RmOptions) => {
+    if (String(path) === olderPath) throw Object.assign(new Error('EBUSY: resource busy or locked, unlink'), { code: 'EBUSY' })
+    return realRmSync(path, options)
+  }) as typeof fs.rmSync)
+  try {
+    await runPlan(w.env, sqlite3mcInstallActions(w.env, fakeAssets()).actions, false)
+  } finally {
+    busy.mockRestore()
+  }
+
+  const file = libraryFileName(sha(SQLITE3MC), 'darwin')!
+  expect(readManifest(w.dataDir)).toEqual({ file, sha256: sha(SQLITE3MC), sourceSha256: SQLITE3MC_ZIP_SHA256 })
+  expect(existsSync(olderPath)).toBe(true)
+  expect(w.out).toContain(`database library: kept ${olderFile}; it is still in use, and the next install removes it`)
+})
+
+test('the embedded sqlite3mc step writes to the path its plan action names', async () => {
+  const dir = join(w.dataDir, 'planned-lib')
+  await runPlan(w.env, [{ kind: 'install-sqlite3mc-embedded' as const, path: dir, asset: fakeAssets().sqlite3mc }], false)
+  const file = libraryFileName(sha(SQLITE3MC), 'darwin')!
+  expect(new Uint8Array(readFileSync(join(dir, file)))).toEqual(SQLITE3MC)
+})
+
+test('an embedded library whose bytes do not match its recorded sha256 fails with a fixed error and writes nothing', async () => {
+  const assets = fakeAssets({ sqlite3mcSha256: 'f'.repeat(64) })
+  const plan = sqlite3mcInstallActions(w.env, assets)
+  expect(plan.actions.map((action) => action.kind)).toEqual(['install-sqlite3mc-embedded'])
+  await expect(runPlan(w.env, plan.actions, false)).rejects.toThrow('the embedded sqlite3mc build does not match its recorded sha256; nothing was written')
+  expect(existsSync(manifestPath(w.dataDir))).toBe(false)
+  expect(existsSync(libDir(w.dataDir)) ? readdirSync(libDir(w.dataDir)) : []).toEqual([])
+})
+
+test('an embedded sqlite-vec build is written once with no network, and a second plan does nothing', async () => {
+  const assets = fakeAssets()
+  const env = { ...w.env, platform: 'darwin' as const, arch: 'arm64' }
+  const plan = vec0InstallActions(env, NO_HEALTH, assets)
+  expect(plan.restartDaemon).toBe(true)
+  expect(plan.actions.map((action) => action.kind)).toEqual(['install-vec0-embedded'])
+
+  let networkCalls = 0
+  await runPlan({ ...env, fetch: async () => (networkCalls += 1, new Response(null)) }, plan.actions, false)
+  expect(networkCalls).toBe(0)
+  expect(new Uint8Array(readFileSync(vec0Path(w.dataDir, 'darwin')))).toEqual(VEC0)
+  expect(vec0InstallActions(env, NO_HEALTH, assets)).toEqual({ actions: [], restartDaemon: false })
+})
+
+test('an embedded sqlite-vec build whose bytes do not match its recorded sha256 fails with a fixed error and writes nothing', async () => {
+  const assets = fakeAssets({ vec0Sha256: 'f'.repeat(64) })
+  const env = { ...w.env, platform: 'darwin' as const, arch: 'arm64' }
+  const plan = vec0InstallActions(env, NO_HEALTH, assets)
+  await expect(runPlan(env, plan.actions, false)).rejects.toThrow('the embedded sqlite-vec build does not match its recorded sha256; nothing was written')
+  expect(existsSync(vec0Path(w.dataDir, 'darwin'))).toBe(false)
+})
+
+test('an embedded dashboard page is served through the dashboard routes', async () => {
+  const response = await dashboardRoute(new Request('http://127.0.0.1:1/dashboard/'), '/dashboard/', dashboardDeps(fakeAssets()))
+  expect(response?.status).toBe(200)
+  expect(await response?.text()).toBe('embedded index.html')
+})
+
+test('developer mode serves the built dashboard page', async () => {
+  ensureAppBuilt()
+  const response = await dashboardRoute(new Request('http://127.0.0.1:1/dashboard/'), '/dashboard/', dashboardDeps(null))
+  expect(response?.status).toBe(200)
+  expect(await response?.text()).toBe(readFileSync(join(APP_DIST, 'index.html'), 'utf8'))
+})
+
+test('an asset folder that cannot be read is an error, not an empty asset list', () => {
+  const notADir = join(w.root, 'not-a-folder')
+  writeFileSync(notADir, 'x')
+  expect(() => listAssets(notADir)).toThrow()
+})
+
+test('a dashboard path with .., an absolute path, a backslash or percent encoding is refused in both modes', async () => {
+  for (const name of ['../index.html', '..\\index.html', '/etc/passwd', 'index/../../index.html', '..', '..%2findex.html', '%2e%2e/index.html']) {
+    expect(safeDashboardName(name)).toBe(false)
+  }
+  const hostile: EmbeddedAssets = {
+    ...fakeAssets(),
+    dashboardFile: () => new Blob(['anything']),
+  }
+  for (const assets of [hostile, null]) {
+    for (const path of ['/dashboard/assets/../index.html', '/dashboard/assets/..%2findex.html', '/dashboard/assets/..\\index.html']) {
+      expect(await dashboardRoute(new Request('http://127.0.0.1:1/dashboard/'), path, dashboardDeps(assets))).toBeNull()
+    }
+  }
+})
+
+test('installEmbeddedVec0 is the direct entry point the plan uses', async () => {
+  const path = vec0Path(w.dataDir, 'linux')
+  await installEmbeddedVec0(w.env, path, fakeAssets().vec0)
+  expect(new Uint8Array(readFileSync(path))).toEqual(VEC0)
+})
+
+test('program mode reports a platform with no sqlite-vec build instead of naming a path', () => {
+  const env = { ...w.env, platform: 'aix' as const, arch: 'x64' }
+  expect(vectorStatusLine(env, NO_HEALTH, fakeAssets())).toBe('semantic search: off (no sqlite-vec build for aix)')
+})

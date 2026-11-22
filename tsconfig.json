@@ -23,6 +23,7 @@
     "scripts"
   ],
   "exclude": [
-    "src/dashboard/app"
+    "src/ui/dashboard",
+    "src/ui/tests/dashboard"
   ]
 }

@@ -1,0 +1,414 @@
+import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { NO_CREDENTIALS } from '../../secrets/credentials'
+import { RETRY_BASE_MS } from '../../store/observer-store'
+import { upsertObserverSettings } from '../../store/observer-settings-store'
+import { insertPrompt } from '../../store/writes'
+import { processSessionBatch } from '../../observer/process'
+import { createRunner } from '../../observer/runners'
+import type { SpawnFn } from '../../observer/runners/claude-cli'
+import type { FetchFn } from '../../observer/runners/openrouter'
+import { type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession, stateCounts } from './test-support'
+import type { GateResult, SafetyGate } from '../../observer/safety-gate'
+import { ObserverError, type ObserverPrompt, type ObserverRunner, type ObserverSettings } from '../../observer/types'
+
+let temp: TempStore
+let logs: string[]
+let clock: number
+beforeEach(() => {
+  temp = openTempStore('sam-process-')
+  logs = []
+  clock = T0 + 120_000
+})
+afterEach(() => temp.cleanup())
+
+const SECRETISH = 'PAYLOAD-TEXT-THAT-MUST-NOT-BE-LOGGED'
+
+function seedTurn(sessionId: number, at: number = T0, promptNumber = 1): string[] {
+  return [
+    seedEvent(temp.store, sessionId, { kind: 'user_prompt', at, promptNumber, promptText: `run the tests ${SECRETISH}` }),
+    seedEvent(temp.store, sessionId, { kind: 'tool_result', at: at + 10, promptNumber, tool: { name: 'Bash', output: `98 pass ${SECRETISH}`, exitCode: 0 } }),
+    seedEvent(temp.store, sessionId, { kind: 'tool_result', at: at + 20, promptNumber, tool: { name: 'Bash', output: '', exitCode: 0 } }),
+    seedEvent(temp.store, sessionId, { kind: 'turn_end', at: at + 30, promptNumber, assistantText: 'all green' }),
+  ]
+}
+
+function citingReply(title = 'Adapter tests pass'): (prompt: ObserverPrompt) => string {
+  return (prompt) => JSON.stringify({
+    observations: [
+      { type: 'discovery', title, narrative: 'n', facts: ['98 pass'], files: [], evidence: { strength: 'tool-verified', sourceEventIds: [prompt.eventIds[1]] } },
+      { type: 'discovery', title: `${title}: empty grep`, narrative: '', facts: [], files: [], evidence: { strength: 'tool-verified', sourceEventIds: [prompt.eventIds[2]] } },
+      { type: 'decision', title: 'User wants tests run', narrative: '', facts: [], files: [], evidence: { strength: 'user-stated', sourceEventIds: [prompt.eventIds[0], 'NOT-IN-BATCH'] } },
+    ],
+    summary: { request: 'run the tests', learned: 'they pass', completed: 'ran them', nextSteps: 'none' },
+  })
+}
+
+function process(runner: ObserverRunner | (() => ObserverRunner), sessionId: number) {
+  const runnerFor = typeof runner === 'function' ? runner : () => runner
+  return processSessionBatch({ db: temp.store.db, runnerFor, now: () => clock, log: (line) => logs.push(line) }, sessionId)
+}
+
+const runs = () => temp.store.db.query('SELECT * FROM observer_runs ORDER BY id').all() as Record<string, unknown>[]
+const observations = () => temp.store.db.query('SELECT * FROM observations ORDER BY id').all() as Record<string, unknown>[]
+const summaries = () => temp.store.db.query('SELECT * FROM summaries').all() as Record<string, unknown>[]
+
+test('a successful batch stores observations with the daemon verdict, a summary, and marks events done', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  const ids = seedTurn(session)
+  const outcome = await process(fakeRunner([citingReply()], 'claude-haiku-5-5'), session)
+
+  expect(outcome).toMatchObject({ status: 'succeeded', events: 4, observations: 3, inserted: 3, downgraded: 1, summary: true })
+  expect(observations().map((row) => [row.title, row.evidence])).toEqual([
+    ['Adapter tests pass', 'tool-verified'],
+    ['Adapter tests pass: empty grep', 'interpretation'],
+    ['User wants tests run', 'user-stated'],
+  ])
+  expect(observations()[0]).toMatchObject({ occurred_at: T0 + 10, observer_model: 'claude-haiku-5-5', host: 'claude-code', project_key: 'org/repo', prompt_number: 1 })
+  expect(JSON.parse(observations()[2]!.source_event_ids as string)).toEqual([ids[0]])
+  expect(summaries()).toEqual([expect.objectContaining({ prompt_number: 1, request: 'run the tests', revision: 1, occurred_at: T0 + 30 })])
+  expect(stateCounts(temp.store, session)).toEqual({ done: 4 })
+  expect(runs()).toEqual([expect.objectContaining({ status: 'succeeded', provider: 'claude-cli', model: 'claude-haiku-5-5', event_count: 4, error: null })])
+})
+
+test('a second batch for the same prompt bumps the summary revision and dedupes repeated observations', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedTurn(session)
+  await process(fakeRunner([citingReply()]), session)
+  seedTurn(session, T0 + 1_000)
+  const second = await process(fakeRunner([citingReply()]), session)
+
+  expect(second).toMatchObject({ status: 'succeeded', observations: 3, inserted: 0 })
+  expect(observations()).toHaveLength(3)
+  expect(summaries()).toEqual([expect.objectContaining({ prompt_number: 1, revision: 2, occurred_at: T0 + 1_030 })])
+})
+
+test('a missing credential records the failure, leaves events retryable and calls no provider at all', async () => {
+  const session = seedSession(temp.store, 'opencode', 'o1')
+  seedTurn(session)
+  const calls: string[] = []
+  const fetch: FetchFn = async () => {
+    calls.push('fetch')
+    return new Response('{}')
+  }
+  const spawn: SpawnFn = async () => {
+    calls.push('spawn')
+    return { exitCode: 0, stdout: '', timedOut: false }
+  }
+  const outcome = await processSessionBatch(
+    { db: temp.store.db, runnerFor: (settings) => createRunner(settings, { dataDir: temp.dataDir, credentials: NO_CREDENTIALS, fetch, spawn }), now: () => clock },
+    session,
+  )
+
+  expect(outcome).toMatchObject({ status: 'failed', errorClass: 'credential_missing' })
+  expect(calls).toEqual([])
+  expect(runs()).toEqual([expect.objectContaining({ status: 'failed', provider: 'openrouter', model: 'openrouter/auto', error: 'credential_missing: no keychain entry for openrouter' })])
+  expect(stateCounts(temp.store, session)).toEqual({ pending: 4 })
+  expect(observations()).toEqual([])
+})
+
+test('failed events are retried with backoff and stop, still visible, after 3 attempts', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedTurn(session)
+  // A reply this batch cannot use counts against its events; a provider that fails as a whole does not (below).
+  const runner = fakeRunner(['I think the tests passed!'])
+  const attempts = () => temp.store.db.query('SELECT DISTINCT observer_attempts AS n FROM events').all()
+
+  expect(await process(runner, session)).toMatchObject({ status: 'failed', errorClass: 'bad_output' })
+  expect(attempts()).toEqual([{ n: 1 }])
+  expect(await process(runner, session)).toEqual({ status: 'idle' })
+  clock += RETRY_BASE_MS
+  expect(await process(runner, session)).toMatchObject({ status: 'failed' })
+  expect(attempts()).toEqual([{ n: 2 }])
+  clock += RETRY_BASE_MS
+  expect(await process(runner, session)).toEqual({ status: 'idle' })
+  clock += RETRY_BASE_MS
+  expect(await process(runner, session)).toMatchObject({ status: 'failed' })
+  clock += 24 * 3_600_000
+  expect(await process(runner, session)).toEqual({ status: 'idle' })
+
+  expect(attempts()).toEqual([{ n: 3 }])
+  expect(stateCounts(temp.store, session)).toEqual({ failed: 4 })
+  expect(runner.prompts).toHaveLength(3)
+  expect(runs().map((row) => row.status)).toEqual(['failed', 'failed', 'failed'])
+})
+
+test('a provider that keeps failing backs off, doubling from a minute, and its events stay pending', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedTurn(session)
+  const runner = fakeRunner([new ObserverError('rate_limited', 'claude exited 1: API Error: 429')])
+  const attempts = () => temp.store.db.query('SELECT DISTINCT observer_attempts AS n FROM events').all()
+
+  expect(await process(runner, session)).toMatchObject({ status: 'failed', errorClass: 'rate_limited' })
+  expect(stateCounts(temp.store, session)).toEqual({ pending: 4 })
+  expect(attempts()).toEqual([{ n: 0 }])
+  const firstRetry = clock + 60_000
+  expect(await process(runner, session)).toEqual({ status: 'backoff', provider: 'claude-cli', errorClass: 'rate_limited', failures: 1, retryAt: firstRetry })
+  // A second session of the same provider waits too: the provider is what is broken.
+  const other = seedSession(temp.store, 'claude-code', 's2')
+  seedTurn(other)
+  expect(await process(runner, other)).toMatchObject({ status: 'backoff' })
+  expect(runner.prompts).toHaveLength(1)
+
+  clock = firstRetry
+  expect(await process(runner, session)).toMatchObject({ status: 'failed' })
+  expect(await process(runner, session)).toMatchObject({ status: 'backoff', failures: 2, retryAt: clock + 120_000 })
+  clock += 120_000
+  expect(await process(runner, session)).toMatchObject({ status: 'failed' })
+  expect(runner.prompts).toHaveLength(3)
+  expect(stateCounts(temp.store, session)).toEqual({ pending: 4 })
+  expect(attempts()).toEqual([{ n: 0 }])
+  // Each failed run says when the provider is tried next; the waits in between log nothing.
+  expect(logs.filter((line) => line.includes('status=failed error=rate_limited') && line.includes(`retry_at=${new Date(clock + 240_000).toISOString()}`))).toHaveLength(1)
+  expect(logs.some((line) => line.includes('status=backoff'))).toBe(false)
+})
+
+test('a batch that times out still counts attempts while its provider waits, so it cannot retry forever', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedTurn(session)
+  const runner = fakeRunner([new ObserverError('timeout', 'claude did not finish in 180000 ms')])
+  expect(await process(runner, session)).toMatchObject({ status: 'failed', errorClass: 'timeout' })
+  expect(stateCounts(temp.store, session)).toEqual({ failed: 4 })
+  expect(await process(runner, session)).toEqual({ status: 'idle' })
+})
+
+test('after a wait, one batch per provider tries again while the others keep waiting', async () => {
+  const first = seedSession(temp.store, 'claude-code', 's1')
+  const second = seedSession(temp.store, 'claude-code', 's2')
+  seedTurn(first)
+  seedTurn(second)
+  expect(await process(fakeRunner([new ObserverError('auth_expired', 'claude exited 1: OAuth session expired')]), first)).toMatchObject({ status: 'failed' })
+  clock += 3_600_000
+  let release = (): void => {}
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const slow: ObserverRunner = { run: async () => {
+    await held
+    throw new ObserverError('auth_expired', 'claude exited 1: OAuth session expired')
+  } }
+  const probing = process(slow, first)
+  await Bun.sleep(5)
+  expect(await process(slow, second)).toMatchObject({ status: 'backoff', provider: 'claude-cli' })
+  release()
+  expect(await probing).toMatchObject({ status: 'failed', errorClass: 'auth_expired' })
+  expect(stateCounts(temp.store, second)).toEqual({ pending: 4 })
+})
+
+test('a success or a settings change ends the backoff', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedTurn(session)
+  const failing = fakeRunner([new ObserverError('rate_limited', 'claude exited 1: API Error: 429')])
+  expect(await process(failing, session)).toMatchObject({ status: 'failed' })
+  clock += 1_000
+  upsertObserverSettings(temp.store.db, { host: 'claude-code', provider: 'claude-cli', model: 'sonnet', credentialRef: null, enabled: true }, clock)
+  clock += 1_000
+  expect(await process(fakeRunner([citingReply()]), session)).toMatchObject({ status: 'succeeded' })
+  seedTurn(session, T0 + 1_000, 2)
+  expect(await process(failing, session)).toMatchObject({ status: 'failed' })
+  clock += 60_000
+  expect(await process(fakeRunner([citingReply('second')]), session)).toMatchObject({ status: 'succeeded' })
+  seedTurn(session, T0 + 2_000, 3)
+  // The success reset the count: one more failure waits a minute again, not two.
+  expect(await process(failing, session)).toMatchObject({ status: 'failed' })
+  expect(await process(failing, session)).toMatchObject({ status: 'backoff', failures: 1, retryAt: clock + 60_000 })
+})
+
+test('a reply that is not valid JSON is a recorded bad_output failure', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedTurn(session)
+  expect(await process(fakeRunner(['I think the tests passed!']), session)).toMatchObject({ status: 'failed', errorClass: 'bad_output' })
+  expect(runs()[0]!.error).toBe('bad_output: reply is not valid JSON')
+})
+
+test('an unknown provider in settings fails the run as config_invalid without calling any runner', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedTurn(session)
+  temp.store.db.run("INSERT INTO observer_settings (host, provider, model, enabled, updated_at) VALUES ('claude-code', 'mystery', 'm', 1, 1)")
+  const runner = fakeRunner(['{}'])
+  expect(await process(runner, session)).toMatchObject({ status: 'failed', errorClass: 'config_invalid' })
+  expect(runner.prompts).toEqual([])
+  expect(runs()[0]).toMatchObject({ provider: 'unresolved', model: 'unresolved' })
+})
+
+test('a disabled host records no run, and its waiting events are marked skipped', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedTurn(session)
+  temp.store.db.run("INSERT INTO observer_settings (host, provider, model, enabled, updated_at) VALUES ('claude-code', 'claude-cli', 'haiku', 0, 1)")
+  expect(await process(fakeRunner(['{}']), session)).toEqual({ status: 'disabled' })
+  expect(stateCounts(temp.store, session)).toEqual({ skipped: 4 })
+  expect(runs()).toEqual([])
+  // The events themselves stay: the Sessions view still shows the turn.
+  expect((temp.store.db.query('SELECT count(*) AS n FROM events WHERE payload IS NOT NULL').get() as { n: number }).n).toBe(4)
+})
+
+test('a backlog larger than one batch is skipped whole in one pass, so none of it is left to be summarised after the switch', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  for (let turn = 0; turn < 20; turn += 1) seedTurn(session, T0 + turn * 1000, turn + 1)
+  temp.store.db.run("INSERT INTO observer_settings (host, provider, model, enabled, updated_at) VALUES ('claude-code', 'claude-cli', 'haiku', 0, 1)")
+  expect(await process(fakeRunner(['{}']), session)).toEqual({ status: 'disabled' })
+  expect(stateCounts(temp.store, session)).toEqual({ skipped: 80 })
+})
+
+test('turning the observer back on summarises only what arrives afterwards, never the backlog parked while it was off', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  const parked = seedTurn(session, T0, 1)
+  temp.store.db.run("INSERT INTO observer_settings (host, provider, model, enabled, updated_at) VALUES ('claude-code', 'claude-cli', 'haiku', 0, 1)")
+  expect(await process(fakeRunner(['{}']), session)).toEqual({ status: 'disabled' })
+
+  temp.store.db.run("UPDATE observer_settings SET enabled = 1 WHERE host = 'claude-code'")
+  // Nothing new: nothing to do, and no model call for the parked turn.
+  const idle = fakeRunner([citingReply()])
+  expect(await process(idle, session)).toEqual({ status: 'idle' })
+  expect(idle.prompts).toEqual([])
+
+  const fresh = seedTurn(session, T0 + 60_000, 2)
+  const runner = fakeRunner([citingReply('After the switch')])
+  expect((await process(runner, session)).status).toBe('succeeded')
+  expect(runner.prompts).toHaveLength(1)
+  expect(runner.prompts[0]!.eventIds).toEqual(fresh)
+  expect(runner.prompts[0]!.eventIds.some((id) => parked.includes(id))).toBe(false)
+  expect(stateCounts(temp.store, session)).toEqual({ skipped: 4, done: 4 })
+})
+
+test('logs carry ids, counts, provider and error class, never payload text or model output', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedTurn(session)
+  await process(fakeRunner([citingReply(`TITLE ${SECRETISH}`)]), session)
+  seedTurn(session, T0 + 5_000, 2)
+  await process(fakeRunner([`garbage ${SECRETISH}`]), session)
+
+  expect(logs).toHaveLength(2)
+  expect(logs[0]).toMatch(/^observer session=1 host=claude-code provider=claude-cli model=haiku run=1 events=4 status=succeeded .* ms=\d+$/)
+  expect(logs[1]).toContain('status=failed error=bad_output')
+  expect(logs.join('\n')).not.toContain(SECRETISH)
+  expect(JSON.stringify(runs())).not.toContain(SECRETISH)
+})
+
+test('a batch with only session_start / session_end is marked done without a model call', async () => {
+  const session = seedSession(temp.store, 'claude-code', 's1')
+  seedEvent(temp.store, session, { kind: 'session_start', at: T0 })
+  seedEvent(temp.store, session, { kind: 'session_end', at: T0 + 5 })
+  const runner = fakeRunner(['{}'])
+  expect(await process(runner, session)).toEqual({ status: 'skipped', events: 2 })
+  expect(runner.prompts).toEqual([])
+  expect(runs()).toEqual([])
+  expect(stateCounts(temp.store, session)).toEqual({ done: 2 })
+})
+
+test('a repeated prompt gets the repeat hint, may return summary null, and shares the first summary', async () => {
+  const first = seedSession(temp.store, 'claude-code', 'r1')
+  const second = seedSession(temp.store, 'opencode', 'r2')
+  for (const sessionId of [first, second]) {
+    insertPrompt(temp.store.db, { sessionId, promptNumber: 1, text: `run the tests ${SECRETISH}`, occurredAt: T0 })
+    seedTurn(sessionId)
+  }
+  const runner = fakeRunner([citingReply(), (prompt) => JSON.stringify({ observations: [], summary: null, echo: prompt.eventIds.length })])
+  await process(runner, first)
+  expect(runner.prompts[0]!.user).not.toContain('repeat an earlier prompt')
+  const outcome = await process(runner, second)
+  expect(runner.prompts[1]!.user).toContain('Prompt number(s) 1 repeat an earlier prompt of this project word for word')
+  expect(outcome).toMatchObject({ status: 'succeeded', summary: true, summaryShared: true })
+  expect(summaries().map((row) => [row.request, row.repeat_count])).toEqual([['run the tests', 2]])
+  expect(logs.join('\n')).not.toContain(SECRETISH)
+})
+
+/** A gate stub that answers `verdict` and records what it saw. */
+function stubGate(verdict: GateResult) {
+  const seen = { checks: [] as ObserverSettings[], toolAttempts: [] as ObserverSettings[] }
+  const gate: SafetyGate = {
+    check: async (settings) => { seen.checks.push(settings); return verdict },
+    reportToolAttempt: async (settings) => { seen.toolAttempts.push(settings) },
+    probeFailures: () => [],
+  }
+  return { gate, seen }
+}
+
+const CODEX_ROW = "INSERT INTO observer_settings (host, provider, model, enabled, updated_at) VALUES ('codex', 'codex-cli', 'gpt-5-mini', 1, 1)"
+
+test('a gate that says not-ok blocks the batch: no run, no runner, events stay pending', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedTurn(session)
+  temp.store.db.run(CODEX_ROW)
+  const { gate, seen } = stubGate({ ok: false, errorClass: 'safety_check_failed' })
+  let built = 0
+  const runnerFor = () => { built += 1; return fakeRunner(['{}']) }
+  const outcome = await processSessionBatch({ db: temp.store.db, runnerFor, safety: gate, now: () => clock, log: (line) => logs.push(line) }, session)
+
+  expect(outcome).toEqual({ status: 'blocked', errorClass: 'safety_check_failed' })
+  expect(seen.checks.map((s) => s.provider)).toEqual(['codex-cli'])
+  expect(built).toBe(0)
+  expect(runs()).toEqual([])
+  expect(stateCounts(temp.store, session)).toEqual({ pending: 4 })
+  expect(temp.store.db.query('SELECT DISTINCT observer_attempts AS n, observer_retry_at AS at FROM events').all()).toEqual([{ n: 0, at: null }])
+})
+
+test('a gate that says ok lets the batch run as before', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedTurn(session)
+  temp.store.db.run(CODEX_ROW)
+  const { gate } = stubGate({ ok: true })
+  const outcome = await processSessionBatch({ db: temp.store.db, runnerFor: () => fakeRunner([citingReply()]), safety: gate, now: () => clock }, session)
+  expect(outcome).toMatchObject({ status: 'succeeded', events: 4 })
+})
+
+test('a run that throws tool_attempt fails the batch as today and reports the tool attempt to the gate', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedTurn(session)
+  temp.store.db.run(CODEX_ROW)
+  const { gate, seen } = stubGate({ ok: true })
+  const runner = fakeRunner([new ObserverError('tool_attempt', 'a tool ran')])
+  const outcome = await processSessionBatch({ db: temp.store.db, runnerFor: () => runner, safety: gate, now: () => clock }, session)
+
+  expect(outcome).toMatchObject({ status: 'failed', errorClass: 'tool_attempt' })
+  expect(stateCounts(temp.store, session)).toEqual({ failed: 4 })
+  expect(runs()).toEqual([expect.objectContaining({ status: 'failed', provider: 'codex-cli', error: 'tool_attempt: a tool ran' })])
+  expect(seen.toolAttempts.map((s) => s.provider)).toEqual(['codex-cli'])
+})
+
+test('other failures do not report a tool attempt', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedTurn(session)
+  temp.store.db.run(CODEX_ROW)
+  const { gate, seen } = stubGate({ ok: true })
+  await processSessionBatch({ db: temp.store.db, runnerFor: () => fakeRunner([new ObserverError('timeout', 't')]), safety: gate, now: () => clock }, session)
+  expect(seen.toolAttempts).toEqual([])
+})
+
+test('settings that change during the gate check are read again: a host disabled meanwhile is disabled, with no run', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedTurn(session)
+  temp.store.db.run(CODEX_ROW)
+  const gate: SafetyGate = {
+    check: async () => {
+      temp.store.db.run("UPDATE observer_settings SET enabled = 0 WHERE host = 'codex'")
+      return { ok: true }
+    },
+    reportToolAttempt: async () => {},
+    probeFailures: () => [],
+  }
+  let built = 0
+  const runnerFor = () => { built += 1; return fakeRunner([citingReply()]) }
+  expect(await processSessionBatch({ db: temp.store.db, runnerFor, safety: gate, now: () => clock }, session)).toEqual({ status: 'disabled' })
+  expect(built).toBe(0)
+  expect(runs()).toEqual([])
+  expect(stateCounts(temp.store, session)).toEqual({ skipped: 4 })
+})
+
+test('a provider changed during the gate check goes through the gate again with the new settings', async () => {
+  const session = seedSession(temp.store, 'codex', 'c1')
+  seedTurn(session)
+  temp.store.db.run(CODEX_ROW)
+  const checked: string[] = []
+  const gate: SafetyGate = {
+    check: async (settings) => {
+      checked.push(settings.provider)
+      if (settings.provider === 'codex-cli') temp.store.db.run("UPDATE observer_settings SET provider = 'opencode-cli' WHERE host = 'codex'")
+      return settings.provider === 'codex-cli' ? { ok: true } : { ok: false, errorClass: 'cli_missing' }
+    },
+    reportToolAttempt: async () => {},
+    probeFailures: () => [],
+  }
+  expect(await processSessionBatch({ db: temp.store.db, runnerFor: () => fakeRunner(['{}']), safety: gate, now: () => clock }, session)).toEqual({ status: 'blocked', errorClass: 'cli_missing' })
+  expect(checked).toEqual(['codex-cli', 'opencode-cli'])
+  expect(runs()).toEqual([])
+})

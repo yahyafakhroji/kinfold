@@ -38,7 +38,7 @@ check_agent_clis() {
 run_live_detach_test() {
   local log="$RUNNER_TEMP/detach-live.log"
   KINFOLD_SQLITE3MC_LIB=not-opened-by-the-live-tests KINFOLD_TEST_DETACH=1 \
-    bun test ./src/update/detach.live.test.ts 2>&1 | tee "$log"
+    bun test ./src/controllers/tests/update/detach.live.test.ts 2>&1 | tee "$log"
   if grep -q '(skip)' "$log" || ! grep -q '(pass)' "$log"; then
     echo "the live detach test skipped or passed nothing"
     exit 1

@@ -17,7 +17,7 @@
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { redactJson } from '../src/redaction/redact'
+import { redactJson } from '../src/resources/redaction/redact'
 
 const EVENT_FIELDS = ['hook_event_name', 'event', 'hookEventName'] as const
 const SAFE_NAME = /[^A-Za-z0-9_.-]/g

@@ -6,8 +6,8 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { openEncrypted } from '../src/sqlite/open'
-import { SqliteError } from '../src/sqlite/types'
+import { openEncrypted } from '../src/resources/sqlite/open'
+import { SqliteError } from '../src/resources/sqlite/types'
 
 const TEST_KEY = '0123456789abcdef'.repeat(4)
 const WRONG_KEY = 'fedcba9876543210'.repeat(4)

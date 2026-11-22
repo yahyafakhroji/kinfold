@@ -4,7 +4,7 @@
 // they wrap runs unchanged wherever the reason holds.
 
 import { test } from 'bun:test'
-import { type OsName, currentPlatform } from '../src/platform/platform'
+import { type OsName, currentPlatform } from '../src/system/platform/platform'
 
 /** Behaviour every POSIX system has and Windows lacks. */
 export type PosixReason =

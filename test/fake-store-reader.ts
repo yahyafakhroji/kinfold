@@ -1,10 +1,10 @@
-// A stand-in for src/workers/store-reader-worker.ts in store-reader.test.ts.
+// A stand-in for src/resources/workers/store-reader-worker.ts in store-reader.test.ts.
 // The start message's dbPath picks the behaviour: 'fail-start', 'busy' (blocks
 // its thread for 300 ms per request, then answers, skipping a request already
 // past its expiry as the real worker does), 'crash' (throws on a request),
 // anything else answers at once. Every op answers with its arguments.
 
-import type { StoreReaderMessage, StoreReaderReply } from '../src/workers/store-reader-protocol'
+import type { StoreReaderMessage, StoreReaderReply } from '../src/resources/workers/store-reader-protocol'
 
 declare const self: Worker
 

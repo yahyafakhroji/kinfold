@@ -20,13 +20,13 @@ describe('pendingChangesets', () => {
 
 describe('changesetNeeded', () => {
   test('a change to shipped code or packaging needs a changeset', () => {
-    for (const path of ['src/cli/kinfold.ts', 'scripts/install.sh', 'tools/pack-npm.ts', 'npm/kinfold/launcher.js', 'package.json', 'bun.lock', '.bun-version']) {
+    for (const path of ['src/controllers/cli/kinfold.ts', 'scripts/install.sh', 'tools/pack-npm.ts', 'npm/kinfold/launcher.js', 'package.json', 'bun.lock', '.bun-version']) {
       expect(changesetNeeded([path])).toBe(true)
     }
   })
 
   test('docs, tests, workflows and changesets alone do not', () => {
-    expect(changesetNeeded(['README.md', 'src/cli/kinfold.test.ts', 'tools/smoke.test.ts', 'test/fixtures/a.json', '.github/workflows/ci.yml', '.changeset/x.md'])).toBe(false)
+    expect(changesetNeeded(['README.md', 'src/controllers/tests/cli/kinfold.test.ts', 'tools/smoke.test.ts', 'test/fixtures/a.json', '.github/workflows/ci.yml', '.changeset/x.md'])).toBe(false)
   })
 })
 

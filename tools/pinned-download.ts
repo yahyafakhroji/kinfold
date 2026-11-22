@@ -4,7 +4,7 @@
 // served them, so a fallback never makes a file more trusted.
 
 import { createHash } from 'node:crypto'
-import { readBodyCapped } from '../src/fs/capped-body'
+import { readBodyCapped } from '../src/system/fs/capped-body'
 
 export interface PinnedDownload {
   /** Names the asset in error messages. */

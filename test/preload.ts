@@ -4,10 +4,10 @@
 // these only when a test passes them in `env` (Bun.spawn hands a child the
 // environment the process started with).
 
-import { DB_KEYSTORE_ENV } from '../src/sqlite/keys'
-import { SQLITE3MC_LIB_ENV } from '../src/sqlite/library'
-import { testLibraryPath } from '../src/sqlite/test-support'
-import { canBuildApp, ensureAppBuilt } from '../src/dashboard/app-files'
+import { DB_KEYSTORE_ENV } from '../src/resources/sqlite/keys'
+import { SQLITE3MC_LIB_ENV } from '../src/resources/sqlite/library'
+import { testLibraryPath } from '../src/resources/tests/sqlite/test-support'
+import { canBuildApp, ensureAppBuilt } from '../src/controllers/dashboard/app-files'
 
 process.env[SQLITE3MC_LIB_ENV] = testLibraryPath()
 process.env[DB_KEYSTORE_ENV] = 'none'
