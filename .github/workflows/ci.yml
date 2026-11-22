@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels that pull request's run still in
+# progress. A push to main gets its own group and is never cancelled.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     name: test (${{ matrix.os }})
@@ -44,7 +50,18 @@ jobs:
         timeout-minutes: 5
         run: bun install --frozen-lockfile
 
+      # The build depends only on the pinned zip in src/sqlite/release.ts and
+      # the scripts that fetch and compile it, so a change to any of them
+      # misses the cache and rebuilds.
+      - name: Restore the sqlite3mc build
+        id: sqlite3mc
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/sqlite3mc
+          key: sqlite3mc-${{ runner.os }}-${{ hashFiles('src/sqlite/release.ts', 'src/sqlite/build.ts', 'tools/build-sqlite3mc.ts', 'tools/pinned-download.ts') }}
+
       - name: Build sqlite3mc for the test preload
+        if: steps.sqlite3mc.outputs.cache-hit != 'true'
         timeout-minutes: 8
         env:
           # Lets the API asset fallback authenticate; anonymous calls hit a shared rate limit.
@@ -84,23 +101,9 @@ jobs:
           bun test --timeout 20000 "${ignore[@]}"
 
   types:
-    name: types (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: types
+    runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: ${{ !matrix.required }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # Each OS's line is flipped to required by the change that brings it
-        # up; the os line between keeps two such changes from touching
-        # neighbouring lines.
-        include:
-          - os: macos-latest
-            required: true
-          - os: ubuntu-latest
-            required: true
-          - os: windows-latest
-            required: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

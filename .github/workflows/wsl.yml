@@ -1,37 +1,10 @@
 name: wsl
 
-# The WSL smoke for a pull request that changes the code WSL runs. A draft
-# pull request already gets it through release-build's smoke, so this one
-# builds only the two programs it needs, and only once the PR is ready.
+# The WSL smoke for a risky branch, run by hand before the release:
+# gh workflow run wsl --ref <branch>. It builds only the two programs WSL
+# needs. The release runs the WSL smoke through smoke.yml.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    # The code the WSL path runs, from the hook and spool to the daemon that
-    # ingests, and everything that builds or drives the smoke.
-    paths:
-      - src/wsl/**
-      - src/install/**
-      - src/agents/**
-      - src/cli/**
-      - src/capture/**
-      - src/spool/**
-      - src/daemon/**
-      - src/store/**
-      - src/platform/**
-      - tools/smoke-wsl.ts
-      - tools/smoke/wsl.ts
-      - tools/smoke/platform.ts
-      - tools/smoke-sums-url.ts
-      - tools/build-*.ts
-      - tools/fetch-*.ts
-      - tools/install-bun.sh
-      - .github/smoke/windows.sh
-      - package.json
-      - bun.lock
-      - .bun-version
-      - .github/workflows/wsl.yml
-      - .github/workflows/wsl-smoke.yml
-      - .github/actions/build-program/**
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -42,7 +15,6 @@ env:
 jobs:
   build:
     name: build (${{ matrix.target }})
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
