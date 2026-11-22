@@ -52,6 +52,12 @@ describe.skipIf(VEC0 === undefined || VEC0 === '')(`vectors upkeep on ${OBSERVAT
   let daemon: RunningDaemon
   let token: string
   const logs: string[] = []
+  // Each line with when it came, so a slow checkpoint can be lined up against a held thread.
+  const stamped: string[] = []
+  const record = (line: string): void => {
+    logs.push(line)
+    stamped.push(`t=${Math.round(performance.now())} ${line}`)
+  }
   let beforeMs = 0
   // Encrypted, as the hub's store is: every page read from disk is decrypted.
   const key = newDbKey()
@@ -91,7 +97,7 @@ describe.skipIf(VEC0 === undefined || VEC0 === '')(`vectors upkeep on ${OBSERVAT
     db.close()
     mkdirSync(dirname(vec0Path(dataDir)), { recursive: true })
     copyFileSync(VEC0!, vec0Path(dataDir))
-    daemon = startDaemon({ dataDir, dbKeys: keys, port: 0, fallbackDrainMs: 60_000, log: (line) => logs.push(line), vectors: { embedder: fakeEmbedder(), tickMs: 100 } })
+    daemon = startDaemon({ dataDir, dbKeys: keys, port: 0, fallbackDrainMs: 60_000, log: record, vectors: { embedder: fakeEmbedder(), tickMs: 100 } })
     token = readFileSync(join(dataDir, 'daemon.token'), 'utf8').trim()
   }, 300_000)
 
@@ -121,6 +127,7 @@ describe.skipIf(VEC0 === undefined || VEC0 === '')(`vectors upkeep on ${OBSERVAT
       expected = at + 10
     }, 10)
     const until = performance.now() + RUN_MS
+    console.log(`upkeep-stall load t=${Math.round(performance.now())}..${Math.round(until)}`)
     try {
       while (performance.now() < until) {
         samples.health.push(await timed(() => fetch(`${base}/health`)))
@@ -139,7 +146,7 @@ describe.skipIf(VEC0 === undefined || VEC0 === '')(`vectors upkeep on ${OBSERVAT
   const expectInBudget = (load: Load): void => {
     // On a miss, the stall watch's own lines name the step that held the thread.
     // The checkpoint lines too: whether the worker had taken over says which connection could have flushed the store.
-    for (const line of logs.filter((entry) => entry.startsWith('main thread') || entry.startsWith('vectors ') || entry.startsWith('checkpoint'))) console.log(`upkeep-stall log: ${line}`)
+    for (const line of stamped.filter((entry) => / (main thread|vectors |checkpoint)/.test(entry))) console.log(`upkeep-stall log: ${line}`)
     expect(max(load.health)).toBeLessThan(HEALTH_BUDGET_MS)
     expect(max(load.context)).toBeLessThan(CONTEXT_BUDGET_MS)
     expect(max(load.view)).toBeLessThan(VIEW_BUDGET_MS)
@@ -170,7 +177,8 @@ describe.skipIf(VEC0 === undefined || VEC0 === '')(`vectors upkeep on ${OBSERVAT
     })()
     store.db.close()
     logs.length = 0
-    daemon = startDaemon({ dataDir, dbKeys: keys, port: 0, fallbackDrainMs: 60_000, log: (line) => logs.push(line), vectors: { embedder: fakeEmbedder(), tickMs: 100 } })
+    stamped.length = 0
+    daemon = startDaemon({ dataDir, dbKeys: keys, port: 0, fallbackDrainMs: 60_000, log: record, vectors: { embedder: fakeEmbedder(), tickMs: 100 } })
     token = readFileSync(join(dataDir, 'daemon.token'), 'utf8').trim()
     const load = await underLoad()
     console.log(`upkeep-stall switch-and-drop ${summary(load)}`)

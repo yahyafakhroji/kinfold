@@ -193,6 +193,14 @@ export interface DaemonVectorOptions {
    * own. Absent: it runs from the first tick.
    */
   upkeepReady?: () => boolean
+  /**
+   * Whether the timed writes on the daemon's thread (an upkeep slice, the
+   * indexer's turn) may run now. The daemon holds them while its checkpoint
+   * worker has a checkpoint in flight: on the Windows runner a 200-row sweep
+   * slice and an indexer turn each waited 2.4 to 3.7 s behind one. Absent:
+   * always.
+   */
+  writesReady?: () => boolean
 }
 
 interface Vectors {
@@ -260,8 +268,13 @@ function startVectors(store: Store, dataDir: string, dbKeys: DbKeyStore, options
     step: (label, fn) => watch.step(`vectors upkeep: ${label}`, fn),
   })
   const upkeepFailed = (error: unknown): void => log(`vectors upkeep failed (${error instanceof Error ? error.message.slice(0, 120) : 'error'})`)
+  // Until the checkpoint worker has settled the daemon's own connection checkpoints: a commit past 1,000 WAL pages
+  // copies them into the store and flushes it, on this thread. Upkeep is what writes that much in a burst (a retired
+  // space's rows go 200 at a time, megabytes per slice), and it can wait a moment: the indexer's turn still runs.
   // Each slice is timed on its own, so the watch names a slow one; between slices the thread answers requests.
-  const upkeep = createUpkeepTurns({ slice: () => watch.step('vectors upkeep', () => spaces.step()), onError: upkeepFailed })
+  const upkeepReady = options?.upkeepReady ?? ((): boolean => true)
+  const writesReady = options?.writesReady ?? ((): boolean => true)
+  const upkeep = createUpkeepTurns({ slice: () => watch.step('vectors upkeep', () => spaces.step()), ready: () => upkeepReady() && writesReady(), onError: upkeepFailed })
   // The first slice runs now, so the active space exists before the first search.
   try {
     watch.step('vectors upkeep', () => spaces.step())
@@ -278,12 +291,10 @@ function startVectors(store: Store, dataDir: string, dbKeys: DbKeyStore, options
     db, embedder, log, onWritten: (rows) => spaces.written(rows),
     ...(embedder.model === LOCAL_MODEL_ID ? { maxBatchesPerTick: LOCAL_BATCHES_PER_TICK } : {}),
   })
-  // Until the checkpoint worker has settled the daemon's own connection checkpoints: a commit past 1,000 WAL pages
-  // copies them into the store and flushes it, on this thread. Upkeep is what writes that much in a burst (a retired
-  // space's rows go 200 at a time, megabytes per slice), and it can wait a moment: the indexer's turn still runs.
-  const upkeepReady = options?.upkeepReady ?? ((): boolean => true)
   const timer = indexer === null && all.length === 0 ? null : setInterval(() => {
-    void (upkeepReady() ? upkeep.run() : Promise.resolve()).then(() => watch.step('vectors indexer turn', () => indexer?.tick()))
+    void upkeep.run().then(() => {
+      if (writesReady()) watch.step('vectors indexer turn', () => indexer?.tick())
+    })
   }, options?.tickMs ?? DEFAULT_INDEX_TICK_MS)
   watch.step('vectors indexer turn', () => indexer?.tick())
   const search = createSemanticSearch({ db, embedder, embedderFor: () => searchEmbedder(spaces, all, set.reason), support, queries })
@@ -614,6 +625,8 @@ interface Checkpoints {
   /** Settles once the worker is on, or is known not to start: from then on it is decided which connection checkpoints. */
   settled: Promise<void>
   hold(): Promise<() => void>
+  /** A checkpoint is in flight; false while the worker is not on. */
+  busy(): boolean
   close(): Promise<void>
 }
 
@@ -653,6 +666,7 @@ function startCheckpoints(store: Store, dbKeys: DbKeyStore, log: (line: string) 
       await ready
       return worker?.hold() ?? (() => {})
     },
+    busy: () => worker?.busy() ?? false,
     close: async () => {
       await ready
       const current = worker
@@ -756,7 +770,13 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     // A device's recall queries are embedded on the hub, and its own store is kept as it was: nothing here touches its vectors.
     // Set once this core's checkpoint worker has settled, a few lines on; timed upkeep waits for it.
     let checkpointsSettled = false
-    const vectorOptions = options.vectors === undefined ? undefined : { ...options.vectors, upkeepReady: options.vectors.upkeepReady ?? ((): boolean => checkpointsSettled) }
+    // Bound to the checkpoint worker once it exists, a few lines on; timed vectors writes wait while it checkpoints.
+    let checkpointBusy = (): boolean => false
+    const vectorOptions = options.vectors === undefined ? undefined : {
+      ...options.vectors,
+      upkeepReady: options.vectors.upkeepReady ?? ((): boolean => checkpointsSettled),
+      writesReady: options.vectors.writesReady ?? ((): boolean => !checkpointBusy()),
+    }
     const vectors = relay === null ? watch.step('vectors start', () => startVectors(store, dataDir, dbKeys, vectorOptions, log, watch)) : deviceVectors(store.db)
     // A read waits on this lookup, as a prompt does: the key alone, never the history walk.
     const reads = daemonReads(dataDir, dbKeys, projectKeyFor.keyOnly, vectors)
@@ -815,6 +835,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     void checkpoints?.settled.then(() => {
       checkpointsSettled = true
     })
+    if (checkpoints !== null) checkpointBusy = checkpoints.busy
     const backfill = relay !== null ? null : setTimeout(() => void watch.step('repo merge', () => mergeSameRepos(store.db, backfillGit, log, () => storeOpen)), 0)
     const exclusive = exclusiveOverAll(vectors.queries, readers, () => checkpoints?.hold() ?? Promise.resolve(() => {}))
     // Bound once the data handlers exist, a few lines on; a retention run cannot come before that.

@@ -3,6 +3,7 @@
 // at a commit, with a flush of the store on the thread that answers requests,
 // and upkeep is what writes megabytes in a burst. Here the gate is held shut
 // by hand: the slice a start always runs happens, and nothing more until it opens.
+// The same holds while the checkpoint worker has a checkpoint in flight.
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -77,6 +78,17 @@ test('with the gate shut only the start\'s own slice runs; once it opens the tim
   await Bun.sleep(400)
   expect(oldRows()).toBe(OBSERVATIONS - SWEEP_CHUNK)
   open = true
+  expect(await until(() => oldRows() === 0, 15_000)).toBe(true)
+})
+
+test('while writes are held (a checkpoint in flight) no upkeep slice runs; once they may, the sweep finishes', async () => {
+  let writes = false
+  const logs: string[] = []
+  daemon = startDaemon({ dataDir, port: 0, fallbackDrainMs: 60_000, log: (line) => logs.push(line), vectors: { embedder: fakeEmbedder(), tickMs: 20, upkeepReady: () => true, writesReady: () => writes } })
+  expect(logs.some((line) => line.startsWith('vectors switched to fake-embed'))).toBe(true)
+  await Bun.sleep(400)
+  expect(oldRows()).toBe(OBSERVATIONS - SWEEP_CHUNK)
+  writes = true
   expect(await until(() => oldRows() === 0, 15_000)).toBe(true)
 })
 

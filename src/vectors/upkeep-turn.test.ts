@@ -69,3 +69,25 @@ test('stop waits for the running turn and runs no slice after it', async () => {
   await turns.run()
   expect(slices).toBe(at)
 })
+
+test('a turn asks before every slice and ends when it may not run one; the next turn goes on', async () => {
+  let ready = true
+  let slices = 0
+  const turns = createUpkeepTurns({
+    slice: () => {
+      slices += 1
+      // Shut after the second slice, as a checkpoint starting between slices would.
+      if (slices === 2) ready = false
+      return slices < 4
+    },
+    ready: () => ready,
+    budgetMs: 10_000,
+  })
+  await turns.run()
+  expect(slices).toBe(2)
+  await turns.run()
+  expect(slices).toBe(2)
+  ready = true
+  await turns.run()
+  expect(slices).toBe(4)
+})

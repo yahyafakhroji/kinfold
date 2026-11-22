@@ -274,7 +274,7 @@ describe.skipIf(VEC0 === undefined || VEC0 === '')('with sqlite-vec', () => {
       },
     })
     manager.step()
-    expect(labels).toEqual(['reconcile old', 'reconcile new', 'promote', 'sweep'])
+    expect(labels).toEqual(['reconcile old', 'reconcile new', 'promote', 'sweep', 'sweep rows'])
   })
 
   test('the sweep of a retired space puts secure_delete back on for everything else', () => {

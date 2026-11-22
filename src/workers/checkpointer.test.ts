@@ -69,6 +69,22 @@ test('a hold waits for the checkpoint in flight and keeps the next one back unti
   expect(await later).toMatchObject({ busy: 0 })
 })
 
+test('busy is true while a checkpoint is in flight, and false while one waits on a hold or has answered', async () => {
+  const worker = await started()
+  write(200)
+  expect(worker.busy()).toBe(false)
+  const release = await worker.hold()
+  const done = worker.checkpointNow()
+  // Microtasks only: the worker's answer is a message, so it cannot land inside this loop.
+  for (let i = 0; i < 1_000; i += 1) await Promise.resolve()
+  expect(worker.busy()).toBe(false)
+  release()
+  for (let i = 0; i < 1_000 && !worker.busy(); i += 1) await Promise.resolve()
+  expect(worker.busy()).toBe(true)
+  expect(await done).toMatchObject({ busy: 0 })
+  expect(worker.busy()).toBe(false)
+})
+
 test('the timer checkpoints on its own, and close stops it', async () => {
   const worker = await started({ intervalMs: 20 })
   write(100)
