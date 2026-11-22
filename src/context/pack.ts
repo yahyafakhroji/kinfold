@@ -10,6 +10,7 @@ import { type PackItem, mergeNearDuplicates } from './merge'
 import { stillCurrent } from './status-notes'
 import { nameTokens } from './similarity'
 import { CHARS_PER_TOKEN, type ContextResult, EMPTY_CONTEXT, type PackObservation, contradictionLabel, estimateTokens } from './types'
+import { shortAge } from './recall-line'
 
 export const FRAME_OPEN = '<kinfold>'
 export const FRAME_CLOSE = '</kinfold>'
@@ -33,14 +34,9 @@ export interface BuiltPack extends ContextResult {
   itemLines: string[]
 }
 
-const MINUTE = 60_000
-const HOUR = 60 * MINUTE
-const DAY = 24 * HOUR
-
+/** An age as the pack writes it. The same function the recall line uses (recall-line.ts, which the hook loads and so imports nothing), so the line a person sees and the pack a model reads cannot give one memory two ages. */
 export function formatAge(ms: number): string {
-  if (ms < HOUR) return `${Math.max(1, Math.floor(ms / MINUTE))}m`
-  if (ms < DAY) return `${Math.floor(ms / HOUR)}h`
-  return `${Math.floor(ms / DAY)}d`
+  return shortAge(0, ms)
 }
 
 /** One line of stored text: no newlines, no frame tags that could close the block early, capped. */

@@ -115,6 +115,31 @@ test('only the end of a huge transcript is read: a turn that fits there is count
   expect(readTurnUsage(cut, 64 * 1024)).toBeNull()
 })
 
+test('a long turn is read across several widening steps: every call counted once, many-byte text cut by a step kept whole, and nothing before the prompt parsed', () => {
+  // About 1.5 MB after the prompt, in lines of odd lengths full of 3-byte characters, so the 256 KB and 1 MB steps cut lines and characters.
+  const noise = (index: number) => ({ type: 'api-request-blob', message: { role: 'user', content: '漢字'.repeat(700 + (index % 13)) } })
+  const turn: Record<string, unknown>[] = []
+  for (let index = 0; index < 300; index += 1) {
+    turn.push(noise(index))
+    if (index % 30 === 0) turn.push(assistant(`msg_${index / 30}`, tool(`toolu_${index}`), usage(10, 1, 100, 0), 61 + index / 30))
+  }
+  const before = Array.from({ length: 200 }, (_, index) => noise(index))
+  const path = transcript('long.jsonl', [user('old', 0), assistant('msg_old', text, usage(999, 999), 1), ...before, user('prompt', 60), ...turn])
+  const realParse = JSON.parse
+  let parsed = 0
+  JSON.parse = ((value: string) => {
+    parsed += 1
+    return realParse(value)
+  }) as typeof JSON.parse
+  try {
+    expect(readTurnUsage(path)).toEqual({ inputTokens: 100, outputTokens: 10, cacheReadTokens: 1_000, cacheCreationTokens: 0, toolCalls: 10, durationMs: 10_000 })
+  } finally {
+    JSON.parse = realParse
+  }
+  // The turn's own lines and its prompt, once each: not the 202 lines before it, and not the tail again at each step.
+  expect(parsed).toBe(turn.length + 1)
+})
+
 // --- through ingest ---
 
 let clock = 1_792_841_878_000

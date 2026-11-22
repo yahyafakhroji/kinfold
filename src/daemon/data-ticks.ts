@@ -10,6 +10,7 @@ import { DEFAULT_SCAN_BATCH, describeScan, scanBatch } from '../data-control/sca
 import type { MarkerKey } from '../redaction/redact'
 import type { Database } from '../sqlite/types'
 import { type Exclusive, runNow } from '../vectors/vector-worker'
+import { errorMessage } from '../errors'
 
 export const DEFAULT_SCAN_TICK_MS = 10_000
 export const DEFAULT_RETENTION_TICK_MS = 10 * 60_000
@@ -35,10 +36,6 @@ export interface DataTicks {
   scanTick: () => boolean
   retentionTick: () => void
   stop: () => void
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 export function startDataTicks(options: DataTickOptions): DataTicks {

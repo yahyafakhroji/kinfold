@@ -25,6 +25,9 @@
 
 import { promptForRecall } from '../context/prompt-text'
 import { type ContextRequest, type ContextResult, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
+import { recent } from '../adapters/recency'
+import { errorName } from '../errors'
+import { isRecord } from '../contract/event'
 
 export const MAX_CACHED_SESSIONS = 256
 export const DELTA_INTERVAL_MS = 30_000
@@ -71,16 +74,8 @@ interface SessionCache {
   askedAt: number
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
 function sessionOf(event: unknown): string | null {
   return isRecord(event) && typeof event.sessionID === 'string' && event.sessionID !== '' ? event.sessionID : null
-}
-
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : 'unknown error'
 }
 
 export function createContextInjector(options: ContextInjectorOptions): ContextInjector {
@@ -108,7 +103,7 @@ export function createContextInjector(options: ContextInjectorOptions): ContextI
   }
 
   const entryFor = (sessionId: string): SessionCache => {
-    const cached = cache.get(sessionId)
+    const cached = recent(cache, sessionId)
     if (cached !== undefined) return cached
     const oldest = cache.keys().next()
     if (cache.size >= MAX_CACHED_SESSIONS && oldest.done !== true) cache.delete(oldest.value)

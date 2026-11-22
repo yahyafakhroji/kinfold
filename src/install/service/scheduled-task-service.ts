@@ -8,7 +8,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { DEFAULT_PORT } from '../../daemon/daemon'
+import { DEFAULT_PORT, parsePortValue } from '../../daemon/port'
 import { WINDOWS_QUERY_TIMEOUT_MS, powershellArgv, psLiteral } from '../access/windows-acl'
 import { checkHealth, readDaemonInfo } from '../daemon-client'
 import { decodeText } from '../files'
@@ -17,13 +17,13 @@ import { HEALTH_WAIT_MS } from '../plan'
 import { windowsJoin, windowsSystemTool } from '../windows-system-path'
 import type { ServiceControl, ServiceStep } from './control'
 import { SERVICE_PATH_FILE, servicePathContent, servicePathFor } from './service-path'
+import { errorCode } from '../../errors'
 
 export const TASK_NAME = 'KinfoldDaemon'
 /** In <LOCALAPPDATA>\Kinfold: outside the data folder, so WSL can find it without knowing that folder. */
 export const TASK_CONFIG_FILE = 'kinfold-daemon.xml'
 export const STOP_POLL_MS = 250
 const SCHTASKS_TIMEOUT_MS = 15_000
-const MAX_PORT = 65_535
 /** Task Scheduler's TASK_STATE numbers for a task with an instance: queued, and running. */
 const ACTIVE_TASK_STATES: readonly number[] = [2, 4]
 const NO_USERNAME = 'USERNAME is not set, so the task cannot name its user'
@@ -43,10 +43,6 @@ export interface TaskXmlInput {
 export interface TaskProcessDeps {
   pidAlive(pid: number): boolean
   kill(pid: number): void
-}
-
-function errorCode(error: unknown): unknown {
-  return typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined
 }
 
 const processDeps: TaskProcessDeps = {
@@ -221,10 +217,7 @@ export function taskDataDir(xml: string): string | null {
 }
 
 export function taskPort(xml: string): number | null {
-  const value = flagValue(xml, '--port')
-  if (value === null || !/^\d+$/.test(value)) return null
-  const port = Number(value)
-  return port >= 1 && port <= MAX_PORT ? port : null
+  return parsePortValue(flagValue(xml, '--port'))
 }
 
 /**

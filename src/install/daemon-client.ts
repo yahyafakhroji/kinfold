@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseEmbeddingSettings, type EmbeddingSettings } from '../vectors/embedding-settings'
 import { isRecord } from '../contract/event'
-import { DEFAULT_PORT } from '../daemon/daemon'
+import { DEFAULT_PORT } from '../daemon/port'
 import { readDaemonEndpoint } from '../daemon/daemon-info'
 import type { ObserverSettingsView } from '../daemon/settings-route'
 import type { DisplayChange } from '../store/display-settings'
@@ -115,47 +115,54 @@ export async function waitForStart(env: InstallEnv, service: ServiceControl | nu
   }
 }
 
-function authorized(env: InstallEnv): { base: string; token: string } {
+function authorized(env: Pick<InstallEnv, 'dataDir'>): { base: string; token: string } {
   const endpoint = readDaemonEndpoint(env.dataDir)
   if (endpoint === null) throw new Error('daemon.json or daemon.token is missing; the daemon is not running')
   return { base: `http://127.0.0.1:${endpoint.port}`, token: endpoint.token }
 }
 
-/** The display switches a flag named (the recall line, the impact test). Throws with the HTTP status and the daemon's message. */
-export async function putDisplaySettings(env: InstallEnv, change: DisplayChange): Promise<void> {
+/** A local LLM is probed before embedding settings are saved, and its first answer can take a model load. */
+const EMBEDDING_PUT_TIMEOUT_MS = 70_000
+
+/** A GET with this install's token and the usual timeout. Throws when no daemon is recorded or the request fails. */
+function daemonGet(env: Pick<InstallEnv, 'dataDir' | 'fetch'>, path: string): Promise<Response> {
   const { base, token } = authorized(env)
-  const response = await env.fetch(`${base}/data/display`, {
+  return env.fetch(`${base}${path}`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+}
+
+/**
+ * A PUT of a JSON body with this install's token. Anything but 200 throws
+ * `PUT <label> answered <status>: <the daemon's message>`: the status and the
+ * daemon's own field message, never the body that was sent.
+ */
+async function daemonPut(env: InstallEnv, path: string, body: unknown, label: string = path, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<void> {
+  const { base, token } = authorized(env)
+  const response = await env.fetch(`${base}${path}`, {
     method: 'PUT',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify(change),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
   })
   if (response.status === 200) return
-  const body: unknown = await response.json().catch(() => null)
-  const detail = isRecord(body) && typeof body.error === 'string' ? `: ${body.error}` : ''
-  throw new Error(`PUT /data/display answered ${response.status}${detail}`)
+  const answer: unknown = await response.json().catch(() => null)
+  const detail = isRecord(answer) && typeof answer.error === 'string' ? `: ${answer.error}` : ''
+  throw new Error(`PUT ${label} answered ${response.status}${detail}`)
+}
+
+/** The display switches a flag named (the recall line, the impact test). Throws with the HTTP status and the daemon's message. */
+export function putDisplaySettings(env: InstallEnv, change: DisplayChange): Promise<void> {
+  return daemonPut(env, '/data/display', change)
 }
 
 /** Throws with the HTTP status (401, 403, 400 ...) and the daemon's field message, never the body we sent. */
-export async function putObserverSettings(env: InstallEnv, input: ObserverSettingsInput): Promise<void> {
-  const { base, token } = authorized(env)
-  const response = await env.fetch(`${base}/observer/settings`, {
-    method: 'PUT',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify(input),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  })
-  if (response.status === 200) return
-  const body: unknown = await response.json().catch(() => null)
-  const detail = isRecord(body) && typeof body.error === 'string' ? `: ${body.error}` : ''
-  throw new Error(`PUT /observer/settings for ${input.host} answered ${response.status}${detail}`)
+export function putObserverSettings(env: InstallEnv, input: ObserverSettingsInput): Promise<void> {
+  return daemonPut(env, '/observer/settings', input, `/observer/settings for ${input.host}`)
 }
 
 /** The saved embedding settings, or null when no daemon answers or it is an older one without the route. */
 export async function getEmbeddingSettings(env: InstallEnv): Promise<EmbeddingSettings | null> {
   try {
-    const { base, token } = authorized(env)
-    const response = await env.fetch(`${base}/embedding/settings`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+    const response = await daemonGet(env, '/embedding/settings')
     if (response.status !== 200) return null
     const body: unknown = await response.json()
     if (!isRecord(body) || !isRecord(body.settings)) return null
@@ -167,29 +174,15 @@ export async function getEmbeddingSettings(env: InstallEnv): Promise<EmbeddingSe
 }
 
 /** Saves the embedding provider; the daemon checks a local LLM answers before it saves. Throws with the status and the daemon's message. */
-export async function putEmbeddingSettings(env: InstallEnv, settings: EmbeddingSettings): Promise<void> {
-  const { base, token } = authorized(env)
-  const response = await env.fetch(`${base}/embedding/settings`, {
-    method: 'PUT',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify(settings),
-    // A local LLM is probed before the save, and its first answer can take a model load.
-    signal: AbortSignal.timeout(EMBEDDING_PUT_TIMEOUT_MS),
-  })
-  if (response.status === 200) return
-  const body: unknown = await response.json().catch(() => null)
-  const detail = isRecord(body) && typeof body.error === 'string' ? `: ${body.error}` : ''
-  throw new Error(`PUT /embedding/settings answered ${response.status}${detail}`)
+export function putEmbeddingSettings(env: InstallEnv, settings: EmbeddingSettings): Promise<void> {
+  return daemonPut(env, '/embedding/settings', settings, '/embedding/settings', EMBEDDING_PUT_TIMEOUT_MS)
 }
-
-const EMBEDDING_PUT_TIMEOUT_MS = 70_000
 
 export type SettingsRead = { ok: true; view: ObserverSettingsView } | { ok: false; reason: string }
 
 export async function getObserverSettings(env: InstallEnv): Promise<SettingsRead> {
   try {
-    const { base, token } = authorized(env)
-    const response = await env.fetch(`${base}/observer/settings`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+    const response = await daemonGet(env, '/observer/settings')
     if (response.status === 404) return { ok: false, reason: 'the running daemon is an older build without /observer/settings' }
     if (response.status !== 200) return { ok: false, reason: `GET /observer/settings answered ${response.status}` }
     const body: unknown = await response.json()
@@ -208,8 +201,7 @@ export async function getObserverSettings(env: InstallEnv): Promise<SettingsRead
  */
 export async function getQuietForMs(env: InstallEnv): Promise<number | null> {
   try {
-    const { base, token } = authorized(env)
-    const response = await env.fetch(`${base}/update/quiet`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+    const response = await daemonGet(env, '/update/quiet')
     if (response.status !== 200) return null
     const body: unknown = await response.json()
     const quietFor = isRecord(body) ? body.quietForMs : undefined
@@ -226,6 +218,9 @@ interface MergeView {
   reason: string
 }
 
+/** An entry of another shape (an older or newer daemon) is left out, not printed as "undefined". */
+const isMergeView = (value: unknown): value is MergeView => isRecord(value) && typeof value.from === 'string' && typeof value.into === 'string' && typeof value.reason === 'string'
+
 /**
  * One line per project merge of the last day: one repo under two keys (a
  * renamed remote, a fork) became one project, and status says so. Empty when
@@ -233,12 +228,12 @@ interface MergeView {
  */
 export async function projectMergeLines(env: Pick<InstallEnv, 'dataDir' | 'fetch'>): Promise<string[]> {
   try {
-    const { base, token } = authorized(env as InstallEnv)
-    const response = await env.fetch(`${base}/projects`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+    // Only the merges: a daemon from before this parameter ignores it and answers the whole list, which reads the same here.
+    const response = await daemonGet(env, '/projects?merges=only')
     if (response.status !== 200) return []
     const body: unknown = await response.json()
     if (!isRecord(body) || !Array.isArray(body.merges)) return []
-    return (body.merges as MergeView[]).map((merge) => `project: merged ${merge.from} into ${merge.into} (${merge.reason === 'same-repo' ? 'same repo' : 'kinfold project merge'})`)
+    return body.merges.filter(isMergeView).map((merge) => `project: merged ${merge.from} into ${merge.into} (${merge.reason === 'same-repo' ? 'same repo' : 'kinfold project merge'})`)
   } catch {
     return []
   }

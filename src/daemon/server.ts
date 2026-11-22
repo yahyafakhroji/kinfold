@@ -39,6 +39,8 @@ import type { InstallRun } from '../update/install-run'
 import { parseVersion } from '../update/version-order'
 import { type UpdateLevel, isUpdateLevel } from '../install/setup/record'
 import { type DeviceRouting, deviceRoute } from '../central/device-routes'
+import { isRecord } from '../contract/event'
+import { declaredLength, readCapped } from '../http/capped'
 
 export interface ServerDeps {
   /** 0 picks a free port. */
@@ -153,39 +155,9 @@ const UPLOAD_PATH = '/restore/upload'
 const UNDO_PATH = '/restore/undo'
 const BACKUP_PATHS: ReadonlySet<string> = new Set(['/backup', '/restore', UPLOAD_PATH, UNDO_PATH, '/restore/status'])
 
-function declaredLength(request: Request): number {
-  const length = Number(request.headers.get('content-length') ?? '0')
-  return Number.isFinite(length) ? length : 0
-}
-
-/** The body, read a chunk at a time and dropped the moment it passes `limit` (null then): a sender cannot make the daemon hold more than the cap. */
-async function readCapped(request: Request, limit: number): Promise<Uint8Array | null> {
-  if (request.body === null) return new Uint8Array(0)
-  const reader = request.body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    total += value.byteLength
-    if (total > limit) {
-      await reader.cancel().catch(() => {})
-      return null
-    }
-    chunks.push(value)
-  }
-  const bytes = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return bytes
-}
-
 async function readJson(request: Request): Promise<Parsed<unknown>> {
   // Counted in bytes before decoding: a body of multi-byte characters is several times its length in characters.
-  const bytes = declaredLength(request) > MAX_BODY_BYTES ? null : await readCapped(request, MAX_BODY_BYTES)
+  const bytes = await readCapped(request, MAX_BODY_BYTES)
   if (bytes === null) return { ok: false, error: 'body too large' }
   try {
     return { ok: true, value: JSON.parse(new TextDecoder().decode(bytes)) }
@@ -384,8 +356,6 @@ export interface UpdateRelease {
   installable: boolean
 }
 
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
-
 /** GET /update/settings reads the level and beta; PUT {"level": "off"|"notify"|"patch", "beta": boolean} sets both. */
 async function updateSettingsRoute(request: Request, handlers: UpdateHandlers | undefined): Promise<RouteAnswer | null> {
   if (handlers === undefined) return null
@@ -393,7 +363,7 @@ async function updateSettingsRoute(request: Request, handlers: UpdateHandlers | 
   if (request.method !== 'PUT') return { status: 405, body: { error: 'method not allowed' } }
   const body = await readJson(request)
   if (!body.ok) return { status: 400, body: { error: body.error } }
-  const value = isObject(body.value) ? body.value : {}
+  const value = isRecord(body.value) ? body.value : {}
   if (!isUpdateLevel(value.level) || typeof value.beta !== 'boolean') return { status: 400, body: { error: 'body must be {"level": "off"|"notify"|"patch", "beta": true|false}' } }
   if (!handlers.setSettings({ level: value.level, beta: value.beta })) return { status: 409, body: { error: 'this data folder has no install record; run kinfold install first' } }
   return { status: 200, body: { settings: handlers.view().settings } }
@@ -406,7 +376,7 @@ async function installRoute(request: Request, handlers: UpdateHandlers | undefin
   if (request.method !== 'POST') return { status: 405, body: { error: 'method not allowed' } }
   const body = await readJson(request)
   if (!body.ok) return { status: 400, body: { error: body.error } }
-  const version = isObject(body.value) ? body.value.version : undefined
+  const version = isRecord(body.value) ? body.value.version : undefined
   // It becomes an argument of the updater's command line, so only a version passes.
   if (typeof version !== 'string' || parseVersion(version) === null) return { status: 400, body: { error: 'body must be {"version": "<the release on offer>"}' } }
   return handlers.install(version)

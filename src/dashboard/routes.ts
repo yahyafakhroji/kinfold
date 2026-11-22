@@ -13,6 +13,7 @@ import type { Parsed } from '../context/types'
 import { isRecord } from '../contract/event'
 import { type EmbeddedAssets, embeddedAssets, safeDashboardName } from '../runtime/embedded'
 import { isOwnPageRequest } from './access'
+import { IMMUTABLE_ASSET_CACHE } from './headers'
 import { APP_ASSETS, APP_DIST, ASSET_NAME, listAssets } from './app-files'
 import { type DashboardAuth, type LeaseMode, clearedSessionCookie, sessionCookie, sessionFromCookie } from './auth'
 import { type DashboardEvents, SIGNED_IN_NOTE } from './events'
@@ -50,14 +51,22 @@ function json(status: number, body: unknown): Response {
 }
 
 // Read on the first request rather than at load: a checkout (and a test run) may build the app after
-// this module loaded. An empty list is read again, so a build made after the daemon started is served.
+// this module loaded. A name that is not in the list makes it read again, so a build made after the
+// daemon started is served too: Vite gives every build new hashed names, and a list read once would
+// answer 404 for all of them until the daemon restarted.
 let builtAssets: ReadonlySet<string> | null = null
 
-function assetNames(assets: EmbeddedAssets | null): ReadonlySet<string> {
-  if (assets !== null) return new Set(assets.dashboardNames().filter((name) => ASSET_NAME.test(name)))
-  if (builtAssets === null || builtAssets.size === 0) builtAssets = listAssets()
-  return builtAssets
+/** Whether `name` is one of the app's built files. In a checkout the folder is listed again on a miss; a release holds its files in the program. */
+function isAsset(name: string, assets: EmbeddedAssets | null, list: () => ReadonlySet<string> = listAssets): boolean {
+  if (assets !== null) return ASSET_NAME.test(name) && assets.dashboardNames().includes(name)
+  // Only a name shaped like a built file is worth a listing, so a scan of made-up paths reads no folder.
+  if (!ASSET_NAME.test(name)) return false
+  if (builtAssets === null || !builtAssets.has(name)) builtAssets = list()
+  return builtAssets.has(name)
 }
+
+/** Test seams for the list of built files. */
+export const assetListForTest = { isAsset, forget: (): void => void (builtAssets = null) }
 
 function dashboardBlob(name: string, assets: EmbeddedAssets | null): Blob | null {
   if (!safeDashboardName(name)) return null
@@ -70,7 +79,8 @@ function file(name: string, assets: EmbeddedAssets | null): Response {
   const blob = dashboardBlob(name, assets)
   if (blob === null) return json(404, { error: assets === null ? NOT_BUILT : 'not found' })
   const type = CONTENT_TYPES[name.slice(name.lastIndexOf('.') + 1)] ?? 'application/octet-stream'
-  return new Response(blob, { status: 200, headers: { 'content-type': type } })
+  // A built file's name carries the hash of its content, so a browser may keep it: a changed file has a new name.
+  return new Response(blob, { status: 200, headers: { 'content-type': type, ...(ASSET_NAME.test(name) ? { 'cache-control': IMMUTABLE_ASSET_CACHE } : {}) } })
 }
 
 /** The log's newest part only: a daemon that ran for months writes far more than anyone reads. */
@@ -84,8 +94,29 @@ async function daemonLog(path: string | undefined): Promise<Response> {
   return new Response(log.slice(start), { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8', 'content-disposition': 'attachment; filename="kinfold-daemon.log"' } })
 }
 
+const METHOD_NOT_ALLOWED = (): Response => json(405, { error: 'method not allowed' })
+
 function onlyGet(request: Request, answer: () => Response): Response {
-  return request.method === 'GET' ? answer() : json(405, { error: 'method not allowed' })
+  return request.method === 'GET' ? answer() : METHOD_NOT_ALLOWED()
+}
+
+function onlyPost(request: Request, answer: () => Response | Promise<Response>): Response | Promise<Response> {
+  return request.method === 'POST' ? answer() : METHOD_NOT_ALLOWED()
+}
+
+/** A sign-in asked for by anything but this dashboard's own page is refused; `step` names the route in the log. */
+function refusedOrigin(request: Request, deps: DashboardDeps, step: string): Response | null {
+  if (isOwnPageRequest(request, deps.port)) return null
+  deps.log(`dashboard ${step} refused reason=origin`)
+  return json(403, { error: 'forbidden origin' })
+}
+
+/** The one end of both sign-in routes: the log line, the activity note, the hook and the session cookie. */
+function signedIn(secret: string, deps: DashboardDeps): Response {
+  deps.log('dashboard session created')
+  deps.events.note(SIGNED_IN_NOTE)
+  deps.onSignIn?.()
+  return new Response(null, { status: 204, headers: { 'set-cookie': sessionCookie(secret) } })
 }
 
 export function parseCodeBody(body: unknown): Parsed<string> {
@@ -146,11 +177,8 @@ function closePrinted(request: Request, deps: DashboardDeps): Response {
 
 /** The code from the login link becomes a session cookie; a code works once, inside 60 s. */
 async function createSession(request: Request, deps: DashboardDeps): Promise<Response> {
-  if (request.method !== 'POST') return json(405, { error: 'method not allowed' })
-  if (!isOwnPageRequest(request, deps.port)) {
-    deps.log('dashboard session refused reason=origin')
-    return json(403, { error: 'forbidden origin' })
-  }
+  const refused = refusedOrigin(request, deps, 'session')
+  if (refused !== null) return refused
   const body = await deps.readBody()
   const code = body.ok ? parseCodeBody(body.value) : body
   if (!code.ok) return json(400, { error: code.error })
@@ -159,10 +187,7 @@ async function createSession(request: Request, deps: DashboardDeps): Promise<Res
     deps.log('dashboard session refused reason=code')
     return json(401, { error: 'this login link is wrong, used or expired; run `kinfold dashboard` again' })
   }
-  deps.log('dashboard session created')
-  deps.events.note(SIGNED_IN_NOTE)
-  deps.onSignIn?.()
-  return new Response(null, { status: 204, headers: { 'set-cookie': sessionCookie(secret) } })
+  return signedIn(secret, deps)
 }
 
 function logout(request: Request, deps: DashboardDeps): Response {
@@ -214,11 +239,8 @@ async function offer(request: Request, deps: DashboardDeps): Promise<Response> {
  * once, so a second tab or a late claim gets nothing.
  */
 async function claim(request: Request, deps: DashboardDeps): Promise<Response> {
-  if (request.method !== 'POST') return json(405, { error: 'method not allowed' })
-  if (!isOwnPageRequest(request, deps.port)) {
-    deps.log('dashboard claim refused reason=origin')
-    return json(403, { error: 'forbidden origin' })
-  }
+  const refused = refusedOrigin(request, deps, 'claim')
+  if (refused !== null) return refused
   const body = await deps.readBody()
   const claimSecret = body.ok ? parseClaimBody(body.value) : body
   const secret = claimSecret.ok ? deps.auth.claimSignIn(claimSecret.value) : null
@@ -226,10 +248,7 @@ async function claim(request: Request, deps: DashboardDeps): Promise<Response> {
     deps.log(`dashboard claim refused reason=${claimSecret.ok ? 'secret' : 'body'}`)
     return json(401, { error: 'this sign-in is wrong, used or expired; run `kinfold dashboard` in a terminal' })
   }
-  deps.log('dashboard session created')
-  deps.events.note(SIGNED_IN_NOTE)
-  deps.onSignIn?.()
-  return new Response(null, { status: 204, headers: { 'set-cookie': sessionCookie(secret) } })
+  return signedIn(secret, deps)
 }
 
 /** A code only under a live lease: without one the dashboard is closed. */
@@ -253,8 +272,8 @@ export async function dashboardRoute(request: Request, path: string, deps: Dashb
   if (path === '/dashboard/state') return onlyGet(request, () => new Response(null, { status: 204 }))
   if (path === '/dashboard/login-code') return issueCode(request, deps)
   if (path === '/dashboard/offer') return offer(request, deps)
-  if (path === '/dashboard/claim') return claim(request, deps)
-  if (path === '/dashboard/session') return createSession(request, deps)
+  if (path === '/dashboard/claim') return onlyPost(request, () => claim(request, deps))
+  if (path === '/dashboard/session') return onlyPost(request, () => createSession(request, deps))
   if (path === '/dashboard/logout') return logout(request, deps)
   if (path === '/dashboard/device-activity') return onlyGet(request, () => json(200, { rows: deps.deviceActivity?.() ?? [] }))
   if (path === '/dashboard/daemon-log') return request.method === 'GET' ? daemonLog(deps.daemonLogPath) : json(405, { error: 'method not allowed' })
@@ -263,5 +282,5 @@ export async function dashboardRoute(request: Request, path: string, deps: Dashb
   if (path === '/dashboard/') return onlyGet(request, () => file('index.html', assets))
   if (!path.startsWith(ASSET_PREFIX)) return null
   const name = path.slice(ASSET_PREFIX.length)
-  return assetNames(assets).has(name) ? onlyGet(request, () => file(name, assets)) : null
+  return isAsset(name, assets) ? onlyGet(request, () => file(name, assets)) : null
 }

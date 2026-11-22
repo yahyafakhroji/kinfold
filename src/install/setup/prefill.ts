@@ -8,14 +8,15 @@
 
 import { existsSync, realpathSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { DEFAULT_PORT } from '../../daemon/daemon'
+import { DEFAULT_PORT } from '../../daemon/port'
 import { OBSERVER_PROVIDERS } from '../../observer/types'
 import { dbKeyStoreOf } from '../../sqlite/keys'
 import { fileState, openStoreFile } from '../../sqlite/open'
 import { DB_FILE } from '../../store/data-dir'
 import { listSafety } from '../../store/observer-safety-store'
 import { rootCommitOf } from '../../store/project-key'
-import { type RootFor, planRootMerges } from '../../store/project-merge'
+import type { Database } from '../../sqlite/types'
+import { type RootFor, planRootMerges, unrootedFolders } from '../../store/project-merge'
 import { type ObserverSettingsInput, listObserverSettings } from '../../store/observer-settings-store'
 import type { WiringState } from '../claude-hooks'
 import { getObserverSettings, readDaemonInfo } from '../daemon-client'
@@ -131,14 +132,26 @@ export interface StoreState {
 
 /** The store's rows and failed safety providers in one read-only open, with the key store's key; throws when the key or the file will not open. */
 export function readStoreState(env: InstallEnv, dataDir: string): StoreState {
+  return withReadonlyStore(env, dataDir, (db) => {
+    const failed = new Set(listSafety(db).filter((row) => row.status === 'failed').map((row) => row.provider))
+    return { rows: listObserverSettings(db), failedProviders: [...failed] }
+  })
+}
+
+/**
+ * One read-only open of the store under `dataDir`, with the key store's key,
+ * closed when `read` returns. The one place the installer decides how to open
+ * a store it does not own: read-only, and with a wait only on the live file,
+ * since a daemon starting up may hold the WAL briefly while it recovers it.
+ * Throws when the key or the file will not open.
+ */
+function withReadonlyStore<Result>(env: InstallEnv, dataDir: string, read: (db: Database) => Result): Result {
   const keys = dbKeyStoreOf(keyStoreOf({ ...env, dataDir }))
   const path = join(dataDir, DB_FILE)
   const target = storeTarget(path)
-  // A daemon starting up may hold the WAL briefly while it recovers it, so the wait is set before the key and the first read.
   const db = openStoreFile(path, { readonly: true, target, keys, ...(target === path ? { busyTimeoutMs: READ_BUSY_TIMEOUT_MS } : {}) })
   try {
-    const failed = new Set(listSafety(db).filter((row) => row.status === 'failed').map((row) => row.provider))
-    return { rows: listObserverSettings(db), failedProviders: [...failed] }
+    return read(db)
   } finally {
     db.close()
   }
@@ -253,18 +266,19 @@ export function savedObserversForYes(state: SetupState, hosts: readonly InstallH
  * install output says it before it happens, with the command that undoes it.
  * Read-only; empty for a new store, and when the store or git cannot say.
  */
+/** The most folders the install looks up for its merge preview. */
+export const MERGE_PREVIEW_FOLDERS = 40
+
 export function mergePlanLines(env: InstallEnv, dataDir: string, rootFor: RootFor = (cwd) => rootCommitOfOrNull(cwd)): string[] {
   try {
-    const path = join(dataDir, DB_FILE)
-    if (fileState(path) === 'new') return []
-    const keys = dbKeyStoreOf(keyStoreOf({ ...env, dataDir }))
-    const target = storeTarget(path)
-    const db = openStoreFile(path, { readonly: true, target, keys, ...(target === path ? { busyTimeoutMs: READ_BUSY_TIMEOUT_MS } : {}) })
-    try {
+    if (fileState(join(dataDir, DB_FILE)) === 'new') return []
+    return withReadonlyStore(env, dataDir, (db) => {
+      // Each folder is asked through a blocking child process (up to half a second when it hangs), with nothing drawn
+      // meanwhile. Past a few dozen, the preview is left to the daemon, which asks without blocking and logs each merge.
+      const folders = unrootedFolders(db).length
+      if (folders > MERGE_PREVIEW_FOLDERS) return [`project: ${folders} projects have no repo root recorded yet; the daemon checks them when it starts, and kinfold status names any it merges`]
       return planRootMerges(db, rootFor).map((merge) => `project: ${merge.from} will merge into ${merge.into} (same repo); kinfold project split ${merge.fromKey} undoes it`)
-    } finally {
-      db.close()
-    }
+    })
   } catch {
     return []
   }

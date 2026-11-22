@@ -8,6 +8,7 @@
 import { existsSync } from 'node:fs'
 import { isIP } from 'node:net'
 import { currentPlatform } from '../platform/platform'
+import { isRecord } from '../contract/event'
 
 export interface TailscaleIdentity {
   /** The owning user's numeric id, as a string. */
@@ -100,8 +101,6 @@ export function isLoopbackAddress(address: string): boolean {
 export function sameOwner(hub: TailscaleIdentity, node: TailscaleIdentity): boolean {
   return hub.tags.length === 0 && node.tags.length === 0 && node.userId === hub.userId
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 
 function parseJson(text: string | null): Record<string, unknown> | null {
   if (text === null) return null

@@ -143,3 +143,18 @@ test('a project the hub merged into another is imported under the key it merged 
   expect(importChunk(hub.db, chunk, 'dev-a', T0, PREPARE)).toMatchObject({ status: 200, body: { sessions: 1 } })
   expect(hub.db.query("SELECT project_key AS key FROM sessions WHERE host_session_id = 'mine'").get()).toEqual({ key: 'github.com/me/kinfold' })
 })
+
+test('an observation cannot name another device\'s session the chunk does not list, and one with no such session still imports', () => {
+  upsertProject(hub.db, { key: 'dev-b:/w/secret', kind: 'path', displayName: 'secret' }, T0)
+  const theirs = upsertSession(hub.db, { host: 'claude-code', hostSessionId: 'their-session', projectKey: 'dev-b:/w/secret', cwd: '/w/secret', occurredAt: T0 })
+  const observation = (title: string, session: { host: string; hostSessionId: string } | null) => ({
+    session, host: 'claude-code', promptNumber: 1, type: 'discovery', title, narrative: 'n', facts: '[]', files: '[]', evidence: 'tool-verified',
+    sourceEventIds: '[]', observerModel: 'm', contentHash: `hash-${title}`, occurredAt: T0, createdAt: T0,
+  })
+  const chunk = { project: { key: 'dev-a:/x', kind: 'path', displayName: 'x' }, sessions: [],
+    observations: [observation('ATTACHED', { host: 'claude-code', hostSessionId: 'their-session' }), observation('loose', null), observation('unknown session', { host: 'claude-code', hostSessionId: 'never-seen' })] }
+  expect(importChunk(hub.db, chunk, 'dev-a', T0, PREPARE)).toEqual({ status: 200, body: { sessions: 0, prompts: 0, summaries: 0, observations: 2, skippedSessions: 1 } })
+  expect(hub.db.query('SELECT COUNT(*) AS n FROM observations WHERE session_id = $id').get({ id: theirs })).toEqual({ n: 0 })
+  expect(hub.db.query("SELECT COUNT(*) AS n FROM observations WHERE title = 'ATTACHED'").get()).toEqual({ n: 0 })
+  expect(hub.db.query('SELECT title, session_id AS session FROM observations ORDER BY title').all()).toEqual([{ title: 'loose', session: null }, { title: 'unknown session', session: null }])
+})

@@ -6,7 +6,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { envName } from '../../env-names'
 import { type InstallEnv, installPaths } from '../env'
 import { bootoutArgv, bootstrapArgv, isAgentLoaded, plistContent } from '../launch-agent'
-import { HEALTH_WAIT_MS, runLaunchctl } from '../plan'
+import { parsePortValue } from '../../daemon/port'
+import { COMMAND_TIMEOUT_MS, HEALTH_WAIT_MS, runLaunchctl } from '../plan'
 import type { ServiceControl, ServiceStep } from './control'
 
 export const LSOF = '/usr/sbin/lsof'
@@ -15,7 +16,6 @@ export const PS = '/bin/ps'
 export const STOP_RETRY_MS = 250
 export const STOP_ATTEMPTS = Math.ceil(HEALTH_WAIT_MS / STOP_RETRY_MS)
 const PROBE_TIMEOUT_MS = 5_000
-const MAX_PORT = 65_535
 
 const XML_ENTITIES: Record<string, string> = { lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' }
 
@@ -59,7 +59,7 @@ export class LaunchAgentService implements ServiceControl {
   }
 
   async stop(): Promise<void> {
-    const { exitCode } = await this.env.run({ argv: bootoutArgv(this.env.uid), timeoutMs: 15_000 })
+    const { exitCode } = await this.env.run({ argv: bootoutArgv(this.env.uid), timeoutMs: COMMAND_TIMEOUT_MS })
     for (let attempt = 1; await this.isRunning(); attempt += 1) {
       if (attempt >= STOP_ATTEMPTS) throw new Error(`the ${this.label} is still loaded after bootout (exit ${exitCode})`)
       await this.env.sleep(STOP_RETRY_MS)
@@ -80,10 +80,7 @@ export class LaunchAgentService implements ServiceControl {
   }
 
   configuredPort(): number | null {
-    const value = this.readEnvironment()?.get(envName('PORT'))
-    if (value === undefined || !/^\d+$/.test(value)) return null
-    const port = Number(value)
-    return port >= 1 && port <= MAX_PORT ? port : null
+    return parsePortValue(this.readEnvironment()?.get(envName('PORT')))
   }
 
   configPath(): string {

@@ -6,7 +6,7 @@
 
 import { existsSync, readFileSync, readdirSync, readlinkSync, realpathSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
-import { DEFAULT_PORT } from '../../daemon/daemon'
+import { DEFAULT_PORT, MAX_PORT, parsePortValue } from '../../daemon/port'
 import { envName } from '../../env-names'
 import { entryCommand } from '../entry'
 import type { CommandResult, InstallEnv } from '../env'
@@ -17,7 +17,6 @@ import { STOP_RETRY_MS } from './launch-agent-service'
 
 export const SYSTEMD_UNIT = 'kinfold.service'
 const LABEL = 'systemd user service'
-const MAX_PORT = 65_535
 /** The lowest port the installer accepts; a unit never carries one it would refuse. */
 const MIN_INSTALL_PORT = 1024
 // A newline would end the assignment early and let the rest of the value
@@ -370,10 +369,7 @@ export class SystemdUserService implements ServiceControl {
   }
 
   configuredPort(): number | null {
-    const value = this.readEnvironment()?.get(envName('PORT'))
-    if (value === undefined || !/^\d+$/.test(value)) return null
-    const port = Number(value)
-    return port >= 1 && port <= MAX_PORT ? port : null
+    return parsePortValue(this.readEnvironment()?.get(envName('PORT')))
   }
 
   async fileHolders(path: string): Promise<string> {

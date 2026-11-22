@@ -53,6 +53,9 @@ test('uninstall removes only our hooks, the shim and the LaunchAgent; the data d
   expect(existsSync(w.dataDir)).toBe(true)
   expect(w.keychain.has('openrouter')).toBe(true)
   expect(w.out).toContain('kept keychain entry openrouter; remove it with: security delete-generic-password -s kinfold -a openrouter  (or rerun with --remove-credentials)')
+  // Only the key that was stored is named: no delete command for an entry that was never there.
+  expect(w.out.filter((line) => line.endsWith('(or rerun with --remove-credentials)'))).toHaveLength(1)
+  for (const never of ['anthropic', 'openai', 'gemini', 'dashscope', 'openai-compatible']) expect(w.out.some((line) => line.includes(`-a ${never}`))).toBe(false)
   expect(w.out.some((line) => line.startsWith(`kept the data dir ${w.dataDir}`))).toBe(true)
 })
 

@@ -14,6 +14,7 @@ import { createInvite } from './invites'
 import { newKeyPair } from './keys'
 import { type Relay, type RelayDeps, VIEW_TIMEOUT_MS, createRelay, failureReason } from './relay'
 import type { TailscaleIdentity } from './tailscale'
+import { listEntries } from '../spool/spool'
 
 const hubKey = newKeyPair()
 const me: TailscaleIdentity = { userId: '42', loginName: 'me', nodeId: 'nME', nodeName: 'me', tags: [] }
@@ -249,4 +250,33 @@ test('the device id in scoped keys is this device\'s', async () => {
   answers['/central/capture'] = () => ({ status: 200, body: { stored: 1, duplicates: 0 } })
   await relay.forward()
   expect(deviceId()).toMatch(/^dev-/)
+})
+
+test('a backlog is listed once and looked at once more for arrivals, sent in order, and what did not fit one request leads the next', async () => {
+  let listings = 0
+  const counting = createRelay({ ...relayDeps(), batchBytes: 3_000, listSpool: (dir) => ((listings += 1), listEntries(dir)) })
+  for (let index = 0; index < 12; index += 1) spool({ kind: 'user_prompt', promptText: `prompt ${index} ${'x'.repeat(600)}` })
+  answers['/central/capture'] = (body) => ({ status: 200, body: { stored: body.events.length, duplicates: 0, rejected: [] } })
+  expect(await counting.forward()).toEqual({ sent: 12, failure: null })
+  const sent = calls.filter((call) => call.path === '/central/capture').flatMap((call) => call.body.events.map((item: { event: { promptText: string } }) => item.event.promptText.split(' ')[1]))
+  expect(sent).toEqual(Array.from({ length: 12 }, (_, index) => String(index)))
+  expect(calls.filter((call) => call.path === '/central/capture').length).toBeGreaterThan(2)
+  // One listing for the twelve, whatever the number of requests, and one more at the end that found nothing new.
+  expect(listings).toBe(2)
+  expect(spooled()).toEqual([])
+})
+
+test('an event spooled while a forward is under way goes out with that forward', async () => {
+  spool({ kind: 'user_prompt', promptText: 'first' })
+  let late = false
+  answers['/central/capture'] = (body) => {
+    // Captured while the hub is answering: its nudge would find this forward already running.
+    if (!late) {
+      late = true
+      spool({ kind: 'user_prompt', promptText: 'second' })
+    }
+    return { status: 200, body: { stored: body.events.length, duplicates: 0, rejected: [] } }
+  }
+  expect(await relay.forward()).toEqual({ sent: 2, failure: null })
+  expect(spooled()).toEqual([])
 })

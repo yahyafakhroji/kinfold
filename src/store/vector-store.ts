@@ -100,6 +100,17 @@ export function embeddingInputs(db: Database, space: VectorSpace, limit: number)
   return rows.map((row) => ({ id: row.id, contentHash: row.contentHash, text: embeddingText(row) }))
 }
 
+/**
+ * Whether more than `limit` observations still wait for a vector in this
+ * space. The read stops at limit + 1 rows, so asking it on every upkeep slice
+ * of a space build costs the same on a large store as on a small one; counting
+ * the whole backlog, and the whole vector table beside it, did not.
+ */
+export function backlogExceeds(db: Database, space: VectorSpace, limit: number): boolean {
+  const waiting = db.query<{ n: number }, Record<string, string | number>>(`SELECT count(*) AS n FROM (${BACKLOG_IDS} LIMIT $probe)`).get({ ...space, probe: limit + 1 })?.n ?? 0
+  return waiting > limit
+}
+
 export function vectorCounts(db: Database, space: VectorSpace): VectorCounts {
   const indexed = db.query<{ n: number }, Record<string, string | number>>(INDEXED_COUNT_SQL).get({ ...space })?.n ?? 0
   const pending = db.query<{ n: number }, Record<string, string | number>>(PENDING_COUNT_SQL).get({ ...space })?.n ?? 0

@@ -49,7 +49,7 @@ import type { SafetyGate } from '../observer/safety-gate'
 import { type CredentialProvider, NO_CREDENTIALS } from '../secrets/credentials'
 import { getObserverSession, recoverInterrupted } from '../store/observer-store'
 import { type RetryTarget, resetFailedEvents } from '../store/observer-reset'
-import { DEFAULT_RESET_CHECK_MS, checkFailedResets } from './failed-reset'
+import { DEFAULT_RESET_CHECK_MS, type ResetMemo, checkFailedResets, createResetMemo } from './failed-reset'
 import { type HmacKeyState, ROTATION_TICK_MS, createHmacKeys } from './hmac-rotation'
 import { createSpoolCursor } from '../spool/spool'
 import { type DrainOptions, type DrainResult, drainBatch } from './ingest'
@@ -116,8 +116,11 @@ import { type StoreReader, inlineStoreReader, readerOrInline, startStoreReader }
 import { type Checkpointer, WAL_TRUNCATE_BYTES, startCheckpointer } from '../workers/checkpointer'
 import { type SpaceManager, createSpaceManager } from '../vectors/space-manager'
 import { LOCAL_MODEL_ID } from '../vectors/local-model'
+import { errorMessage, errorName } from '../errors'
+import { isRecord } from '../contract/event'
+import { DEFAULT_PORT } from './port'
 
-export const DEFAULT_PORT = 37_811
+export { DEFAULT_PORT }
 export const FALLBACK_DRAIN_MS = 2_000
 
 export interface DaemonOptions {
@@ -184,6 +187,12 @@ export interface DaemonVectorOptions {
   /** Built from the store's embedding settings at each core start (main.ts); wins over embedder. */
   embedders?: (db: Database) => EmbedderSet
   tickMs?: number
+  /**
+   * Whether timed upkeep may run yet. The daemon holds it back until its
+   * checkpoint worker has settled (on, or known to be off); tests pass their
+   * own. Absent: it runs from the first tick.
+   */
+  upkeepReady?: () => boolean
 }
 
 interface Vectors {
@@ -262,15 +271,19 @@ function startVectors(store: Store, dataDir: string, dbKeys: DbKeyStore, options
   const inline = inlineVectorQueries(db)
   const queries = support.ok && all.length > 0
     ? workerOrInline(startVectorWorker({
-      dbPath: store.path, dataDir, key: dbKeys.read(), libraryOverride: readEnv(process.env, 'SQLITE3MC_LIB') ?? null, cacheKib: DAEMON_CACHE_KIB,
+      dbPath: store.path, dataDir, key: dbKeys.read(), libraryOverride: sqliteLibOverride(), cacheKib: DAEMON_CACHE_KIB,
     }), inline, log)
     : inline
   const indexer = embedder === null ? null : createVectorIndexer({
     db, embedder, log, onWritten: (rows) => spaces.written(rows),
     ...(embedder.model === LOCAL_MODEL_ID ? { maxBatchesPerTick: LOCAL_BATCHES_PER_TICK } : {}),
   })
+  // Until the checkpoint worker has settled the daemon's own connection checkpoints: a commit past 1,000 WAL pages
+  // copies them into the store and flushes it, on this thread. Upkeep is what writes that much in a burst (a retired
+  // space's rows go 200 at a time, megabytes per slice), and it can wait a moment: the indexer's turn still runs.
+  const upkeepReady = options?.upkeepReady ?? ((): boolean => true)
   const timer = indexer === null && all.length === 0 ? null : setInterval(() => {
-    void upkeep.run().then(() => watch.step('vectors indexer turn', () => indexer?.tick()))
+    void (upkeepReady() ? upkeep.run() : Promise.resolve()).then(() => watch.step('vectors indexer turn', () => indexer?.tick()))
   }, options?.tickMs ?? DEFAULT_INDEX_TICK_MS)
   watch.step('vectors indexer turn', () => indexer?.tick())
   const search = createSemanticSearch({ db, embedder, embedderFor: () => searchEmbedder(spaces, all, set.reason), support, queries })
@@ -373,11 +386,10 @@ export function parsePort(value: string | undefined): number {
   return port
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
 /** Counts and spool file names only: quarantine reasons can quote file content. */
+/** The test-only path to a sqlite3mc build (KINFOLD_SQLITE3MC_LIB), for every connection and worker this daemon opens. */
+const sqliteLibOverride = (): string | null => readEnv(process.env, 'SQLITE3MC_LIB') ?? null
+
 export function describeDrain(result: DrainResult): string | null {
   if (result.read === 0 && result.quarantined.length === 0 && result.error === undefined) return null
   const counts = `drained read=${result.read} inserted=${result.inserted} duplicates=${result.duplicates} quarantined=${result.quarantined.length}`
@@ -414,9 +426,9 @@ function traceObserver(db: Database, trace: TraceBuffer, sessionId: number, outc
 }
 
 /** Settings or credential changes send exhausted failed events back to pending, then the observer looks again. */
-function resetCheck(db: Database, options: DaemonObserverOptions, keys: HmacKeyState, observer: ObserverScheduler, log: (line: string) => void): void {
+function resetCheck(db: Database, options: DaemonObserverOptions, keys: HmacKeyState, observer: ObserverScheduler, memo: ResetMemo, log: (line: string) => void): void {
   try {
-    const outcomes = checkFailedResets({ db, credentials: options.credentials ?? NO_CREDENTIALS, fingerprintKey: keys.fingerprint(), log })
+    const outcomes = checkFailedResets({ db, credentials: options.credentials ?? NO_CREDENTIALS, fingerprintKey: keys.fingerprint(), memo, log })
     if (outcomes.some((outcome) => outcome.events > 0)) observer.tick()
   } catch (error: unknown) {
     log(`observer reset check failed: ${errorMessage(error)}`)
@@ -452,7 +464,8 @@ function startObserver(db: Database, options: DaemonObserverOptions, keys: HmacK
     ...(options.schedule !== undefined ? { config: options.schedule } : {}),
     log,
   })
-  const check = (): void => watch.step('observer reset check', () => resetCheck(db, options, keys, observer, log))
+  const resetMemo = createResetMemo()
+  const check = (): void => watch.step('observer reset check', () => resetCheck(db, options, keys, observer, resetMemo, log))
   const tick = (): void => void watch.step('observer tick', () => observer.tick())
   const timers = [
     setInterval(tick, options.tickMs ?? DEFAULT_OBSERVER_TICK_MS),
@@ -508,10 +521,21 @@ function daemonReads(dataDir: string, keys: DbKeyStore, projectKeyFor: ReadRoute
   }
 }
 
-function removeOwnInfoFile(path: string): void {
-  if (!existsSync(path)) return
-  const info: unknown = JSON.parse(readFileSync(path, 'utf8'))
-  if (typeof info === 'object' && info !== null && 'pid' in info && info.pid === process.pid) rmSync(path, { force: true })
+/**
+ * The last step of a stop: daemon.json goes when it still names this process.
+ * A file that cannot be read or is not JSON (cut short, or being rewritten by
+ * the daemon that replaced this one) is left alone and logged: everything else
+ * has shut down by now, and a throw here would turn a clean stop into exit 1,
+ * which a service manager reads as a crash.
+ */
+export function removeOwnInfoFile(path: string, log: (line: string) => void, pid: number = process.pid): void {
+  try {
+    if (!existsSync(path)) return
+    const info: unknown = JSON.parse(readFileSync(path, 'utf8'))
+    if (isRecord(info) && info.pid === pid) rmSync(path, { force: true })
+  } catch (error: unknown) {
+    log(`daemon.json left in place: ${errorName(error)}`)
+  }
 }
 
 /**
@@ -577,7 +601,7 @@ export interface Readers {
  */
 function startReaders(store: Store, dataDir: string, dbKeys: DbKeyStore, log: (line: string) => void): Readers {
   const inline = inlineStoreReader(store.db, store.path)
-  const start = (cacheKib: number) => () => startStoreReader({ dbPath: store.path, dataDir, key: dbKeys.read(), libraryOverride: readEnv(process.env, 'SQLITE3MC_LIB') ?? null, cacheKib })
+  const start = (cacheKib: number) => () => startStoreReader({ dbPath: store.path, dataDir, key: dbKeys.read(), libraryOverride: sqliteLibOverride(), cacheKib })
   const warm = (reader: StoreReader): Promise<unknown> => reader.run('recallWarm', {})
   return {
     recall: readerOrInline('recall', start(RECALL_CACHE_KIB), inline, log, { eager: true, warm }),
@@ -587,6 +611,8 @@ function startReaders(store: Store, dataDir: string, dbKeys: DbKeyStore, log: (l
 }
 
 interface Checkpoints {
+  /** Settles once the worker is on, or is known not to start: from then on it is decided which connection checkpoints. */
+  settled: Promise<void>
   hold(): Promise<() => void>
   close(): Promise<void>
 }
@@ -608,7 +634,7 @@ function startCheckpoints(store: Store, dbKeys: DbKeyStore, log: (line: string) 
     if (isOpen()) store.db.run(`PRAGMA wal_autocheckpoint = ${DEFAULT_AUTOCHECKPOINT_PAGES}`)
   }
   const ready = startCheckpointer({
-    dbPath: store.path, key: dbKeys.read(), libraryOverride: readEnv(process.env, 'SQLITE3MC_LIB') ?? null, log,
+    dbPath: store.path, key: dbKeys.read(), libraryOverride: sqliteLibOverride(), log,
     onStopped: () => {
       worker = null
       selfCheckpoint()
@@ -622,6 +648,7 @@ function startCheckpoints(store: Store, dbKeys: DbKeyStore, log: (line: string) 
     log('checkpoint worker on; the daemon connection no longer checkpoints')
   }).catch((error: unknown) => log(`checkpoint worker off (${error instanceof Error ? error.message.slice(0, 120) : 'it failed to start'}); the daemon connection checkpoints`))
   return {
+    settled: ready,
     hold: async () => {
       await ready
       return worker?.hold() ?? (() => {})
@@ -674,6 +701,8 @@ function warnIfPlaintextBesideKey(path: string, log: (line: string) => void, key
 
 export function startDaemon(options: DaemonOptions): RunningDaemon {
   const dataDir = ensureDataDir(options.dataDir)
+  /** The key store this daemon uses: the injected one (null is a choice: none), else the platform's. */
+  const keyStore = () => (options.keyStore !== undefined ? options.keyStore : defaultKeyStore(dataDir))
   const log = options.log ?? ((line: string) => process.stderr.write(logLine(line)))
   const version = options.version ?? VERSION
   const envVars = options.updateCheck?.envVars ?? (() => process.env)
@@ -725,7 +754,10 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     store.db.run(`PRAGMA cache_size = -${DAEMON_CACHE_KIB}`)
     warnIfPlaintextBesideKey(store.path, log, dbKeys)
     // A device's recall queries are embedded on the hub, and its own store is kept as it was: nothing here touches its vectors.
-    const vectors = relay === null ? watch.step('vectors start', () => startVectors(store, dataDir, dbKeys, options.vectors, log, watch)) : deviceVectors(store.db)
+    // Set once this core's checkpoint worker has settled, a few lines on; timed upkeep waits for it.
+    let checkpointsSettled = false
+    const vectorOptions = options.vectors === undefined ? undefined : { ...options.vectors, upkeepReady: options.vectors.upkeepReady ?? ((): boolean => checkpointsSettled) }
+    const vectors = relay === null ? watch.step('vectors start', () => startVectors(store, dataDir, dbKeys, vectorOptions, log, watch)) : deviceVectors(store.db)
     // A read waits on this lookup, as a prompt does: the key alone, never the history walk.
     const reads = daemonReads(dataDir, dbKeys, projectKeyFor.keyOnly, vectors)
     const drainOptions = (): DrainOptions => ({ spoolDir: join(dataDir, SPOOL_DIR), ...hmacKeys.marker(), projectKeyFor })
@@ -780,6 +812,9 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     // Off the start path: one git call per project folder; a hub can only read its own folders, devices send theirs.
     let storeOpen = true
     const checkpoints = relay !== null ? null : startCheckpoints(store, dbKeys, log, () => storeOpen)
+    void checkpoints?.settled.then(() => {
+      checkpointsSettled = true
+    })
     const backfill = relay !== null ? null : setTimeout(() => void watch.step('repo merge', () => mergeSameRepos(store.db, backfillGit, log, () => storeOpen)), 0)
     const exclusive = exclusiveOverAll(vectors.queries, readers, () => checkpoints?.hold() ?? Promise.resolve(() => {}))
     // Bound once the data handlers exist, a few lines on; a retention run cannot come before that.
@@ -810,7 +845,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       return { ...answer, ...noticeField(notice) }
     }
     sizeChanged = () => data.sizeChanged?.()
-    const data = dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log, holdoutHosts: HOLDOUT_HOSTS, onDisplay: publishDisplay, reports: readers.reports })
+    const data = dataHandlers({ db: store.db, dbPath: store.path, markerKey: hmacKeys.marker, now: Date.now, log, holdoutHosts: HOLDOUT_HOSTS, onDisplay: publishDisplay, reports: readers.reports, onRemoved: () => routes.memory.views?.invalidate() })
     // Measured once the start has settled, so `kinfold size` and the Data page find a report instead of waiting on dbstat.
     // The dashboard's kept reports are measured then too, so its first page finds them ready.
     const sizeWarm = relay !== null ? null : setTimeout(() => watch.step('size warm', () => {
@@ -826,7 +861,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       context: relay === null ? context : deviceContext(relay),
       retryFailed: (target) => retryFailed(store.db, target, observer, log),
       observerSettings: settingsHandlers(store.db, Date.now, log, () => observing?.safety?.probeFailures() ?? [],
-        keyStoreToken(options.keyStore !== undefined ? options.keyStore : defaultKeyStore(dataDir))),
+        keyStoreToken(keyStore())),
       data,
       exclusive,
       memory: memoryHandlers(store.db, log, readers.reports, { deviceNames: () => pairedDeviceNames(dataDir, log) }),
@@ -855,7 +890,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
       }
     }
     const snapshotFile = (dest: string): Promise<number> =>
-      snapshotInWorker({ dbPath: store.path, key: dbKeys.read(), dest, libraryOverride: readEnv(process.env, 'SQLITE3MC_LIB') ?? null }).catch((error: unknown) => {
+      snapshotInWorker({ dbPath: store.path, key: dbKeys.read(), dest, libraryOverride: sqliteLibOverride() }).catch((error: unknown) => {
         log(`backup snapshot worker off (${error instanceof Error ? error.message : 'it failed'}); copying on the daemon connection`)
         return snapshotInto(store.db, dest)
       })
@@ -948,7 +983,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     now: Date.now,
     log,
     snapshot: (dest) => core.snapshot(dest),
-    keyStore: () => (options.keyStore !== undefined ? options.keyStore : defaultKeyStore(dataDir)),
+    keyStore,
     restart,
     sleep: options.backup?.sleep ?? ((ms) => Bun.sleep(ms)),
     onEvent: (kind, detail) => core.activity({ kind, at: Date.now(), detail }),
@@ -960,10 +995,14 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
   const quietSince = (): number => (restarter.down() || restarter.inFlight() !== null ? updateNow() : lastEventAt)
 
   // Polled once a second by every watcher: an update state that cannot be read costs the line, never the rows.
+  /** The update the user is owed, as the banner and the watch line say it. `markShown` uses up a notice that is shown once. */
+  const bannerView = (markShown: boolean): { version: string; message: string } | null => {
+    const notice = bannerNotice(dataDir, version, envVars(), { capable: canAutoUpdate, now: updateNow(), ...stagePlace }, markShown)
+    return notice === null ? null : { version: notice.version, message: userMessage(notice) }
+  }
   const watchUpdate = (): { version: string; message: string } | null => {
     try {
-      const notice = bannerNotice(dataDir, version, envVars(), { capable: canAutoUpdate, now: updateNow(), ...stagePlace }, false)
-      return notice === null ? null : { version: notice.version, message: userMessage(notice) }
+      return bannerView(false)
     } catch {
       return null
     }
@@ -978,10 +1017,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     version,
     hmacMode: () => hmacKeys.mode(),
     update: {
-      banner: (markShown) => {
-        const notice = bannerNotice(dataDir, version, envVars(), { capable: canAutoUpdate, now: updateNow(), ...stagePlace }, markShown)
-        return notice === null ? null : { version: notice.version, message: userMessage(notice) }
-      },
+      banner: bannerView,
       auto: () => autoUpdateView(dataDir, version, envVars(), updateNow()),
       quietForMs: () => Math.max(0, updateNow() - quietSince()),
       setAuto: (enabled) => {
@@ -1099,7 +1135,7 @@ export function startDaemon(options: DaemonOptions): RunningDaemon {
     await server.stop()
     // A core a restore already closed, and could not replace, has nothing left to stop.
     if (!restarter.down()) await core.stop()
-    removeOwnInfoFile(infoPath)
+    removeOwnInfoFile(infoPath, log)
   }
   return {
     port: server.port,

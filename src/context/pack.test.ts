@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { FRAME_CLOSE, FRAME_OPEN, buildPack, formatAge } from './pack'
+import { shortAge } from './recall-line'
 import { isStatusNote } from './status-notes'
 import { type PackObservation, estimateTokens } from './types'
 
@@ -120,6 +121,8 @@ test('stored text cannot close the frame early or add lines', () => {
 
 test('ages read in minutes, hours, then days', () => {
   expect([formatAge(0), formatAge(5 * 60_000), formatAge(3 * HOUR), formatAge(50 * HOUR)]).toEqual(['1m', '5m', '3h', '2d'])
+  // The pack and the line a person sees share one formatter, at every boundary.
+  for (const ms of [-5, 0, 59_999, 60_000, 59 * 60_000 + 59_999, HOUR, 24 * HOUR - 1, 24 * HOUR, 400 * HOUR]) expect(formatAge(ms)).toBe(shortAge(1_000_000, 1_000_000 + ms))
 })
 
 test('a status note ranks below every lasting memory, whatever its evidence', () => {

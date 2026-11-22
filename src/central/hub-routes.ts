@@ -14,6 +14,7 @@ import type { ProjectKey } from '../store/project-key'
 import { type SemanticAnswer, type SemanticRequest, parseSemanticRequest } from '../vectors/search'
 import { MAX_BATCH_BYTES, type HubAnswer, type HubContext, type HubRoute } from './hub-server'
 import { parseDeviceProject } from './project-key'
+import { isRecord } from '../contract/event'
 
 /** What the hub's current store answers with; rebuilt when a restore replaces the store. */
 export interface CentralCore {
@@ -44,7 +45,6 @@ const MAX_KNOWN_KEYS = 1_000
 /** Far above any wait a hook or plugin has. */
 const MAX_BUDGET_MS = 10_000
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const bad = (error: string): HubAnswer => ({ status: 400, body: { error } })
 const NOT_FOUND: HubAnswer = { status: 404, body: { error: 'not found' } }
 

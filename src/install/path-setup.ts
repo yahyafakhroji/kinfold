@@ -245,7 +245,7 @@ function blockActions(env: InstallEnv, path: string, kind: BlockKind): Action[] 
   return [
     ...mkdirIfMissing(dirname(path)),
     ...backupIfFirst(env, path),
-    { kind: 'write', path: writeTarget(path), content: after, mode: modeOf(path), summary: `add the kinfold PATH block (${change})` },
+    { kind: 'write', path: writeTarget(path), content: after, before, mode: modeOf(path), summary: `add the kinfold PATH block (${change})` },
   ]
 }
 
@@ -258,7 +258,7 @@ function blockRemovalActions(env: InstallEnv, path: string): Action[] {
   if (after === before) return []
   return [
     ...backupIfFirst(env, path),
-    { kind: 'write', path: writeTarget(path), content: after, mode: modeOf(path), summary: `remove the kinfold PATH block (${lineCount(before)} -> ${lineCount(after)} lines)` },
+    { kind: 'write', path: writeTarget(path), content: after, before, mode: modeOf(path), summary: `remove the kinfold PATH block (${lineCount(before)} -> ${lineCount(after)} lines)` },
   ]
 }
 

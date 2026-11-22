@@ -17,6 +17,7 @@ import { autoUpdateSetting } from './enabled'
 import { updateLockHolder } from './lock'
 import { type UpdateState, readUpdateState } from './state'
 import { compareVersions, isPatchUpdate, parseVersion } from './version-order'
+import { errorName } from '../errors'
 
 type Env = Readonly<Record<string, string | undefined>>
 
@@ -136,14 +137,12 @@ function tickOnce(deps: AutoUpdateDeps, since: number): AutoUpdateHold | 'starte
   return decision.apply ? start(deps, decision.version, state.checkedAt) : decision.reason
 }
 
-const errorLabel = (error: unknown): string => (error instanceof Error ? error.name : 'error')
-
 /** One look at the saved state; returns what it did or why it held back. Never throws. */
 export function runAutoUpdateTick(deps: AutoUpdateDeps, since: number = 0): AutoUpdateHold | 'started' | 'failed' {
   try {
     return tickOnce(deps, since)
   } catch (error: unknown) {
-    deps.log(`auto-update failed (${errorLabel(error)})`)
+    deps.log(`auto-update failed (${errorName(error, 'error')})`)
     return 'failed'
   }
 }
@@ -175,7 +174,7 @@ export function createAutoUpdateTicker(deps: AutoUpdateDeps, since?: number): ()
       logged = null
       return result
     } catch (error: unknown) {
-      const label = errorLabel(error)
+      const label = errorName(error, 'error')
       if (label !== logged) deps.log(`auto-update failed (${label}); trying again in an hour`)
       logged = label
       pausedUntil = clock() + ERROR_BACKOFF_MS

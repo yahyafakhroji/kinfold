@@ -12,7 +12,8 @@ import { NO_FILTERS, type VectorHit, nearestObservations, upsertVectors } from '
 import { upsertProject } from '../store/writes'
 import { startActive, setVecReady } from '../store/vector-spaces'
 import { loadVec0, vec0Path } from './extension'
-import { createVecIndex, reconcileVecIndex, writeVecRows } from './vec-index'
+import { createVecIndex, writeVecRows } from './vec-index'
+import { reconcileVecIndex } from './vec-index.test-support'
 import { type VectorQueries, runNow, startVectorWorker, workerOrInline } from './vector-worker'
 
 const FAKE = new URL('../../test/fake-search-worker.ts', import.meta.url).href

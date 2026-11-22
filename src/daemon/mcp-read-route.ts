@@ -9,17 +9,14 @@
 import type { Parsed } from '../context/types'
 import type { Database } from '../sqlite/types'
 import { MCP_READ_STATUSES, MCP_TOOLS, type McpRead, type McpReadStatus, type McpTool, insertMcpRead } from '../store/mcp-read-store'
+import { isRecord } from '../contract/event'
+import { HOST_NAME_PATTERN } from '../names'
 
 export const MAX_REPORTED_IDS = 100
 const MAX_ROWS = 1_000
 const MAX_MS = 600_000
 const MAX_PROJECT_KEY_CHARS = 4_096
-const HOST_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const KEYS = ['host', 'ms', 'projectKey', 'returnedIds', 'rows', 'status', 'tool'] as const
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 const isCount = (value: unknown, max: number): value is number => Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= max
 
@@ -38,7 +35,7 @@ export function parseMcpRead(body: unknown): Parsed<McpRead> {
   const { tool, projectKey, host, returnedIds, rows, ms, status } = body
   if (!MCP_TOOLS.includes(tool as McpTool)) return { ok: false, error: 'tool must be search, timeline or get_observations' }
   if (typeof projectKey !== 'string' || projectKey === '' || projectKey.length > MAX_PROJECT_KEY_CHARS) return { ok: false, error: 'projectKey must be a non-empty string' }
-  if (host !== null && (typeof host !== 'string' || !HOST_PATTERN.test(host))) return { ok: false, error: 'host must be null or a short lowercase name' }
+  if (host !== null && (typeof host !== 'string' || !HOST_NAME_PATTERN.test(host))) return { ok: false, error: 'host must be null or a short lowercase name' }
   const ids = idsOf(returnedIds)
   if (ids === null) return { ok: false, error: `returnedIds must be at most ${MAX_REPORTED_IDS} positive integers` }
   if (!isCount(rows, MAX_ROWS)) return { ok: false, error: 'rows must be a whole number from 0 to 1000' }

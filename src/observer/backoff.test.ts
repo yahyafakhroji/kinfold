@@ -123,3 +123,23 @@ test('a login problem says what to run, and where', () => {
   expect(backoffLine({ ...entry, provider: 'codex-cli' }, T0)).toStartWith('codex-cli: the login Kinfold uses has expired; run `codex login` in a plain terminal (not one with CODEX_HOME set).')
   expect(backoffLine({ ...entry, errorClass: 'rate_limited' }, T0)).toMatch(/^claude-cli has failed 4 times since .+: rate_limited \(a usage limit\); retrying at .+$/)
 })
+
+test('the streak is counted from the newest run that broke it, found without reading the provider\'s older runs', () => {
+  ensureBackoffIndex(temp.store.db)
+  // A long history: successes, then another class, a restart in between, then the streak.
+  for (let index = 0; index < 400; index += 1) run('claude-cli', T0 + index * 10_000, index % 3 === 0 ? 'timeout: after 120 s' : null)
+  const from = T0 + 400 * 10_000
+  run('claude-cli', from, 'http_error: 500')
+  run('claude-cli', from + 10_000, 'timeout: after 120 s')
+  run('claude-cli', from + 20_000, 'interrupted: daemon restart')
+  run('claude-cli', from + 30_000, 'timeout: after 120 s')
+  expect(providerBackoff(temp.store.db, 'claude-cli')).toMatchObject({ errorClass: 'timeout', failures: 2, since: from + 10_000, lastFailedAt: from + 32_000 })
+
+  // The boundary read walks (provider, id) backward and stops: it neither scans the table nor builds a sorted copy.
+  const detail = temp.store.db.query<{ detail: string }, { provider: string; errorClass: string; restart: string }>(
+    `EXPLAIN QUERY PLAN SELECT id FROM observer_runs WHERE provider = $provider AND status <> 'running'
+       AND (status = 'succeeded' OR error IS NULL OR substr(error, 1, instr(error, ':') - 1) NOT IN ($errorClass, $restart)) ORDER BY id DESC LIMIT 1`,
+  ).all({ provider: 'claude-cli', errorClass: 'timeout', restart: 'interrupted' }).map((row) => row.detail).join('\n')
+  expect(detail).toContain('observer_runs_by_provider')
+  expect(detail).not.toContain('TEMP B-TREE')
+})

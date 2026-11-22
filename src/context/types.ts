@@ -6,6 +6,8 @@
 import { isAbsolute } from 'node:path'
 import type { EvidenceStrength } from '../evidence'
 import type { FirstScreen, Recalled } from './recall-line'
+import { isRecord } from '../contract/event'
+import { HOST_NAME_PATTERN } from '../names'
 
 export const HOST_PROFILES = ['claude-code', 'opencode', 'default'] as const
 export type HostProfile = (typeof HOST_PROFILES)[number]
@@ -117,7 +119,6 @@ export interface PackObservation {
 
 export const EMPTY_CONTEXT: ContextResult = { text: '', observationIds: [], tokens: 0 }
 
-const HOST_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const MAX_CWD_CHARS = 4096
 const MAX_HOST_SESSION_CHARS = 256
 /** Hosts cut longer prompts to this before sending. */
@@ -136,17 +137,13 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN)
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string }
 
 /** Validates a POST /context body; error messages name the field, never echo its value. */
 export function parseContextRequest(body: unknown): Parsed<ContextRequest> {
   if (!isRecord(body)) return { ok: false, error: 'body must be a JSON object' }
   const { host, cwd, hostSessionId, channel } = body
-  if (typeof host !== 'string' || !HOST_PATTERN.test(host)) return { ok: false, error: 'host must be a short lowercase name' }
+  if (typeof host !== 'string' || !HOST_NAME_PATTERN.test(host)) return { ok: false, error: 'host must be a short lowercase name' }
   if (typeof cwd !== 'string' || !isAbsolute(cwd) || cwd.length > MAX_CWD_CHARS) return { ok: false, error: 'cwd must be an absolute path' }
   if (typeof hostSessionId !== 'string' || hostSessionId === '' || hostSessionId.length > MAX_HOST_SESSION_CHARS) {
     return { ok: false, error: 'hostSessionId must be a non-empty string' }

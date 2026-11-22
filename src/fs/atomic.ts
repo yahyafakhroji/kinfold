@@ -17,6 +17,8 @@ export interface DirSyncOptions {
 export interface AtomicWriteOptions extends DirSyncOptions {
   /** Also fsync the folder after the rename, so the new name survives a power loss. Off by default: most writes can be redone. */
   syncDir?: boolean
+  /** Test seam: the write to the temp file. */
+  write?: (fd: number, content: string | Uint8Array) => number
 }
 
 /** Makes a rename in `dir` durable; the file's own fsync covers only its bytes, not the folder entry. */
@@ -33,14 +35,16 @@ export function fsyncDirectory(dir: string, options: DirSyncOptions = {}): void 
 export function writeFileAtomic(path: string, content: string | Uint8Array, mode: number, options: AtomicWriteOptions = {}): void {
   const temp = join(dirname(path), `.${basename(path)}.kinfold-tmp-${process.pid}`)
   const fd = openSync(temp, 'w', mode)
+  // Whatever fails before the rename (a full disk in the write, an I/O error in the fsync), the temp file goes with
+  // it: its name holds this pid, so no other process would ever replace it, and it can hold a secret at mode 0600.
   try {
-    if (typeof content === 'string') writeSync(fd, content)
-    else writeSync(fd, content)
-    fsyncSync(fd)
-  } finally {
-    closeSync(fd)
-  }
-  try {
+    try {
+      const write = options.write ?? ((target: number, data: string | Uint8Array): number => (typeof data === 'string' ? writeSync(target, data) : writeSync(target, data)))
+      write(fd, content)
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
     chmodSync(temp, mode)
     renameSync(temp, path)
   } catch (error: unknown) {

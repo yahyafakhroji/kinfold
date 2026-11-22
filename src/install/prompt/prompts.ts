@@ -13,6 +13,7 @@
 // reject with PromptCancelled; the caller decides the exit code.
 
 import { createBar } from './bar'
+import { clean } from './clean'
 import type { Key } from './keys'
 import type { TerminalIO } from './terminal'
 
@@ -99,8 +100,7 @@ const BOLD = '\u001b[1m'
 const RESET = '\u001b[0m'
 const up = (lines: number): string => (lines > 0 ? `\u001b[${lines}A` : '')
 
-/** Labels can come from files, hosts or models; control and format characters (escapes, bidi marks) never reach the screen. */
-export const clean = (text: string): string => text.replace(/[\p{Cc}\p{Cf}]/gu, '')
+export { clean }
 
 const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g
 

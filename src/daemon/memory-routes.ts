@@ -15,11 +15,10 @@ import { type BrowseFilters, type Facets, type ObservationDetail, observationDet
 import { type StoreReader, inlineStoreReader } from '../workers/store-reader'
 import type { RouteAnswer } from './data-routes'
 import { type DashboardViewOptions, type ViewRoute, dashboardViews } from './dashboard-views'
+import { HOST_PATTERN, MAX_PROJECT_CHARS, optional } from './list-params'
 
 export const PAGE_SIZE = 50
 export const MAX_PAGE = 1_000
-const HOST_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
-const MAX_PROJECT_CHARS = 512
 const QUERY_KEYS = new Set(['project', 'host', 'type', 'evidence', 'q', 'page'])
 const DETAIL_PATH = /^\/memory\/observations\/(\d{1,15})$/
 
@@ -42,12 +41,6 @@ export interface MemoryHandlers {
   facets: () => Promise<Facets>
   /** The new dashboard's lists and reports (dashboard-views.ts); null for a path that is not one. */
   views?: ViewRoute
-}
-
-/** An empty value is the same as an absent one: a cleared filter in the page's form. */
-function optional(params: URLSearchParams, name: string): string | null {
-  const value = params.get(name)
-  return value === null || value.trim() === '' ? null : value.trim()
 }
 
 function parsePage(value: string | null): Parsed<number> {

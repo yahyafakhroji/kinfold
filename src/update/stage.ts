@@ -17,6 +17,8 @@ import { autoUpdateSetting, betaChannelOn } from './enabled'
 import { releaseKind } from './release'
 import { knownRelease, readUpdateState } from './state'
 import { compareVersions, parseVersion } from './version-order'
+import { isRecord } from '../contract/event'
+import { isTime } from './auto-state'
 
 type Env = Readonly<Record<string, string | undefined>>
 
@@ -60,9 +62,6 @@ const stageDir = (dataDir: string): string => join(dataDir, STAGE_DIR)
 function stagedName(version: string, platform: NodeJS.Platform): string {
   return `kinfold-${version}${osOf(platform) === 'windows' ? '.exe' : ''}`
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
-const isTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 
 function stagedOf(value: unknown): StagedRecord | null {
   if (!isRecord(value)) return null

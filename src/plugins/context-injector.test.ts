@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { type ContextRequest, type ContextResult, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
-import { DELTA_INTERVAL_MS, MAX_DELTAS_PER_SESSION, PACK_RETRY_INTERVAL_MS, createContextInjector } from './context-injector'
+import { DELTA_INTERVAL_MS, MAX_CACHED_SESSIONS, MAX_DELTAS_PER_SESSION, PACK_RETRY_INTERVAL_MS, createContextInjector } from './context-injector'
 
 const PACK: ContextResult = { text: '<kinfold>pack</kinfold>', observationIds: [1], tokens: 10 }
 const delta = (n: number): ContextResult => ({ text: `<kinfold>delta ${n}</kinfold>`, observationIds: [100 + n], tokens: 8 })
@@ -318,4 +318,20 @@ test('an empty pack with a notice adds nothing', async () => {
   const system: { type: string; text?: string }[] = []
   await injector.onContext({ sessionID: 's1', system })
   expect(system.map((part) => part.text)).toEqual([])
+})
+
+test('a session still in use keeps its cached pack when more sessions than the cache holds have come and gone', async () => {
+  const r = rig()
+  const ask = async (sessionID: string): Promise<void> => {
+    await r.injector.onContext({ sessionID, system: [{ type: 'text', text: 'host system prompt' }] })
+  }
+  await ask('live')
+  for (let index = 0; index < MAX_CACHED_SESSIONS - 1; index += 1) await ask(`s${index}`)
+  await ask('live')
+  for (let index = MAX_CACHED_SESSIONS; index < MAX_CACHED_SESSIONS + 20; index += 1) await ask(`s${index}`)
+  const before = r.requests.filter((request) => request.channel === 'request' && request.hostSessionId === 'live').length
+  await ask('live')
+  // Evicted, it would have asked the daemon for its pack a second time.
+  expect(r.requests.filter((request) => request.channel === 'request' && request.hostSessionId === 'live')).toHaveLength(before)
+  expect(before).toBe(1)
 })

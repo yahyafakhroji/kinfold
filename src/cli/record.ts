@@ -38,8 +38,13 @@ export async function nudgeDaemon(dataDir: string, budgetMs: number = NUDGE_BUDG
   }
 }
 
-export async function recordEvent(event: NormalizedEvent, dataDir: string): Promise<RecordResult> {
+/** Redacts the event and writes it to the spool; the path of the file. Synchronous, so the event is on disk when this returns. */
+export function spoolEvent(event: NormalizedEvent, dataDir: string): string {
   const spoolDir = join(ensureDataDir(dataDir), SPOOL_DIR)
-  const spoolPath = captureEvent(event, { spoolDir, ...loadMarkerKey(dataDir, Date.now()) })
+  return captureEvent(event, { spoolDir, ...loadMarkerKey(dataDir, Date.now()) })
+}
+
+export async function recordEvent(event: NormalizedEvent, dataDir: string): Promise<RecordResult> {
+  const spoolPath = spoolEvent(event, dataDir)
   return { spoolPath, nudge: await nudgeDaemon(dataDir) }
 }

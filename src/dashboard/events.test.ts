@@ -36,3 +36,15 @@ test('a cursor from another daemon process reads every kept entry, even when the
   expect(after.after(old.cursor, null).events).toHaveLength(3)
   expect(after.after(null).epoch).not.toBe(old.epoch)
 })
+
+test('the log stays at its cap through many requests, ids keep counting, and a reader\'s copy is not changed by later entries', () => {
+  const events = createDashboardEvents(() => 1, 5)
+  const { epoch } = events.after(null)
+  for (let index = 0; index < 4; index += 1) events.note(`n${index}`)
+  const held = events.after(0, epoch).events
+  for (let index = 4; index < 1_000; index += 1) events.request('GET', '/health', 200, 1)
+  const now = events.after(0, epoch)
+  expect(now.cursor).toBe(1_000)
+  expect(now.events.map((line) => line.id)).toEqual([996, 997, 998, 999, 1_000])
+  expect(held.map((line) => line.id)).toEqual([1, 2, 3, 4])
+})

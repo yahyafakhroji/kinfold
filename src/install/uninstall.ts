@@ -108,10 +108,20 @@ function keptEntryNote(store: KeyStore, ref: string): string {
   return `kept ${store.describeEntry(ref)}; rerun with --remove-credentials to remove it`
 }
 
+/** A store that cannot be asked (a locked Keychain) is treated as holding the entry: the note is then a prompt to look, not a claim. */
+function entryExists(store: KeyStore, ref: string): boolean {
+  try {
+    return store.exists(ref)
+  } catch {
+    return true
+  }
+}
+
 function keptNotes(env: InstallEnv, store: KeyStore | null, refs: readonly string[], removeCredentials: boolean): string[] {
   const notes = [`kept the data dir ${env.dataDir} (memory, spool, logs); remove it with: rm -rf ${env.dataDir}`]
   if (removeCredentials || store === null) return notes
-  return [...notes, ...refs.map((ref) => keptEntryNote(store, ref))]
+  // Only entries that exist: a note with a delete command for a key that was never stored misstates what is left.
+  return [...notes, ...refs.filter((ref) => entryExists(store, ref)).map((ref) => keptEntryNote(store, ref))]
 }
 
 /** Uninstall goes on without the keys when the store is unknown: a broken record must not keep the agents wired. */

@@ -16,6 +16,7 @@ import type { BatchOutcome } from '../observer/process'
 import type { Database } from '../sqlite/types'
 import { type QueueStats, endIdleSessions, queueStats } from '../store/observer-store'
 import { oldestPendingIngest } from '../store/schedule-reads'
+import { errorName } from '../errors'
 
 export interface ObserverScheduleConfig {
   maxGlobal: number
@@ -118,10 +119,6 @@ export function parseIdleMs(value: string | undefined): number {
 /** KINFOLD_OBSERVER_MAX_WAIT_MS: how long a pending event may wait mid-turn before its session is due. */
 export function parseMaxWaitMs(value: string | undefined): number {
   return parsePositiveMs(envName('OBSERVER_MAX_WAIT_MS'), value, DEFAULT_SCHEDULE.maxWaitMs)
-}
-
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : 'unknown error'
 }
 
 /** Promises that resolve the next time the in-flight set is empty. */

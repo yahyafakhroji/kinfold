@@ -15,7 +15,7 @@ import { type SafetyKey, getSafety, recordSafety } from '../store/observer-safet
 import { resetSafetyFailedEvents } from '../store/observer-reset'
 import { runPlantedCheck } from './planted-check'
 import type { CliObserverRunner } from './runners/cli-core'
-import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, type ObserverErrorClass, type ObserverProvider, type ObserverSettings, toObserverError } from './types'
+import { type CliLoginProvider, type ObserverErrorClass, type ObserverSettings, isCliLoginProvider, toObserverError } from './types'
 
 export type GateResult = { ok: true } | { ok: false; errorClass: 'safety_check_failed' | 'tool_attempt' | ObserverErrorClass }
 
@@ -43,10 +43,6 @@ export interface SafetyGateDeps {
 const OK: GateResult = { ok: true }
 
 type Probed = { ok: true; key: SafetyKey; runner: CliObserverRunner } | { ok: false; errorClass: ObserverErrorClass }
-
-function isCliLoginProvider(provider: ObserverProvider): provider is CliLoginProvider {
-  return (CLI_LOGIN_PROVIDERS as readonly string[]).includes(provider)
-}
 
 function keyString(key: SafetyKey): string {
   return JSON.stringify([key.provider, key.cliVersion, key.binaryPath])

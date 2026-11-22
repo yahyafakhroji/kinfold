@@ -127,6 +127,10 @@ export const UNPROVEN_CLI_PROVIDERS: Readonly<Record<string, string>> = {
 export const CLI_LOGIN_PROVIDERS = ['codex-cli', 'opencode-cli', 'goose-cli'] as const
 export type CliLoginProvider = (typeof CLI_LOGIN_PROVIDERS)[number]
 
+export function isCliLoginProvider(provider: unknown): provider is CliLoginProvider {
+  return (CLI_LOGIN_PROVIDERS as readonly unknown[]).includes(provider)
+}
+
 export interface ObserverSettings {
   provider: ObserverProvider
   model: string
@@ -159,6 +163,12 @@ export const OBSERVER_ERROR_CLASSES = [
   'rate_limited',
 ] as const
 export type ObserverErrorClass = (typeof OBSERVER_ERROR_CLASSES)[number]
+
+/** The class part of a stored run error ("<class>: <detail>"); a row with no colon, an unknown class or no error is "other". */
+export function errorClassOf(error: string | null): ObserverErrorClass | 'other' {
+  const head = (error ?? '').split(':')[0]?.trim() ?? ''
+  return OBSERVER_ERROR_CLASSES.includes(head as ObserverErrorClass) ? (head as ObserverErrorClass) : 'other'
+}
 
 /**
  * A failure we can name. `detail` is written by this codebase (an exit code, an

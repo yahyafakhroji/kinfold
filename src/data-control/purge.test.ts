@@ -149,3 +149,17 @@ test('activity rows that name a purged project, session or host go with it, and 
   purge(db, { kind: 'range', after: null, before: T0 + 1 }, { dryRun: false, now: () => T0 })
   expect(rows()).toEqual([])
 })
+
+test('a purge that removes no memory leaves every injection and its id list as they were', () => {
+  const injections = (): unknown[] => fx.temp.store.db.query('SELECT id, observation_ids AS ids FROM injections ORDER BY id').all()
+  const reads = (): unknown[] => fx.temp.store.db.query('SELECT id, returned_ids AS ids FROM mcp_reads ORDER BY id').all()
+  const [before, readsBefore] = [injections(), reads()]
+  expect(before.length).toBeGreaterThan(0)
+  const prompt = fx.temp.store.db.query<{ id: number }, []>('SELECT id FROM prompts ORDER BY id LIMIT 1').get()!
+  const dry = run({ kind: 'prompt', id: prompt.id }, true)
+  const report = run({ kind: 'prompt', id: prompt.id })
+  expect(report.counts).toMatchObject({ prompts: 1, observations: 0, injections: 0, injectionsTrimmed: 0, links: 0 })
+  expect(dry.counts).toEqual(report.counts)
+  expect(injections()).toEqual(before)
+  expect(reads()).toEqual(readsBefore)
+})

@@ -22,8 +22,6 @@ const FILTERED_CANDIDATES_PER_HIT = 16
 export const MAX_KNN = 4096
 /** Rows a reconcile pass inserts at most: about 90 ms of vec0 inserts for 1,000 rows on the daemon's thread. */
 export const RECONCILE_CHUNK = 500
-/** Deletes are cheaper and carry purged data, so a pass removes more of them. */
-export const RECONCILE_REMOVE_CHUNK = 5_000
 
 export interface IndexedSpace {
   id: number
@@ -37,7 +35,8 @@ export interface VecRow {
   vector: Float32Array
 }
 
-const tableOf = (space: { id: number }): string => {
+/** The space's vec0 table. Exported for the test helper that fills an index in one go. */
+export const tableOf = (space: { id: number }): string => {
   if (!Number.isSafeInteger(space.id) || space.id <= 0) throw new Error('a vector space id must be a positive integer')
   return `vec_space_${space.id}`
 }
@@ -69,43 +68,6 @@ export function writeVecRows(db: Database, space: { id: number }, rows: readonly
       insert.run({ id: row.id, project: row.project, embedding: encodeVector(row.vector) })
     }
   })()
-}
-
-export interface ReconcileResult {
-  added: number
-  removed: number
-  /** Nothing was left over this pass. */
-  done: boolean
-}
-
-/** Up to `limit` rows each way: index rows with no stored vector out, stored vectors with no index row in. */
-export function reconcileVecIndex(db: Database, space: IndexedSpace, limit: number = RECONCILE_CHUNK): ReconcileResult {
-  const table = tableOf(space)
-  const params = { model: space.model, dims: space.dims, limit }
-  const removeLimit = Math.max(limit, RECONCILE_REMOVE_CHUNK)
-  const stale = db.query<{ id: number }, typeof params>(
-    `SELECT observation_id AS id FROM ${table}
-     WHERE observation_id NOT IN (SELECT observation_id FROM observation_vectors WHERE model = $model AND dims = $dims) LIMIT $limit`,
-  ).all({ ...params, limit: removeLimit })
-  // A row filed under a project its observation has left (a project merge or split, store/project-merge.ts) goes out, and comes back in below under the right one.
-  const moved = db.query<{ id: number }, { limit: number }>(
-    `SELECT v.observation_id AS id FROM ${table} v JOIN observations o ON o.id = v.observation_id WHERE v.project_key <> o.project_key LIMIT $limit`,
-  ).all({ limit: removeLimit })
-  stale.push(...moved.filter((row) => !stale.some((known) => known.id === row.id)))
-  const remove = db.prepare(`DELETE FROM ${table} WHERE observation_id = $id`)
-  const insert = db.prepare(`INSERT INTO ${table} (observation_id, project_key, embedding) VALUES ($id, $project, $embedding)`)
-  // Read after the removals, so a row taken out for its project comes back in the same pass.
-  const missing = db.transaction(() => {
-    for (const row of stale) remove.run({ id: row.id })
-    const rows = db.query<{ id: number; project: string; embedding: Uint8Array }, typeof params>(
-      `SELECT v.observation_id AS id, o.project_key AS project, v.embedding AS embedding
-       FROM observation_vectors v JOIN observations o ON o.id = v.observation_id
-       WHERE v.model = $model AND v.dims = $dims AND v.observation_id NOT IN (SELECT observation_id FROM ${table}) LIMIT $limit`,
-    ).all(params)
-    for (const row of rows) insert.run({ id: row.id, project: row.project, embedding: row.embedding })
-    return rows
-  })()
-  return { added: missing.length, removed: stale.length, done: missing.length < limit && stale.length < removeLimit }
 }
 
 /** Observation ids one reconcile window covers: three index range reads of about this many entries. */

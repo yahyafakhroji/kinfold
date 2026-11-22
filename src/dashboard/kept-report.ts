@@ -2,7 +2,10 @@
 // value and when it was computed. An ask within maxAgeMs gets it as it is; an
 // older one gets it at once while a fresh one is computed behind it, so a
 // page shows "as of N min ago" instead of waiting. Only the first ask, with
-// nothing kept yet, waits. One computation runs at a time.
+// nothing kept yet, waits. One computation runs at a time. After invalidate()
+// (a purge, a retention change) the next ask waits for a value computed from
+// then on: one already being computed read the store before the change, so it
+// is let finish and is not handed out as the answer.
 
 export interface KeptAnswer<T> {
   value: T
@@ -26,37 +29,49 @@ export interface KeptOptions {
 
 export function keptReport<T>(compute: () => Promise<T>, options: KeptOptions): KeptReport<T> {
   const now = options.now ?? Date.now
-  let kept: { value: T; asOf: number } | null = null
-  let running: Promise<{ value: T; asOf: number }> | null = null
-  let fresh = true
+  type Kept = { value: T; asOf: number }
+  /** Counts invalidations: a value is good for the generation its computation started in. */
+  let generation = 0
+  let kept: (Kept & { generation: number }) | null = null
+  let running: { promise: Promise<Kept>; generation: number } | null = null
 
-  const refresh = (): Promise<{ value: T; asOf: number }> => {
-    running ??= (async () => {
+  const refresh = (): Promise<Kept> => {
+    if (running !== null && running.generation === generation) return running.promise
+    const startedIn = generation
+    // Still one at a time: a computation from before the invalidation is waited out, whatever it ends in.
+    const earlier = running?.promise.then(() => {}, () => {})
+    // Declared before the computation starts: its first part runs in this same turn, and may end there too.
+    const entry: { promise: Promise<Kept>; generation: number } = { promise: Promise.resolve({ value: undefined as T, asOf: 0 }), generation: startedIn }
+    const run = async (): Promise<Kept> => {
+      // Awaited only when there is one, so a first computation starts in the same turn as the ask.
+      if (earlier !== undefined) await earlier
       const startedAt = now()
       try {
         const value = await compute()
-        kept = { value, asOf: startedAt }
-        fresh = true
-        return kept
+        kept = { value, asOf: startedAt, generation: startedIn }
+        return { value, asOf: startedAt }
       } finally {
-        running = null
+        if (running === entry) running = null
       }
-    })()
-    return running
+    }
+    running = entry
+    entry.promise = run()
+    return entry.promise
   }
 
   return {
     get: async () => {
-      if (kept === null || !fresh) {
+      if (kept === null || kept.generation !== generation) {
         const result = await refresh()
         return { ...result, refreshing: false }
       }
-      if (now() - kept.asOf <= options.maxAgeMs) return { ...kept, refreshing: running !== null }
+      const { value, asOf } = kept
+      if (now() - asOf <= options.maxAgeMs) return { value, asOf, refreshing: running !== null }
       refresh().catch((error: unknown) => options.onError?.(error))
-      return { ...kept, refreshing: true }
+      return { value, asOf, refreshing: true }
     },
     invalidate: () => {
-      fresh = false
+      generation += 1
     },
   }
 }

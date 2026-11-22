@@ -156,3 +156,24 @@ test('a snapshot taken while the store is being written is whole and holds every
   expect(rows % 25).toBe(0)
   copy.close()
 })
+
+/** A worker script written for one test: what it does on its first message. */
+function workerScript(name: string, body: string): string {
+  const path = join(dir, name)
+  writeFileSync(path, `self.onmessage = () => { ${body} }\n`)
+  return path
+}
+
+test('a worker that ends without an answer rejects, so the backup request does not wait for good', async () => {
+  const silent = workerScript('silent-worker.js', 'process.exit(0)')
+  const failure = await snapshotInWorker({ dbPath: store.path, key, dest, libraryOverride: library(), workerUrl: silent, timeoutMs: 20_000 }).then(() => null, (error: unknown) => error as Error)
+  expect(failure?.message).toBe('the snapshot worker stopped without an answer')
+})
+
+test('a worker still silent at its deadline is stopped and the request rejects', async () => {
+  const stuck = workerScript('stuck-worker.js', 'setInterval(() => {}, 1000)')
+  const startedAt = performance.now()
+  const failure = await snapshotInWorker({ dbPath: store.path, key, dest, libraryOverride: library(), workerUrl: stuck, timeoutMs: 150 }).then(() => null, (error: unknown) => error as Error)
+  expect(failure?.message).toBe('the snapshot worker did not answer in time')
+  expect(performance.now() - startedAt).toBeLessThan(10_000)
+})

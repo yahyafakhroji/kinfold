@@ -124,7 +124,7 @@ export async function applySetup(env: InstallEnv, state: SetupState, answers: Se
     const conversion = conversionOf(answers.encryption)
     const problem = conversionProblem(env, conversion)
     if (problem !== null) throw new ChoiceError(problem)
-    const detections = await detectHosts(env, options.hosts)
+    const detections = answers.detections ?? (await detectHosts(env, options.hosts))
     reportDetections(env, detections, answers.hosts)
     for (const choice of answers.observers) {
       env.out(`observer ${choice.input.host}: ${describeInput(choice.input)} (${choice.origin}); ${choice.credentialNote}; check ${choice.check}`)

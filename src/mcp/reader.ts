@@ -143,7 +143,8 @@ const BEFORE = '(o.occurred_at < $at OR (o.occurred_at = $at AND o.id < $id))'
 const AFTER = '(o.occurred_at > $at OR (o.occurred_at = $at AND o.id > $id))'
 
 /** Every statement the reader prepares, shaped by what the store has. */
-function sqlFor({ hasLinks, hasSharing }: StoreFeatures) {
+/** Exported for the query-plan tests. */
+export function sqlFor({ hasLinks, hasSharing }: StoreFeatures) {
   const INDEX_COLUMNS = indexColumns(hasLinks)
   const SUMMARY_COLUMNS = summaryColumns(hasSharing)
   const SESSION_SUMMARIES = sessionSummaryScope(hasSharing)

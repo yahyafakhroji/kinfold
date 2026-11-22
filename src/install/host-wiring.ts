@@ -76,7 +76,7 @@ export function hostHookInstallActions(env: InstallEnv, host: CommandHookHost): 
   return [
     ...(existsSync(dir) ? [] : [{ kind: 'mkdir', path: dir, mode: DIR_MODE } as const]),
     ...(backup !== null ? [{ kind: 'backup', from: path, to: backup } as const] : []),
-    { kind: 'write', path, content: serializeJson(merge.settings, file.exists ? file.text : null), mode: file.exists ? file.mode : FILE_MODE, summary: parts.join('; ') },
+    { kind: 'write', path, content: serializeJson(merge.settings, file.exists ? file.text : null), before: file.exists ? file.text : null, mode: file.exists ? file.mode : FILE_MODE, summary: parts.join('; ') },
   ]
 }
 
@@ -89,7 +89,7 @@ export function hostHookUninstallActions(env: InstallEnv, host: CommandHookHost)
   const backup = plannedBackup(path, env.now())
   return [
     ...(backup !== null ? [{ kind: 'backup', from: path, to: backup } as const] : []),
-    { kind: 'write', path, content: serializeJson(result.settings, file.text), mode: file.mode, summary: `remove ${result.removed} Kinfold hook entries; every other key and hook kept` },
+    { kind: 'write', path, content: serializeJson(result.settings, file.text), before: file.text, mode: file.mode, summary: `remove ${result.removed} Kinfold hook entries; every other key and hook kept` },
   ]
 }
 

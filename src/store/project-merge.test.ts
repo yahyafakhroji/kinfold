@@ -148,3 +148,33 @@ test('on a hub, keys of paired devices are never checked against the hub\'s own 
   backfillRoots(db(), (cwd) => (asked.push(cwd), ROOT), T0)
   expect(asked).toEqual([])
 })
+
+test('registering a key the store already holds writes nothing, with or without its first commit', () => {
+  seedProject(remote('github.com/me/kinfold'), 1, T0)
+  const changes = (): number => db().query<{ n: number }, []>('SELECT total_changes() AS n').get()!.n
+  const before = changes()
+  // The hub's context route: the key alone, once per prompt.
+  for (let prompt = 0; prompt < 5; prompt += 1) expect(registerProject(db(), remote('github.com/me/kinfold', null), T0 + prompt)).toBe('github.com/me/kinfold')
+  // And with the commit it already has.
+  expect(registerProject(db(), remote('github.com/me/kinfold'), T0 + 10)).toBe('github.com/me/kinfold')
+  expect(changes()).toBe(before)
+  // A new key, and a first commit for a key that had none, are still written.
+  registerProject(db(), remote('github.com/me/other', null), T0 + 20)
+  registerProject(db(), remote('github.com/me/other', OTHER_ROOT), T0 + 30)
+  expect(db().query('SELECT root_commit AS root FROM projects WHERE key = ?').get('github.com/me/other')).toEqual({ root: OTHER_ROOT })
+})
+
+test('a merge that fails partway leaves every row under its own key, with no half-moved project that could not be split back', () => {
+  seedProject(remote('github.com/me/shared-agent-memory'), 3, T0)
+  // The merge record is the last write of a merge; here it cannot be written.
+  db().run("CREATE TRIGGER fail_merge_record BEFORE INSERT ON project_merges BEGIN SELECT RAISE(ABORT, 'disk full'); END")
+  expect(() => registerProject(db(), remote('github.com/me/kinfold'), T0 + 1_000)).toThrow('disk full')
+  expect(observationKeys()).toEqual({ 'github.com/me/shared-agent-memory': 3 })
+  expect(canonicalKey(db(), 'github.com/me/shared-agent-memory')).toBe('github.com/me/shared-agent-memory')
+  expect(db().query('SELECT count(*) AS n FROM projects WHERE key = ?').get('github.com/me/kinfold')).toEqual({ n: 0 })
+  expect(db().query('SELECT count(*) AS n FROM project_merges').get()).toEqual({ n: 0 })
+  // With the fault gone the same call merges whole.
+  db().run('DROP TRIGGER fail_merge_record')
+  expect(registerProject(db(), remote('github.com/me/kinfold'), T0 + 2_000)).toBe('github.com/me/kinfold')
+  expect(observationKeys()).toEqual({ 'github.com/me/kinfold': 3 })
+})

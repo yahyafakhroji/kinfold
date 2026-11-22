@@ -13,8 +13,8 @@
 
 import { isAbsolute } from 'node:path'
 import { type EventKind, type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../../contract/event'
-import { type AdapterContext, AdapterInputError } from '../../adapters/context'
-import type { AgentId } from '../profile'
+import { type AdapterContext, AdapterInputError, lenient, str } from '../context'
+import type { AgentId } from '../../agents/profile'
 
 export type ClaudeStyleEventMap = Readonly<Record<string, EventKind>>
 
@@ -30,10 +30,6 @@ export interface ClaudeStyleOptions {
 }
 
 const EXIT_CODE = /^Exit code (\d+)/
-
-function str(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
-}
 
 /** Read returns { file: { content } }, Bash returns { stdout, stderr }; anything else is kept as JSON. */
 export function flattenToolResponse(response: unknown): string {
@@ -174,12 +170,5 @@ export function parseClaudeStyle(eventMap: ClaudeStyleEventMap, host: AgentId, p
  * than an error, since the docs show some events without those fields.
  */
 export function normalizeClaudeStyle(eventMap: ClaudeStyleEventMap, host: AgentId): (payload: unknown, ctx: AdapterContext) => NormalizedEvent | null {
-  return (payload, ctx) => {
-    try {
-      return parseClaudeStyle(eventMap, host, payload, ctx)
-    } catch (error: unknown) {
-      if (error instanceof AdapterInputError) return null
-      throw error
-    }
-  }
+  return lenient((payload, ctx) => parseClaudeStyle(eventMap, host, payload, ctx))
 }

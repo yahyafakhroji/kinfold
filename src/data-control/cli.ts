@@ -233,18 +233,34 @@ export const FINDING_PURGE_NEEDS_YES = 'kinfold findings: nothing was deleted. -
  * matched. A finding never holds the matched text, so the secret cannot
  * reach the screen.
  */
+/**
+ * The pending finding with this id, asked for by id: the list answers the
+ * newest 100, so after a rules update with hundreds of findings an older one
+ * read as "no pending finding" and could only be purged unseen, with --yes. A
+ * daemon from before the by-id route answers 404 with no finding, and the
+ * list is searched as it used to be.
+ */
+async function pendingFinding(env: DataCliEnv, id: number): Promise<{ ok: true; finding: Finding | null } | { ok: false; error: string }> {
+  const one = await daemonCall(env, 'GET', `/data/findings/${id}`)
+  const found = one.ok && isRecord(one.body) && isRecord(one.body.finding) ? (one.body.finding as unknown as Finding) : null
+  if (found !== null) return { ok: true, finding: found.action === 'pending' ? found : null }
+  const listed = await daemonCall(env, 'GET', '/data/findings?action=pending')
+  if (!listed.ok) return listed
+  return { ok: true, finding: (listed.body as FindingsView).findings.find((candidate) => candidate.id === id) ?? null }
+}
+
 async function confirmedFindingPurge(env: DataCliEnv, id: number): Promise<number> {
   if (env.ui === undefined) {
     env.out(FINDING_PURGE_NEEDS_YES)
     return EXIT_FAILED
   }
-  const listed = await daemonCall(env, 'GET', '/data/findings?action=pending')
-  if (!listed.ok) {
-    env.ui.error(`kinfold findings failed: ${listed.error}`)
+  const looked = await pendingFinding(env, id)
+  if (!looked.ok) {
+    env.ui.error(`kinfold findings failed: ${looked.error}`)
     return EXIT_FAILED
   }
-  const finding = (listed.body as FindingsView).findings.find((candidate) => candidate.id === id)
-  if (finding === undefined) {
+  const finding = looked.finding
+  if (finding === null) {
     env.ui.error(`kinfold findings: no pending finding #${id}; nothing was deleted`)
     return EXIT_FAILED
   }

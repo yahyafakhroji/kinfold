@@ -17,7 +17,7 @@
 
 import { isAbsolute } from 'node:path'
 import { type EventKind, type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../contract/event'
-import { type AdapterContext, AdapterInputError } from './context'
+import { type AdapterContext, AdapterInputError, lenient, str } from './context'
 
 export const CLINE_HOST = 'cline'
 
@@ -41,10 +41,6 @@ const KINDS: Readonly<Record<string, EventKind>> = {
 }
 
 type Payload = Record<string, unknown>
-
-function str(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
-}
 
 const asText = (value: unknown): string => (value === undefined || value === null ? '' : typeof value === 'string' ? value : JSON.stringify(value))
 
@@ -106,14 +102,7 @@ export function parseCline(payload: unknown, context: AdapterContext): Normalize
 }
 
 /** A payload it cannot map is not captured, rather than an error, since the agent is built from docs. */
-export function normalizeCline(payload: unknown, context: AdapterContext): NormalizedEvent | null {
-  try {
-    return parseCline(payload, context)
-  } catch (error: unknown) {
-    if (error instanceof AdapterInputError) return null
-    throw error
-  }
-}
+export const normalizeCline: (payload: unknown, context: AdapterContext) => NormalizedEvent | null = lenient(parseCline)
 
 /**
  * The output both hosts read: the VS Code extension validates cancel and

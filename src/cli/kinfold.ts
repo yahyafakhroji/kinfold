@@ -101,13 +101,13 @@ export function parseGlobalArgs(argv: readonly string[]): Parsed<GlobalArgs> {
   return { ok: true, value: { dataDir, version, plain, argv: rest } }
 }
 
+/** `embed-check` loads the bundled model and embeds fixed texts; the release smoke runs it on every target. */
+export type ExtraRunners = { embedCheck?: () => Promise<number> }
+
 /**
  * `env` is the caller's already-built environment (tests); the real CLI leaves
  * it out, so the modules behind an installer command load only when one runs.
  */
-/** `embed-check` loads the bundled model and embeds fixed texts; the release smoke runs it on every target. */
-export type ExtraRunners = { embedCheck?: () => Promise<number> }
-
 export async function runKinfold(argv: readonly string[], env?: InstallEnv, runners: Partial<SubcommandRunners> & ExtraRunners = {}): Promise<number> {
   const write = env?.out ?? ((line: string): void => {
     process.stdout.write(`${line}\n`)
@@ -282,11 +282,6 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
   }
 }
 
-/**
- * Applies `--data-dir` to the process for the duration of a subcommand, so
- * resolveDataDir inside it selects this store and nothing else. Restored
- * afterwards because callers such as tests run more than one command.
- */
 /** The commands that change or remove stored memory on this machine; on a central device they belong to the hub. */
 const HUB_ONLY_COMMANDS = new Set(['backup', 'restore', 'encrypt', 'decrypt', 'rekey', 'key'])
 
@@ -300,6 +295,11 @@ async function hubOnlyRefusal(env: InstallEnv, args: readonly string[]): Promise
   return EXIT_FAILED
 }
 
+/**
+ * Applies `--data-dir` to the process for the duration of a subcommand, so
+ * resolveDataDir inside it selects this store and nothing else. Restored
+ * afterwards because callers such as tests run more than one command.
+ */
 async function withDataDir(dataDir: string | null, run: () => Promise<void>): Promise<void> {
   if (dataDir === null) {
     await run()

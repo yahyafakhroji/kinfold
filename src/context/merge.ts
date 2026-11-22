@@ -50,11 +50,14 @@ function toItem(group: Group): PackItem {
 
 /** `ignore` holds tokens every title in the project may carry (its name). Returns items in rank order. */
 export function mergeNearDuplicates(observations: readonly PackObservation[], ignore: ReadonlySet<string> = new Set()): PackItem[] {
-  const groups = rankObservations(observations).reduce<Group[]>((acc, observation) => {
+  // The groups are this function's own, appended to in place: a copy of the whole list per observation made 600
+  // candidates cost 600 list copies, three times per observer write (once per agent profile), inside its transaction.
+  const groups: Group[] = []
+  for (const observation of rankObservations(observations)) {
     const tokens = titleTokens(observation.title, ignore)
-    const index = acc.findIndex((group) => isNearDuplicate(group.tokens, tokens))
-    if (index === -1) return [...acc, { lead: observation, tokens, members: [observation] }]
-    return acc.map((group, at) => (at === index ? { ...group, members: [...group.members, observation] } : group))
-  }, [])
+    const group = groups.find((known) => isNearDuplicate(known.tokens, tokens))
+    if (group === undefined) groups.push({ lead: observation, tokens, members: [observation] })
+    else group.members.push(observation)
+  }
   return groups.map(toItem)
 }

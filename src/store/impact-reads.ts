@@ -93,6 +93,8 @@ export function embeddingCalls(db: Database, since: number): EmbeddingCalls {
 }
 
 export interface TurnUsageRow {
+  /** The agent the turn ran in. */
+  host: string
   heldOut: boolean
   projectKey: string
   /** Every token the turn's model calls processed: input, output, cache reads and cache writes. */
@@ -105,9 +107,21 @@ export interface TurnUsageRow {
 /** Most recent rows the comparison reads; at one held-out turn in ten this is far past the minimum sample. */
 export const TURN_USAGE_LIMIT = 20_000
 
+/**
+ * The turns of projects that have both kinds, held out and normal. A project
+ * with turns of only one kind is left out: its turns would shift one group by
+ * what that project is like, not by what memory does. The one rule behind the
+ * Impact page's comparison and the "tokens saved" figure.
+ */
+export function comparableTurns<Turn extends { heldOut: boolean; projectKey: string }>(rows: readonly Turn[]): Turn[] {
+  const withHeld = new Set(rows.filter((row) => row.heldOut).map((row) => row.projectKey))
+  const withNormal = new Set(rows.filter((row) => !row.heldOut).map((row) => row.projectKey))
+  return rows.filter((row) => withHeld.has(row.projectKey) && withNormal.has(row.projectKey))
+}
+
 export function turnUsageRows(db: Database, limit: number = TURN_USAGE_LIMIT): TurnUsageRow[] {
   return db.query<Omit<TurnUsageRow, 'heldOut'> & { heldOut: number }, { limit: number }>(
-    `SELECT held_out AS heldOut, project_key AS projectKey,
+    `SELECT host, held_out AS heldOut, project_key AS projectKey,
        input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens AS tokens, output_tokens AS outputTokens,
        tool_calls AS toolCalls, duration_ms AS durationMs
      FROM turn_usage ORDER BY occurred_at DESC LIMIT $limit`,

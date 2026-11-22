@@ -3,7 +3,7 @@
 
 import type { AdapterContext } from './context'
 import type { NormalizedEvent } from '../contract/event'
-import { type ClaudeStyleEventMap, flattenToolResponse, parseClaudeStyle } from '../agents/families/claude-style-parse'
+import { type ClaudeStyleEventMap, flattenToolResponse, parseClaudeStyle } from './families/claude-style-parse'
 
 export { flattenToolResponse }
 

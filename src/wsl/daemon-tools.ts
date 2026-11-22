@@ -16,19 +16,22 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { READ_TOOLS } from '../daemon/read-routes'
-import type { ToolCaller, ToolOutcome, ToolResult } from '../mcp/tools'
+import { parseToolOutcome, unavailableOutcome as unavailable } from '../mcp/outcome'
+import type { ToolCaller, ToolOutcome } from '../mcp/tools'
 import { DAEMON_INFO_FILE, TOKEN_FILE } from '../store/data-dir'
 import { type WslProbes, defaultWslProbes } from './wsl-probes'
+import { isRecord } from '../contract/event'
+import { errorCode } from '../errors'
+import { MAX_ANSWER_BYTES, readCappedJson } from '../http/capped'
+import { MAX_PORT } from '../daemon/port'
 
 export const WSL_READ_TIMEOUT_MS = 5_000
 /** A drive mount that has not answered by then is treated as wedged. */
 export const WSL_FILE_TIMEOUT_MS = 2_000
-/** Far above any real answer; a bigger body is not from the daemon. */
-export const MAX_ANSWER_BYTES = 16 * 1024 * 1024
+export { MAX_ANSWER_BYTES, parseToolOutcome }
 
 const LOOPBACK = '127.0.0.1'
 const MIN_PORT = 1_024
-const MAX_PORT = 65_535
 const PREFIX = 'memory is unavailable from WSL: '
 const ERROR_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
 const HEADER_SAFE = /^[\x21-\x7e]+$/
@@ -60,52 +63,8 @@ interface Answer {
   body: unknown
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0
-
-export function unavailableOutcome(reason: string): ToolOutcome {
-  const result: ToolResult = {
-    content: [{ type: 'text', text: `${PREFIX}${reason}` }],
-    structuredContent: { status: 'unavailable', reason },
-    isError: true,
-  }
-  return { result, count: 0 }
-}
-
-function parseContent(value: unknown): ToolResult['content'] | null {
-  if (!Array.isArray(value)) return null
-  const content: ToolResult['content'] = []
-  for (const item of value) {
-    if (!isRecord(item) || item.type !== 'text' || typeof item.text !== 'string') return null
-    content.push({ type: 'text', text: item.text })
-  }
-  return content
-}
-
-function parseResult(value: unknown): ToolResult | null {
-  if (!isRecord(value)) return null
-  const content = parseContent(value.content)
-  const { structuredContent, isError } = value
-  if (content === null || !isRecord(structuredContent)) return null
-  if (isError !== undefined && typeof isError !== 'boolean') return null
-  return isError === undefined ? { content, structuredContent } : { content, structuredContent, isError }
-}
-
-const isIdList = (value: unknown): value is number[] => Array.isArray(value) && value.every((id) => Number.isInteger(id))
-
-/** A ToolOutcome rebuilt from the daemon's JSON, keeping only checked fields; null when any field is off. */
-export function parseToolOutcome(value: unknown): ToolOutcome | null {
-  if (!isRecord(value)) return null
-  const result = parseResult(value.result)
-  const { count, ids, scope } = value
-  if (result === null || !isCount(count)) return null
-  if (ids !== undefined && !isIdList(ids)) return null
-  if (scope !== undefined && typeof scope !== 'string') return null
-  return { result, count, ...(ids !== undefined ? { ids } : {}), ...(scope !== undefined ? { scope } : {}) }
-}
+/** The MCP answer when WSL cannot reach the Windows daemon. */
+export const unavailableOutcome = (reason: string): ToolOutcome => unavailable(PREFIX, reason)
 
 class TimeoutError extends Error {
   override name = 'TimeoutError'
@@ -123,8 +82,6 @@ async function within<T>(promise: Promise<T>, ms: number): Promise<T> {
     clearTimeout(timer)
   }
 }
-
-const errorCode = (error: unknown): unknown => (error instanceof Error ? (error as { code?: unknown }).code : undefined)
 
 async function readOptional(path: string): Promise<string | null> {
   try {
@@ -172,30 +129,6 @@ async function readDaemonFiles(dataDir: string): Promise<Read<DaemonFiles>> {
   return { ok: true, value: files }
 }
 
-/** JSON from a body of at most MAX_ANSWER_BYTES; null for anything else. */
-async function readJson(response: Response): Promise<unknown> {
-  const declared = Number(response.headers.get('content-length') ?? '0')
-  if (declared > MAX_ANSWER_BYTES || response.body === null) return null
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let size = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    size += value.byteLength
-    if (size > MAX_ANSWER_BYTES) {
-      await reader.cancel()
-      return null
-    }
-    chunks.push(value)
-  }
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
-  } catch {
-    return null
-  }
-}
-
 /** One deadline for the whole call: every step races the same timer and shares one abort signal. */
 interface Deadline {
   run: <T>(step: (signal: AbortSignal) => Promise<T>) => Promise<T>
@@ -228,7 +161,7 @@ function isConnectionError(error: unknown): boolean {
 async function isOurDaemon(base: string, files: DaemonFiles, fetchFn: DaemonFetch, signal: AbortSignal): Promise<boolean> {
   try {
     const response = await fetchFn(`${base}/health`, { method: 'GET', redirect: 'error', signal })
-    const body = response.status === 200 ? await readJson(response) : null
+    const body = response.status === 200 ? await readCappedJson(response, MAX_ANSWER_BYTES) : null
     return isRecord(body) && body.ok === true && (files.pid === null || body.pid === files.pid)
   } catch (error: unknown) {
     if (isConnectionError(error)) throw error
@@ -239,7 +172,7 @@ async function isOurDaemon(base: string, files: DaemonFiles, fetchFn: DaemonFetc
 async function postRead(url: string, init: RequestInit, fetchFn: DaemonFetch): Promise<Answer> {
   try {
     const response = await fetchFn(url, init)
-    return { status: response.status, body: response.status === 200 ? await readJson(response) : null }
+    return { status: response.status, body: response.status === 200 ? await readCappedJson(response, MAX_ANSWER_BYTES) : null }
   } catch (error: unknown) {
     if (isConnectionError(error)) throw error
     // A redirect or a broken answer after the handshake: unreadable, never followed.

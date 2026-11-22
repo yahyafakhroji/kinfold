@@ -369,3 +369,27 @@ test('the watch route names the merges of the last day', () => {
   const body = watchRoute(db, 'GET', new URL('http://x/watch?after=0'), T0 + 2).body as { merges: { from: string; into: string }[] }
   expect(body.merges.map((merge) => [merge.from, merge.into])).toEqual([['sam', 'kinfold']])
 })
+
+test('a filtered watcher\'s cursor passes the prompts that did not match, and still waits for a matching one that is settling', () => {
+  const db = temp.store.db
+  const ask = (query: string, now: number): { cursor: number; rows: { host: string }[] } =>
+    watchRoute(db, 'GET', new URL(`http://x/watch?${query}`), now).body as { cursor: number; rows: { host: string }[] }
+  for (let number = 1; number <= 5; number += 1) prompt(claude, number, T0 + number * MINUTE)
+  const settled = T0 + 10 * MINUTE + WATCH_SETTLE_MS
+  // Five prompts, none from cursor: nothing to show, and nothing to read again on the next poll.
+  const first = ask('after=0&host=cursor', settled)
+  expect(first.rows).toEqual([])
+  expect(first.cursor).toBe(latestPromptId(db))
+  expect(ask('after=0&project=other', settled).cursor).toBe(latestPromptId(db))
+
+  // A matching prompt still settling holds the cursor where it was, so it is shown on a later poll.
+  prompt(cursorSession, 1, T0 + 20 * MINUTE)
+  prompt(claude, 6, T0 + 20 * MINUTE)
+  const waiting = ask(`after=${first.cursor}&host=cursor`, T0 + 20 * MINUTE)
+  expect(waiting).toMatchObject({ rows: [], cursor: first.cursor })
+  const shown = ask(`after=${first.cursor}&host=cursor`, T0 + 20 * MINUTE + WATCH_SETTLE_MS + 1)
+  expect(shown.rows.map((row) => row.host)).toEqual(['cursor'])
+  expect(shown.cursor).toBe(latestPromptId(db))
+  // Without a filter the cursor is the last row shown, as before.
+  expect(ask('after=0', T0 + 21 * MINUTE + WATCH_SETTLE_MS).cursor).toBe(latestPromptId(db))
+})

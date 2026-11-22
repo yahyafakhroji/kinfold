@@ -9,7 +9,7 @@
 
 import { isAbsolute } from 'node:path'
 import { type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../contract/event'
-import { type AdapterContext, AdapterInputError } from './context'
+import { type AdapterContext, AdapterInputError, str } from './context'
 
 export const CODEX_HOST = 'codex'
 
@@ -17,10 +17,6 @@ export const CODEX_HOST = 'codex'
 const EXIT_PATTERNS = [/Process exited with code (-?\d+)/, /^Exit code:\s*(-?\d+)/m]
 
 type Payload = Record<string, unknown>
-
-function str(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
-}
 
 /** MCP results are { content: [{ type: 'text', text }], isError }; shell and apply_patch are plain strings. */
 export function flattenCodexResponse(response: unknown): string {

@@ -13,6 +13,7 @@ import type { SemanticClient } from '../mcp/semantic-client'
 import { callTool } from '../mcp/tools'
 import type { ProjectKeyResolver } from '../store/project-key'
 import type { RouteAnswer } from './data-routes'
+import { isRecord } from '../contract/event'
 
 export const READ_TOOLS = ['search', 'timeline', 'get_observations'] as const
 export type ReadTool = (typeof READ_TOOLS)[number]
@@ -42,10 +43,6 @@ export interface ReadRequest {
 
 interface ReadAnswer extends RouteAnswer {
   count: number
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 // A WSL caller sends a POSIX path and a Windows caller a drive or UNC path; the daemon's own OS does not decide which is valid.

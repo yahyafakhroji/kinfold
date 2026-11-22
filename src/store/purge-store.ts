@@ -157,8 +157,15 @@ const ANY_PURGED = 'EXISTS (SELECT 1 FROM json_each(injections.observation_ids) 
 /** Links with either end purged; the foreign keys delete them, this only counts them. */
 const LINKS_PURGED = 'from_id IN (SELECT value FROM json_each($purged)) OR to_id IN (SELECT value FROM json_each($purged))'
 
-function injectionsWhere(scope: PurgeScope): string {
-  return `(${scope.where.injections}) OR (${ONLY_PURGED})`
+/**
+ * The injections to delete: those in scope, and those that held nothing but
+ * purged memories. With no memory purged (a purge of events, prompts or
+ * summaries, a retention pass with nothing expired) the second part cannot
+ * match, and leaving it out spares a JSON parse of every injection ever
+ * recorded, inside the write transaction.
+ */
+function injectionsWhere(scope: PurgeScope, anyPurged: boolean): string {
+  return anyPurged ? `(${scope.where.injections}) OR (${ONLY_PURGED})` : `(${scope.where.injections})`
 }
 
 function findingsWhere(scope: PurgeScope): string {
@@ -194,13 +201,14 @@ function countWhere(db: Database, table: string, where: string, params: Record<s
 /** What deleteScope would remove, without changing anything. */
 export function countScope(db: Database, scope: PurgeScope, purgedIds: readonly number[]): PurgeCounts {
   const params = { ...scope.params, purged: JSON.stringify(purgedIds) }
+  const anyPurged = purgedIds.length > 0
   const tables = Object.fromEntries(PURGE_TABLES.map((table) => [table, countWhere(db, table, scope.where[table], params)])) as Record<PurgeTable, number>
   return {
     ...tables,
-    injections: countWhere(db, 'injections', injectionsWhere(scope), params),
-    injectionsTrimmed: countWhere(db, 'injections', `NOT (${injectionsWhere(scope)}) AND ${ANY_PURGED}`, params),
+    injections: countWhere(db, 'injections', injectionsWhere(scope, anyPurged), params),
+    injectionsTrimmed: anyPurged ? countWhere(db, 'injections', `NOT (${injectionsWhere(scope, true)}) AND ${ANY_PURGED}`, params) : 0,
     findings: countWhere(db, 'redaction_findings', findingsWhere(scope), params),
-    links: countWhere(db, 'observation_links', LINKS_PURGED, params),
+    links: anyPurged ? countWhere(db, 'observation_links', LINKS_PURGED, params) : 0,
   }
 }
 
@@ -224,6 +232,20 @@ function deleteWhere(db: Database, table: string, where: string, params: Record<
   db.query(`DELETE FROM ${table} WHERE ${where}`).run(params)
 }
 
+/** Mixed injections and reads lose only the purged ids. */
+function trimPurgedIds(db: Database, purged: string): void {
+  db.query(
+
+    `UPDATE injections SET observation_ids = (SELECT json_group_array(j.value) FROM json_each(injections.observation_ids) j
+       WHERE j.value NOT IN (SELECT value FROM json_each($purged))) WHERE ${ANY_PURGED}`,
+  ).run({ purged })
+  db.query(
+    `UPDATE mcp_reads SET returned_ids = (SELECT json_group_array(j.value) FROM json_each(mcp_reads.returned_ids) j
+       WHERE j.value NOT IN (SELECT value FROM json_each($purged)))
+     WHERE EXISTS (SELECT 1 FROM json_each(mcp_reads.returned_ids) j WHERE j.value IN (SELECT value FROM json_each($purged)))`,
+  ).run({ purged })
+}
+
 /**
  * Deletes in dependency order; the caller owns the transaction. Mixed
  * injections lose only the purged ids. The counts come from countScope just
@@ -236,16 +258,10 @@ export function deleteScope(db: Database, scope: PurgeScope, purgedIds: readonly
   const params = { ...scope.params, purged: JSON.stringify(purgedIds) }
   const recount = rehomeSummaries(db, scope, scope.params)
   deleteWhere(db, 'redaction_findings', findingsWhere(scope), params)
-  deleteWhere(db, 'injections', injectionsWhere(scope), params)
-  db.query(
-    `UPDATE injections SET observation_ids = (SELECT json_group_array(j.value) FROM json_each(injections.observation_ids) j
-       WHERE j.value NOT IN (SELECT value FROM json_each($purged))) WHERE ${ANY_PURGED}`,
-  ).run({ purged: params.purged })
-  db.query(
-    `UPDATE mcp_reads SET returned_ids = (SELECT json_group_array(j.value) FROM json_each(mcp_reads.returned_ids) j
-       WHERE j.value NOT IN (SELECT value FROM json_each($purged)))
-     WHERE EXISTS (SELECT 1 FROM json_each(mcp_reads.returned_ids) j WHERE j.value IN (SELECT value FROM json_each($purged)))`,
-  ).run({ purged: params.purged })
+  const anyPurged = purgedIds.length > 0
+  deleteWhere(db, 'injections', injectionsWhere(scope, anyPurged), params)
+  // Trimming purged ids out of the injections and reads that keep others: nothing to trim when no memory was purged.
+  if (anyPurged) trimPurgedIds(db, params.purged)
   for (const table of PURGE_TABLES.slice(1)) deleteWhere(db, table, scope.where[table], params)
   settleContradictions(db, revealed)
   recountSummaries(db, recount)

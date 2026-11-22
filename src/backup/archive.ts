@@ -12,7 +12,7 @@
 // any other. The manifest is advice (what to show, what to refuse early); the
 // restore reads the schema version and the cipher from the snapshot itself.
 
-import { closeSync, fstatSync, openSync, readSync, rmSync, writeSync } from 'node:fs'
+import { closeSync, fstatSync, fsyncSync, openSync, readSync, rmSync, writeSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { isRecord } from '../contract/event'
 import { DATA_FILE_MODE } from '../store/data-dir'
@@ -122,6 +122,13 @@ function writeAll(fd: number, bytes: Buffer): void {
   while (written < bytes.length) written += writeSync(fd, bytes, written, bytes.length - written)
 }
 
+/** fsync, behind a seam so a test can see that it ran and can make it fail. */
+export const archiveSync = { fsync: (fd: number): void => fsyncSync(fd) }
+
+function syncFile(fd: number): void {
+  archiveSync.fsync(fd)
+}
+
 export async function sha256OfFile(path: string): Promise<string> {
   const fd = openSync(path, 'r')
   try {
@@ -152,6 +159,9 @@ export async function writeArchive(dest: string, manifest: BackupManifest, snaps
     } finally {
       closeSync(source)
     }
+    // On disk before the caller renames it into place and records the backup as made: without this a power loss just
+    // after could leave a short or empty file under the final name.
+    syncFile(out)
   } catch (error: unknown) {
     closeSync(out)
     rmSync(dest, { force: true })
@@ -210,6 +220,8 @@ export async function extractSnapshot(path: string, header: ArchiveHeader, dest:
     })
     if (!whole) throw cutShort()
     if (hash.digest('hex') !== sha256) throw new BackupError('tampered', 'the backup file is damaged: its contents do not match its checksum. Nothing was changed')
+    // The restore renames this file over the store: its pages are on disk first.
+    syncFile(out)
   } catch (error: unknown) {
     closeSync(out)
     closeSync(fd)

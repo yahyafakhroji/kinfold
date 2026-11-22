@@ -14,7 +14,7 @@
 import { HOLDOUT_HOSTS } from '../context/holdout'
 import type { Database } from '../sqlite/types'
 import { readDisplaySettings } from '../store/display-settings'
-import { type ContextCost, type EmbeddingCalls, type ObserverCost, type TurnUsageRow, contextCosts, embeddingCalls, observerCosts, turnUsageRows } from '../store/impact-reads'
+import { type ContextCost, type EmbeddingCalls, type ObserverCost, type TurnUsageRow, comparableTurns, contextCosts, embeddingCalls, observerCosts, turnUsageRows } from '../store/impact-reads'
 
 /** Turns needed in each group before the two are compared. */
 export const MIN_HOLDOUT_SAMPLE = 30
@@ -71,9 +71,7 @@ export interface HoldoutComparison {
  * that project is like, not by what memory does.
  */
 export function holdoutComparison(rows: readonly TurnSample[], minSample: number = MIN_HOLDOUT_SAMPLE): HoldoutComparison {
-  const withHeld = new Set(rows.filter((row) => row.heldOut).map((row) => row.projectKey))
-  const withNormal = new Set(rows.filter((row) => !row.heldOut).map((row) => row.projectKey))
-  const compared = rows.filter((row) => withHeld.has(row.projectKey) && withNormal.has(row.projectKey))
+  const compared = comparableTurns(rows)
   const held = compared.filter((row) => row.heldOut)
   const normal = compared.filter((row) => !row.heldOut)
   const enough = held.length >= minSample && normal.length >= minSample

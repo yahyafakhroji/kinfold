@@ -5,6 +5,7 @@
 // The read queries feed the hit-rate proxies in src/dashboard/hit-rate.ts.
 
 import type { Database } from '../sqlite/types'
+import { parseIds } from './ids'
 
 export const MCP_TOOLS = ['search', 'timeline', 'get_observations'] as const
 export type McpTool = (typeof MCP_TOOLS)[number]
@@ -36,16 +37,6 @@ export interface InjectedIds {
   channel: string
   occurredAt: number
   observationIds: number[]
-}
-
-function parseIds(json: string): number[] {
-  try {
-    const value: unknown = JSON.parse(json)
-    return Array.isArray(value) ? value.filter((id): id is number => Number.isSafeInteger(id)) : []
-  } catch {
-    // A row this build did not write: count it with no ids rather than fail the summary.
-    return []
-  }
 }
 
 export function insertMcpRead(db: Database, read: McpRead, occurredAt: number): number {

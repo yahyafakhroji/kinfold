@@ -35,14 +35,11 @@ import { isObserverProcess } from '../observer/env'
 import { resolveDataDir } from '../store/data-dir'
 import { applyDataDirFlag } from '../store/data-dir-flag'
 import { recordEvent } from './record'
+import { errorMessage } from '../errors'
 
 export type ErrorSink = (line: string) => void
 
 export type HookHost = AgentId
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
 
 /** `--host <id>` or `--host=<id>`; anything else is Claude Code. Unknown ids are null, and nothing is captured. */
 export function hostFromArgs(argv: readonly string[]): HookHost | null {
@@ -130,9 +127,12 @@ async function contextOutput(event: NormalizedEvent, dataDir: string, host: Hook
   if (spec === null || (event.kind !== 'session_start' && event.kind !== 'user_prompt')) return null
   // An agent running this host's hooks under its own name is not known to show the message, so it gets the context alone.
   const hasUserChannel = spec.userMessage !== undefined && event.host === host
-  const show = hasUserChannel && readDisplayFile(dataDir).showRecall
+  const mayProgress = spec.progressLine !== undefined && event.host === host
+  // One read of display.json for both lines, and none when this host shows neither: this runs inside the hook's budget.
+  const showRecall = (hasUserChannel || mayProgress) && readDisplayFile(dataDir).showRecall
+  const show = hasUserChannel && showRecall
   // A progress line rides in front of the normal output; an agent running this host's hooks under its own name is not known to strip it.
-  const progress = spec.progressLine !== undefined && event.host === host && readDisplayFile(dataDir).showRecall ? spec.progressLine : null
+  const progress = mayProgress && showRecall && spec.progressLine !== undefined ? spec.progressLine : null
   const wanted = contextFor(event, host)
   if (wanted === null) {
     if (progress !== null) return event.kind === 'user_prompt' ? progress(NO_PROMPT_MEMORY_LINE) : null

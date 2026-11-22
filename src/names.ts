@@ -24,4 +24,7 @@ export const LEGACY_PLUGIN_FILE_NAME = 'shared-agent-memory.js'
 export const SHIM_MARKER = 'kinfold'
 export const LEGACY_SHIM_MARKER = 'shared-agent-memory'
 
+/** An agent's id as every route, CLI filter and tool argument takes it: one rule, so the dashboard and the CLI accept the same hosts. */
+export const HOST_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
+
 export const LOG_PREFIX = 'kinfold-daemon'

@@ -568,3 +568,10 @@ test('installing a prerelease turns the beta channel on, unless --no-beta is giv
   expect(await install(w.env, { ...YES, releaseVersion: '0.6.0-beta.1', beta: false })).toBe(EXIT_OK)
   expect(record()).not.toHaveProperty('beta')
 })
+
+test('an install starts each agent\'s CLI for its version once: what the questions found is what the apply step reports', async () => {
+  const w = both()
+  expect(await install(w.env, YES)).toBe(EXIT_OK)
+  const asks = w.commands.filter((command) => command.argv.length === 2 && command.argv[1] === '--version').map((command) => String(command.argv[0]).split('/').at(-1))
+  for (const cli of ['claude', 'opencode']) expect(asks.filter((name) => name === cli)).toHaveLength(1)
+})

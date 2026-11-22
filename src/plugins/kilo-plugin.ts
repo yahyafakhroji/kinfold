@@ -22,14 +22,16 @@ import { appendFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { defaultAdapterContext } from '../adapters/context'
 import { recordedHostVersion } from '../adapters/host-version'
-import { KILO_HOST, createKiloMapper } from '../adapters/kilo-code'
-import { recordEvent } from '../cli/record'
+import { KILO_HOST, createKiloMapper, promptText } from '../adapters/kilo-code'
 import { DAEMON_ONLY_TIMEOUT_MS, fetchDaemonContext } from '../context/daemon'
 import type { ContextRequest, ContextResult } from '../context/types'
 import type { NormalizedEvent } from '../contract/event'
 import { isObserverProcess } from '../observer/env'
 import { resolveDataDir } from '../store/data-dir'
 import { createContextInjector } from './context-injector'
+import { createPluginRecorder } from './recorder'
+import { errorName } from '../errors'
+import { isRecord } from '../contract/event'
 
 export const KILO_PLUGIN_ID = 'kinfold'
 const LOG_LABEL = 'kinfold-kilo'
@@ -40,23 +42,30 @@ const LOG_DIR_MODE = 0o700
 const LOG_FILE_MODE = 0o600
 
 /** Appends to the plugin's log file. A line that cannot be written is dropped: logging must never fail a request. */
-function fileLog(dataDir: string): (line: string) => void {
+export function fileLog(dataDir: string): (line: string) => void {
   const dir = join(dataDir, 'logs')
   const path = join(dir, KILO_LOG_FILE)
+  // The folder is made and the file measured once; after that the size is counted here, so a line costs one append
+  // on the thread that draws Kilo. null until that first look, and again after a failed write.
+  let size: number | null = null
+  const measure = (): number => {
+    mkdirSync(dir, { recursive: true, mode: LOG_DIR_MODE })
+    try {
+      return statSync(path).size
+    } catch {
+      return 0 // No file yet.
+    }
+  }
   return (line) => {
     try {
-      mkdirSync(dir, { recursive: true, mode: LOG_DIR_MODE })
       const text = `${new Date().toISOString()} ${line}\n`
-      let size = 0
-      try {
-        size = statSync(path).size
-      } catch {
-        // No file yet.
-      }
-      if (size > MAX_LOG_BYTES) writeFileSync(path, text, { mode: LOG_FILE_MODE })
+      const before = size ?? measure()
+      if (before > MAX_LOG_BYTES) writeFileSync(path, text, { mode: LOG_FILE_MODE })
       else appendFileSync(path, text, { mode: LOG_FILE_MODE })
+      size = (before > MAX_LOG_BYTES ? 0 : before) + Buffer.byteLength(text)
     } catch {
-      // Nowhere to say it.
+      // Nowhere to say it. The next line looks at the disk again.
+      size = null
     }
   }
 }
@@ -86,23 +95,6 @@ export interface KiloPluginOptions {
   fetchContext?: ContextFetcher
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/** Names only: a message could quote a prompt or a path. */
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : 'unknown error'
-}
-
-function promptTextOf(output: unknown): string {
-  if (!isRecord(output) || !Array.isArray(output.parts)) return ''
-  return output.parts
-    .filter((part): part is { text: string } => isRecord(part) && part.type === 'text' && typeof part.text === 'string' && part.synthetic !== true)
-    .map((part) => part.text)
-    .join('\n')
-}
-
 export function createKiloPlugin(options: KiloPluginOptions = {}): KiloPlugin {
   const server = async (input: unknown): Promise<KiloHooks> => {
     if (isObserverProcess(options.env ?? process.env)) return {}
@@ -115,14 +107,14 @@ export function createKiloPlugin(options: KiloPluginOptions = {}): KiloPlugin {
     }
     const mapper = createKiloMapper({ ...defaultAdapterContext(recordedHostVersion(dataDir, KILO_HOST)), directory })
 
+    const recorder = createPluginRecorder({ dataDir, onNudgeSkipped: (reason, events) => log(`${LOG_LABEL}: ${events} event(s) spooled, nudge skipped: ${reason}`) })
     const record = (events: readonly NormalizedEvent[]): void => {
       for (const event of events) {
-        recordEvent(event, dataDir).then(
-          ({ nudge }) => {
-            if (!nudge.ok) log(`${LOG_LABEL}: event ${event.eventId} spooled, nudge skipped: ${nudge.reason}`)
-          },
-          (error: unknown) => log(`${LOG_LABEL}: event ${event.eventId} not captured: ${errorName(error)}`),
-        )
+        try {
+          recorder.record(event)
+        } catch (error: unknown) {
+          log(`${LOG_LABEL}: event ${event.eventId} not captured: ${errorName(error)}`)
+        }
       }
     }
     /** Whatever a hook does, Kilo sees it return: a throw here would fail the user's request. */
@@ -137,7 +129,7 @@ export function createKiloPlugin(options: KiloPluginOptions = {}): KiloPlugin {
       event: (hook) => guarded('event', () => record(mapper.event(isRecord(hook) ? hook.event : null))),
       'chat.message': (hookInput, output) => guarded('chat.message', () => {
         // The prompt's text is kept for the next request's related memory, as OpenCode's prompt hook keeps it.
-        if (isRecord(hookInput) && typeof hookInput.sessionID === 'string') injector.onPrompt({ sessionID: hookInput.sessionID, prompt: { text: promptTextOf(output) } })
+        if (isRecord(hookInput) && typeof hookInput.sessionID === 'string') injector.onPrompt({ sessionID: hookInput.sessionID, prompt: { text: promptText(isRecord(output) ? output.parts : undefined) } })
         record(mapper.chatMessage(hookInput, output))
       }),
       'tool.execute.after': (hookInput, output) => guarded('tool.execute.after', () => record(mapper.toolAfter(hookInput, output))),

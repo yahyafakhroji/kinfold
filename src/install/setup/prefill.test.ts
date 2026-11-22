@@ -17,7 +17,7 @@ import { ChoiceError, chooseObservers } from '../observer-choice'
 import { runPlan } from '../plan'
 import { envForDataDir } from '../../cli/data-dir-env'
 import { type FakeWorld, YES, createWorld, fakeService, startWorldDaemon } from '../test-support'
-import { UNREADABLE_OBSERVERS, lockedFolderProblem, mergePlanLines, readSetupState, savedObserversForYes } from './prefill'
+import { UNREADABLE_OBSERVERS, MERGE_PREVIEW_FOLDERS, lockedFolderProblem, mergePlanLines, readSetupState, savedObserversForYes } from './prefill'
 import { installRecordAction } from './record'
 import { posixOnly } from '../../../test/platform-guards'
 
@@ -345,6 +345,36 @@ test('the install output says which keys of one repo will merge, before the daem
     'project: shared-agent-memory will merge into kinfold (same repo); kinfold project split github.com/me/shared-agent-memory undoes it',
   ])
   expect(mergePlanLines(w.env, join(w.dataDir, 'none'), () => 'f'.repeat(40))).toEqual([])
+})
+
+test('the merge preview looks up each folder once, and past a few dozen folders leaves the lookups to the daemon', () => {
+  world = createWorld()
+  const w = world
+  const seed = (projects: number, folderOf: (index: number) => string): void => {
+    const store = openStore(w.dataDir)
+    try {
+      store.db.run('DELETE FROM sessions')
+      store.db.run('DELETE FROM projects')
+      for (let index = 0; index < projects; index += 1) {
+        const key = `github.com/me/repo-${index}`
+        store.db.query('INSERT INTO projects (key, key_kind, display_name, created_at) VALUES (?, ?, ?, ?)').run(key, 'git-remote', `repo-${index}`, index + 1)
+        store.db.query('INSERT INTO sessions (host, host_session_id, project_key, cwd, started_at, last_event_at) VALUES (?, ?, ?, ?, ?, ?)').run('claude-code', key, key, folderOf(index), index + 1, index + 1)
+      }
+    } finally {
+      store.db.close()
+    }
+  }
+  const asked: string[] = []
+  const rootFor = (cwd: string): string => (asked.push(cwd), 'f'.repeat(40))
+  // Six keys in two folders: two lookups, not six.
+  seed(6, (index) => `/work/${index % 2}`)
+  expect(mergePlanLines(w.env, w.dataDir, rootFor)).toHaveLength(5)
+  expect(asked.sort()).toEqual(['/work/0', '/work/1'])
+  // More folders than the preview looks up: one line, and no lookup at all.
+  asked.length = 0
+  seed(MERGE_PREVIEW_FOLDERS + 1, (index) => `/work/${index}`)
+  expect(mergePlanLines(w.env, w.dataDir, rootFor)).toEqual([`project: ${MERGE_PREVIEW_FOLDERS + 1} projects have no repo root recorded yet; the daemon checks them when it starts, and kinfold status names any it merges`])
+  expect(asked).toEqual([])
 })
 
 test('a claude-cli login the daemon backs off on is noticed, so setup can offer a long-lived token', async () => {

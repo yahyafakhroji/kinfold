@@ -14,6 +14,7 @@ import { isNearDuplicate, nameTokens, titleTokens } from '../context/similarity'
 import type { Database } from '../sqlite/types'
 import { finalStrength } from './sources'
 import type { ObserverEvent, ParsedObservation } from './types'
+import { parseIds } from '../store/ids'
 
 export const MAX_KNOWN_OBSERVATIONS = 40
 
@@ -27,16 +28,6 @@ export interface KnownObservation {
 export interface EchoFilterResult {
   kept: ParsedObservation[]
   echoes: number
-}
-
-/** Our own column; a value that is not a JSON array of ids names no observations. */
-function parseIds(json: string): number[] {
-  try {
-    const value: unknown = JSON.parse(json)
-    return Array.isArray(value) ? value.filter((id): id is number => Number.isSafeInteger(id)) : []
-  } catch {
-    return []
-  }
 }
 
 /** Ids a relation may name: what the run showed, narrowed to the session's project. */

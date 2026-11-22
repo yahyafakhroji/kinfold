@@ -21,3 +21,25 @@ export class AdapterInputError extends Error {
     this.name = 'AdapterInputError'
   }
 }
+
+/** A payload field when it is a string; an empty string is still a string. */
+export function str(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+/** A payload field when it is a string with something in it. */
+export function nonEmpty(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+/** Turns a parser that throws AdapterInputError into one that answers null for a payload it cannot map. Any other error still throws. */
+export function lenient<Args extends unknown[], Result>(parse: (...args: Args) => Result): (...args: Args) => Result | null {
+  return (...args) => {
+    try {
+      return parse(...args)
+    } catch (error: unknown) {
+      if (error instanceof AdapterInputError) return null
+      throw error
+    }
+  }
+}

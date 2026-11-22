@@ -9,7 +9,7 @@
 
 import { isRecord } from '../../contract/event'
 import { ObserverError, type RunnerUsage } from '../types'
-import type { CliAdapter, CliParsed, CliRunContext, Semver } from './cli-core'
+import { type CliAdapter, type CliParsed, type CliRunContext, type Semver, parseSemver } from './cli-core'
 import { cliFailure } from './cli-error'
 import type { SpawnResult } from './claude-cli'
 
@@ -56,13 +56,6 @@ export function tomlBasicString(value: string): string {
     else out += char
   }
   return `${out}"`
-}
-
-function parseVersion(stdout: string): Semver | null {
-  const match = VERSION_PATTERN.exec(stdout)
-  if (match === null) return null
-  const parts = [Number(match[1]), Number(match[2]), Number(match[3])] as const
-  return parts.every(Number.isSafeInteger) ? parts : null
 }
 
 function isolatedEnv(_runDir: string, baseEnv: Record<string, string>): Record<string, string> {
@@ -185,7 +178,7 @@ export const codexAdapter: CliAdapter = {
   binary: 'codex',
   extraEnv: ['CODEX_HOME'],
   minVersion: CODEX_MIN_VERSION,
-  parseVersion,
+  parseVersion: (stdout) => parseSemver(VERSION_PATTERN, stdout),
   isolatedEnv,
   invocation: ({ binaryPath, runDir, model, system, env }) => ({
     cmd: [

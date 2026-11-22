@@ -6,9 +6,9 @@
 // callers for one provider share a single in-flight listing, so a page full of forms starts one process.
 
 import type { CliObserverRunner } from '../observer/runners/cli-core'
-import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, type ObserverSettings, toObserverError } from '../observer/types'
+import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, type ObserverSettings, isCliLoginProvider, toObserverError } from '../observer/types'
 import type { RouteAnswer } from './data-routes'
-import { MAX_MODEL_CHARS, isCliLoginProvider } from './settings-route'
+import { MAX_MODEL_CHARS } from './settings-route'
 
 const CACHE_MS = 10 * 60_000
 const PLACEHOLDER_MODEL = '-'

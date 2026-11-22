@@ -28,6 +28,7 @@ import { searchablePrompt } from './prompt-text'
 import type { RecallKeywordAnswer, RecallRowsAnswer, TermCounts } from './recall-reads'
 import { RELATED_BUDGET_TOKENS, RELATED_CANDIDATES, type RelatedCandidate, type RelatedGate, type RelatedMode, buildRelated, isRelated, joinContext, rankRelated } from './related'
 import { type ContextRequest, type ContextResult, EMPTY_CONTEXT, MAX_CONTEXT_PROMPT_CHARS } from './types'
+import { errorName } from '../errors'
 
 /** The hook gives the daemon 200 ms (client.ts); measured from when the request arrived, so every read and the embed count. */
 export const PROMPT_SEMANTIC_DEADLINE_MS = 150
@@ -113,10 +114,6 @@ function race<T>(pending: Promise<T>, ms: number): Promise<Raced<T>> {
   return Promise.race([settled, deadline]).finally(() => clearTimeout(timer))
 }
 
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : 'error'
-}
-
 /** What the reads are about: the terms the recall read matched on, and where rows may come from. */
 interface Matching {
   projectKey: string
@@ -199,13 +196,13 @@ export async function preparePromptContext(deps: PromptContextDeps, request: Con
   const embedding = query === '' ? { pending: null, semantic: 'no_prompt' as SemanticOutcome } : startEmbed(deps, projectKey, query, reading)
 
   const [deltaRaced, read] = await Promise.all([race(deltaRead.pending, wait), race(keywordRead.pending, wait)])
-  if (deltaRaced.kind === 'failed') deps.log(`prompt delta read failed: ${errorName(deltaRaced.error)}`)
+  if (deltaRaced.kind === 'failed') deps.log(`prompt delta read failed: ${errorName(deltaRaced.error, 'error')}`)
   const delta = deltaRaced.kind === 'answer' ? deltaRaced.value : EMPTY_CONTEXT
   const deltaMs = deltaRead.ms()
   const keywordMs = keywordRead.ms()
   const deltaRead_ = deltaRaced.kind === 'answer' ? 'ok' : deltaRaced.kind === 'failed' ? 'error' : 'late'
   if (read.kind !== 'answer') {
-    if (read.kind === 'failed') deps.log(`prompt recall read failed: ${errorName(read.error)}`)
+    if (read.kind === 'failed') deps.log(`prompt recall read failed: ${errorName(read.error, 'error')}`)
     else parkLate(deps, reads, { projectKey, sessionKey }, reading, embedding.pending, now)
     return { ...nothing(read.kind === 'failed' ? 'error' : 'late', embedding.pending === null ? embedding.semantic : 'late', deltaMs, keywordMs), ...delta }
   }
@@ -225,7 +222,7 @@ export async function preparePromptContext(deps: PromptContextDeps, request: Con
     return { ...joinContext(delta, related.result), relatedText: related.result.text, related: related.result.observationIds.length, semantic: related.semantic, read: read_,
       deltaMs, keywordMs, relatedMs: Math.round(performance.now() - relatedStart), relatedServed: related.served, explain: related.explain }
   } catch (error: unknown) {
-    deps.log(`prompt related failed: ${errorName(error)}`)
+    deps.log(`prompt related failed: ${errorName(error, 'error')}`)
     return { ...nothing(read_, 'error', deltaMs, keywordMs), ...delta, relatedMs: Math.round(performance.now() - relatedStart) }
   }
 }
@@ -250,7 +247,7 @@ function startEmbed(deps: PromptContextDeps, projectKey: string, query: string, 
   const slots = deps.slots
   const alsoIds = reading.then((answer) => answer.keywordRows.map((row) => row.id), () => [])
   const pending = deps.semantic({ query, project: projectKey, k: RELATED_VECTOR_K, deadlineMs: LATE_EMBED_DEADLINE_MS, filters: NO_FILTERS, alsoIds })
-    .catch((error: unknown): SemanticAnswer => ({ status: 'unavailable', reason: errorName(error) }))
+    .catch((error: unknown): SemanticAnswer => ({ status: 'unavailable', reason: errorName(error, 'error') }))
     .finally(() => slots?.release())
   return { pending, semantic: 'ok' }
 }
@@ -390,7 +387,7 @@ function parkVectorHits(deps: PromptContextDeps, reads: StoreReader, matching: M
     const candidates = candidatesFrom(rows, answer.hits, matching.terms.length)
     parkCandidates(deps, matching.sessionKey, candidates, askedAt)
     deps.log(`prompt semantic late status=ok hits=${candidates.length} embed_ms=${answer.embedMs} top=${topDistances(candidates)}`)
-  }).catch((error: unknown) => deps.log(`prompt semantic late failed: ${errorName(error)}`))
+  }).catch((error: unknown) => deps.log(`prompt semantic late failed: ${errorName(error, 'error')}`))
 }
 
 /** A store read past the deadline: its keyword matches, and the embed's hits when it ends, wait for the next prompt. */
@@ -402,5 +399,5 @@ function parkLate(deps: PromptContextDeps, reads: StoreReader, where: Where, rea
     const parked = parkCandidates(deps, matching.sessionKey, keyword, askedAt)
     deps.log(`prompt recall read late keyword=${parked}`)
     if (pending !== null) parkVectorHits(deps, reads, matching, answer.sessionId, pending, askedAt)
-  }).catch((error: unknown) => deps.log(`prompt recall read late failed: ${errorName(error)}`))
+  }).catch((error: unknown) => deps.log(`prompt recall read late failed: ${errorName(error, 'error')}`))
 }

@@ -7,7 +7,7 @@
 // `#!/usr/bin/env node` shebang runs on) and `opencode`.
 
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
-import { DEFAULT_PORT } from '../daemon/daemon'
+import { DEFAULT_PORT } from '../daemon/port'
 import { envName } from '../env-names'
 import { LEGACY_LAUNCH_AGENT_LABEL } from '../names'
 import { type InstallEnv, LAUNCH_AGENT_LABEL, installPaths, platformOf } from './env'

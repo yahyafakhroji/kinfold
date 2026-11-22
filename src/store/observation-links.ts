@@ -103,8 +103,15 @@ export function confirmationsColumn(alias: string): string {
 
 /** A read-only reader may meet a store from before v5. */
 export function hasLinksTable(db: Database): boolean {
-  return db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'observation_links'").get() !== null
+  if (withLinks.has(db)) return true
+  const found = db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'observation_links'").get() !== null
+  // Only a yes is kept: a migration can add the table under this same connection, and it is never dropped.
+  if (found) withLinks.add(db)
+  return found
 }
+
+/** Connections seen to have the links table, so the prompt path asks sqlite_master once per connection and not several times per prompt. */
+const withLinks = new WeakSet<Database>()
 
 /** The row a content hash names; a retried batch finds the row it stored the first time. */
 export function observationIdByHash(db: Database, projectKey: string, contentHash: string): number | null {

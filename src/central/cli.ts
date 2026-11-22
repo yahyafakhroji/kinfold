@@ -220,15 +220,22 @@ function withLocalStore<T>(ctx: Context, read: (db: Database) => T): T | null {
 
 /** Sends one local project to the hub; the counts of what the hub added, or the reason it could not. */
 async function sendProject(ctx: Context, endpoint: HubEndpoint, project: ProjectKey): Promise<{ ok: true; added: Record<string, number> } | { ok: false; reason: string }> {
-  const chunks = withLocalStore(ctx, (db) => [...exportProject(db, project, endpoint.deviceId)]) ?? []
   const added: Record<string, number> = { sessions: 0, prompts: 0, summaries: 0, observations: 0 }
-  for (const chunk of chunks) {
-    const call = await callHub(endpoint, '/central/import', chunk, { timeoutMs: 60_000, ...(ctx.deps.fetch !== undefined ? { fetch: ctx.deps.fetch } : {}) })
-    if (!call.ok) return { ok: false, reason: failureReason(call.reason, 'the hub', call.gap ?? null) }
-    if (call.status !== 200) return { ok: false, reason: `the hub answered ${call.status}` }
-    for (const [key, value] of Object.entries(call.body as Record<string, number>)) added[key] = (added[key] ?? 0) + value
+  const db = openLocalStore(ctx.env.dataDir, ctx.deps.dbKeys ?? dbKeyStoreFor(ctx.env.dataDir))
+  if (db === null) return { ok: true, added }
+  try {
+    // One chunk in memory at a time: the read-only store stays open while its chunks are sent, so a project's
+    // whole history is never held as JSON before the first request.
+    for (const chunk of exportProject(db, project, endpoint.deviceId)) {
+      const call = await callHub(endpoint, '/central/import', chunk, { timeoutMs: 60_000, ...(ctx.deps.fetch !== undefined ? { fetch: ctx.deps.fetch } : {}) })
+      if (!call.ok) return { ok: false, reason: failureReason(call.reason, 'the hub', call.gap ?? null) }
+      if (call.status !== 200) return { ok: false, reason: `the hub answered ${call.status}` }
+      for (const [key, value] of Object.entries(call.body as Record<string, number>)) added[key] = (added[key] ?? 0) + value
+    }
+    return { ok: true, added }
+  } finally {
+    db.close()
   }
-  return { ok: true, added }
 }
 
 const addedLine = (added: Record<string, number>): string => `${added.observations ?? 0} memories, ${added.sessions ?? 0} sessions, ${added.prompts ?? 0} prompts`

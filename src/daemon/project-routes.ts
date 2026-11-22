@@ -49,7 +49,9 @@ export async function projectRoute(method: string, url: URL, readBody: () => Pro
   if (deps.device) return { status: 409, body: { error: DEVICE_REFUSAL } }
   if (path === '/projects') {
     if (method !== 'GET') return { status: 405, body: { error: 'method not allowed' } }
-    return { status: 200, body: { projects: listProjects(deps.db), merges: recentMerges(deps.db, deps.now() - RECENT_MERGE_MS) } }
+    const merges = recentMerges(deps.db, deps.now() - RECENT_MERGE_MS)
+    // `kinfold status` wants the merges alone: the list counts every memory and session of every project, to be thrown away.
+    return { status: 200, body: url.searchParams.get('merges') === 'only' ? { merges } : { projects: listProjects(deps.db), merges } }
   }
   if (method !== 'POST') return { status: 405, body: { error: 'method not allowed' } }
   const merging = path === '/projects/merge'

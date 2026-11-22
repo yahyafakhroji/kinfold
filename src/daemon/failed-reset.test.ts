@@ -5,7 +5,7 @@ import { LEGACY_FINGERPRINT_SCHEME, MASTER_FINGERPRINT_SCHEME } from '../secrets
 import { MAX_OBSERVER_ATTEMPTS, finishRun, startRun } from '../store/observer-store'
 import { providerBackoff } from '../observer/backoff'
 import { startDaemon } from './daemon'
-import { checkFailedResets } from './failed-reset'
+import { BACKOFF_HOSTS_WINDOW_MS, CREDENTIAL_RECHECK_MS, checkFailedResets, createResetMemo } from './failed-reset'
 
 const HMAC_KEY = 'ef'.repeat(32)
 const LEGACY_KEY = { key: HMAC_KEY, scheme: LEGACY_FINGERPRINT_SCHEME }
@@ -164,4 +164,70 @@ test('moving from hmac.key to the master key re-baselines the fingerprint instea
   expect(stored.credential).toStartWith(`${MASTER_FINGERPRINT_SCHEME}:`)
   credential = KEY_V2
   expect(underMaster()).toEqual([{ host: 'opencode', reason: 'credential', events: 1 }])
+})
+
+test('a running daemon reads the key store once per recheck interval, sees a new credential after it, and logs a skip once', () => {
+  const { opencode } = seedStuck()
+  credential = KEY_V1
+  let reads = 0
+  let now = T0
+  let broken = false
+  const counting: CredentialProvider = {
+    get: (ref) => {
+      reads += 1
+      if (broken) throw new Error('keychain locked')
+      return credentials.get(ref)
+    },
+  }
+  const memo = createResetMemo()
+  const tick = () => checkFailedResets({ db: temp.store.db, credentials: counting, fingerprintKey: LEGACY_KEY, now: () => now, memo, log: (line) => logs.push(line) })
+  tick()
+  const perCheck = reads
+  expect(perCheck).toBeGreaterThan(0)
+  for (let step = 0; step < 3; step += 1) {
+    now += 30_000
+    expect(tick()).toEqual([])
+  }
+  // Four checks in under two minutes: the key store was asked for the first only.
+  expect(reads).toBe(perCheck)
+
+  // The key is replaced. The checks inside the interval still hold the old fingerprint; the first one after it resets.
+  credential = KEY_V2
+  now = T0 + CREDENTIAL_RECHECK_MS + 1
+  expect(tick()).toEqual([{ host: 'opencode', reason: 'credential', events: 1 }])
+  expect(reads).toBe(perCheck * 2)
+  expect(states(opencode)[0]).toEqual({ state: 'pending', attempts: 0 })
+
+  // A key store that stops answering is said once, not every 30 s, and said again after it has worked in between.
+  temp.store.db.run(`UPDATE events SET observer_state = 'failed', observer_attempts = ${MAX_OBSERVER_ATTEMPTS}`)
+  broken = true
+  const skips = (): number => logs.filter((line) => line === 'observer reset check host=opencode skipped: credential lookup failed').length
+  for (let step = 1; step <= 3; step += 1) {
+    now = T0 + (step + 1) * (CREDENTIAL_RECHECK_MS + 1)
+    tick()
+  }
+  expect(skips()).toBe(1)
+  broken = false
+  now += CREDENTIAL_RECHECK_MS + 1
+  tick()
+  broken = true
+  now += CREDENTIAL_RECHECK_MS + 1
+  tick()
+  expect(skips()).toBe(2)
+})
+
+test('the hosts of a backing-off provider are read from recent runs only', () => {
+  const old = seedSession(temp.store, 'cursor', 'cu-old')
+  const recent = seedSession(temp.store, 'opencode', 'oc-1')
+  const run = (sessionId: number, host: string, startedAt: number): void => {
+    const id = startRun(temp.store.db, { sessionId, host, provider: 'openrouter', model: 'openrouter/auto', eventCount: 1, startedAt })
+    finishRun(temp.store.db, id, 'failed', 'credential_missing: no keychain entry for openrouter', startedAt + 1_000)
+  }
+  run(old, 'cursor', T0 - BACKOFF_HOSTS_WINDOW_MS - 60_000)
+  run(recent, 'opencode', T0 - 10_000)
+  expect(providerBackoff(temp.store.db, 'openrouter')).not.toBeNull()
+  credential = KEY_V1
+  check()
+  const baselined = temp.store.db.query('SELECT host FROM observer_fingerprints ORDER BY host').all()
+  expect(baselined).toEqual([{ host: 'opencode' }])
 })

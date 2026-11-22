@@ -13,6 +13,8 @@ import type { Database } from '../sqlite/types'
 import { firstScreenFor, titlesFor } from '../store/context-store'
 import { recentMerges } from '../store/project-merge'
 import { RECENT_MERGE_MS } from '../daemon/project-routes'
+import { parseIds } from '../store/ids'
+import { HOST_NAME_PATTERN } from '../names'
 
 /**
  * A prompt is shown this long after its event time. The hook asks for recall
@@ -67,21 +69,21 @@ interface InjectionRow {
   late: number
 }
 
-function parseIds(json: string): number[] {
-  try {
-    const value: unknown = JSON.parse(json)
-    return Array.isArray(value) ? value.filter((id): id is number => Number.isSafeInteger(id)) : []
-  } catch {
-    return []
-  }
-}
-
 /** 0 on a store with no prompt yet. */
 export function latestPromptId(db: Database): number {
   return db.query<{ id: number }, []>('SELECT coalesce(max(id), 0) AS id FROM prompts').get()?.id ?? 0
 }
 
 export function watchRows(db: Database, query: WatchQuery): WatchRow[] {
+  return watchPage(db, query).rows
+}
+
+/**
+ * watchRows, and whether they are every matching prompt after `afterId`:
+ * false when the limit cut the list or a prompt was too fresh to show. When
+ * true, a watcher may move its cursor past prompts that did not match.
+ */
+export function watchPage(db: Database, query: WatchQuery): { rows: WatchRow[]; complete: boolean } {
   const prompts = db.query<PromptRow, Record<string, string | number | null>>(
     `SELECT p.id, p.occurred_at AS at, p.prompt_number AS promptNumber, s.host, s.host_session_id AS hostSessionId, pr.display_name AS project
      FROM prompts p JOIN sessions s ON s.id = p.session_id JOIN projects pr ON pr.key = s.project_key
@@ -95,7 +97,10 @@ export function watchRows(db: Database, query: WatchQuery): WatchRow[] {
     `SELECT observation_ids AS ids, held_out AS heldOut, related_count AS relatedCount, late FROM injections
      WHERE host = $host AND host_session_id = $hostSessionId AND channel = 'prompt' AND prompt_number = $promptNumber ORDER BY id`,
   )
-  return settled.map((prompt) => {
+  const complete = tooFresh === -1 && prompts.length < query.limit
+  return { complete, rows: settled.map((prompt) => rowOf(prompt)) }
+
+  function rowOf(prompt: PromptRow): WatchRow {
     const injections = sent.all({ host: prompt.host, hostSessionId: prompt.hostSessionId, promptNumber: prompt.promptNumber })
     // In each row the related ids are the last ones (the delta comes first).
     const parts = injections.flatMap((row) => {
@@ -112,7 +117,7 @@ export function watchRows(db: Database, query: WatchQuery): WatchRow[] {
       hostSessionId: prompt.hostSessionId, promptNumber: prompt.promptNumber,
       line: heldOut ? HELD_OUT_LINE : late ? lateLine(recallLine(ids, recalled)) : recallLine(ids, recalled),
     }
-  })
+  }
 }
 
 export interface WatchStart {
@@ -174,7 +179,8 @@ export function watchStarts(db: Database, query: WatchStartsQuery): WatchStart[]
   })
 }
 
-export const HOST_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
+export const HOST_PATTERN = HOST_NAME_PATTERN
+/** `kinfold watch --project` and the debug trace: a name typed on a command line, so shorter than the dashboard lists' cap (daemon/list-params.ts). */
 export const MAX_PROJECT_CHARS = 300
 
 /**
@@ -202,8 +208,10 @@ export function watchRoute(db: Database, method: string, url: URL, now: number):
   const newest = latestPromptId(db)
   // The same for prompts: a cursor from a store that is no longer here would wait for ids that may never come.
   if (afterId > newest) return { status: 200, body: { cursor: newest, rows: [], ...starts } }
-  const rows = watchRows(db, { afterId, before: now - WATCH_SETTLE_MS, host, project, limit: WATCH_LIMIT })
-  return { status: 200, body: { cursor: rows.at(-1)?.id ?? afterId, rows, ...starts } }
+  const { rows, complete } = watchPage(db, { afterId, before: now - WATCH_SETTLE_MS, host, project, limit: WATCH_LIMIT })
+  // With a host or project filter most prompts do not match. Once every matching one up to `newest` (read before
+  // the rows) has been shown, the cursor passes the rest too, or each poll would read them all again, and more each time.
+  return { status: 200, body: { cursor: complete ? newest : (rows.at(-1)?.id ?? afterId), rows, ...starts } }
 }
 
 /** The session starts after `afterId` (null: from now) and the cursor to ask from next, which passes every row looked at, shown or not. */

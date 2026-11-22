@@ -8,7 +8,7 @@ import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { checkEndpoint } from '../../observer/endpoint'
 import { defaultModelFor, isEndpointProvider } from '../../observer/settings'
-import { type EndpointProvider, OBSERVER_PROVIDERS, type ObserverProvider, UNPROVEN_CLI_PROVIDERS } from '../../observer/types'
+import { type EndpointProvider, OBSERVER_PROVIDERS, type ObserverProvider, UNPROVEN_CLI_PROVIDERS, isCliLoginProvider } from '../../observer/types'
 import { readDisplayFile } from '../../context/display-file'
 import { HOLDOUT_HOSTS } from '../../context/holdout'
 import { encodeRecoveryCode } from '../../sqlite/recovery'
@@ -40,7 +40,6 @@ import {
   endpointQuestion,
   GOOSE_MODEL_HINT,
   flagInput,
-  isCliLoginProvider,
   listModelsFor,
   modelProblem,
   newCredentialSession,
@@ -56,6 +55,7 @@ import { type Choice, PromptCancelled, type Prompts } from '../prompt/prompts'
 import { confirmRecoveryCode, recoverySinkFromPrompts } from '../recovery-confirm'
 import { LOCKED_FOLDER_NOTE, type SetupState, lockedFolderProblem, savedObserversForYes } from './prefill'
 import { type UpdateLevel, readInstallRecord, switchesFor, updateLevel } from './record'
+import { MAX_PORT } from '../../daemon/port'
 
 export interface SetupFlags {
   dataDir: string | null
@@ -103,6 +103,8 @@ export interface SetupAnswers {
   holdout?: boolean
   /** The embedding provider, from --embeddings or the question; absent: the setting stays as it is. */
   embeddings?: EmbeddingSettings
+  /** What the agents question found, under the same --hosts: the apply step reports from it and does not start every agent's CLI a second time. */
+  detections?: readonly HostDetection[]
 }
 
 export const NO_TTY_ENCRYPTION_CHANGE = 'changing encryption on an existing store needs a terminal; run kinfold encrypt or kinfold decrypt'
@@ -111,7 +113,6 @@ export const NO_AGENTS_NOTE = 'No supported agent was found on this machine, so 
 export const ENCRYPTION_IS_ON = 'Encryption is on. Run kinfold key show-recovery to see the recovery code.'
 
 const MIN_PORT = 1024
-const MAX_PORT = 65_535
 const PORT_SCAN_LIMIT = 200
 const LSOF = '/usr/sbin/lsof'
 const HOLDER_TIMEOUT_MS = 3_000
@@ -186,8 +187,15 @@ async function portStep(env: InstallEnv, ask: Prompts | null, state: SetupState,
   if (flags.port !== null) return flags.port
   const wanted = await defaultPort(env, state.port, ask !== null)
   if (ask === null) return wanted.port
-  const taken = wanted.takenBy === undefined ? '' : `Port ${state.port} is in use${wanted.takenBy === null ? '' : ` (process ${wanted.takenBy})`}. `
-  return Number(await ask.text(`${taken}Port for the daemon:`, String(wanted.port), validPort))
+  const inUse = (port: number, holder: string | null): string => `Port ${port} is in use${holder === null ? '' : ` (process ${holder})`}. `
+  let taken = wanted.takenBy === undefined ? '' : inUse(state.port, wanted.takenBy)
+  // A typed port is checked like the suggested one. Unchecked, a busy port was written into the service and found
+  // only at the daemon's failed start, after the agents and the service config had already been changed.
+  for (;;) {
+    const typed = Number(await ask.text(`${taken}Port for the daemon:`, String(wanted.port), validPort))
+    if (await portAvailable(env, typed)) return typed
+    taken = inUse(typed, await portHolder(env, typed))
+  }
 }
 
 // ---- folder -----------------------------------------------------------------
@@ -363,15 +371,20 @@ async function observerFor(env: InstallEnv, ask: Prompts, host: InstallHost, fla
   throw new ChoiceError(`no working observer for ${host} after ${MAX_CHOICE_ATTEMPTS} tries`)
 }
 
-async function observersStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags, choice: ChoiceOptions, agents: AgentsAnswer, profiles: ProfileTable): Promise<ObserverChoice[]> {
+/** The daemon's saved embedding settings, asked for once per wizard run however many questions read them; null when no daemon answers. */
+type SavedEmbeddings = () => Promise<EmbeddingSettings | null>
+
+async function observersStep(env: InstallEnv, ask: Prompts | null, state: SetupState, flags: SetupFlags, choice: ChoiceOptions, agents: AgentsAnswer, profiles: ProfileTable, savedEmbeddings: SavedEmbeddings): Promise<ObserverChoice[]> {
   const { hosts } = agents
   const saved = ask !== null || flags.yes ? savedObserversForYes(state, hosts, flags.observers) : undefined
   // Worked out at the first question and kept: a run that asks nothing (--yes, a flag for every agent) looks for no CLI.
   let found: Promise<MissingClis> | null = null
   const clis = (): Promise<MissingClis> => (found ??= missingClis(env, agents.detections, profiles))
   const observerNote = (host: InstallHost): string | null => selfObserverNote(profiles[host])
-  let embeddings: Promise<string | null> | null = null
-  const embeddingUrl = (): Promise<string | null> => (embeddings ??= getEmbeddingSettings(env).then((settings) => (settings?.provider === 'local-llm' ? settings.llmUrl : null)))
+  const embeddingUrl = async (): Promise<string | null> => {
+    const settings = await savedEmbeddings()
+    return settings?.provider === 'local-llm' ? settings.llmUrl : null
+  }
   const options: ChoiceOptions = {
     ...choice, yes: choice.yes || flags.yes, flags: flags.observers, ...(saved === undefined ? {} : { saved }), missingClis: clis, observerNote, embeddingUrl,
     offerClaudeToken: choice.offerClaudeToken === true || state.claudeLoginFailing === true,
@@ -608,11 +621,6 @@ interface EmbeddingsAnswer {
 }
 
 /**
- * Which embedder makes the vectors. Asked on a terminal only; a flag answers
- * it. The default is what the running daemon has saved, else the local model,
- * which is what a store with no saved choice gets anyway.
- */
-/**
  * The local LLM address offered for embeddings: the saved one, then an
  * OpenAI-compatible observer's address on this machine (a separate setting;
  * this only saves typing it twice), then Ollama's. A remote observer address
@@ -624,10 +632,15 @@ export function embeddingUrlDefault(saved: string | null, observers: readonly Ob
   return local?.input.endpoint ?? DEFAULT_LLM_URL
 }
 
-async function embeddingsStep(env: InstallEnv, ask: Prompts | null, flags: SetupFlags, observers: readonly ObserverChoice[] = []): Promise<EmbeddingsAnswer> {
+/**
+ * Which embedder makes the vectors. Asked on a terminal only; a flag answers
+ * it. The default is what the running daemon has saved, else the local model,
+ * which is what a store with no saved choice gets anyway.
+ */
+async function embeddingsStep(ask: Prompts | null, flags: SetupFlags, observers: readonly ObserverChoice[], savedEmbeddings: SavedEmbeddings): Promise<EmbeddingsAnswer> {
   if (flags.embeddings !== undefined) return { shown: flags.embeddings, send: flags.embeddings }
   if (ask === null) return { shown: null, send: undefined }
-  const saved = (await getEmbeddingSettings(env)) ?? LOCAL_SETTINGS
+  const saved = (await savedEmbeddings()) ?? LOCAL_SETTINGS
   const provider = await ask.select('Embeddings for semantic search:', EMBEDDING_CHOICES, saved.provider)
   let picked: EmbeddingSettings = { ...LOCAL_SETTINGS, provider }
   if (provider === 'local-llm') {
@@ -666,15 +679,17 @@ export async function runWizard(
   const { env, state } = retarget !== undefined && resolve(dataDir) !== resolve(firstState.dataDir) ? await retarget(dataDir) : { env: first, state: firstState }
   const agents = await agentsStep(env, ask, state, flags, profiles)
   const { hosts } = agents
-  const observers = await observersStep(env, ask, state, flags, choice, agents, profiles)
+  let asked: Promise<EmbeddingSettings | null> | null = null
+  const savedEmbeddings: SavedEmbeddings = () => (asked ??= getEmbeddingSettings(env))
+  const observers = await observersStep(env, ask, state, flags, choice, agents, profiles, savedEmbeddings)
   const encryption = await encryptionStep(env, ask, state, flags, choice.dryRun)
   const port = await portStep(env, ask, state, flags)
   const { updateCheck, autoUpdate, beta } = await updatesStep(ask, state, flags)
   const holdout = await holdoutStep(env, ask, flags, hosts, profiles)
-  const embeddings = await embeddingsStep(env, ask, flags, observers)
+  const embeddings = await embeddingsStep(ask, flags, observers, savedEmbeddings)
   const path = await pathStep(env, ask, flags)
   const answers: SetupAnswers = {
-    dataDir, hosts, observers, encryption, port, updateCheck, autoUpdate, beta, path, ...(holdout !== undefined ? { holdout } : {}), ...(embeddings.send !== undefined ? { embeddings: embeddings.send } : {}),
+    dataDir, hosts, observers, encryption, port, updateCheck, autoUpdate, beta, path, detections: agents.detections, ...(holdout !== undefined ? { holdout } : {}), ...(embeddings.send !== undefined ? { embeddings: embeddings.send } : {}),
   }
   if (ask !== null) await summaryStep(env, ask, answers, flags, profiles, embeddings.shown)
   return answers

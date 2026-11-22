@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { detectHosts, parseOpenCodeVersion, selectedHosts } from './detect'
+import { DETECT_AT_ONCE, INSTALL_HOSTS, detectHosts, inOrder, parseOpenCodeVersion, selectedHosts } from './detect'
 import { type FakeWorld, type WorldOptions, createWorld } from './test-support'
 
 let world: FakeWorld | null = null
@@ -106,4 +106,34 @@ test('a detection names the binary that answered --version, and none for an app 
   expect(other.find((d) => d.host === 'claude-code')?.binary).toBeUndefined()
   expect(other.find((d) => d.host === 'codex')).toMatchObject({ selected: true })
   expect(other.find((d) => d.host === 'codex')?.binary).toBeUndefined()
+})
+
+test('probes run a few at a time, never more than the limit, and the answers keep the order asked', async () => {
+  let running = 0
+  let most = 0
+  const work = async (item: number): Promise<string> => {
+    running += 1
+    most = Math.max(most, running)
+    // Later items finish first, so order by finish would be reversed.
+    await new Promise((resolve) => setTimeout(resolve, 20 - item))
+    running -= 1
+    return `r${item}`
+  }
+  expect(await inOrder([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 3, work)).toEqual(['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9'])
+  expect(most).toBe(3)
+  expect(await inOrder([], 3, work)).toEqual([])
+  expect(await inOrder([1], 0, (item) => item * 2)).toEqual([2])
+  await expect(inOrder([1, 2], 2, async (item) => {
+    if (item === 2) throw new Error('probe failed')
+    return item
+  })).rejects.toThrow('probe failed')
+})
+
+test('every agent is probed once, in the order of the agent list, whether or not it is installed', async () => {
+  world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', opencodeVersion: 'opencode v2.1.4' })
+  const detections = await detectHosts(world.env, null)
+  expect(detections.map((detection) => detection.host)).toEqual([...INSTALL_HOSTS])
+  const versionAsks = world.commands.filter((command) => command.argv.includes('--version')).map((command) => command.argv[0])
+  expect(new Set(versionAsks).size).toBe(versionAsks.length)
+  expect(DETECT_AT_ONCE).toBeGreaterThan(1)
 })

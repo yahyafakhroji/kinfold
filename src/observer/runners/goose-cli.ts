@@ -22,7 +22,7 @@ import { isRecord } from '../../contract/event'
 import type { Parsed } from '../../context/types'
 import { checkEndpoint } from '../endpoint'
 import { ObserverError } from '../types'
-import type { CliAdapter, CliParsed, Semver } from './cli-core'
+import { type CliAdapter, type CliParsed, type Semver, parseSemver } from './cli-core'
 
 export const GOOSE_MIN_VERSION: Semver = [1, 59, 0]
 
@@ -52,11 +52,6 @@ export function parseGooseModel(value: string): Parsed<GooseModel> {
   const model = at <= 0 ? '' : value.slice(at + 1)
   if (!(GOOSE_PROVIDERS as readonly string[]).includes(provider) || !MODEL_PART.test(model)) return { ok: false, error: MODEL_ERROR }
   return { ok: true, value: { provider, model } }
-}
-
-function parseVersion(stdout: string): Semver | null {
-  const match = VERSION_PATTERN.exec(stdout)
-  return match === null ? null : [Number(match[1]), Number(match[2]), Number(match[3])]
 }
 
 function isolatedEnv(runDir: string, baseEnv: Record<string, string>): Record<string, string> {
@@ -137,7 +132,7 @@ export const gooseAdapter: CliAdapter = {
   // The keyring needs the D-Bus session on Linux; OLLAMA_HOST is how goose finds a local Ollama with its config folder moved.
   extraEnv: ['OLLAMA_HOST', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR'],
   minVersion: GOOSE_MIN_VERSION,
-  parseVersion,
+  parseVersion: (stdout) => parseSemver(VERSION_PATTERN, stdout),
   isolatedEnv,
   probeInRunDir: true,
   invocation: ({ binaryPath, runDir, model, system, env }) => {

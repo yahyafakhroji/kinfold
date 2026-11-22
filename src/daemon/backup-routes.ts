@@ -35,6 +35,7 @@ import type { KeyStore } from '../secrets/key-store'
 import { RecoveryCodeError, decodeRecoveryCode } from '../sqlite/recovery'
 import { DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
 import type { RouteAnswer } from './data-routes'
+import { errorName } from '../errors'
 
 export const RESTORE_INCOMING_DIR = 'restore-incoming'
 /** The upload, the staged copy and the store it becomes all sit on this disk for a moment. */
@@ -140,8 +141,6 @@ function downloadName(at: number): string {
   return `kinfold-backup-${new Date(at).toISOString().slice(0, 10)}${BACKUP_FILE_EXTENSION}`
 }
 
-const errorName = (error: unknown): string => (error instanceof Error ? error.name : 'error')
-
 export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
   let busy = false
   let pending: Pending | null = null
@@ -172,7 +171,7 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
         try {
           writeBackupRecord(deps.dataDir, at)
         } catch (error: unknown) {
-          deps.log(`backup.json not written: ${errorName(error)}`)
+          deps.log(`backup.json not written: ${errorName(error, 'error')}`)
         }
         deps.onEvent?.('backup', null)
       }
@@ -184,8 +183,8 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
         },
       })
     } catch (error: unknown) {
-      deps.log(`backup failed: ${errorName(error)}`)
-      const message = error instanceof BackupError ? error.message : `the backup could not be written (${errorName(error)})`
+      deps.log(`backup failed: ${errorName(error, 'error')}`)
+      const message = error instanceof BackupError ? error.message : `the backup could not be written (${errorName(error, 'error')})`
       return Response.json({ error: message }, { status: 500 })
     } finally {
       busy = false
@@ -246,8 +245,8 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
       }
     } catch (error: unknown) {
       if (path !== null) rmSync(path, { force: true })
-      deps.log(`restore upload refused: ${error instanceof BackupError ? error.kind : errorName(error)}`)
-      return error instanceof BackupError ? { status: 400, body: { error: error.message } } : { status: 500, body: { error: `the upload could not be stored (${errorName(error)})` } }
+      deps.log(`restore upload refused: ${error instanceof BackupError ? error.kind : errorName(error, 'error')}`)
+      return error instanceof BackupError ? { status: 400, body: { error: error.message } } : { status: 500, body: { error: `the upload could not be stored (${errorName(error, 'error')})` } }
     } finally {
       busy = false
     }
@@ -277,8 +276,8 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
       deps.log('restore finished')
       deps.onEvent?.('restore', null)
     } catch (error: unknown) {
-      deps.log(`restore failed: ${error instanceof BackupError ? error.kind : errorName(error)}`)
-      status = { state: 'failed', step: null, lines: [], error: error instanceof BackupError ? error.message : `the restore failed (${errorName(error)})` }
+      deps.log(`restore failed: ${error instanceof BackupError ? error.kind : errorName(error, 'error')}`)
+      status = { state: 'failed', step: null, lines: [], error: error instanceof BackupError ? error.message : `the restore failed (${errorName(error, 'error')})` }
     } finally {
       busy = false
     }
@@ -315,8 +314,8 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
     } catch (error: unknown) {
       busy = false
       status = before
-      deps.log(`restore refused: ${error instanceof BackupError ? error.kind : errorName(error)}`)
-      return error instanceof BackupError ? { status: 400, body: { error: error.message } } : { status: 500, body: { error: `the restore could not start (${errorName(error)})` } }
+      deps.log(`restore refused: ${error instanceof BackupError ? error.kind : errorName(error, 'error')}`)
+      return error instanceof BackupError ? { status: 400, body: { error: error.message } } : { status: 500, body: { error: `the restore could not start (${errorName(error, 'error')})` } }
     }
     deps.log('restore started')
     void run(staged)
@@ -346,8 +345,8 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
       deps.log('restore undo finished')
       deps.onEvent?.('restore', 'undo')
     } catch (error: unknown) {
-      deps.log(`restore undo failed: ${error instanceof BackupError ? error.kind : errorName(error)}`)
-      status = { state: 'failed', step: null, lines: [], error: error instanceof BackupError ? error.message : `switching back failed (${errorName(error)})` }
+      deps.log(`restore undo failed: ${error instanceof BackupError ? error.kind : errorName(error, 'error')}`)
+      status = { state: 'failed', step: null, lines: [], error: error instanceof BackupError ? error.message : `switching back failed (${errorName(error, 'error')})` }
     } finally {
       busy = false
     }
@@ -359,8 +358,8 @@ export function backupRoutes(deps: BackupRouteDeps): BackupRoutes {
       // Everything that can refuse runs here, while the store is still open and untouched.
       checkUndo({ dataDir: deps.dataDir, keyStore: deps.keyStore() })
     } catch (error: unknown) {
-      deps.log(`restore undo refused: ${error instanceof BackupError ? error.kind : errorName(error)}`)
-      return error instanceof BackupError ? { status: 400, body: { error: error.message } } : { status: 500, body: { error: `the switch back could not start (${errorName(error)})` } }
+      deps.log(`restore undo refused: ${error instanceof BackupError ? error.kind : errorName(error, 'error')}`)
+      return error instanceof BackupError ? { status: 400, body: { error: error.message } } : { status: 500, body: { error: `the switch back could not start (${errorName(error, 'error')})` } }
     }
     busy = true
     status = { state: 'running', step: 'check', lines: [], error: null }

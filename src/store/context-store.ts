@@ -8,6 +8,7 @@ import type { ContextChannel, HostProfile, PackObservation } from '../context/ty
 import type { Database } from '../sqlite/types'
 import { recordActivity } from './activity-store'
 import { confirmationsColumn, contradictionKindColumn, hasLinksTable } from './observation-links'
+import { parseIds } from './ids'
 
 export interface PackRow {
   projectKey: string
@@ -47,16 +48,6 @@ interface StoredPack {
   observationIds: string
   builtFromMaxId: number
   builtAt: number
-}
-
-function parseIds(json: string): number[] {
-  try {
-    const value: unknown = JSON.parse(json)
-    return Array.isArray(value) ? value.filter((id): id is number => Number.isSafeInteger(id)) : []
-  } catch {
-    // A pack row this build did not write: serve its text without ids rather than fail the read.
-    return []
-  }
 }
 
 export function readPack(db: Database, projectKey: string, hostProfile: HostProfile): PackRow | null {
@@ -194,7 +185,9 @@ export function titlesFor(db: Database, ids: readonly number[]): Map<number, str
   const titles = new Map<number, string>()
   for (let start = 0; start < ids.length; start += TITLE_CHUNK) {
     const chunk = ids.slice(start, start + TITLE_CHUNK)
-    const rows = db.query<{ id: number; title: string }, number[]>(`SELECT id, title FROM observations WHERE id IN (${chunk.map(() => '?').join(',')})`).all(...chunk)
+    // One statement text whatever the number of ids: a `?` per id made a new prepared statement for each count, and
+    // those pushed the prompt path's own statements out of the 256-entry statement cache.
+    const rows = db.query<{ id: number; title: string }, { ids: string }>('SELECT id, title FROM observations WHERE id IN (SELECT value FROM json_each($ids))').all({ ids: JSON.stringify(chunk) })
     for (const row of rows) titles.set(row.id, row.title)
   }
   return titles
@@ -219,10 +212,10 @@ export function firstScreenFor(db: Database, query: FirstScreenQuery): FirstScre
      WHERE project_key = $projectKey AND NOT (host = $host AND host_session_id = $hostSessionId)`,
   ).get({ projectKey: query.projectKey, host: query.host, hostSessionId: query.hostSessionId })
   const ids = query.ids.slice(0, TITLE_CHUNK)
-  const rows = ids.length === 0 ? [] : db.query<{ id: number; title: string; occurredAt: number }, number[]>(
-    `SELECT id, title, occurred_at AS occurredAt FROM observations WHERE id IN (${ids.map(() => '?').join(',')})
-     ORDER BY occurred_at DESC, id DESC LIMIT ${Math.max(0, Math.floor(query.rows))}`,
-  ).all(...ids)
+  const rows = ids.length === 0 ? [] : db.query<{ id: number; title: string; occurredAt: number }, { ids: string; limit: number }>(
+    `SELECT id, title, occurred_at AS occurredAt FROM observations WHERE id IN (SELECT value FROM json_each($ids))
+     ORDER BY occurred_at DESC, id DESC LIMIT $limit`,
+  ).all({ ids: JSON.stringify(ids), limit: Math.max(0, Math.floor(query.rows)) })
   return { project, total, lastSessionAt: last?.at ?? null, rows }
 }
 
@@ -270,7 +263,8 @@ export function sessionDeliveries(db: Database, host: string, hostSessionId: str
   for (const row of rows) if (row.late !== 0) for (const id of new Set(parseIds(row.ids))) lateOffers.set(id, (lateOffers.get(id) ?? 0) + 1)
   const offeredOut = [...lateOffers.entries()].filter(([, count]) => count >= LATE_OFFERS_BEFORE_DELIVERED).map(([id]) => id)
   const sentIds = [...new Set([...onTime.flatMap((row) => parseIds(row.ids)), ...offeredOut])]
-  const firstAt = onTime.length === 0 ? null : Math.min(...onTime.map((row) => row.at))
+  // A loop, not Math.min(...rows): a spread passes every row as an argument, and a long session has thousands.
+  const firstAt = onTime.reduce<number | null>((first, row) => (first === null || row.at < first ? row.at : first), null)
   return { sentIds, firstAt }
 }
 

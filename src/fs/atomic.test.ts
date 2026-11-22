@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { fstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { fstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runPlan } from '../install/plan'
@@ -42,5 +42,23 @@ posixOnly('file modes')('key-store.json round-trips at 0600 and the folder is fl
     expect(synced).toEqual([statSync(world.dataDir).ino])
   } finally {
     await world.cleanup()
+  }
+})
+
+test('a write that fails before the rename leaves no temp file beside the target, and the target as it was', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kinfold-atomic-fail-'))
+  try {
+    const path = join(dir, 'daemon.token')
+    writeFileSync(path, 'old')
+    const full = Object.assign(new Error('no space left on device'), { code: 'ENOSPC' })
+    expect(() => writeFileAtomic(path, 'new secret', 0o600, { write: () => { throw full } })).toThrow('no space left on device')
+    expect(readdirSync(dir)).toEqual(['daemon.token'])
+    expect(readFileSync(path, 'utf8')).toBe('old')
+    // And a write that works still replaces the file and leaves nothing else.
+    writeFileAtomic(path, 'new', 0o600)
+    expect(readdirSync(dir)).toEqual(['daemon.token'])
+    expect(readFileSync(path, 'utf8')).toBe('new')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })

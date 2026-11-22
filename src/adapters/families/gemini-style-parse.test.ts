@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { type EventKind, type NormalizedEvent, validateEvent } from '../../contract/event'
-import { hookSpecFor } from '../hook-specs'
-import type { AgentId } from '../profile'
+import { hookSpecFor } from '../../agents/hook-specs'
+import type { AgentId } from '../../agents/profile'
 import { normalizeGeminiStyle } from './gemini-style-parse'
 
 const FIXTURES = join(import.meta.dir, '../../../test/fixtures')

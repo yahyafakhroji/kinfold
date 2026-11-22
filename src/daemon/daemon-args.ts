@@ -6,6 +6,7 @@
 
 import { isAbsolute } from 'node:path'
 import { type PlatformInfo, currentPlatform } from '../platform/platform'
+import { MAX_PORT } from './port'
 
 export interface DaemonArgs {
   /** Wins over KINFOLD_PORT when set. */
@@ -15,7 +16,6 @@ export interface DaemonArgs {
 }
 
 const MIN_PORT = 1024
-const MAX_PORT = 65_535
 
 function portFrom(value: string | undefined): number {
   const port = Number(value)

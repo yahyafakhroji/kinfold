@@ -62,3 +62,11 @@ test('impact holds the measured result per agent beside the estimate totals, and
   expect(report.holdout.on).toBe(false)
   expect(Array.isArray(report.context)).toBe(true)
 })
+
+test('a stored error with no colon keeps its whole class name: "timeout" is timeout, not a name cut one letter short', () => {
+  upsertSession(store.db, { host: 'codex', hostSessionId: 's', projectKey: 'org/repo', cwd: '/w', occurredAt: 1 })
+  upsertSession(store.db, { host: 'cursor', hostSessionId: 'c', projectKey: 'org/repo', cwd: '/w', occurredAt: 1 })
+  run(1, 'codex', 'failed', 'timeout', NOW - DAY)
+  run(2, 'cursor', 'failed', ' timeout : after 120 s', NOW - DAY)
+  expect(overviewReport(store.db, NOW, []).failing.map((agent) => [agent.host, agent.errorClass])).toEqual([['codex', 'timeout'], ['cursor', 'timeout']])
+})
