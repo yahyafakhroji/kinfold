@@ -29,6 +29,17 @@ describe('release workflow', () => {
     expect(job(text, 'check')).toContain('if [ "$REF_TYPE" != "tag" ]')
   })
 
+  test('only ci runs on pull requests; release-build, wsl and driver-check run by hand', () => {
+    for (const name of ['release-build.yml', 'wsl.yml', 'driver-check.yml']) {
+      const text = readFileSync(join(WORKFLOWS, name), 'utf8')
+      expect(text).not.toContain('pull_request')
+      expect(text).toContain('\n  workflow_dispatch:')
+    }
+    const build = readFileSync(join(WORKFLOWS, 'release-build.yml'), 'utf8')
+    expect(build).not.toContain('DRAFT_PR_VERSION')
+    expect(build).toMatch(/workflow_dispatch:\n {4}inputs:\n {6}version:\n(?: {8}.*\n)*? {8}required: true/)
+  })
+
   test('release.yml defaults to no permissions, and only npm-publish has id-token: write', () => {
     const text = release()
     expect(text).toMatch(/^permissions: \{\}\s*$/m)

@@ -22,24 +22,13 @@ on:
         description: Version stamped into each program
         required: true
         type: string
-  # A draft pull request proves the pipeline with a candidate version before
-  # the workflow is in place on main, where workflow_dispatch can see it.
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: read
 
-env:
-  # The draft pull request path has no version input, so it builds this one
-  # candidate. workflow_dispatch supplies its own version.
-  DRAFT_PR_VERSION: 0.1.0-rc.1
-
 jobs:
   build:
     name: build (${{ matrix.target }})
-    if: inputs.version != '' || github.event.pull_request.draft
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -68,12 +57,7 @@ jobs:
         shell: bash
         env:
           INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          if [ -n "$INPUT_VERSION" ]; then
-            echo "value=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=$DRAFT_PR_VERSION" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "value=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
 
       # The same steps build the WSL workflow's programs. A composite action's
       # steps take no limit of their own, so this one bounds them all.
