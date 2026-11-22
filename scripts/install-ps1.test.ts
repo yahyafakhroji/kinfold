@@ -104,11 +104,13 @@ const REFUSED_BASES = [
 ]
 
 pwshTest('local bases are checked as whole origins', async () => {
-  for (const base of REFUSED_BASES) {
-    const run = await runPwsh(['-File', INSTALL_PS1], { PROCESSOR_ARCHITECTURE: 'AMD64', KINFOLD_RELEASE_BASE: base })
+  // Each pwsh start costs seconds on a cold runner; the runs share nothing, so they start together.
+  const refused = await Promise.all(REFUSED_BASES.map((base) => runPwsh(['-File', INSTALL_PS1], { PROCESSOR_ARCHITECTURE: 'AMD64', KINFOLD_RELEASE_BASE: base })))
+  REFUSED_BASES.forEach((base, index) => {
+    const run = refused[index]!
     expect({ base, code: run.code, stderr: run.stderr.trim() }).toEqual({ base, code: 1, stderr: BASE_REFUSAL })
     expect(run.tempEntries).toEqual([])
-  }
+  })
 
   // A local server that has nothing: the base passes the check, and the download is a 404.
   const requests: string[] = []

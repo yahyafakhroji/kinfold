@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { templateStore } from '../backup/store-templates.test-support'
 import { fakeTerminal } from '../install/prompt/fake-terminal'
 import { runKinfold } from '../cli/kinfold'
 import { startDaemon } from '../daemon/daemon'
@@ -14,6 +15,7 @@ beforeEach(() => {
 afterEach(async () => world.cleanup())
 
 function startWorldDaemon(): void {
+  templateStore('plain', world.dataDir)
   const daemon = startDaemon({ dataDir: world.dataDir, port: 0, fallbackDrainMs: 60_000, log: () => {} })
   world.launchd.daemon = daemon
   world.allowedPorts.add(daemon.port)
