@@ -90,13 +90,15 @@ jobs:
       # and the per-test timeout cannot end that await, so those two files are
       # skipped there and every other file still reports.
       # The Windows runner takes 9 to 11 minutes on a good run and has slow stretches, so it gets 20; the others keep 12.
+      # Benchmarks and the upkeep stall test end in .bench.test.ts and run in
+      # the bench job on main instead.
       - name: Test
         timeout-minutes: ${{ matrix.os == 'windows-latest' && 20 || 12 }}
         shell: bash
         run: |
-          ignore=()
+          ignore=(--path-ignore-patterns '**/*.bench.test.ts')
           if [ "$RUNNER_OS" = "Windows" ]; then
-            ignore=(--path-ignore-patterns '**/semantic-client.test.ts' --path-ignore-patterns '**/embedder.test.ts')
+            ignore+=(--path-ignore-patterns '**/semantic-client.test.ts' --path-ignore-patterns '**/embedder.test.ts')
           fi
           bun test --timeout 20000 "${ignore[@]}"
 
@@ -143,3 +145,62 @@ jobs:
       - name: Check the changeset
         shell: bash
         run: bun tools/changesets.ts check "origin/$GITHUB_BASE_REF"
+
+  # The benchmarks and the upkeep stall test, on every push to main. A missed
+  # budget fails the run on main; this job is not a required check, so a pull
+  # request never waits for it.
+  bench:
+    name: bench (${{ matrix.os }})
+    if: github.event_name == 'push'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install development dependencies
+        timeout-minutes: 5
+        run: bun install --frozen-lockfile
+
+      - name: Restore the sqlite3mc build
+        id: sqlite3mc
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/sqlite3mc
+          key: sqlite3mc-${{ runner.os }}-${{ hashFiles('src/sqlite/release.ts', 'src/sqlite/build.ts', 'tools/build-sqlite3mc.ts', 'tools/pinned-download.ts') }}
+
+      - name: Build sqlite3mc for the test preload
+        if: steps.sqlite3mc.outputs.cache-hit != 'true'
+        timeout-minutes: 8
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun tools/build-sqlite3mc.ts
+
+      - name: Fetch the pinned sqlite-vec build
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun tools/fetch-vec0.ts
+
+      - name: Fetch the pinned embedding model
+        timeout-minutes: 5
+        run: bun tools/fetch-model.ts
+
+      # Without ./ Bun reads the argument as a filter on file paths, so every
+      # file ending in .bench.test.ts runs and no list needs keeping.
+      - name: Bench
+        timeout-minutes: 20
+        shell: bash
+        run: bun test --timeout 900000 .bench.test.ts

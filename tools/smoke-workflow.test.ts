@@ -49,9 +49,21 @@ describe('smoke workflow', () => {
 })
 
 describe('ci workflow', () => {
+  test('the unit run skips *.bench.test.ts and a main-only bench job runs them on every OS', () => {
+    const text = workflow('ci.yml')
+    const test = text.slice(text.indexOf('\n  test:'), text.indexOf('\n  types:'))
+    expect(test).toContain("--path-ignore-patterns '**/*.bench.test.ts'")
+    const bench = text.slice(text.indexOf('\n  bench:'))
+    expect(bench).toContain("if: github.event_name == 'push'")
+    expect(bench).toContain('bun test --timeout 900000 .bench.test.ts')
+    expect(bench).not.toContain('continue-on-error')
+    for (const os of ['macos-latest', 'ubuntu-latest', 'windows-latest']) expect(bench).toContain(`- ${os}`)
+  })
+
   test('ci gates each OS on its required flag', () => {
     const text = workflow('ci.yml')
-    const lines = text.split('\n')
+    // The bench job has its own matrix and no required flag; the gate is the test job's.
+    const lines = text.slice(text.indexOf('\n  test:'), text.indexOf('\n  types:')).split('\n')
     const gates = lines.filter((line) => line.trim() === 'continue-on-error: ${{ !matrix.required }}')
     expect(lines.filter((line) => line.trim() === 'runs-on: ${{ matrix.os }}').length).toBe(1)
     expect(gates.length).toBe(1)
