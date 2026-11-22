@@ -1,5 +1,58 @@
 # kinfold
 
+## 0.6.1
+
+### Patch Changes
+
+- 67f4a4b: The remaining fixes from the 0.6.0 audit. Most of them make Kinfold do less work; these are the ones you may notice.
+  
+  `kinfold findings --purge <id>` finds a pending finding however old it is. It looked only at the newest 100, so after a rules update with hundreds of findings an older one read as "no pending finding".
+  
+  `kinfold uninstall` names only the key store entries that exist. It printed a "kept keychain entry" line, with a delete command, for every provider Kinfold knows.
+  
+  `kinfold install` checks a port you type, and asks again when another program holds it. It starts each agent's CLI once to read its version, a few at a time, where it started each one twice and one after another. If you or an agent save a config file (`~/.claude/settings.json`, `opencode.json`, a shell startup file) while the install runs, the install stops at that file and asks you to run it again; before, it wrote its own copy over your change.
+  
+  The dashboard's Overview and Impact pages show a purge or a retention change at once. They kept the old counts for up to ten minutes. A browser now keeps the dashboard's script and style files between visits.
+  
+  A backup is flushed to disk before `kinfold backup` reports it, and a backup whose worker stops answering fails after 30 minutes with an error.
+  
+  In OpenCode and Kilo, a session still in use keeps its memory after the plugin has seen more than 256 sessions. The plugins tell the daemon about new events once per burst, not once per event.
+  
+  On a hub, a paired device can no longer attach a memory to another device's session through an import.
+  
+  After you replace an observer key, events that had failed retry within two minutes. The daemon asked the key store every 30 seconds until then, which on macOS starts a program each time.
+  
+  Also: `kinfold scan`, `kinfold watch` with a filter, and a long Claude Code turn with the impact test on no longer hold the daemon's attention for seconds; the daemon stops cleanly when `daemon.json` is unreadable; a new index (schema 20, added on first start) speeds up the MCP timeline; and the release workflows pin each GitHub Action to a commit.
+- 2fb269c: Fixes from the 0.6.0 audit for stalls and wrong results.
+  
+  The daemon answers while it works through a backlog. After a sleep or a restart it stored every waiting capture in one go, before it listened for requests; now it starts answering first and stores 200 captures at a time, with requests served in between. It asks git for a folder's project once per batch and before it opens the write, a folder whose git times out is asked again after 30 seconds and no longer once per capture, and MCP reads skip the walk through a repo's history.
+  
+  Retention deletes old memories and summaries 500 at a time, up to 10,000 per run, and the next run 10 minutes later carries on. Tightening retention on a long history used to delete everything in one write and could hold the daemon for seconds. Deleting memories is faster on a large store too: a new index (schema 19, added on first start) removes a full scan per deleted memory, and the dashboard's metrics page reads its turn times through an index and reuses a summary for 30 seconds.
+  
+  Capturing a long single line (a base64 blob, a minified bundle, a long dotted name) no longer hangs the capture hook. Redaction took seconds to minutes on such lines, the agent killed the hook and the event was lost. It finds the same secrets as before, with one limit: a key name that runs on for more than 256 characters after the word `token`, `password` and the like no longer counts as a key name.
+  
+  Search results that match any term can be paged. Page 2 of such a search came back empty under the heading "matched every term".
+  
+  `sh install.sh --observer-token-stdin` reads the token you pipe in. On a machine with a terminal it read the terminal and dropped the piped token.
+  
+  `kinfold uninstall` no longer stops when one agent's config file is not valid JSON. It leaves that file alone, prints `<agent>: skipped; <file> is not valid JSON`, and still removes the service, the other agents' wiring and the program.
+  
+  In OpenCode and Kilo, a session that started while the daemon was down could stay without its memory pack until the next compaction, and text from before a compaction could reappear after it. A restore started during an embedding change now waits for it and no longer opens the store twice. The observer is shown the 40 memories a long session received last, so it stops saving restatements of them as new. Background indexing no longer stalls for good when the local embedding worker exits without an error.
+- e374e0b: BREAKING: security fixes from the 0.6.0 audit. Four things you may notice. A new install checks for updates daily and tells you, and installs nothing by itself: releases are not signed yet, so `patch` is now a choice (`kinfold install --updates patch`) and an install already at `patch` keeps it. `kinfold central join <hub>` asks for the pairing code or reads it from stdin; the code still works on the command line and in `kinfold install --central-code`, with a warning, since other programs on the machine can read a command line. The daemon makes a new token at every start, so a script that saved `daemon.token` must read it again. `KINFOLD_SQLITE3MC_LIB` is read only under `NODE_ENV=test`.
+  
+  `kinfold project merge` and `kinfold project split` work again; the daemon answered 400 to every request.
+  
+  `kinfold dashboard` signs in only the browser it opened. The command makes a one-time secret, and a sign-in without it gets nothing, so another program on the machine can no longer take the session by asking first. If the browser has not signed in after a few seconds, the command prints the address to open by hand. A page on another 127.0.0.1 port can no longer trigger a backup download, use up the update banner or call the hub with your dashboard session.
+  
+  Kinfold no longer keeps the contents of a sensitive file an agent writes or edits (`.env`, `*.pem`, `id_rsa` and the like), or a command that names such a file; before, it withheld only the output. The secret scan now flags rows stored before this fix, so you can redact them. A private key cut off before its END line is redacted too.
+  
+  A memory title containing the word "constructor" no longer stops that project's session-start memory from updating.
+  
+  Also fixed: an observer setting could send the Claude login token to another provider's address; the observer followed redirects; clients sent the daemon token to whatever held the port after a crash; purge and redaction left a copy of the embedding in the search index; restore accepted a backup with database triggers or a damaged database; the hub read a request body before checking who sent it; a device name could carry terminal control characters; install could loosen a locked OpenCode folder; three downloads had no size limit while downloading; the port picker and the printed status command trusted input they should not.
+- cec4d3e: On Windows, the daemon keeps answering while it drops an old embedding index after you switch embedding models. Vectors upkeep and the indexer now wait while the store is being checkpointed: a write on the daemon's thread waited behind each checkpoint, and on a Windows CI runner it held the thread for 2.4 to 3.7 s.
+  
+  Also: the daemon waits up to 10 s for its checkpoint worker to close when it stops, so a slow last checkpoint no longer leaves the store file open on Windows.
+
 ## 0.6.0
 
 ### Minor Changes
