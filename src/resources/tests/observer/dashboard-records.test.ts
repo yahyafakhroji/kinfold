@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { listActivity } from '../store/activity-store'
-import { processSessionBatch } from './process'
+import { listActivity } from '../../store/activity-store'
+import { processSessionBatch } from '../../observer/process'
 import { type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from './test-support'
-import { ObserverError, type ObserverPrompt } from './types'
+import { ObserverError, type ObserverPrompt } from '../../observer/types'
 
 let temp: TempStore
 beforeEach(() => {

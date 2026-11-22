@@ -1,11 +1,11 @@
-// A stand-in for src/vectors/search-worker.ts in vector-worker.test.ts. The
+// A stand-in for src/resources/vectors/search-worker.ts in vector-worker.test.ts. The
 // start message's dbPath picks the behaviour: 'fail-start', 'slow' (never
 // answers a request), 'busy' (blocks its thread for 300 ms per request, then
 // answers, dropping a request already past its deadline as the real worker
 // does), 'crash' (throws on a request), anything else answers at once. A hit's
 // id is the nearest query's k, or the first id of a distances query.
 
-import type { WorkerClose, WorkerReply, WorkerRequest, WorkerStart } from '../src/vectors/vector-worker-protocol'
+import type { WorkerClose, WorkerReply, WorkerRequest, WorkerStart } from '../src/resources/vectors/vector-worker-protocol'
 
 declare const self: Worker
 

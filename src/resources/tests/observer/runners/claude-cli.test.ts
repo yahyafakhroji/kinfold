@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { statSync } from 'node:fs'
 import { join } from 'node:path'
 import { type TempStore, openTempStore } from '../test-support'
-import { ObserverError, type ObserverPrompt } from '../types'
-import { type SpawnFn, type SpawnRequest, createClaudeCliRunner } from './claude-cli'
-import { posixOnly } from '../../../test/platform-guards'
+import { ObserverError, type ObserverPrompt } from '../../../observer/types'
+import { type SpawnFn, type SpawnRequest, createClaudeCliRunner } from '../../../observer/runners/claude-cli'
+import { posixOnly } from '../../../../../test/platform-guards'
 
 let temp: TempStore
 beforeEach(() => {

@@ -1,17 +1,17 @@
 import { afterEach, expect, mock, test } from 'bun:test'
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { EXIT_OK, install } from '../install'
-import { status } from '../status'
+import { EXIT_OK, install } from '../../../install/install'
+import { status } from '../../../install/status'
 import { type FakeWorld, YES, createWorld } from '../test-support'
-import type { DataDirAccess } from './check'
-import { dataDirAccessFor } from './check'
-import { posixOnly } from '../../../test/platform-guards'
+import type { DataDirAccess } from '../../../install/access/check'
+import { dataDirAccessFor } from '../../../install/access/check'
+import { posixOnly } from '../../../../../test/platform-guards'
 
 // The real factories, kept so the spies below can be undone: mock.module lasts for
 // the whole process, and other test files use the real modules.
-const realPosix = { ...(await import('./posix-modes')) }
-const realWindows = { ...(await import('./windows-acl')) }
+const realPosix = { ...(await import('../../../install/access/posix-modes')) }
+const realWindows = { ...(await import('../../../install/access/windows-acl')) }
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -20,8 +20,8 @@ afterEach(async () => {
 })
 
 function restoreRealModules(): void {
-  mock.module('./posix-modes', () => realPosix)
-  mock.module('./windows-acl', () => realWindows)
+  mock.module('../../../install/access/posix-modes', () => realPosix)
+  mock.module('../../../install/access/windows-acl', () => realWindows)
 }
 
 function looseDataDir(w: FakeWorld): void {
@@ -64,8 +64,8 @@ test('each platform gets its access check', () => {
   const windows: DataDirAccess = { ...quietAccess }
   const posixSpy = mock(() => posix)
   const windowsSpy = mock(() => windows)
-  mock.module('./posix-modes', () => ({ ...realPosix, posixModeAccess: posixSpy }))
-  mock.module('./windows-acl', () => ({ ...realWindows, windowsAclAccess: windowsSpy }))
+  mock.module('../../../install/access/posix-modes', () => ({ ...realPosix, posixModeAccess: posixSpy }))
+  mock.module('../../../install/access/windows-acl', () => ({ ...realWindows, windowsAclAccess: windowsSpy }))
   // Undone inside the test, so no other test in this file ever sees the spies.
   try {
     world = createWorld()

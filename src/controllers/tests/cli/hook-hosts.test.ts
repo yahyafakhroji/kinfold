@@ -2,17 +2,17 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { HOST_VERSIONS_FILE, serializeHostVersions } from '../adapters/host-version'
-import { rebuildProjectPacks } from '../context/packs'
-import { hideRecallLine, seedObservation } from '../context/test-support'
-import type { NormalizedEvent } from '../contract/event'
-import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
-import { openStore } from '../store/db'
-import { upsertProject, upsertSession } from '../store/writes'
-import { hostFromArgs } from './hook'
+import { HOST_VERSIONS_FILE, serializeHostVersions } from '../../../plugins/adapters/host-version'
+import { rebuildProjectPacks } from '../../../resources/context/packs'
+import { hideRecallLine, seedObservation } from '../../../resources/tests/context/test-support'
+import type { NormalizedEvent } from '../../../system/contract/event'
+import { SQLITE3MC_LIB_ENV } from '../../../resources/sqlite/library'
+import { openStore } from '../../../resources/store/db'
+import { upsertProject, upsertSession } from '../../../resources/store/writes'
+import { hostFromArgs } from '../../cli/hook'
 
-const HOOK = join(import.meta.dir, 'hook.ts')
-const FIXTURES = join(import.meta.dir, '../../test/fixtures')
+const HOOK = join(import.meta.dir, '../../cli/hook.ts')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures')
 
 let root: string
 let dataDir: string

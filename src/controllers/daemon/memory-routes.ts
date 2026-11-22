@@ -1,18 +1,18 @@
 // The memory browser's read routes: GET /memory/observations (filters,
 // search, pages), GET /memory/observations/:id and GET /memory/facets. Search
-// text goes through the MCP server's sanitizer (src/mcp/fts.ts), so the
+// text goes through the MCP server's sanitizer (src/controllers/mcp/fts.ts), so the
 // dashboard and agents share one rule for what reaches FTS5 MATCH. Answers
 // hold observations only, never an event payload. Errors name the parameter,
 // never echo it, and the log line holds counts and the duration.
 
-import type { Parsed } from '../context/types'
+import type { Parsed } from '../../resources/context/types'
 import { EVIDENCE_FILTERS } from '../mcp/args'
 import { ftsMatch, parseSearchQuery } from '../mcp/fts'
 import type { IndexRow } from '../mcp/reader'
-import { OBSERVATION_TYPES, type ObservationType } from '../observer/types'
-import type { Database } from '../sqlite/types'
-import { type BrowseFilters, type Facets, type ObservationDetail, observationDetail } from '../store/memory-reads'
-import { type StoreReader, inlineStoreReader } from '../workers/store-reader'
+import { OBSERVATION_TYPES, type ObservationType } from '../../resources/observer/types'
+import type { Database } from '../../resources/sqlite/types'
+import { type BrowseFilters, type Facets, type ObservationDetail, observationDetail } from '../../resources/store/memory-reads'
+import { type StoreReader, inlineStoreReader } from '../../resources/workers/store-reader'
 import type { RouteAnswer } from './data-routes'
 import { type DashboardViewOptions, type ViewRoute, dashboardViews } from './dashboard-views'
 import { HOST_PATTERN, MAX_PROJECT_CHARS, optional } from './list-params'

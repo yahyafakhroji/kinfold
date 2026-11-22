@@ -4,10 +4,10 @@
 // its token estimate), and each host profile's token budget.
 
 import { isAbsolute } from 'node:path'
-import type { EvidenceStrength } from '../evidence'
+import type { EvidenceStrength } from '../../system/evidence'
 import type { FirstScreen, Recalled } from './recall-line'
-import { isRecord } from '../contract/event'
-import { HOST_NAME_PATTERN } from '../names'
+import { isRecord } from '../../system/contract/event'
+import { HOST_NAME_PATTERN } from '../../system/names'
 
 export const HOST_PROFILES = ['claude-code', 'opencode', 'default'] as const
 export type HostProfile = (typeof HOST_PROFILES)[number]
@@ -20,7 +20,7 @@ export const CHARS_PER_TOKEN = 4
 /**
  * Delivery moments: Claude Code's SessionStart, OpenCode's per-request context
  * hook, and `prompt`, answered with a short delta (what the session has not
- * been sent yet, src/context/delta.ts) for mid-session updates.
+ * been sent yet, src/resources/context/delta.ts) for mid-session updates.
  */
 export const CONTEXT_CHANNELS = ['session_start', 'request', 'prompt'] as const
 export type ContextChannel = (typeof CONTEXT_CHANNELS)[number]

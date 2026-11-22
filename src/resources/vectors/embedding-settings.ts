@@ -8,7 +8,7 @@
 // the address is checked as loopback here, on every save and on every use.
 
 import type { Parsed } from '../context/types'
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 import type { Database } from '../sqlite/types'
 import type { VectorSpace } from '../store/vector-store'
 import { DEFAULT_EMBED_DIMS, DEFAULT_EMBED_MODEL } from './embedder'

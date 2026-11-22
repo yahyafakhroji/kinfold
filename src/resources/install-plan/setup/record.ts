@@ -5,12 +5,12 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readEnv } from '../../env-names'
-import { writeFileAtomic } from '../../fs/atomic'
+import { readEnv } from '../../../system/env-names'
+import { writeFileAtomic } from '../../../system/fs/atomic'
 import { DATA_FILE_MODE } from '../../store/data-dir'
 import type { InstallEnv } from '../env'
 import type { Action } from '../plan'
-import { type CentralMode, parseCentralMode } from '../../central/mode'
+import { type CentralMode, parseCentralMode } from '../../../controllers/central/mode'
 
 export const INSTALL_RECORD_FILE = 'install.json'
 

@@ -1,4 +1,4 @@
-// Registers the MCP read server (src/mcp/server.ts) with each host. Claude
+// Registers the MCP read server (src/controllers/mcp/server.ts) with each host. Claude
 // Code keeps user-scope servers in ~/.claude.json, a large file it rewrites
 // itself while running, so we read it only to inspect our entry and change it
 // through `claude mcp add-json|remove --scope user`, never by writing the file.
@@ -7,12 +7,12 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 import type { InstallEnv } from './env'
 import { entryCommand, entryIdentity } from './entry'
 import { plannedBackup, readJsonObject, serializeJson } from './files'
-import { LEGACY_MCP_SERVER_NAME } from '../names'
-import { MCP_HOST_ENV } from '../mcp/read-reporter'
+import { LEGACY_MCP_SERVER_NAME } from '../../system/names'
+import { MCP_HOST_ENV } from '../../controllers/mcp/read-reporter'
 import { MCP_SERVER_NAME, type McpEntryState, type McpTarget, claudeMcpEntry, hasOurMcpEntryNamed, openCodeMcpEntry, inspectMcpEntry, mergeMcpEntry, removeMcpEntry, removeMcpEntryNamed } from './mcp-config'
 import type { Action } from './plan'
 

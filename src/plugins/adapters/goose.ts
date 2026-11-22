@@ -8,8 +8,8 @@
 // github.com/aaif-goose/goose crates/goose/src/hooks/mod.rs) is read when
 // present and is otherwise empty.
 
-import type { EventKind, NormalizedEvent } from '../contract/event'
-import { isRecord } from '../contract/event'
+import type { EventKind, NormalizedEvent } from '../../system/contract/event'
+import { isRecord } from '../../system/contract/event'
 import { normalizeClaudeStyle } from './families/claude-style-parse'
 import type { AdapterContext } from './context'
 

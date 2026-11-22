@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { platformOf } from '../install/env'
-import { detectPlatform, osOf, type PlatformProbe } from './platform'
+import { platformOf } from '../../install-plan/env'
+import { detectPlatform, osOf, type PlatformProbe } from '../../../system/platform/platform'
 
 function probe(platform: NodeJS.Platform, overrides: Partial<PlatformProbe> = {}): PlatformProbe {
   return { platform, osRelease: () => null, env: {}, ...overrides }

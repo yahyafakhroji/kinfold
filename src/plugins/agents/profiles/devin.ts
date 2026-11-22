@@ -34,8 +34,8 @@
 // hooks and search only.
 
 import { join } from 'node:path'
-import { type InstallEnv, errorMessage, platformOf } from '../../install/env'
-import type { OsName } from '../../platform/platform'
+import { type InstallEnv, errorMessage, platformOf } from '../../../resources/install-plan/env'
+import type { OsName } from '../../../system/platform/platform'
 import { readPlainJsonObject } from '../families/plain-json'
 import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentWiring, mcpServersFile } from '../families/json-agent'
 import { type AgentProfile, type Capabilities, NO_TOOLS_OFF, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'

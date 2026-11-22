@@ -5,11 +5,11 @@
 // instead of asking again. Any installed CLI can observe any agent: an
 // OpenCode session can be summarised through claude.
 
-import { INSTALL_PROFILES } from '../agents/install-profiles'
-import type { AgentId, ProfileTable } from '../agents/profile'
-import type { ObserverProvider } from '../observer/types'
-import { type HostDetection, detectFromSpec } from './detectors'
-import { type InstallEnv, platformOf } from './env'
+import { INSTALL_PROFILES } from '../../plugins/agents/install-profiles'
+import type { AgentId, ProfileTable } from '../../plugins/agents/profile'
+import type { ObserverProvider } from '../../resources/observer/types'
+import { type HostDetection, detectFromSpec } from '../../resources/install-plan/detectors'
+import { type InstallEnv, platformOf } from '../../resources/install-plan/env'
 
 interface ProviderCli {
   /** The agent whose detection looked for the binary. */

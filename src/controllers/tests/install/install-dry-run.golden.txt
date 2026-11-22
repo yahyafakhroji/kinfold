@@ -20,7 +20,7 @@ plan (dry run, nothing is changed): 25 actions
   8. write <root>/home/.kinfold/host-versions.json: record host_version for claude-code 2.1.310, opencode 2.1.4
   9. mkdir <root>/home/.claude (mode 0755)
   10. write <root>/home/.claude/settings.json: add Kinfold hooks for SessionStart, UserPromptSubmit, PostToolUse, PostToolUseFailure, Stop, SessionEnd; every other key and hook kept
-  11. register the Kinfold MCP server with Claude Code (user scope): claude mcp add-json --scope user kinfold {"type":"stdio","command":"/opt/fake/bin/bun","args":["<root>/checkout/src/mcp/server.ts","--data-dir","<root>/home/.kinfold"],"env":{"KINFOLD_MCP_HOST":"claude-code"}}
+  11. register the Kinfold MCP server with Claude Code (user scope): claude mcp add-json --scope user kinfold {"type":"stdio","command":"/opt/fake/bin/bun","args":["<root>/checkout/src/controllers/mcp/server.ts","--data-dir","<root>/home/.kinfold"],"env":{"KINFOLD_MCP_HOST":"claude-code"}}
   12. mkdir <root>/home/.config/opencode/plugins (mode 0755)
   13. write <root>/home/.config/opencode/plugins/kinfold.js: create (6 lines)
   14. mkdir <root>/home/.config/opencode/plugins/kinfold-recall (mode 0755)
@@ -51,5 +51,5 @@ opencode: MCP server already in <root>/home/.config/opencode/opencode.json
 claude-code: hooks already wired in <root>/home/.claude/settings.json
 LaunchAgent: loaded with an unchanged plist; checking that the daemon answers
 plan (dry run, nothing is changed): 2 actions
-  1. register the Kinfold MCP server with Claude Code (user scope): claude mcp add-json --scope user kinfold {"type":"stdio","command":"/opt/fake/bin/bun","args":["<root>/checkout/src/mcp/server.ts","--data-dir","<root>/home/.kinfold"],"env":{"KINFOLD_MCP_HOST":"claude-code"}}
+  1. register the Kinfold MCP server with Claude Code (user scope): claude mcp add-json --scope user kinfold {"type":"stdio","command":"/opt/fake/bin/bun","args":["<root>/checkout/src/controllers/mcp/server.ts","--data-dir","<root>/home/.kinfold"],"env":{"KINFOLD_MCP_HOST":"claude-code"}}
   2. wait up to 180 s for GET /health (a large store takes a while to open)

@@ -5,7 +5,7 @@
 // capped and run through the redactor, so a key it echoes never reaches a log.
 
 import { randomBytes } from 'node:crypto'
-import { isRecord } from '../../contract/event'
+import { isRecord } from '../../../system/contract/event'
 import { redactText } from '../../redaction/redact'
 import { ObserverError, type ObserverErrorClass } from '../types'
 

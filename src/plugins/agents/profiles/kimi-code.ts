@@ -13,7 +13,7 @@
 //     (KIMI_CODE_HOME moves the whole data root, config.toml included)
 //   kimi.com/code/docs/en/kimi-code-cli/configuration/data-locations.html
 //     (C:\Users\<name>\.kimi-code on Windows)
-// The parser is src/adapters/kimi-code.ts. The hooks page shows only the
+// The parser is src/plugins/adapters/kimi-code.ts. The hooks page shows only the
 // shared stdin fields, so the prompt and tool-output field names are read the
 // Claude Code way and the limit says so. KIMI_CODE_HOME is held to Codex's
 // CODEX_HOME rule (an existing folder). The docs don't name the shell a hook
@@ -22,10 +22,10 @@
 
 import { join } from 'node:path'
 import { KIMI_CODE_EVENTS } from '../../adapters/kimi-code'
-import { resolveAgentHome } from '../../install/codex-home'
-import { type InstallEnv, platformOf } from '../../install/env'
-import type { Action } from '../../install/plan'
-import type { OsName } from '../../platform/platform'
+import { resolveAgentHome } from '../../../resources/install-plan/codex-home'
+import { type InstallEnv, platformOf } from '../../../resources/install-plan/env'
+import type { Action } from '../../../resources/install-plan/plan'
+import type { OsName } from '../../../system/platform/platform'
 import { type AgentHome, type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpServersFile } from '../families/json-agent'
 import { mcpEntryState } from '../families/mcp-entry'
 import { tomlHooksActions, tomlHooksState, tomlHooksUninstallActions } from '../families/toml-file'

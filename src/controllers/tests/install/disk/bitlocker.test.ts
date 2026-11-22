@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from 'bun:test'
-import { dbStatusLines } from '../db-encryption'
-import type { CommandResult } from '../env'
+import { dbStatusLines } from '../../../install/db-encryption'
+import type { CommandResult } from '../../../../resources/install-plan/env'
 import { type FakeWorld, createWorld } from '../test-support'
-import { bitlockerCheck, bitlockerScript, bitlockerStateOf, dataDirDrive } from './bitlocker'
-import { diskEncryptionCheckFor } from './check'
+import { bitlockerCheck, bitlockerScript, bitlockerStateOf, dataDirDrive } from '../../../install/disk/bitlocker'
+import { diskEncryptionCheckFor } from '../../../install/disk/check'
 
 let world: FakeWorld | null = null
 afterEach(async () => {

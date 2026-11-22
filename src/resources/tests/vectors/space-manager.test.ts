@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { seedObservation } from '../context/test-support'
-import { readEnv } from '../env-names'
+import { readEnv } from '../../../system/env-names'
 import { PROJECT, T0, type TempStore, openTempStore, seedSession } from '../observer/test-support'
-import { activeSpace, buildingSpace, startActive } from '../store/vector-spaces'
-import { upsertVectors } from '../store/vector-store'
-import { mergeProjects } from '../store/project-merge'
-import { upsertProject } from '../store/writes'
-import { createSpaceManager, withFastDelete } from './space-manager'
-import { createVecIndex, knnCandidates, vecIndexExists } from './vec-index'
+import { activeSpace, buildingSpace, startActive } from '../../store/vector-spaces'
+import { upsertVectors } from '../../store/vector-store'
+import { mergeProjects } from '../../store/project-merge'
+import { upsertProject } from '../../store/writes'
+import { createSpaceManager, withFastDelete } from '../../vectors/space-manager'
+import { createVecIndex, knnCandidates, vecIndexExists } from '../../vectors/vec-index'
 
 const VEC0 = readEnv(process.env, 'TEST_VEC0')
 const OLD = { model: 'old', dims: 2 }

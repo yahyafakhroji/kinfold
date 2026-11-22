@@ -4,9 +4,9 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { LOCAL_MODEL_FILES } from './local-model'
+import { LOCAL_MODEL_FILES } from '../../vectors/local-model'
 
 export function testModelDir(): string | null {
-  const dir = process.env.KINFOLD_TEST_MODEL_DIR ?? join(import.meta.dir, '..', '..', '.cache', 'embed-model')
+  const dir = process.env.KINFOLD_TEST_MODEL_DIR ?? join(import.meta.dir, '..', '..', '..', '..', '.cache', 'embed-model')
   return Object.values(LOCAL_MODEL_FILES).every((file) => existsSync(join(dir, file.name))) ? dir : null
 }

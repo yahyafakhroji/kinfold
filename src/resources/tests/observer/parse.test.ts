@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { parseObserverOutput } from './parse'
+import { parseObserverOutput } from '../../observer/parse'
 
 const IDS = ['01JA', '01JB', '01JC']
 
@@ -9,7 +9,7 @@ function observation(overrides: Record<string, unknown> = {}): Record<string, un
     title: 'Spool drains in host-time order',
     narrative: 'Entries sort by occurredAt.',
     facts: ['drain order follows host time'],
-    files: ['src/spool/spool.ts'],
+    files: ['src/resources/spool/spool.ts'],
     evidence: { strength: 'tool-verified', sourceEventIds: ['01JA'] },
     ...overrides,
   }

@@ -11,10 +11,10 @@ import {
 import { type FtsMode, ftsMatch, parseSearchQuery } from './fts'
 import { MAX_FACT_CHARS, MAX_NARRATIVE_CHARS, MAX_SUMMARY_FIELD_CHARS, MAX_TITLE_CHARS, block, framed, indexLine, observationBlock, summaryLine } from './format'
 import { type VectorRow, fuseRanks } from './fusion'
-import { oneLine } from '../context/pack'
+import { oneLine } from '../../resources/context/pack'
 import type { FullObservation, IndexRow, MemoryReader, SearchFilters, SummaryItem } from './reader'
 import type { SemanticClient } from './semantic-client'
-import { MAX_K, type SemanticAnswer } from '../vectors/search'
+import { MAX_K, type SemanticAnswer } from '../../resources/vectors/search'
 import { TOOL_DEFINITIONS } from './tool-definitions'
 
 export { TOOL_DEFINITIONS }

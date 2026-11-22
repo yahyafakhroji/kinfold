@@ -8,7 +8,7 @@
 // reason (no extension, no key, no vectors yet), and callers fall back to FTS.
 
 import type { Parsed } from '../context/types'
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 import type { Database } from '../sqlite/types'
 import { NO_FILTERS, type NearestFilters, type VectorHit } from '../store/vector-store'
 import { EmbedError, type Embedder } from './embedder'

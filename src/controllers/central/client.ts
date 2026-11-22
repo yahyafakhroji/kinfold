@@ -13,13 +13,13 @@ import { isIP } from 'node:net'
 import { HEADER, signedHeaders } from './auth'
 import { deviceProof, normalizeCode, proofKey, verifierFor, verifyHubProof } from './code'
 import { bodyHash, newKeyPair, verifyReply } from './keys'
-import { writeFileAtomic } from '../fs/atomic'
-import { DATA_FILE_MODE } from '../store/data-dir'
+import { writeFileAtomic } from '../../system/fs/atomic'
+import { DATA_FILE_MODE } from '../../resources/store/data-dir'
 import { plainName } from './mode'
 import { centralDir, centralPath } from './paths'
 import { type VersionGap, versionGap } from './version-rule'
-import { errorName } from '../errors'
-import { MAX_ANSWER_BYTES, readCappedText } from '../http/capped'
+import { errorName } from '../../system/errors'
+import { MAX_ANSWER_BYTES, readCappedText } from '../../system/http/capped'
 
 export const DEFAULT_CALL_TIMEOUT_MS = 5_000
 export { MAX_ANSWER_BYTES }

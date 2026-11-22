@@ -13,13 +13,13 @@
 
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
-import { DATA_DIR_NAME } from '../names'
-import { osOf } from '../platform/platform'
-import { type InstallEnv, platformOf } from './env'
-import { installedProgramPath } from './entry'
-import { plannedBackup, readTextOrNull } from './files'
-import type { Action, StepNote } from './plan'
-import type { InstallRecord, PathSetup } from './setup/record'
+import { DATA_DIR_NAME } from '../../system/names'
+import { osOf } from '../../system/platform/platform'
+import { type InstallEnv, platformOf } from '../../resources/install-plan/env'
+import { installedProgramPath } from '../../resources/install-plan/entry'
+import { plannedBackup, readTextOrNull } from '../../resources/install-plan/files'
+import type { Action, StepNote } from '../../resources/install-plan/plan'
+import type { InstallRecord, PathSetup } from '../../resources/install-plan/setup/record'
 
 export type { PathSetup }
 export type PathAnswer = 'add' | 'decline'

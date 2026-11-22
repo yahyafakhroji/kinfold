@@ -6,8 +6,8 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { writeFileAtomic } from '../fs/atomic'
-import { DATA_FILE_MODE } from '../store/data-dir'
+import { writeFileAtomic } from '../../system/fs/atomic'
+import { DATA_FILE_MODE } from '../../resources/store/data-dir'
 
 export const AUTO_STATE_FILE = 'auto-update.json'
 

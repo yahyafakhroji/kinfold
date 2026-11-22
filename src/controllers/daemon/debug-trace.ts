@@ -3,11 +3,11 @@
 // with a session's events, and GET /watch/debug, which reads the in-memory
 // trace. Everything here reads ids and numbers; nothing is written.
 
-import type { ObserverTrace, TraceBuffer, TurnTrace } from '../debug/trace'
-import { backoffLine, providerBackoff } from '../observer/backoff'
-import type { BatchOutcome } from '../observer/process'
-import type { Database } from '../sqlite/types'
-import { projectDisplayName } from '../store/context-store'
+import type { ObserverTrace, TraceBuffer, TurnTrace } from '../../system/debug/trace'
+import { backoffLine, providerBackoff } from '../../resources/observer/backoff'
+import type { BatchOutcome } from '../../resources/observer/process'
+import type { Database } from '../../resources/sqlite/types'
+import { projectDisplayName } from '../../resources/store/context-store'
 import { HOST_PATTERN, MAX_PROJECT_CHARS } from '../watch/reads'
 import type { RouteAnswer } from './data-routes'
 import type { TurnEnd, TurnUsage } from './transcript-usage'

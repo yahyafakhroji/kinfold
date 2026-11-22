@@ -2,7 +2,7 @@
 // JSON hooks writer (agents/families/json-hooks.ts). Our entry has the shape
 // this project's .claude/settings.local.json proved live: one command and its
 // args, timeout 10, async with matcher '*' for the tool events. The command is
-// the checkout's bun on src/cli/hook.ts, or the installed program with
+// the checkout's bun on src/controllers/cli/hook.ts, or the installed program with
 // --data-dir before `hook` (entry.ts), and carries no --host.
 
 import {
@@ -17,7 +17,7 @@ import {
   jsonHookScriptsIn,
   mergeJsonHooks,
   removeJsonHooks,
-} from '../agents/families/json-hooks'
+} from '../../plugins/agents/families/json-hooks'
 import type { EntryCommand } from './entry'
 
 export type { HookTarget, Settings, WiringState }

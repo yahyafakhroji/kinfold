@@ -3,15 +3,15 @@
 // its row, and the size estimate counts it.
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { FAKE_SECRETS } from '../../test/fixtures/secrets'
-import { scanBatch } from '../data-control/scanner'
+import { FAKE_SECRETS } from '../../../../test/fixtures/secrets'
+import { scanBatch } from '../../data-control/scanner'
 import { type TempStore, T0, openTempStore } from '../observer/test-support'
-import { RULES_VERSION } from '../redaction/rules'
-import { purge } from '../data-control/purge'
-import { PROMPT_EXPIRED_MARKER, countExpiring, expirePromptTexts } from './retention-store'
-import { SCAN_SPECS, readScanRow, unscannedRows } from './scan-store'
-import { projectBytes } from './size-store'
-import { insertPrompt, setPromptReply, upsertProject, upsertSession } from './writes'
+import { RULES_VERSION } from '../../redaction/rules'
+import { purge } from '../../data-control/purge'
+import { PROMPT_EXPIRED_MARKER, countExpiring, expirePromptTexts } from '../../store/retention-store'
+import { SCAN_SPECS, readScanRow, unscannedRows } from '../../store/scan-store'
+import { projectBytes } from '../../store/size-store'
+import { insertPrompt, setPromptReply, upsertProject, upsertSession } from '../../store/writes'
 
 let temp: TempStore
 let session: number

@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { seedObservation } from '../context/test-support'
 import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../observer/test-support'
-import { DEFAULT_RETENTION, readDataSettings, writeDataSettings } from '../store/data-settings-store'
-import { insertFinding } from '../store/findings-store'
-import { PROMPT_EXPIRED_MARKER } from '../store/retention-store'
-import { insertPrompt } from '../store/writes'
-import { DAY_MS, applyRetention, describeRetention } from './retention'
+import { DEFAULT_RETENTION, readDataSettings, writeDataSettings } from '../../store/data-settings-store'
+import { insertFinding } from '../../store/findings-store'
+import { PROMPT_EXPIRED_MARKER } from '../../store/retention-store'
+import { insertPrompt } from '../../store/writes'
+import { DAY_MS, applyRetention, describeRetention } from '../../data-control/retention'
 
 let temp: TempStore
 let session: number

@@ -6,9 +6,9 @@
 // link to an id the run never showed as memory (or one from another project)
 // is dropped and counted, never stored.
 
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 import { oneLine } from './prompt'
-import type { EvidenceStrength } from '../evidence'
+import type { EvidenceStrength } from '../../system/evidence'
 import {
   EVIDENCE_STRENGTHS,
   OBSERVATION_TYPES,

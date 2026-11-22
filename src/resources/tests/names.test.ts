@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import { installPaths } from './install/env'
-import * as names from './names'
+import { installPaths } from '../install-plan/env'
+import * as names from '../../system/names'
 
 describe('names', () => {
   test('each product name sits next to its legacy one', () => {

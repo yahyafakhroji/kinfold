@@ -5,13 +5,13 @@
 // args }. OpenCode 2.x keeps them under `mcp` in opencode.json as
 // { type: 'local', command: [bin, ...args] }, the shape claude-mem's
 // OpenCodeInstaller writes. The command comes from entry.ts: the checkout's
-// bun on src/mcp/server.ts, or the installed program with --data-dir before
+// bun on src/controllers/mcp/server.ts, or the installed program with --data-dir before
 // `mcp`. An entry is ours when it runs one of those; an entry under our name
 // that runs anything else is foreign and is never replaced or removed.
 
-import { isRecord } from '../contract/event'
-import { MCP_HOST_ENV } from '../mcp/read-reporter'
-import { MCP_SERVER_NAME } from '../names'
+import { isRecord } from '../../system/contract/event'
+import { MCP_HOST_ENV } from '../../controllers/mcp/read-reporter'
+import { MCP_SERVER_NAME } from '../../system/names'
 import type { Settings } from './claude-hooks'
 import { entryPath, entryRole, type EntryCommand } from './entry'
 

@@ -20,10 +20,10 @@
 
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import type { InstallEnv } from '../../install/env'
-import { describeTextChange, readTextOrNull } from '../../install/files'
-import type { Action } from '../../install/plan'
-import { LEGACY_SHIM_MARKER, SHIM_MARKER } from '../../names'
+import type { InstallEnv } from '../../../resources/install-plan/env'
+import { describeTextChange, readTextOrNull } from '../../../resources/install-plan/files'
+import type { Action } from '../../../resources/install-plan/plan'
+import { LEGACY_SHIM_MARKER, SHIM_MARKER } from '../../../system/names'
 
 const DIR_MODE = 0o755
 const FILE_MODE = 0o644

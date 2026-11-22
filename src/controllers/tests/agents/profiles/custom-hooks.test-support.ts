@@ -5,14 +5,14 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runHook } from '../../cli/hook'
-import type { ContextRequest } from '../../context/types'
-import type { Action } from '../../install/plan'
+import { runHook } from '../../../cli/hook'
+import type { ContextRequest } from '../../../../resources/context/types'
+import type { Action } from '../../../../resources/install-plan/plan'
 import { type FakeWorld, createWorld } from '../../install/test-support'
-import { profileOf } from '../install-profiles'
-import type { AgentId, AgentProfile } from '../profile'
+import { profileOf } from '../../../../plugins/agents/install-profiles'
+import type { AgentId, AgentProfile } from '../../../../plugins/agents/profile'
 
-const FIXTURES = join(import.meta.dir, '../../../test/fixtures')
+const FIXTURES = join(import.meta.dir, '../../../../../test/fixtures')
 
 export interface HookBench {
   root: string

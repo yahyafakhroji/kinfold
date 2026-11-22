@@ -7,10 +7,10 @@
 
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import type { UpdateNotice } from '../context/types'
-import { DATA_DIR_NAME } from '../names'
-import { currentPlatform, osOf } from '../platform/platform'
-import { type InstallChannel, type InstallRecord, readInstallRecord } from '../install/setup/record'
+import type { UpdateNotice } from '../../resources/context/types'
+import { DATA_DIR_NAME } from '../../system/names'
+import { currentPlatform, osOf } from '../../system/platform/platform'
+import { type InstallChannel, type InstallRecord, readInstallRecord } from '../../resources/install-plan/setup/record'
 import { type AutoUpdateState, STALE_ATTEMPT_MS, lostAttempt, readAutoState } from './auto-state'
 import { autoUpdateSetting, betaChannelOn, updatesEnabled } from './enabled'
 import { releaseAssetName } from '../install/self-install'
@@ -19,7 +19,7 @@ import { readStageRecord, stagedProgram } from './stage'
 import { type UpdateState, knownRelease, markNotified, readUpdateState } from './state'
 import { compareVersions, isPatchUpdate } from './version-order'
 
-export type { UpdateNotice } from '../context/types'
+export type { UpdateNotice } from '../../resources/context/types'
 export { STALE_ATTEMPT_MS }
 export { availableMessage, installCommand, updateCommand, userMessage } from './notice-text'
 

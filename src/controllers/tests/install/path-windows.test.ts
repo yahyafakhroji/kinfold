@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
-import type { CommandRequest, CommandResult } from './env'
-import { changeWindowsUserPath, userPathScript } from './path-windows'
+import type { CommandRequest, CommandResult } from '../../../resources/install-plan/env'
+import { changeWindowsUserPath, userPathScript } from '../../install/path-windows'
 import { type FakeWorld, createWorld } from './test-support'
 
 let world: FakeWorld | null = null

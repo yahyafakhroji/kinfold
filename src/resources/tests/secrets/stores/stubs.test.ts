@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { KEY_STORE_KINDS, type KeyStoreDeps } from '../key-store'
-import { KEY_STORE_MODULES } from './select'
-import { stubKeyStoreModule } from './stub'
+import { KEY_STORE_KINDS, type KeyStoreDeps } from '../../../secrets/key-store'
+import { KEY_STORE_MODULES } from '../../../secrets/stores/select'
+import { stubKeyStoreModule } from '../../../secrets/stores/stub'
 
 const deps: KeyStoreDeps = {
   platform: { os: 'linux', wsl: false, node: 'linux' },

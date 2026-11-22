@@ -1,20 +1,20 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readHostVersions, recordedHostVersion } from '../adapters/host-version'
-import type { EmbeddedAssets } from '../runtime/embedded'
-import { installPaths } from './env'
-import { cmdCommand, powershellCommand } from '../agents/families/hook-shell'
-import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, mergeHostHooks, samItem } from './host-hooks'
-import { CODEX_TRUST_NOTE, hostHookInstallActions, hostHookUninstallActions, hostWiringLine, hostWiringState, opencodeInstallActions } from './host-wiring'
-import { EXIT_OK, install } from './install'
-import { inspectShim, pluginFileContent, shimContent } from './opencode-shim'
-import { runPlan } from './plan'
-import { status } from './status'
-import { entryCommand } from './entry'
-import { BUN, type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
-import { uninstall } from './uninstall'
-import { posixOnly } from '../../test/platform-guards'
+import { readHostVersions, recordedHostVersion } from '../../../plugins/adapters/host-version'
+import type { EmbeddedAssets } from '../../../system/runtime/embedded'
+import { installPaths } from '../../../resources/install-plan/env'
+import { cmdCommand, powershellCommand } from '../../../plugins/agents/families/hook-shell'
+import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, mergeHostHooks, samItem } from '../../install/host-hooks'
+import { CODEX_TRUST_NOTE, hostHookInstallActions, hostHookUninstallActions, hostWiringLine, hostWiringState, opencodeInstallActions } from '../../../resources/install-plan/host-wiring'
+import { EXIT_OK, install } from '../../install/install'
+import { inspectShim, pluginFileContent, shimContent } from '../../install/opencode-shim'
+import { runPlan } from '../../../resources/install-plan/plan'
+import { status } from '../../install/status'
+import { entryCommand } from '../../../resources/install-plan/entry'
+import { BUN, type FakeWorld, YES, createWorld, snapshotTree } from '../install/test-support'
+import { uninstall } from '../../install/uninstall'
+import { posixOnly } from '../../../../test/platform-guards'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -160,7 +160,7 @@ test('program mode replaces a checkout shim with the bundle it carries, then pla
   w.env.mode = { kind: 'program', binPath: join(w.dataDir, 'bin', 'kinfold') }
   const paths = installPaths(w.env)
   mkdirSync(paths.opencodePluginsDir, { recursive: true })
-  writeFileSync(paths.opencodePlugin, shimContent('/old/checkout/src/plugins/opencode.ts', w.dataDir))
+  writeFileSync(paths.opencodePlugin, shimContent('/old/checkout/src/plugins/plugins/opencode.ts', w.dataDir))
 
   await runPlan(w.env, await opencodeInstallActions(w.env, fakeAssets(BUNDLE)), false)
   const text = readFileSync(paths.opencodePlugin, 'utf8')

@@ -5,15 +5,15 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseEmbeddingSettings, type EmbeddingSettings } from '../vectors/embedding-settings'
-import { isRecord } from '../contract/event'
+import { parseEmbeddingSettings, type EmbeddingSettings } from '../../resources/vectors/embedding-settings'
+import { isRecord } from '../../system/contract/event'
 import { DEFAULT_PORT } from '../daemon/port'
 import { readDaemonEndpoint } from '../daemon/daemon-info'
 import type { ObserverSettingsView } from '../daemon/settings-route'
-import type { DisplayChange } from '../store/display-settings'
-import type { ObserverSettingsInput } from '../store/observer-settings-store'
-import { DAEMON_INFO_FILE } from '../store/data-dir'
-import type { InstallEnv } from './env'
+import type { DisplayChange } from '../../resources/store/display-settings'
+import type { ObserverSettingsInput } from '../../resources/store/observer-settings-store'
+import { DAEMON_INFO_FILE } from '../../resources/store/data-dir'
+import type { InstallEnv } from '../../resources/install-plan/env'
 import type { ServiceControl } from './service/control'
 
 const HEALTH_TIMEOUT_MS = 1_000

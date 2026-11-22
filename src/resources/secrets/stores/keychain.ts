@@ -9,7 +9,7 @@
 // security's own output is dropped unread. Existence checks run without -w,
 // so they read item metadata and never the secret.
 
-import { LEGACY_KEYCHAIN_SERVICE } from '../../names'
+import { LEGACY_KEYCHAIN_SERVICE } from '../../../system/names'
 import { KEYCHAIN_SERVICE, assertCredentialRef, assertStorableValue } from '../credentials'
 import type { KeyStore, KeyStoreModule } from '../key-store'
 

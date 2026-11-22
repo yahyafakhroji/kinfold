@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { DEFAULT_PORT, MAX_PORT, parsePortValue } from './port'
+import { DEFAULT_PORT, MAX_PORT, parsePortValue } from '../../daemon/port'
 
 test('a configured port is digits from 1 to 65535, and anything else is no port', () => {
   expect(parsePortValue('37811')).toBe(DEFAULT_PORT)

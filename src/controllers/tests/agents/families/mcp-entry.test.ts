@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { MCP_SERVER_NAME } from '../../install/mcp-config'
-import { mcpTarget } from '../../install/mcp-wiring'
+import { MCP_SERVER_NAME } from '../../../../resources/install-plan/mcp-config'
+import { mcpTarget } from '../../../../resources/install-plan/mcp-wiring'
 import { type FakeWorld, createWorld } from '../../install/test-support'
-import { MCP_HOST_ENV } from '../../mcp/read-reporter'
-import { type McpEntrySpec, mcpEntryActions, mcpEntryState, mcpEntryUninstallActions } from './mcp-entry'
-import { assertWriterContract, fileWriter } from './writer-contract.test-support'
+import { MCP_HOST_ENV } from '../../../mcp/read-reporter'
+import { type McpEntrySpec, mcpEntryActions, mcpEntryState, mcpEntryUninstallActions } from '../../../../plugins/agents/families/mcp-entry'
+import { assertWriterContract, fileWriter } from '../../../../plugins/tests/agents/families/writer-contract.test-support'
 
 let worlds: FakeWorld[] = []
 afterEach(async () => {
@@ -52,7 +52,7 @@ test('an MCP entry is added under the configured key, a re-run changes nothing, 
 })
 
 test('an entry of ours that runs another path is stale and replaced; one under our name that is not ours is left alone', () => {
-  const stale = { mcpServers: { [MCP_SERVER_NAME]: { command: '/old/bun', args: ['/old/checkout/src/mcp/server.ts'] } } }
+  const stale = { mcpServers: { [MCP_SERVER_NAME]: { command: '/old/bun', args: ['/old/checkout/src/controllers/mcp/server.ts'] } } }
   const { w, path } = setup(JSON.stringify(stale))
   expect(mcpEntryState(w.env, SPEC, 'gemini-cli')).toBe('stale')
   expect(mcpEntryActions(w.env, SPEC, 'gemini-cli').map((action) => action.kind)).toEqual(['backup', 'write'])

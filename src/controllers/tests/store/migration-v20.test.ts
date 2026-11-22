@@ -2,11 +2,11 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { sqlFor } from '../mcp/reader'
-import { openTestDatabase } from '../sqlite/test-support'
-import type { Database } from '../sqlite/types'
-import { openStore } from './db'
-import { MIGRATIONS, SUMMARIES_TIME_INDEX } from './schema'
+import { sqlFor } from '../../mcp/reader'
+import { openTestDatabase } from '../../../resources/tests/sqlite/test-support'
+import type { Database } from '../../../resources/sqlite/types'
+import { openStore } from '../../../resources/store/db'
+import { MIGRATIONS, SUMMARIES_TIME_INDEX } from '../../../resources/store/schema'
 
 let root: string
 beforeEach(() => {

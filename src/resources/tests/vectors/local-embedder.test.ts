@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import { EmbedError } from './embedder'
-import { LOCAL_MODEL_DIMS, LOCAL_MODEL_FILES, LOCAL_MODEL_ID } from './local-model'
-import type { EmbedWorkerReply, EmbedWorkerRequest } from './local-embed-protocol'
-import { type EmbedWorker, localModelPaths, startLocalEmbedder } from './local-embedder'
+import { EmbedError } from '../../vectors/embedder'
+import { LOCAL_MODEL_DIMS, LOCAL_MODEL_FILES, LOCAL_MODEL_ID } from '../../vectors/local-model'
+import type { EmbedWorkerReply, EmbedWorkerRequest } from '../../vectors/local-embed-protocol'
+import { type EmbedWorker, localModelPaths, startLocalEmbedder } from '../../vectors/local-embedder'
 import { testModelDir } from './local-test-support'
 
 describe('localModelPaths', () => {

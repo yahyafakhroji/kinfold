@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
-import { BACKUP_FORMAT_VERSION, type BackupManifest, BackupError, MAX_MANIFEST_BYTES, archiveSync, extractSnapshot, parseManifest, readArchive, sha256OfFile, writeArchive } from './archive'
+import { BACKUP_FORMAT_VERSION, type BackupManifest, BackupError, MAX_MANIFEST_BYTES, archiveSync, extractSnapshot, parseManifest, readArchive, sha256OfFile, writeArchive } from '../../backup/archive'
 
 let dir: string
 let snapshot: string

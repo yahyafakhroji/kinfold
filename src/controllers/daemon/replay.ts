@@ -10,11 +10,11 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type BatchOutcome, MAX_BATCH_EVENTS } from '../observer/process'
-import type { Database } from '../sqlite/types'
-import { openStore } from '../store/db'
-import { markDone, markProcessing, retryableEvents } from '../store/observer-store'
-import type { TimelineEvent } from '../store/replay-reads'
+import { type BatchOutcome, MAX_BATCH_EVENTS } from '../../resources/observer/process'
+import type { Database } from '../../resources/sqlite/types'
+import { openStore } from '../../resources/store/db'
+import { markDone, markProcessing, retryableEvents } from '../../resources/store/observer-store'
+import type { TimelineEvent } from '../../resources/store/replay-reads'
 import { DEFAULT_OBSERVER_TICK_MS, type DueReason, type ObserverScheduleConfig, createObserverScheduler } from './observer-scheduler'
 
 export interface ReplayRun {

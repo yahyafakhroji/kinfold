@@ -5,10 +5,10 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { USAGE, displayChangeOf, parseArgs } from './args'
-import { putDisplaySettings } from './daemon-client'
-import { displayActions } from './install'
-import { describeAction } from './plan'
+import { USAGE, displayChangeOf, parseArgs } from '../../install/args'
+import { putDisplaySettings } from '../../install/daemon-client'
+import { displayActions } from '../../install/install'
+import { describeAction } from '../../../resources/install-plan/plan'
 import { type FakeWorld, createWorld } from './test-support'
 
 let world: FakeWorld | null = null

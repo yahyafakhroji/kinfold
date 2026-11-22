@@ -7,7 +7,7 @@
 // before the store does.
 
 import { existsSync, statSync } from 'node:fs'
-import { isCompiledProgram } from '../runtime/program'
+import { isCompiledProgram } from '../../system/runtime/program'
 import type { CheckpointMode, CheckpointReply, CheckpointResult, CheckpointStart } from './checkpoint-protocol'
 
 /** How often the WAL is copied into the store. */
@@ -29,7 +29,7 @@ export const CHECKPOINT_SLOW_MS = 1_000
 export const CHECKPOINT_CLOSE_WAIT_MS = 10_000
 
 /** The worker inside a compiled program, by its path from the entries' common folder (tools/build-release.test.ts holds them in step). */
-export const COMPILED_CHECKPOINT_WORKER_PATH = './workers/checkpoint-worker.ts'
+export const COMPILED_CHECKPOINT_WORKER_PATH = './resources/workers/checkpoint-worker.ts'
 
 export interface Checkpointer {
   /** Waits for the checkpoint in flight and keeps the next back until the returned release is called. */

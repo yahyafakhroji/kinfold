@@ -8,13 +8,13 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { currentPlatform } from '../../platform/platform'
-import type { InstallEnv } from '../env'
-import { encodeText } from '../files'
-import { createCommandRunner } from '../system'
-import { windowsSystemTool } from '../windows-system-path'
-import { WINDOWS_QUERY_TIMEOUT_MS, powershellArgv } from '../access/windows-acl'
-import { ScheduledTaskService, TASK_NAME, taskStateOf, taskStateScript } from './scheduled-task-service'
+import { currentPlatform } from '../../../../system/platform/platform'
+import type { InstallEnv } from '../../../../resources/install-plan/env'
+import { encodeText } from '../../../../resources/install-plan/files'
+import { createCommandRunner } from '../../../install/system'
+import { windowsSystemTool } from '../../../install/windows-system-path'
+import { WINDOWS_QUERY_TIMEOUT_MS, powershellArgv } from '../../../install/access/windows-acl'
+import { ScheduledTaskService, TASK_NAME, taskStateOf, taskStateScript } from '../../../install/service/scheduled-task-service'
 
 const LIVE = currentPlatform().os === 'windows' && process.env.KINFOLD_TEST_WINDOWS_TASK === '1'
 const PID_FILE = 'stand-in.pid'
@@ -27,7 +27,7 @@ const TEST_TIMEOUT_MS = 180_000
 const READY = 3
 const RUNNING = 4
 
-/** What the CLI hands its children (src/cli/kinfold.ts): PATH and HOME, nothing else. */
+/** What the CLI hands its children (src/controllers/cli/kinfold.ts): PATH and HOME, nothing else. */
 function cliChildEnv(home: string): Record<string, string> {
   const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'
   return { PATH: process.env[pathKey] ?? '', HOME: home }
@@ -88,8 +88,8 @@ describe.skipIf(!LIVE)('scheduled task (live)', () => {
     expect(await service.isRegistered()).toBe(false)
     let pid: number | null = null
     try {
-      mkdirSync(join(projectRoot, 'src', 'cli'), { recursive: true })
-      writeFileSync(join(projectRoot, 'src', 'cli', 'kinfold.ts'), STAND_IN_DAEMON)
+      mkdirSync(join(projectRoot, 'src', 'controllers', 'cli'), { recursive: true })
+      writeFileSync(join(projectRoot, 'src', 'controllers', 'cli', 'kinfold.ts'), STAND_IN_DAEMON)
       const path = service.configPath()
       mkdirSync(dirname(path), { recursive: true })
       writeFileSync(path, encodeText(service.configContent(37811) ?? '', 'utf16le'))

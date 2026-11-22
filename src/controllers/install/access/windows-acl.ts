@@ -5,7 +5,7 @@
 // account names are localized, and a warning names them by SID.
 
 import { existsSync } from 'node:fs'
-import type { CommandResult, InstallEnv } from '../env'
+import type { CommandResult, InstallEnv } from '../../../resources/install-plan/env'
 import { windowsSystemTool } from '../windows-system-path'
 import type { DataDirAccess } from './check'
 

@@ -5,11 +5,11 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
-import type { InstallRecord } from '../install/setup/record'
-import { type TempStore, openTempStore } from '../observer/test-support'
-import { QUIET_MS } from '../update/auto'
-import { mergeAutoState } from '../update/auto-state'
-import { writeUpdateState } from '../update/state'
+import type { InstallRecord } from '../../../resources/install-plan/setup/record'
+import { type TempStore, openTempStore } from '../../../resources/tests/observer/test-support'
+import { QUIET_MS } from '../../update/auto'
+import { mergeAutoState } from '../../update/auto-state'
+import { writeUpdateState } from '../../update/state'
 
 const RECORD: InstallRecord = { channel: 'curl', updateCheck: true, autoUpdate: true, autoUpdateIntro: false, agentHomes: {}, firstInstalledAt: 1 }
 const T0 = 1_792_900_000_000

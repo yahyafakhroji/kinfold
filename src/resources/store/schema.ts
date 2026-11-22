@@ -270,7 +270,7 @@ INSERT INTO data_settings (key, value, updated_at) VALUES
 // v5: observation links. The observer may say a new observation
 // confirms, updates or contradicts one the session was shown; every accepted
 // link is kept here, and updates/contradicts also set the older row's
-// contradicted_by when the evidence rule allows (src/store/observation-links.ts).
+// contradicted_by when the evidence rule allows (src/resources/store/observation-links.ts).
 // Both ends cascade, so a purge leaves no link behind, and the to_id index
 // serves the purge's re-settle and the detail view's incoming links.
 const V5_LINKS = `
@@ -313,7 +313,7 @@ CREATE INDEX mcp_reads_by_time ON mcp_reads(occurred_at);
 CREATE INDEX mcp_reads_by_project ON mcp_reads(project_key, occurred_at);
 `
 
-// v7: shared summaries (src/store/summary-share.ts). prompts.text_hash
+// v7: shared summaries (src/resources/store/summary-share.ts). prompts.text_hash
 // is a sha256 of the trimmed, whitespace-collapsed stored text; a prompt
 // identical to a summarized one in the same project points at that summary
 // through prompts.summary_id instead of adding a row. repeat_count and
@@ -329,7 +329,7 @@ CREATE INDEX prompts_by_text_hash ON prompts(text_hash) WHERE text_hash IS NOT N
 CREATE INDEX prompts_by_summary ON prompts(summary_id) WHERE summary_id IS NOT NULL;
 `
 
-// v8: embeddings for semantic search (src/vectors/). A plain table, not
+// v8: embeddings for semantic search (src/resources/vectors/). A plain table, not
 // a sqlite-vec vec0 virtual table: without the extension loaded SQLite cannot
 // even delete from a vec0 table, and an embedding can leak the text it came
 // from, so purge, retention and secure_delete must never depend on it. The
@@ -363,7 +363,7 @@ CREATE INDEX related_served_by_time ON related_served(occurred_at);
 CREATE INDEX related_served_by_observation ON related_served(observation_id);
 `
 
-// v10: the daemon's safety gate (src/observer/safety-gate.ts). One row per
+// v10: the daemon's safety gate (src/resources/observer/safety-gate.ts). One row per
 // (provider, CLI version, resolved binary path) that ran the planted-instruction
 // test, passed or failed with its error class. The model is not part of the key.
 const V10_OBSERVER_SAFETY = `
@@ -562,7 +562,7 @@ CREATE INDEX observations_recall ON observations(id, project_key, contradicted_b
 //     tokens can be split over what it made. NULL for rows written before.
 //   activity: what happened, for the Activity page. Kinds and counts, never
 //     memory text; detail holds a short machine word (an error class, a
-//     version). Kept to 90 days and 100,000 rows (src/store/activity-store.ts).
+//     version). Kept to 90 days and 100,000 rows (src/resources/store/activity-store.ts).
 const V18_DASHBOARD_RECORDS = `
 ALTER TABLE sessions ADD COLUMN device TEXT;
 UPDATE sessions SET device = substr(project_key, 1, instr(project_key, ':') - 1) WHERE project_key GLOB 'dev-?*:?*';

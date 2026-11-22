@@ -7,8 +7,8 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 
-const ROOT = resolve(import.meta.dir, '..', '..')
-const ENTRY = join(ROOT, 'src', 'cli', 'kinfold.ts')
+const ROOT = resolve(import.meta.dir, '..', '..', '..', '..')
+const ENTRY = join(ROOT, 'src', 'controllers', 'cli', 'kinfold.ts')
 const SCANNED = ['src', 'tools']
 
 function sourceFiles(dir: string): string[] {
@@ -44,9 +44,9 @@ function entryImporters(): string[] {
   return importers.sort()
 }
 
-const CLACK_ADAPTER = join(ROOT, 'src', 'install', 'prompt', 'clack.ts')
+const CLACK_ADAPTER = join(ROOT, 'src', 'controllers', 'install', 'prompt', 'clack.ts')
 /** What agents and the service start. Their output is a protocol or data, and a hook is paid for on every prompt. */
-const SERVICE_ENTRIES = ['src/cli/hook.ts', 'src/mcp/server.ts', 'src/daemon/main.ts', 'src/observer/once.ts']
+const SERVICE_ENTRIES = ['src/controllers/cli/hook.ts', 'src/controllers/mcp/server.ts', 'src/controllers/daemon/main.ts', 'src/resources/observer/once.ts']
 
 interface FileImports {
   /** Relative imports resolved to files, static and import() alike. */
@@ -106,13 +106,13 @@ describe('@clack/prompts', () => {
 
 describe('the hook', () => {
   test('reaches no installer module: it runs on every prompt and pays only for itself', () => {
-    const installer = join(ROOT, 'src', 'install')
-    expect(reachableFrom('src/cli/hook.ts').filter((file) => file.startsWith(installer)).map((file) => relative(ROOT, file))).toEqual([])
+    const installer = [join(ROOT, 'src', 'controllers', 'install'), join(ROOT, 'src', 'resources', 'install-plan')]
+    expect(reachableFrom('src/controllers/cli/hook.ts').filter((file) => installer.some((dir) => file.startsWith(dir))).map((file) => relative(ROOT, file))).toEqual([])
   })
 })
 
 describe('the program entry', () => {
-  test('no source file imports src/cli/kinfold.ts', () => {
+  test('no source file imports src/controllers/cli/kinfold.ts', () => {
     expect(entryImporters()).toEqual([])
   })
 })

@@ -9,15 +9,15 @@
 
 import { statSync } from 'node:fs'
 import { join } from 'node:path'
-import { INSTALL_RECORD_FILE, type InstallRecord, readInstallRecord } from '../install/setup/record'
-import type { OsName } from '../platform/platform'
+import { INSTALL_RECORD_FILE, type InstallRecord, readInstallRecord } from '../../resources/install-plan/setup/record'
+import type { OsName } from '../../system/platform/platform'
 import { type AutoUpdateState, lostAttempt, mergeAutoState, readAutoState } from './auto-state'
 import { detachPlan, spawnDetached } from './detach'
 import { autoUpdateSetting } from './enabled'
 import { updateLockHolder } from './lock'
 import { type UpdateState, readUpdateState } from './state'
 import { compareVersions, isPatchUpdate, parseVersion } from './version-order'
-import { errorName } from '../errors'
+import { errorName } from '../../system/errors'
 
 type Env = Readonly<Record<string, string | undefined>>
 

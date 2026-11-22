@@ -5,15 +5,15 @@
 // it, and changes nothing.
 
 import { join } from 'node:path'
-import { DATA_DIR_NAME } from '../../names'
-import { osOf } from '../../platform/platform'
-import { DB_KEY_REF } from '../../secrets/credentials'
-import { fileState } from '../../sqlite/open'
-import { DB_FILE } from '../../store/data-dir'
+import { DATA_DIR_NAME } from '../../../system/names'
+import { osOf } from '../../../system/platform/platform'
+import { DB_KEY_REF } from '../../../resources/secrets/credentials'
+import { fileState } from '../../../resources/sqlite/open'
+import { DB_FILE } from '../../../resources/store/data-dir'
 import { storedDbKey } from '../db-encryption'
 import { detectHosts } from '../detect'
 import { decryptConfirmed, encryptKeyExists, encryptWithKey, noKeyStoreRefusal } from '../encrypt'
-import { type InstallEnv, codexHomeProblem, errorMessage } from '../env'
+import { type InstallEnv, codexHomeProblem, errorMessage } from '../../../resources/install-plan/env'
 import {
   type DaemonSituation,
   EXIT_BLOCKED,
@@ -28,11 +28,11 @@ import {
   restartService,
   takeInstallLock,
 } from '../install'
-import { INSTALL_PROFILES } from '../../agents/install-profiles'
+import { INSTALL_PROFILES } from '../../../plugins/agents/install-profiles'
 import { type InstallKeyStore, keyStoreOf, readKeyStore } from '../key-store-choice'
 import { ChoiceError, describeInput } from '../observer-choice'
 import type { PathPlan } from '../path-setup'
-import { linesListener, runPlan } from '../plan'
+import { linesListener, runPlan } from '../../../resources/install-plan/plan'
 import { PromptCancelled, type Row } from '../prompt/prompts'
 import { managedServiceOf } from '../service/control'
 import { type ProgramCheck, checkProgram } from '../self-install'
@@ -194,7 +194,7 @@ function commandPrefix(env: InstallEnv): string {
   // Run by hand, either one reads ~/.kinfold unless told otherwise.
   const windows = osOf(env.platform) === 'windows'
   const folder = env.dataDir === join(env.homeDir, DATA_DIR_NAME) ? '' : ` --data-dir ${quoted(env.dataDir, windows)}`
-  const program = env.mode.kind === 'checkout' ? 'bun src/cli/kinfold.ts' : quoted(env.mode.binPath, windows)
+  const program = env.mode.kind === 'checkout' ? 'bun src/controllers/cli/kinfold.ts' : quoted(env.mode.binPath, windows)
   // PowerShell reads a quoted path as a string; the call operator runs it.
   return `${windows && program.startsWith("'") ? '& ' : ''}${program}${folder}`
 }

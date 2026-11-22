@@ -9,7 +9,7 @@ export const SCHEMA_VERSION = 1
 export const EVENT_KINDS = ['session_start', 'user_prompt', 'tool_result', 'turn_end', 'session_end'] as const
 export type EventKind = (typeof EVENT_KINDS)[number]
 
-/** Hosts with an adapter in src/adapters/. Any other lowercase id still validates, so this list only grows. */
+/** Hosts with an adapter in src/plugins/adapters/. Any other lowercase id still validates, so this list only grows. */
 export const KNOWN_HOSTS = [
   'claude-code',
   'opencode',

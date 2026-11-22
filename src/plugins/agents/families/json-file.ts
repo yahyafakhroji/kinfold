@@ -8,9 +8,9 @@
 
 import { existsSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { type InstallEnv, errorMessage } from '../../install/env'
-import { plannedBackup, serializeJson } from '../../install/files'
-import type { Action } from '../../install/plan'
+import { type InstallEnv, errorMessage } from '../../../resources/install-plan/env'
+import { plannedBackup, serializeJson } from '../../../resources/install-plan/files'
+import type { Action } from '../../../resources/install-plan/plan'
 import { readPlainJsonObject, uninstallText } from './plain-json'
 
 export type Settings = Readonly<Record<string, unknown>>

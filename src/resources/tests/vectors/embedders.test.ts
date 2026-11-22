@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { T0, type TempStore, openTempStore } from '../observer/test-support'
-import { startActive } from '../store/vector-spaces'
-import { DEFAULT_EMBED_DIMS, DEFAULT_EMBED_MODEL, EmbedError } from './embedder'
-import { embeddersFor } from './embedders'
-import { writeEmbeddingSettings } from './embedding-settings'
-import type { LocalEmbedder } from './local-embedder'
-import { LOCAL_MODEL_DIMS, LOCAL_MODEL_ID } from './local-model'
+import { startActive } from '../../store/vector-spaces'
+import { DEFAULT_EMBED_DIMS, DEFAULT_EMBED_MODEL, EmbedError } from '../../vectors/embedder'
+import { embeddersFor } from '../../vectors/embedders'
+import { writeEmbeddingSettings } from '../../vectors/embedding-settings'
+import type { LocalEmbedder } from '../../vectors/local-embedder'
+import { LOCAL_MODEL_DIMS, LOCAL_MODEL_ID } from '../../vectors/local-model'
 
 let temp: TempStore
 beforeEach(() => {

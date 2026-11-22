@@ -3,8 +3,8 @@
 // interface, so the install, encrypt and update flows never name an OS tool.
 
 import { linkedServiceFor } from '../../wsl/linked-service'
-import { type InstallEnv, platformOf } from '../env'
-import type { TextEncoding } from '../files'
+import { type InstallEnv, platformOf } from '../../../resources/install-plan/env'
+import type { TextEncoding } from '../../../resources/install-plan/files'
 import { LaunchAgentService } from './launch-agent-service'
 import { ScheduledTaskService } from './scheduled-task-service'
 import { SystemdUserService } from './systemd-service'

@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { CommandResult, InstallEnv } from '../install/env'
-import { encodeText } from '../install/files'
+import type { CommandResult, InstallEnv } from '../../../resources/install-plan/env'
+import { encodeText } from '../../../resources/install-plan/files'
 import { YES, type FakeWorld, createWorld } from '../install/test-support'
-import { taskXml } from '../install/service/scheduled-task-service'
-import { wslInstall } from './entry'
-import { INTEROP_OFF, WSLINFO, WSLPATH, findWindowsInstall, networkingMode, windowsDaemonHealth, windowsToolPath } from './windows-install'
+import { taskXml } from '../../install/service/scheduled-task-service'
+import { wslInstall } from '../../wsl/entry'
+import { INTEROP_OFF, WSLINFO, WSLPATH, findWindowsInstall, networkingMode, windowsDaemonHealth, windowsToolPath } from '../../wsl/windows-install'
 
 const worlds: FakeWorld[] = []
 afterEach(async () => {

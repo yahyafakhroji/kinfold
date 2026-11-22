@@ -12,8 +12,8 @@
 
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import type { InstallEnv } from '../install/env'
-import { readTextOrNull } from '../install/files'
+import type { InstallEnv } from '../../resources/install-plan/env'
+import { readTextOrNull } from '../../resources/install-plan/files'
 import type { ServiceControl, ServiceStep } from '../install/service/control'
 import { taskDataDir, taskPort } from '../install/service/scheduled-task-service'
 import { PREVIEW, type WslLink, readWslLink, wslHomeDir } from './link'

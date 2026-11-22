@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { duplicateWarning } from './duplicates'
+import { duplicateWarning } from '../../install/duplicates'
 
 test('the duplicate-wiring warning names Kinfold and the kinfold command, not the old name', () => {
   const lines = duplicateWarning(['/work/.claude/settings.json'])

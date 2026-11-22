@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { UNKEYED_EPOCH } from '../redaction/redact'
-import { listSubKeyEpochs, loadMarkerKey, pickEpoch, readSubKey, subKeyDir, subKeyPath, writeSubKey } from './hmac-key'
-import { posixOnly } from '../../test/platform-guards'
+import { UNKEYED_EPOCH } from '../../redaction/redact'
+import { listSubKeyEpochs, loadMarkerKey, pickEpoch, readSubKey, subKeyDir, subKeyPath, writeSubKey } from '../../store/hmac-key'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const OCT = Date.UTC(2026, 9, 26)
 const key = (byte: string): string => byte.repeat(32)

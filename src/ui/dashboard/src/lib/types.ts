@@ -1,5 +1,5 @@
 // The daemon's answers, as the pages read them. These mirror the daemon's own
-// types (src/store/list-reads.ts, src/dashboard/overview.ts, saved.ts and the
+// types (src/resources/store/list-reads.ts, src/resources/reports/overview.ts, saved.ts and the
 // settings routes); the app is built apart from the daemon, so they are
 // restated here rather than imported.
 

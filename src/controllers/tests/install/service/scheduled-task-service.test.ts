@@ -1,24 +1,24 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { NO_DB_KEYS } from '../../sqlite/keys'
-import { fileState } from '../../sqlite/open'
-import { DAEMON_INFO_FILE, DB_FILE } from '../../store/data-dir'
-import { openStore } from '../../store/db'
-import { START_WAIT_MS, waitForStart } from '../daemon-client'
-import { runKeyCommand } from '../encrypt'
-import type { CommandRequest, CommandResult, InstallEnv } from '../env'
-import { readTextOrNull } from '../files'
-import { EXIT_OK, install, serviceActions } from '../install'
-import { uninstall } from '../uninstall'
-import { SERVICE_PATH_FILE, readServicePath } from './service-path'
-import { HEALTH_WAIT_MS, applyAction } from '../plan'
-import { status } from '../status'
+import { NO_DB_KEYS } from '../../../../resources/sqlite/keys'
+import { fileState } from '../../../../resources/sqlite/open'
+import { DAEMON_INFO_FILE, DB_FILE } from '../../../../resources/store/data-dir'
+import { openStore } from '../../../../resources/store/db'
+import { START_WAIT_MS, waitForStart } from '../../../install/daemon-client'
+import { runKeyCommand } from '../../../install/encrypt'
+import type { CommandRequest, CommandResult, InstallEnv } from '../../../../resources/install-plan/env'
+import { readTextOrNull } from '../../../../resources/install-plan/files'
+import { EXIT_OK, install, serviceActions } from '../../../install/install'
+import { uninstall } from '../../../install/uninstall'
+import { SERVICE_PATH_FILE, readServicePath } from '../../../install/service/service-path'
+import { HEALTH_WAIT_MS, applyAction } from '../../../../resources/install-plan/plan'
+import { status } from '../../../install/status'
 import { BUN, type FakeWorld, YES, createWorld } from '../test-support'
 import {
   STOP_POLL_MS, ScheduledTaskService, TASK_CONFIG_FILE, TASK_NAME, type TaskProcessDeps,
   splitWindowsArgs, taskConfigPath, taskDataDir, taskPort, taskStateOf, taskStateScript, taskXml, windowsArg,
-} from './scheduled-task-service'
+} from '../../../install/service/scheduled-task-service'
 
 const SCHTASKS = 'C:\\Windows\\System32\\schtasks.exe'
 const POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
@@ -164,7 +164,7 @@ test('no USERNAME means a manual start, not a broken task', async () => {
   expect(plan.some((line) => line.includes('schtasks'))).toBe(false)
   expect(plan.some((line) => line.includes('GET /health'))).toBe(false)
   expect(plan.some((line) => line.includes(TASK_CONFIG_FILE))).toBe(false)
-  const entry = `${BUN} ${join(w.projectRoot, 'src/daemon/main.ts')}`
+  const entry = `${BUN} ${join(w.projectRoot, 'src/controllers/daemon/main.ts')}`
   expect(w.out).toContain(`scheduled task: USERNAME is not set, so the task cannot name its user; start the daemon yourself with: ${entry}`)
   expect(w.commands.some((c) => c.argv[0] === SCHTASKS && c.argv[1] !== '/Query')).toBe(false)
 })
@@ -454,7 +454,7 @@ test('the install plan writes the task file and starts the task', async () => {
   expect(await install({ ...w.env, service }, { ...YES, dryRun: true })).toBe(EXIT_OK)
   const path = taskConfigPath(w.env)
   const content = service.configContent(37811) ?? ''
-  expect(content).toBe(taskXml({ user: 'HOST\\me', program: BUN, script: join(w.projectRoot, 'src/cli/kinfold.ts'), dataDir: w.dataDir, port: 37811, logFile: `${w.dataDir}\\logs\\daemon.log` }))
+  expect(content).toBe(taskXml({ user: 'HOST\\me', program: BUN, script: join(w.projectRoot, 'src/controllers/cli/kinfold.ts'), dataDir: w.dataDir, port: 37811, logFile: `${w.dataDir}\\logs\\daemon.log` }))
   const plan = planLines(w)
   const write = plan.findIndex((line) => line.startsWith(`write ${path}: `))
   const start = plan.indexOf(service.describe('start'))

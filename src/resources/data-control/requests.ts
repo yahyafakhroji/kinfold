@@ -3,7 +3,7 @@
 // widen or silently drop a selector. Errors name the field, never echo it.
 
 import type { Parsed } from '../context/types'
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 import { RETENTION_TABLES, type DataSettingsChange, type RetentionTable } from '../store/data-settings-store'
 import { FINDING_ACTIONS, type FindingAction, type FindingQuery } from '../store/findings-store'
 import type { PurgeTarget } from '../store/purge-store'

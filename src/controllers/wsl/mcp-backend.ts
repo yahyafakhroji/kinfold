@@ -6,7 +6,7 @@
 // answers, as it always has.
 
 import type { ToolCaller } from '../mcp/tools'
-import type { PlatformInfo } from '../platform/platform'
+import type { PlatformInfo } from '../../system/platform/platform'
 import { centralModeOf } from '../central/mode'
 import { centralToolCaller } from '../central/mcp-caller'
 import { daemonToolCaller } from './daemon-tools'

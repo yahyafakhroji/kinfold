@@ -1,17 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { HOOK_SPECS } from '../agents/hook-specs'
-import { profileOf } from '../agents/install-profiles'
-import type { AgentId } from '../agents/profile'
-import { kiloTuiPath } from '../agents/families/kilo-tui'
-import { opencodeTuiDir } from '../agents/families/opencode-tui'
-import { runHook } from '../cli/hook'
-import { KNOWN_HOSTS } from '../contract/event'
+import { HOOK_SPECS } from '../../../plugins/agents/hook-specs'
+import { profileOf } from '../../../plugins/agents/install-profiles'
+import type { AgentId } from '../../../plugins/agents/profile'
+import { kiloTuiPath } from '../../../plugins/agents/families/kilo-tui'
+import { opencodeTuiDir } from '../../../plugins/agents/families/opencode-tui'
+import { runHook } from '../../cli/hook'
+import { KNOWN_HOSTS } from '../../../system/contract/event'
 import type { FakeWorld } from '../install/test-support'
 import { PORT, type Stand, linkedStand, mentions, wslProgram } from './test-support'
 
-const FIXTURES = join(import.meta.dir, '../../test/fixtures')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures')
 const TOKEN = 'a'.repeat(64)
 
 const worlds: FakeWorld[] = []

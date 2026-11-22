@@ -22,7 +22,7 @@
 // written for it (hook-shell.ts).
 
 import { join } from 'node:path'
-import type { InstallEnv } from '../../install/env'
+import type { InstallEnv } from '../../../resources/install-plan/env'
 import type { McpEntrySpec } from '../families/mcp-entry'
 import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentWiring, stdioMcpEntry } from '../families/json-agent'
 import { type AgentProfile, type Capabilities, NO_TOOLS_OFF } from '../profile'

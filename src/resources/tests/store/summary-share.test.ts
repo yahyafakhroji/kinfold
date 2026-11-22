@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { T0, type TempStore, openTempStore } from '../observer/test-support'
-import { expirePromptTexts } from './retention-store'
-import { normalizePromptText, promptTextHash, repeatedPromptNumbers, writeSharedSummary } from './summary-share'
-import { insertPrompt, upsertProject, upsertSession } from './writes'
+import { expirePromptTexts } from '../../store/retention-store'
+import { normalizePromptText, promptTextHash, repeatedPromptNumbers, writeSharedSummary } from '../../store/summary-share'
+import { insertPrompt, upsertProject, upsertSession } from '../../store/writes'
 
 let temp: TempStore
 beforeEach(() => {

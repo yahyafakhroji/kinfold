@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { keptReport } from './kept-report'
+import { keptReport } from '../../dashboard/kept-report'
 
 function controlled() {
   let calls = 0

@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { installPaths } from './env'
-import { EXIT_OK, install } from './install'
-import { LAUNCHCTL } from './launch-agent'
+import { installPaths } from '../../../resources/install-plan/env'
+import { EXIT_OK, install } from '../../install/install'
+import { LAUNCHCTL } from '../../install/launch-agent'
 import { type FakeWorld, YES, createWorld } from './test-support'
 
 let world: FakeWorld | null = null

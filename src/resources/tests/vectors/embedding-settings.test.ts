@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { seedObservation } from '../context/test-support'
 import { PROJECT, T0, type TempStore, openTempStore, seedSession } from '../observer/test-support'
-import { upsertVectors } from '../store/vector-store'
-import { DEFAULT_EMBED_DIMS, DEFAULT_EMBED_MODEL } from './embedder'
+import { upsertVectors } from '../../store/vector-store'
+import { DEFAULT_EMBED_DIMS, DEFAULT_EMBED_MODEL } from '../../vectors/embedder'
 import {
   ensureEmbeddingSettings, isLoopbackUrl, llmEndpoint, parseEmbeddingSettings, readEmbeddingSettings, spaceForSettings, writeEmbeddingSettings,
-} from './embedding-settings'
-import { LOCAL_MODEL_DIMS, LOCAL_MODEL_ID } from './local-model'
+} from '../../vectors/embedding-settings'
+import { LOCAL_MODEL_DIMS, LOCAL_MODEL_ID } from '../../vectors/local-model'
 
 let temp: TempStore
 beforeEach(() => {

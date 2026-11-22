@@ -3,20 +3,20 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { seedObservation } from '../context/test-support'
-import { readEnv } from '../env-names'
+import { readEnv } from '../../../system/env-names'
 import { T0, seedSession } from '../observer/test-support'
-import { newDbKey } from '../sqlite/keys'
-import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
-import { openStore } from '../store/db'
-import { NO_FILTERS, type VectorHit, nearestObservations, upsertVectors } from '../store/vector-store'
-import { upsertProject } from '../store/writes'
-import { startActive, setVecReady } from '../store/vector-spaces'
-import { loadVec0, vec0Path } from './extension'
-import { createVecIndex, writeVecRows } from './vec-index'
+import { newDbKey } from '../../sqlite/keys'
+import { SQLITE3MC_LIB_ENV } from '../../sqlite/library'
+import { openStore } from '../../store/db'
+import { NO_FILTERS, type VectorHit, nearestObservations, upsertVectors } from '../../store/vector-store'
+import { upsertProject } from '../../store/writes'
+import { startActive, setVecReady } from '../../store/vector-spaces'
+import { loadVec0, vec0Path } from '../../vectors/extension'
+import { createVecIndex, writeVecRows } from '../../vectors/vec-index'
 import { reconcileVecIndex } from './vec-index.test-support'
-import { type VectorQueries, runNow, startVectorWorker, workerOrInline } from './vector-worker'
+import { type VectorQueries, runNow, startVectorWorker, workerOrInline } from '../../vectors/vector-worker'
 
-const FAKE = new URL('../../test/fake-search-worker.ts', import.meta.url).href
+const FAKE = new URL('../../../../test/fake-search-worker.ts', import.meta.url).href
 const VEC0 = readEnv(process.env, 'TEST_VEC0')
 
 let opened: VectorQueries[] = []

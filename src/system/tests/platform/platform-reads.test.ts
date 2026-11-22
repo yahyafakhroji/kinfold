@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
-const SRC = join(import.meta.dir, '..')
+const SRC = join(import.meta.dir, '..', '..', '..')
 const ROOT = join(SRC, '..')
-const OWNER = 'src/platform/platform.ts'
+const OWNER = 'src/system/platform/platform.ts'
 const READS = [/process\.platform/, /\bplatform\s*[!=]==\s*'(darwin|linux|win32)'/]
 
 test('only the platform module reads process.platform', () => {

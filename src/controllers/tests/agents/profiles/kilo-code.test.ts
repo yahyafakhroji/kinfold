@@ -1,18 +1,18 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { MCP_SERVER_NAME } from '../../install/mcp-config'
-import { mcpTarget, opencodeMcpInstallActions } from '../../install/mcp-wiring'
-import type { Action } from '../../install/plan'
+import { MCP_SERVER_NAME } from '../../../../resources/install-plan/mcp-config'
+import { mcpTarget, opencodeMcpInstallActions } from '../../../../resources/install-plan/mcp-wiring'
+import type { Action } from '../../../../resources/install-plan/plan'
 import { type FakeWorld, createWorld } from '../../install/test-support'
-import { MCP_HOST_ENV } from '../../mcp/read-reporter'
-import { assertWriterContract, fileWriter } from '../families/writer-contract.test-support'
-import { jsonAgentFileInstallActions, jsonAgentFileUninstallActions } from '../families/json-agent'
-import { profileOf } from '../install-profiles'
-import { capabilityLine } from '../profile'
-import { agentWiringActions } from '../../install/install'
-import { KILO_CODE_PROFILE, KILO_MCP_FILE } from './kilo-code'
-import { shimContent } from '../families/plugin-file'
+import { MCP_HOST_ENV } from '../../../mcp/read-reporter'
+import { assertWriterContract, fileWriter } from '../../../../plugins/tests/agents/families/writer-contract.test-support'
+import { jsonAgentFileInstallActions, jsonAgentFileUninstallActions } from '../../../../plugins/agents/families/json-agent'
+import { profileOf } from '../../../../plugins/agents/install-profiles'
+import { capabilityLine } from '../../../../plugins/agents/profile'
+import { agentWiringActions } from '../../../install/install'
+import { KILO_CODE_PROFILE, KILO_MCP_FILE } from '../../../../plugins/agents/profiles/kilo-code'
+import { shimContent } from '../../../../plugins/agents/families/plugin-file'
 
 let worlds: FakeWorld[] = []
 afterEach(async () => {
@@ -39,7 +39,7 @@ test('an install over the plugin file Kinfold 0.4 wrote, which Kilo rejects, rep
   const w = world()
   const path = join(w.env.homeDir, '.config/kilo/plugin/kinfold.js')
   mkdirSync(join(w.env.homeDir, '.config/kilo/plugin'), { recursive: true })
-  writeFileSync(path, shimContent(join(w.projectRoot, 'src/plugins/opencode.ts'), w.env.dataDir, 'kilo-code', 'Kilo Code'))
+  writeFileSync(path, shimContent(join(w.projectRoot, 'src/plugins/plugins/opencode.ts'), w.env.dataDir, 'kilo-code', 'Kilo Code'))
   expect(KILO_CODE_PROFILE.wiring.line(w.env)).toContain('plugin stale path')
   apply(await KILO_CODE_PROFILE.wiring.install(w.env))
   expect(readFileSync(path, 'utf8')).toMatch(/src[\\/]+plugins[\\/]+kilo\.ts/)
@@ -50,7 +50,7 @@ test('an install over the plugin file Kinfold 0.4 wrote, which Kilo rejects, rep
 test('kilo-code is registered, checked live, and detected by its binary', () => {
   expect(profileOf('kilo-code')).toBe(KILO_CODE_PROFILE)
   expect(KILO_CODE_PROFILE.verification).toBe('live')
-  expect(readdirSync(join(import.meta.dir, '../../../test/fixtures/kilo-code')).length).toBeGreaterThan(0)
+  expect(readdirSync(join(import.meta.dir, '../../../../../test/fixtures/kilo-code')).length).toBeGreaterThan(0)
   expect(KILO_CODE_PROFILE.capabilities('macos').context).toEqual({ sessionStart: true, prompt: true })
   expect(KILO_CODE_PROFILE.detection).toEqual({ binaries: ['kilo'] })
   // No observer provider runs through Kilo; a new agent falls back to OpenRouter auto.

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { promptForRecall, searchablePrompt, splitPrompt } from './prompt-text'
+import { promptForRecall, searchablePrompt, splitPrompt } from '../../context/prompt-text'
 
 const PASTED = 'Claude pasted this <pasted_content id="bb24">\nthe sqlite3mc build log\n</pasted_content id="bb24"> fix it'
 

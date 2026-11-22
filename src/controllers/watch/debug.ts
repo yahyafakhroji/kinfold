@@ -3,9 +3,9 @@
 // Every title and name is another session's or another machine's text, so
 // each goes through cleanTitle and stays on its own line.
 
-import { cleanTitle } from '../context/recall-line'
-import { isRecord } from '../contract/event'
-import type { SearchTrace, TraceCandidate, TraceEvent, TracedRow } from '../debug/trace'
+import { cleanTitle } from '../../resources/context/recall-line'
+import { isRecord } from '../../system/contract/event'
+import type { SearchTrace, TraceCandidate, TraceEvent, TracedRow } from '../../system/debug/trace'
 
 type Of<K extends TraceEvent['kind']> = Extract<TraceEvent, { kind: K }>
 

@@ -1,6 +1,6 @@
 // Rows of observation_vectors (v8). Writes and the queue are plain SQL,
 // so they work on any connection; only nearestObservations calls sqlite-vec's
-// vec_distance_cosine and needs the extension loaded (src/vectors/extension.ts).
+// vec_distance_cosine and needs the extension loaded (src/resources/vectors/extension.ts).
 // The search filters by project before it measures distance (project
 // filter first), so its cost grows with one project's rows, not the store's.
 // Nothing here logs or returns observation text except embeddingInputs, whose

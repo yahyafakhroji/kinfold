@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { detectHosts } from './detect'
-import { missingClis, notInstalled } from './observer-clis'
+import { detectHosts } from '../../install/detect'
+import { missingClis, notInstalled } from '../../install/observer-clis'
 import { type FakeWorld, createWorld } from './test-support'
 
 let world: FakeWorld | null = null

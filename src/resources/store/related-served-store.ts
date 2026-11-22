@@ -2,8 +2,8 @@
 // line, with the distance and matched-term count that earned it a place. Ids
 // and numbers only, no text. Joined with MCP get_observations reads, they say
 // which distances led to a line the agent went on to fetch
-// (src/dashboard/hit-rate.ts). A row goes with its observation (foreign key
-// cascade) and ages out with the MCP reads (src/data-control/retention.ts).
+// (src/resources/reports/hit-rate.ts). A row goes with its observation (foreign key
+// cascade) and ages out with the MCP reads (src/resources/data-control/retention.ts).
 
 import type { Database } from '../sqlite/types'
 

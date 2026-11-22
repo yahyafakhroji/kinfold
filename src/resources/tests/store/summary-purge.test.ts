@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { purge } from '../data-control/purge'
+import { purge } from '../../data-control/purge'
 import { T0, type TempStore, openTempStore } from '../observer/test-support'
-import type { PurgeTarget } from './purge-store'
-import { writeSharedSummary } from './summary-share'
-import { insertPrompt, upsertProject, upsertSession } from './writes'
+import type { PurgeTarget } from '../../store/purge-store'
+import { writeSharedSummary } from '../../store/summary-share'
+import { insertPrompt, upsertProject, upsertSession } from '../../store/writes'
 
 // Purge coverage for shared summaries (v7): a summary goes with its last
 // pointing prompt and stays while a surviving prompt uses it; the kept row

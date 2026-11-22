@@ -3,7 +3,7 @@
 // matched against sleep or load. The message is the caller's: ids, counts and
 // timings, never text.
 
-import { LOG_PREFIX } from '../names'
+import { LOG_PREFIX } from '../../system/names'
 
 export function logLine(message: string, at: Date = new Date()): string {
   return `${at.toISOString()} ${LOG_PREFIX}: ${message}\n`

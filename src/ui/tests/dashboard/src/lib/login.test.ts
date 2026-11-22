@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { claimFromHash, codeFromHash, signIn } from './login'
+import { claimFromHash, codeFromHash, signIn } from '../../../../dashboard/src/lib/login'
 
 function deps(hash: string, status: number | Error) {
   const calls: { url: string; init: RequestInit | undefined }[] = []

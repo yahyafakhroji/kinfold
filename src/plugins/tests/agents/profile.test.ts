@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { KNOWN_HOSTS } from '../contract/event'
-import { type AgentProfile, type Capabilities, capabilityLine, verificationNote } from './profile'
+import { KNOWN_HOSTS } from '../../../system/contract/event'
+import { type AgentProfile, type Capabilities, capabilityLine, verificationNote } from '../../agents/profile'
 
 const IDS = [
   'claude-code', 'opencode', 'codex', 'cursor', 'gemini-cli', 'qwen-code', 'factory-droid', 'devin',

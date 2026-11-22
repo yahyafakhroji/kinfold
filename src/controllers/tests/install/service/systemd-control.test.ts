@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { DEFAULT_PORT } from '../../daemon/daemon'
-import type { CommandResult, InstallEnv } from '../env'
-import { install } from '../install'
+import { DEFAULT_PORT } from '../../../daemon/daemon'
+import type { CommandResult, InstallEnv } from '../../../../resources/install-plan/env'
+import { install } from '../../../install/install'
 import { type FakeWorld, YES, createWorld } from '../test-support'
-import { uninstall } from '../uninstall'
-import { SYSTEMD_UNIT, SystemdUserService, unitContent } from './systemd-service'
+import { uninstall } from '../../../install/uninstall'
+import { SYSTEMD_UNIT, SystemdUserService, unitContent } from '../../../install/service/systemd-service'
 
 const SYSTEMCTL = '/usr/bin/systemctl'
 /** env, XDG_RUNTIME_DIR=, systemctl, --user: what comes before the systemctl arguments. */

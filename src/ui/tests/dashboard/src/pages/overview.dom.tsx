@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { Measured, Overview } from '../lib/types'
+import type { Measured, Overview } from '../../../../dashboard/src/lib/types'
 import { fakeDaemon, useDom } from '../test/dom'
 
 useDom()
@@ -14,7 +14,7 @@ test('the app opens on the overview and says Kinfold is working, in sentences fi
   const { render } = await import('@testing-library/react/pure')
   const { QueryClientProvider } = await import('@tanstack/react-query')
   const { RouterProvider, createMemoryHistory } = await import('@tanstack/react-router')
-  const { makeRouter, queryClient } = await import('../router')
+  const { makeRouter, queryClient } = await import('../../../../dashboard/src/router')
   const daemon = fakeDaemon({
     '/memory/overview': { body: { value: overview(), asOf: Date.now(), refreshing: false } },
     '/memory/impact?window=7d': { body: { value: { measured: result('saving') }, asOf: Date.now(), refreshing: false } },

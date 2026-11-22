@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { LOCAL_MODEL_DIMS, LOCAL_MODEL_ID } from './local-model'
-import { runEmbedCheck } from './embed-check'
-import type { LocalEmbedder } from './local-embedder'
+import { LOCAL_MODEL_DIMS, LOCAL_MODEL_ID } from '../../vectors/local-model'
+import { runEmbedCheck } from '../../vectors/embed-check'
+import type { LocalEmbedder } from '../../vectors/local-embedder'
 
 const PATHS = { ok: true as const, paths: { model: 'm', vocab: 'v', wasm: 'w' } }
 

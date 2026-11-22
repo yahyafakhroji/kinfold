@@ -13,9 +13,9 @@
 import { afterEach, expect, test } from 'bun:test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { install } from './install'
+import { install } from '../../install/install'
 import { type FakeWorld, YES, createWorld } from './test-support'
-import { posixOnly } from '../../test/platform-guards'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const FIXTURE = join(import.meta.dir, 'install-dry-run.golden.txt')
 

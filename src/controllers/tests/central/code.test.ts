@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { CODE_PATTERN, deviceProof, hubProof, newInviteCode, normalizeCode, proofKey, verifierFor, verifyDeviceProof, verifyHubProof } from './code'
+import { CODE_PATTERN, deviceProof, hubProof, newInviteCode, normalizeCode, proofKey, verifierFor, verifyDeviceProof, verifyHubProof } from '../../central/code'
 
 const SALT = Buffer.alloc(16, 7).toString('base64')
 

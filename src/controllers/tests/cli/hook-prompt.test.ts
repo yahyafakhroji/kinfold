@@ -2,13 +2,13 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { hideRecallLine, seedObservation } from '../context/test-support'
-import { type RunningDaemon, startDaemon } from '../daemon/daemon'
-import { openStore } from '../store/db'
-import { upsertProject, upsertSession } from '../store/writes'
-import { runHook } from './hook'
+import { hideRecallLine, seedObservation } from '../../../resources/tests/context/test-support'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import { openStore } from '../../../resources/store/db'
+import { upsertProject, upsertSession } from '../../../resources/store/writes'
+import { runHook } from '../../cli/hook'
 
-const FIXTURES = join(import.meta.dir, '../../test/fixtures')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures')
 const SESSION = '00000000-0000-4000-8000-000000000001'
 
 let root: string

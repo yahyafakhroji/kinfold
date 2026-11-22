@@ -2,22 +2,22 @@ import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { normalizeClaudeCode } from '../adapters/claude-code'
-import { captureEvent } from '../capture/capture'
-import { ulid } from '../contract/ulid'
-import { countSpool } from '../spool/spool'
-import { loadHmacKey } from '../store/hmac-key'
-import { type RunningDaemon, startDaemon } from './daemon'
-import * as ingest from './ingest'
-import * as readRoutes from './read-routes'
-import * as server from './server'
-import { openStore } from '../store/db'
-import type { CachingProjectKeyResolver } from '../store/project-key'
-import { type DbKeyStore, newDbKey } from '../sqlite/keys'
+import { normalizeClaudeCode } from '../../../plugins/adapters/claude-code'
+import { captureEvent } from '../../../resources/capture/capture'
+import { ulid } from '../../../system/contract/ulid'
+import { countSpool } from '../../../resources/spool/spool'
+import { loadHmacKey } from '../../../resources/store/hmac-key'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import * as ingest from '../../daemon/ingest'
+import * as readRoutes from '../../daemon/read-routes'
+import * as server from '../../daemon/server'
+import { openStore } from '../../../resources/store/db'
+import type { CachingProjectKeyResolver } from '../../../resources/store/project-key'
+import { type DbKeyStore, newDbKey } from '../../../resources/sqlite/keys'
 import { PROJECT_A, seedMcpObservation, seedMcpSession } from '../mcp/test-support'
-import { LATEST_SCHEMA_VERSION } from '../store/schema'
-import { VERSION } from '../version'
-import { posixOnly } from '../../test/platform-guards'
+import { LATEST_SCHEMA_VERSION } from '../../../resources/store/schema'
+import { VERSION } from '../../../system/version'
+import { posixOnly } from '../../../../test/platform-guards'
 
 let root: string
 let dataDir: string
@@ -41,7 +41,7 @@ const url = (path: string): string => `http://127.0.0.1:${daemon.port}${path}`
 const authed = (init: RequestInit = {}): RequestInit => ({ ...init, headers: { authorization: `Bearer ${token}`, ...init.headers } })
 
 function spoolFixture(output: string): string {
-  const recorded = JSON.parse(readFileSync(join(import.meta.dir, '../../test/fixtures/claude-code/post-tool-use.bash.json'), 'utf8'))
+  const recorded = JSON.parse(readFileSync(join(import.meta.dir, '../../../../test/fixtures/claude-code/post-tool-use.bash.json'), 'utf8'))
   const payload = { ...recorded, cwd: root, tool_response: { ...recorded.tool_response, stdout: output } }
   const event = normalizeClaudeCode(payload, { now: () => Date.now(), newId: () => ulid() })!
   captureEvent(event, { spoolDir: join(dataDir, 'spool'), hmacKey: loadHmacKey(dataDir) })
@@ -170,11 +170,11 @@ test('a /read/ path answers 404 when no read route takes it, and the route answe
   const real = { ...readRoutes }
   const declined = mock(async () => null)
   const stub = mock(async () => ({ status: 200, body: { from: 'read-route' } }))
-  mock.module('./read-routes', () => ({ ...real, readRoute: declined }))
+  mock.module('../../daemon/read-routes', () => ({ ...real, readRoute: declined }))
   try {
     expect((await fetch(url('/read/search'), authed({ method: 'POST', body: '{}' }))).status).toBe(404)
     expect(declined).toHaveBeenCalledTimes(1)
-    mock.module('./read-routes', () => ({ ...real, readRoute: stub }))
+    mock.module('../../daemon/read-routes', () => ({ ...real, readRoute: stub }))
     expect((await fetch(url('/read/search'), { method: 'POST', body: '{}' })).status).toBe(401)
     expect(stub).not.toHaveBeenCalled()
     const answer = await fetch(url('/read/search'), authed({ method: 'POST', body: '{}' }))
@@ -182,7 +182,7 @@ test('a /read/ path answers 404 when no read route takes it, and the route answe
     expect(await answer.json()).toEqual({ from: 'read-route' })
     expect(stub).toHaveBeenCalledTimes(1)
   } finally {
-    mock.module('./read-routes', () => real)
+    mock.module('../../daemon/read-routes', () => real)
   }
 })
 

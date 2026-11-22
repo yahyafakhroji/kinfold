@@ -19,7 +19,7 @@
 // full. The docs don't say PromptSubmit's output reaches the agent, so no
 // context is claimed: the hook prints nothing. Hooks are written with `args`,
 // so no shell quoting is involved and Windows gets them as well.
-import { UNPROVEN_CLI_PROVIDERS } from '../../observer/types'
+import { UNPROVEN_CLI_PROVIDERS } from '../../../resources/observer/types'
 
 import { join } from 'node:path'
 import { AUGGIE_EVENTS } from '../../adapters/auggie'

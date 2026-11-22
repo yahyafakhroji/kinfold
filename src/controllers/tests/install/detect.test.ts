@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { DETECT_AT_ONCE, INSTALL_HOSTS, detectHosts, inOrder, parseOpenCodeVersion, selectedHosts } from './detect'
+import { DETECT_AT_ONCE, INSTALL_HOSTS, detectHosts, inOrder, parseOpenCodeVersion, selectedHosts } from '../../install/detect'
 import { type FakeWorld, type WorldOptions, createWorld } from './test-support'
 
 let world: FakeWorld | null = null

@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test'
-import { type TomlDoc, mergeTomlHooks, mergeTomlMcp, readTomlConfig, removeTomlOurs, renderToml } from './toml-config'
+import { type TomlDoc, mergeTomlHooks, mergeTomlMcp, readTomlConfig, removeTomlOurs, renderToml } from '../../../agents/families/toml-config'
 import { assertWriterContract } from './writer-contract.test-support'
 
-const HOOK = { entry: { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/sam/src/cli/hook.ts', '--data-dir', '/Users/dev/.kinfold', '--host', 'kimi-code'] } }
-const OLD_HOOK = { entry: { command: '/Users/dev/.bun/bin/bun', args: ["/Users/dev/old's checkout/src/cli/hook.ts", '--host', 'kimi-code'] } }
+const HOOK = { entry: { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/sam/src/controllers/cli/hook.ts', '--data-dir', '/Users/dev/.kinfold', '--host', 'kimi-code'] } }
+const OLD_HOOK = { entry: { command: '/Users/dev/.bun/bin/bun', args: ["/Users/dev/old's checkout/src/controllers/cli/hook.ts", '--host', 'kimi-code'] } }
 const MCP = { entry: { command: '/Users/dev/.kinfold/bin/kinfold', args: ['--data-dir', '/Users/dev/.kinfold', 'mcp'] } }
 const EVENTS = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop', 'SessionEnd'] as const
 
@@ -90,7 +90,7 @@ test('mergeTomlHooks then removeTomlOurs round-trips a Kimi config with other ho
   const merged = mergeTomlHooks(parsed(KIMI), EVENTS, HOOK)
   const text = renderToml(merged)
   expect(text.startsWith(KIMI)).toBe(true)
-  expect(text).toContain(`[[hooks]]\nevent = "Stop"\ncommand = "'/Users/dev/.bun/bin/bun' '/Users/dev/sam/src/cli/hook.ts' --data-dir '/Users/dev/.kinfold' --host kimi-code"\ntimeout = 10\n`)
+  expect(text).toContain(`[[hooks]]\nevent = "Stop"\ncommand = "'/Users/dev/.bun/bin/bun' '/Users/dev/sam/src/controllers/cli/hook.ts' --data-dir '/Users/dev/.kinfold' --host kimi-code"\ntimeout = 10\n`)
   expect(text.match(/\[\[hooks\]\]/g)).toHaveLength(6)
   // A re-run finds every entry in place and returns the same document.
   expect(mergeTomlHooks(parsed(text), EVENTS, HOOK)).toEqual(parsed(text))

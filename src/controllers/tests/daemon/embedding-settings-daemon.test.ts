@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
-import { fakeEmbedder } from '../vectors/test-support'
+import { fakeEmbedder } from '../../../resources/tests/vectors/test-support'
 
 let root: string
 let rig: DashboardRig

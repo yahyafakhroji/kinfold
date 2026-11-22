@@ -1,7 +1,7 @@
 // A deterministic embedder for tests: each word adds to one of DIMS buckets,
 // so texts that share words point the same way. It never touches the network.
 
-import type { Embedder } from './embedder'
+import type { Embedder } from '../../vectors/embedder'
 
 export const FAKE_DIMS = 8
 

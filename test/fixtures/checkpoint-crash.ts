@@ -3,9 +3,9 @@
 // worker, says so on stdout while the worker copies the WAL, and waits to be
 // killed. The test passes the data folder as the first argument.
 
-import { SQLITE3MC_LIB_ENV } from '../../src/sqlite/library'
-import { openStore } from '../../src/store/db'
-import { startCheckpointer } from '../../src/workers/checkpointer'
+import { SQLITE3MC_LIB_ENV } from '../../src/resources/sqlite/library'
+import { openStore } from '../../src/resources/store/db'
+import { startCheckpointer } from '../../src/resources/workers/checkpointer'
 
 const dataDir = process.argv[2]
 if (dataDir === undefined) throw new Error('pass the data folder')

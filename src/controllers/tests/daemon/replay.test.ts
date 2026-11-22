@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
-import type { TimelineEvent } from '../store/replay-reads'
-import { DEFAULT_SCHEDULE, LEGACY_SCHEDULE } from './observer-scheduler'
-import { type ReplayRun, runReplay } from './replay'
-import { summarizeReplay } from './replay-summary'
+import type { TimelineEvent } from '../../../resources/store/replay-reads'
+import { DEFAULT_SCHEDULE, LEGACY_SCHEDULE } from '../../daemon/observer-scheduler'
+import { type ReplayRun, runReplay } from '../../daemon/replay'
+import { summarizeReplay } from '../../daemon/replay-summary'
 
 const T = 1_792_845_000_000
 const RUN_MS = 10_000

@@ -13,10 +13,10 @@
 // docs pages checked name no `cn` install or version probe, so there is no
 // safe signal: detection finds nothing and --hosts continue names it.
 
-import { type InstallEnv } from '../../install/env'
-import { MCP_SERVER_NAME } from '../../install/mcp-config'
-import { mcpTarget } from '../../install/mcp-wiring'
-import { MCP_HOST_ENV } from '../../mcp/read-reporter'
+import { type InstallEnv } from '../../../resources/install-plan/env'
+import { MCP_SERVER_NAME } from '../../../resources/install-plan/mcp-config'
+import { mcpTarget } from '../../../resources/install-plan/mcp-wiring'
+import { MCP_HOST_ENV } from '../../../controllers/mcp/read-reporter'
 import { type AgentProfile, type Capabilities, NO_TOOLS_OFF } from '../profile'
 
 const HOST = 'continue'

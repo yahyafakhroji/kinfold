@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import type { CredentialProvider } from './credentials'
-import { HMAC_MASTER_REF, epochAt, epochStart, errorClassOf, fingerprintKey, isEpoch, markerSubKey, nextEpoch, previousEpoch, readMaster } from './hmac-keys'
+import type { CredentialProvider } from '../../secrets/credentials'
+import { HMAC_MASTER_REF, epochAt, epochStart, errorClassOf, fingerprintKey, isEpoch, markerSubKey, nextEpoch, previousEpoch, readMaster } from '../../secrets/hmac-keys'
 
 const MASTER = '5a'.repeat(32)
 const OTHER = 'a5'.repeat(32)

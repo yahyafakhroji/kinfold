@@ -2,7 +2,7 @@
 // daemon to WSL, from the hub to a device. Both sides rebuild it from JSON
 // field by field, and both need the same answer for "could not ask".
 
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 import type { ToolOutcome, ToolResult } from './tools'
 
 const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0

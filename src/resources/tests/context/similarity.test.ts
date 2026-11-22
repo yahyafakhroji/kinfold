@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { NEAR_DUPLICATE_THRESHOLD, isNearDuplicate, jaccard, nameTokens, stem, titleTokens } from './similarity'
+import { NEAR_DUPLICATE_THRESHOLD, isNearDuplicate, jaccard, nameTokens, stem, titleTokens } from '../../context/similarity'
 
 const LIVE_CLAUDE = 'Test suite passes: 197 tests across 16 files'
 const LIVE_OPENCODE = 'shared-agent-memory test suite: 197 tests passing across 16 files'

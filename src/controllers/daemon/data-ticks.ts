@@ -5,12 +5,12 @@
 // retried on the next tick. The marker key is read per tick, so a rotation
 // takes effect without a restart.
 
-import { applyRetention, describeRetention } from '../data-control/retention'
-import { DEFAULT_SCAN_BATCH, describeScan, scanBatch } from '../data-control/scanner'
-import type { MarkerKey } from '../redaction/redact'
-import type { Database } from '../sqlite/types'
-import { type Exclusive, runNow } from '../vectors/vector-worker'
-import { errorMessage } from '../errors'
+import { applyRetention, describeRetention } from '../../resources/data-control/retention'
+import { DEFAULT_SCAN_BATCH, describeScan, scanBatch } from '../../resources/data-control/scanner'
+import type { MarkerKey } from '../../resources/redaction/redact'
+import type { Database } from '../../resources/sqlite/types'
+import { type Exclusive, runNow } from '../../resources/vectors/vector-worker'
+import { errorMessage } from '../../system/errors'
 
 export const DEFAULT_SCAN_TICK_MS = 10_000
 export const DEFAULT_RETENTION_TICK_MS = 10 * 60_000

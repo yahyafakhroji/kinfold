@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { classifyCliError, cliErrorText, cliFailure } from './cli-error'
+import { classifyCliError, cliErrorText, cliFailure } from '../../../observer/runners/cli-error'
 
 test('the CLI\'s own words name an expired login, a missing login and a usage limit', () => {
   expect(classifyCliError('Failed to authenticate: OAuth session expired and could not be refreshed')).toBe('auth_expired')

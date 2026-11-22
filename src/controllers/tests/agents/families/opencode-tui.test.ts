@@ -7,13 +7,13 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { type Action, applyAction } from '../../install/plan'
-import type { InstallEnv } from '../../install/env'
+import { type Action, applyAction } from '../../../../resources/install-plan/plan'
+import type { InstallEnv } from '../../../../resources/install-plan/env'
 import { type FakeWorld, createWorld } from '../../install/test-support'
-import { OPENCODE_PROFILE } from '../profiles/opencode'
+import { OPENCODE_PROFILE } from '../../../../plugins/agents/profiles/opencode'
 import {
   OPENCODE_TUI_DIR, opencodeTuiContent, opencodeTuiDir, opencodeTuiInstallActions, opencodeTuiServerContent, opencodeTuiUninstallActions,
-} from './opencode-tui'
+} from '../../../../plugins/agents/families/opencode-tui'
 
 let world: FakeWorld
 beforeEach(() => {

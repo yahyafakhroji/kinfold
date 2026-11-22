@@ -1,9 +1,9 @@
 // Codex CLI: command hooks in hooks.json under CODEX_HOME (default ~/.codex).
 // Built from the Codex hooks docs (learn.chatgpt.com/docs/hooks, read
-// 2026-10-25) and codex-rs/hooks/src/schema.rs; see src/adapters/codex.ts.
+// 2026-10-25) and codex-rs/hooks/src/schema.rs; see src/plugins/adapters/codex.ts.
 // Its observer can run on the user's own `codex` login.
 
-import { CODEX_TRUST_NOTE, codexHookUninstallActions, hostHookInstallActions, hostWiringLine, hostWiringState } from '../../install/host-wiring'
+import { CODEX_TRUST_NOTE, codexHookUninstallActions, hostHookInstallActions, hostWiringLine, hostWiringState } from '../../../resources/install-plan/host-wiring'
 import type { AgentProfile, Capabilities } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: true }, search: true, observer: true }

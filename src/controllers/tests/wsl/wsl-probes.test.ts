@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { join } from 'node:path'
-import { parseNetworkingMode, parseTasklist, runProbe } from './wsl-probes'
+import { parseNetworkingMode, parseTasklist, runProbe } from '../../wsl/wsl-probes'
 
 const BUN = process.execPath
 // The test's own env, so the Bun binary starts on every OS; the probes themselves pass a minimal one.

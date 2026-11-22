@@ -6,9 +6,9 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
-import { builtProfiles } from '../src/agents/install-profiles'
-import { type AgentProfile, type Capabilities, capabilitySummary } from '../src/agents/profile'
-import type { OsName } from '../src/platform/platform'
+import { builtProfiles } from '../src/plugins/agents/install-profiles'
+import { type AgentProfile, type Capabilities, capabilitySummary } from '../src/plugins/agents/profile'
+import type { OsName } from '../src/system/platform/platform'
 
 export class AgentTableError extends Error {
   override name = 'AgentTableError'

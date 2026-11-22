@@ -8,9 +8,9 @@
 
 import { existsSync } from 'node:fs'
 import { sep } from 'node:path'
-import type { InstallEnv } from '../env'
+import type { InstallEnv } from '../../../resources/install-plan/env'
 import { type InstallLog, createInstallLog, installLogPath } from '../install-log'
-import type { PlanListener } from '../plan'
+import type { PlanListener } from '../../../resources/install-plan/plan'
 import type { Ui } from '../prompt/ui'
 import { type FramedView, createFramedView } from './framed-view'
 

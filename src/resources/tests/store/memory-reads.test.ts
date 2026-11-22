@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { seedObservation } from '../context/test-support'
 import { PROJECT, T0, type TempStore, openTempStore, seedSession } from '../observer/test-support'
-import { type BrowseFilters, browseObservations, observationDetail } from './memory-reads'
-import { insertLinks, settleContradictions } from './observation-links'
+import { type BrowseFilters, browseObservations, observationDetail } from '../../store/memory-reads'
+import { insertLinks, settleContradictions } from '../../store/observation-links'
 
 // The memory browser's list rows carry confirmedBy, counted the way
 // the MCP reader counts it: current confirmers of the same project only.

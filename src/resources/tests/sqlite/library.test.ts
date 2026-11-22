@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SQLITE3MC_LIB_ENV, checkLibrary, libDir, libraryFileName, libraryFor, manifestPath, readManifest } from './library'
+import { SQLITE3MC_LIB_ENV, checkLibrary, libDir, libraryFileName, libraryFor, manifestPath, readManifest } from '../../sqlite/library'
 
 let dataDir: string
 beforeEach(() => {

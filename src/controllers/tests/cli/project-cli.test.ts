@@ -2,8 +2,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { USAGE } from '../install/args'
-import { parseProjectArgs, runProjectCommand } from './project-cli'
+import { USAGE } from '../../install/args'
+import { parseProjectArgs, runProjectCommand } from '../../cli/project-cli'
 
 let root: string
 let dataDir: string

@@ -5,7 +5,7 @@
 // folder; the hub never does), and the hub accepts only a shared remote key
 // or a key scoped to the sending device.
 
-import type { ProjectKey, ProjectKeyKind } from '../store/project-key'
+import type { ProjectKey, ProjectKeyKind } from '../../resources/store/project-key'
 
 const MAX_KEY_CHARS = 4_200
 const MAX_NAME_CHARS = 256

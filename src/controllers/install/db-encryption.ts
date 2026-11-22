@@ -1,26 +1,26 @@
 // Database encryption in `kinfold install` and `kinfold status`. On a
 // data dir with no memory.db yet, install puts a new random key in the
 // key store (db-key), so the daemon creates the store encrypted
-// (src/sqlite/open.ts). An existing store is never touched here: `kinfold
+// (src/resources/sqlite/open.ts). An existing store is never touched here: `kinfold
 // encrypt` converts it (E3). Status reads the file's header and key store
 // metadata only, never the key, and warns when disk encryption is off, since the
 // spool, logs and host transcripts sit outside memory.db.
 
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { DB_KEY_NEXT_REF, DB_KEY_REF, KEYCHAIN_SERVICE } from '../secrets/credentials'
-import type { KeyStore } from '../secrets/key-store'
-import { createKeychainStore } from '../secrets/stores/keychain'
-import { NO_DB_KEYS, newDbKey } from '../sqlite/keys'
-import { foundBackupPath } from '../sqlite/convert'
-import { fileState, maintenancePath } from '../sqlite/open'
-import { DB_FILE } from '../store/data-dir'
-import { openStore } from '../store/db'
+import { DB_KEY_NEXT_REF, DB_KEY_REF, KEYCHAIN_SERVICE } from '../../resources/secrets/credentials'
+import type { KeyStore } from '../../resources/secrets/key-store'
+import { createKeychainStore } from '../../resources/secrets/stores/keychain'
+import { NO_DB_KEYS, newDbKey } from '../../resources/sqlite/keys'
+import { foundBackupPath } from '../../resources/sqlite/convert'
+import { fileState, maintenancePath } from '../../resources/sqlite/open'
+import { DB_FILE } from '../../resources/store/data-dir'
+import { openStore } from '../../resources/store/db'
 import { diskCheckOf, diskEncryptionLine } from './disk/check'
-import { type InstallEnv, errorMessage } from './env'
+import { type InstallEnv, errorMessage } from '../../resources/install-plan/env'
 import { keyStoreOf, readKeyStore } from './key-store-choice'
 import { ChoiceError } from './observer-choice'
-import type { Action } from './plan'
+import type { Action } from '../../resources/install-plan/plan'
 import type { EncryptionAnswer } from './setup/wizard'
 
 const foundLine = (store: KeyStore): string => `database: ${store.label} entry ${DB_KEY_REF} found; the new store is created encrypted with it`

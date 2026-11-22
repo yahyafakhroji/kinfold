@@ -3,10 +3,10 @@
 // refuse it, and the device's own display switches still are.
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { embeddingActions, settingsActions } from '../install/install'
-import { type InstallRecord, setCentralMode, writeInstallRecord } from '../install/setup/record'
+import { embeddingActions, settingsActions } from '../../install/install'
+import { type InstallRecord, setCentralMode, writeInstallRecord } from '../../../resources/install-plan/setup/record'
 import { type FakeWorld, createWorld } from '../install/test-support'
-import { isHubOnly } from './device-routes'
+import { isHubOnly } from '../../central/device-routes'
 
 const RECORD: InstallRecord = { channel: 'curl', updateCheck: true, autoUpdate: true, autoUpdateIntro: false, agentHomes: {}, firstInstalledAt: 1 }
 let world: FakeWorld

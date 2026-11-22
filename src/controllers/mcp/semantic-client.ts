@@ -7,9 +7,9 @@
 // only and is never logged here.
 
 import { readDaemonEndpoint } from '../daemon/daemon-info'
-import { isRecord } from '../contract/event'
-import type { NearestFilters, VectorHit } from '../store/vector-store'
-import type { SemanticAnswer } from '../vectors/search'
+import { isRecord } from '../../system/contract/event'
+import type { NearestFilters, VectorHit } from '../../resources/store/vector-store'
+import type { SemanticAnswer } from '../../resources/vectors/search'
 
 /** Off the prompt path, so more than the 300 ms prompt-time budget; the daemon gets most of it for the embed. */
 export const MCP_SEMANTIC_TIMEOUT_MS = 1_500

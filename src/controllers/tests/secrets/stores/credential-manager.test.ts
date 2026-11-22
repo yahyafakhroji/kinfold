@@ -3,16 +3,16 @@ import { ptr } from 'bun:ffi'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { EXIT_OK, install } from '../../install/install'
-import { refusalLines } from '../../install/key-store-choice'
+import { EXIT_OK, install } from '../../../install/install'
+import { refusalLines } from '../../../install/key-store-choice'
 import { type FakeWorld, YES, createWorld, forbiddenSecurity } from '../../install/test-support'
-import { dbKeyStoreOf } from '../../sqlite/keys'
-import { openStoreFile } from '../../sqlite/open'
-import { SqliteError } from '../../sqlite/types'
-import { readMaster } from '../hmac-keys'
-import { type KeyStoreDeps, type KeyStoreKind, type KeyStoreModule, credentialProviderOf } from '../key-store'
-import { KEY_STORE_FILE, resolveKeyStore } from '../key-store-record'
-import { runKeyStoreContract } from './contract'
+import { dbKeyStoreOf } from '../../../../resources/sqlite/keys'
+import { openStoreFile } from '../../../../resources/sqlite/open'
+import { SqliteError } from '../../../../resources/sqlite/types'
+import { readMaster } from '../../../../resources/secrets/hmac-keys'
+import { type KeyStoreDeps, type KeyStoreKind, type KeyStoreModule, credentialProviderOf } from '../../../../resources/secrets/key-store'
+import { KEY_STORE_FILE, resolveKeyStore } from '../../../../resources/secrets/key-store-record'
+import { runKeyStoreContract } from '../../../../resources/secrets/stores/contract'
 import {
   CREDENTIALW_OFFSETS,
   CREDENTIALW_SIZE,
@@ -28,8 +28,8 @@ import {
   credentialManagerModule,
   credentialTarget,
   packCredential,
-} from './credential-manager'
-import { KEY_STORE_MODULES, probeKeyStores } from './select'
+} from '../../../../resources/secrets/stores/credential-manager'
+import { KEY_STORE_MODULES, probeKeyStores } from '../../../../resources/secrets/stores/select'
 
 type ModuleTable = Readonly<Record<KeyStoreKind, KeyStoreModule>>
 

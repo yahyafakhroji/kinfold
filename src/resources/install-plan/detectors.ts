@@ -4,7 +4,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { AgentId, DetectionSpec } from '../agents/profile'
+import type { AgentId, DetectionSpec } from '../../plugins/agents/profile'
 import { type InstallEnv, installPaths } from './env'
 
 export const VERSION_TIMEOUT_MS = 5_000

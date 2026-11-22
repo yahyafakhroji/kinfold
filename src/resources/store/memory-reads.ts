@@ -1,14 +1,14 @@
 // Read-only queries behind the dashboard's memory browser. Same shape as the
-// MCP reader (src/mcp/reader.ts): named parameters, one optional clause per
+// MCP reader (src/controllers/mcp/reader.ts): named parameters, one optional clause per
 // filter, observations and their FTS index only. The events table is never
 // read here, so no payload can reach a dashboard answer; an observation
 // carries its source event ids and nothing more. The caller sanitizes the
-// search text with src/mcp/fts.ts before it becomes `match`. A detail also
-// carries its observation links both ways (src/store/observation-links.ts).
+// search text with src/controllers/mcp/fts.ts before it becomes `match`. A detail also
+// carries its observation links both ways (src/resources/store/observation-links.ts).
 // Every row carries confirmedBy, as reader.ts counts it: 0 on a store from
 // before v5, which has no observation_links.
 
-import { type FullObservation, type IndexRow, stringList } from '../mcp/reader'
+import { type FullObservation, type IndexRow, stringList } from '../../controllers/mcp/reader'
 import type { Database } from '../sqlite/types'
 import { type LinkedObservation, confirmationsColumn, contradictionKindColumn, hasLinksTable, linksOf } from './observation-links'
 

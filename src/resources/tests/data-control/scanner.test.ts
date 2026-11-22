@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { seedObservation } from '../context/test-support'
 import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../observer/test-support'
-import { RULES_VERSION } from '../redaction/rules'
-import { listFindings } from '../store/findings-store'
-import { embeddingInputs, upsertVectors } from '../store/vector-store'
-import { insertPrompt } from '../store/writes'
-import { resolveFinding } from './resolve'
-import { describeScan, scanBatch, scanUntil } from './scanner'
+import { RULES_VERSION } from '../../redaction/rules'
+import { listFindings } from '../../store/findings-store'
+import { embeddingInputs, upsertVectors } from '../../store/vector-store'
+import { insertPrompt } from '../../store/writes'
+import { resolveFinding } from '../../data-control/resolve'
+import { describeScan, scanBatch, scanUntil } from '../../data-control/scanner'
 import { FRAGMENT, HMAC_KEY, ftsMatch, markV1 } from './test-support'
 
 let temp: TempStore

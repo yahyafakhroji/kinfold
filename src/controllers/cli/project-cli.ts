@@ -1,13 +1,13 @@
 // `kinfold project list | merge <old> <into> | split <key>`: which key a
 // repo's memory lives under. A thin client of the daemon's /projects routes
-// (src/daemon/project-routes.ts), as the data commands are of /data. Merge
+// (src/controllers/daemon/project-routes.ts), as the data commands are of /data. Merge
 // and split show what would move unless --yes is given. One repo under two
 // keys merges on its own (same first commit); merge is for folders git
 // cannot match, split undoes either.
 
-import type { Parsed } from '../context/types'
+import type { Parsed } from '../../resources/context/types'
 import { type DataCliEnv, daemonCall } from '../data-control/cli'
-import type { MaintenanceAnswer, ProjectListRow } from '../store/project-merge'
+import type { MaintenanceAnswer, ProjectListRow } from '../../resources/store/project-merge'
 
 export type ProjectArgs =
   | { command: 'list' }

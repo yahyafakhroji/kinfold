@@ -2,10 +2,10 @@ import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { currentPlatform } from '../../platform/platform'
+import { currentPlatform } from '../../../../system/platform/platform'
 import { type FakeWorld, createWorld } from '../test-support'
-import { diskEncryptionLine } from './check'
-import { LUKS_ADVICE, type LuksRoots, createLuksCheck, isCryptBacked, luksCheck, mountDevice } from './luks'
+import { diskEncryptionLine } from '../../../install/disk/check'
+import { LUKS_ADVICE, type LuksRoots, createLuksCheck, isCryptBacked, luksCheck, mountDevice } from '../../../install/disk/luks'
 
 // sysfs names its devices "major:minor", and Windows cannot create a folder
 // name holding ':', so the sysfs fixtures cannot be built there.

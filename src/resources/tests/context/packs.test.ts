@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { type TempStore, PROJECT, T0, openTempStore, seedSession } from '../observer/test-support'
-import { maxObservationId, readPack, upsertPack } from '../store/context-store'
-import { PACK_MAX_AGE_MS, currentPack, isFresh, rebuildProjectPacks, serveContext } from './packs'
+import { maxObservationId, readPack, upsertPack } from '../../store/context-store'
+import { PACK_MAX_AGE_MS, currentPack, isFresh, rebuildProjectPacks, serveContext } from '../../context/packs'
 import { NARRATIVE_MARKER, seedObservation, seedSummary } from './test-support'
-import type { ContextRequest } from './types'
+import type { ContextRequest } from '../../context/types'
 
 let temp: TempStore
 let claude: number

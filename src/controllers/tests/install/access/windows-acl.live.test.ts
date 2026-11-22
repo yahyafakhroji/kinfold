@@ -7,10 +7,10 @@ import { describe, expect, test } from 'bun:test'
 import { mkdirSync, rmSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
-import { currentPlatform } from '../../platform/platform'
-import type { InstallEnv } from '../env'
-import { createCommandRunner } from '../system'
-import { WINDOWS_QUERY_TIMEOUT_MS, windowsAclAccess } from './windows-acl'
+import { currentPlatform } from '../../../../system/platform/platform'
+import type { InstallEnv } from '../../../../resources/install-plan/env'
+import { createCommandRunner } from '../../../install/system'
+import { WINDOWS_QUERY_TIMEOUT_MS, windowsAclAccess } from '../../../install/access/windows-acl'
 
 const LIVE = currentPlatform().os === 'windows' && process.env.KINFOLD_TEST_WINDOWS_ACL === '1'
 /** install's data folder mode */
@@ -28,7 +28,7 @@ function liveEnv(childVars: Record<string, string>): InstallEnv {
   return env as InstallEnv
 }
 
-/** What the CLI hands its children (src/cli/kinfold.ts): PATH and HOME, nothing else. */
+/** What the CLI hands its children (src/controllers/cli/kinfold.ts): PATH and HOME, nothing else. */
 function statusChildEnv(): Record<string, string> {
   const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'
   return { PATH: process.env[pathKey] ?? '', HOME: process.env.USERPROFILE ?? '' }

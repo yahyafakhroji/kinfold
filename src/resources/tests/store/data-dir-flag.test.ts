@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { applyDataDirFlag } from './data-dir-flag'
+import { applyDataDirFlag } from '../../store/data-dir-flag'
 
 test('the flag sets the data folder variable and the rest of argv is returned in order', () => {
   const env: Record<string, string | undefined> = {}

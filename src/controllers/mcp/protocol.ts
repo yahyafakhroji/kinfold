@@ -7,12 +7,12 @@
 // count; never arguments or text. Each answered call is also reported to the
 // daemon, after the fact and without waiting (read-reporter.ts).
 
-import { isRecord } from '../contract/event'
-import { MCP_SERVER_NAME } from '../names'
-import { MCP_READ_STATUSES, MCP_TOOLS, type McpReadStatus, type McpTool } from '../store/mcp-read-store'
+import { isRecord } from '../../system/contract/event'
+import { MCP_SERVER_NAME } from '../../system/names'
+import { MCP_READ_STATUSES, MCP_TOOLS, type McpReadStatus, type McpTool } from '../../resources/store/mcp-read-store'
 import type { ReadReporter } from './read-reporter'
 import { TOOL_DEFINITIONS, type ToolCaller, type ToolContext, type ToolOutcome, callTool } from './tools'
-import { VERSION } from '../version'
+import { VERSION } from '../../system/version'
 
 /** Newest first; an unknown requested version gets the newest. */
 export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as const

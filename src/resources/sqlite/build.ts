@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
-import { currentPlatform, osOf } from '../platform/platform'
+import { currentPlatform, osOf } from '../../system/platform/platform'
 import { AMALGAMATION_MEMBERS, MAX_SQLITE3MC_ZIP_BYTES, SQLITE3MC_DEFINES, SQLITE3MC_ZIP_SHA256 } from './release'
 
 export const MAX_MEMBER_BYTES = 40_000_000

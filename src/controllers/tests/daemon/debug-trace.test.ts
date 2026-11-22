@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { createTraceBuffer } from '../debug/trace'
-import { finishRun, startRun } from '../store/observer-store'
-import { type TempStore, T0, openTempStore } from '../observer/test-support'
-import { recordInjection } from '../store/context-store'
-import { upsertProject, upsertSession } from '../store/writes'
-import { debugWatchRoute, observerTrace, turnTrace } from './debug-trace'
+import { createTraceBuffer } from '../../../system/debug/trace'
+import { finishRun, startRun } from '../../../resources/store/observer-store'
+import { type TempStore, T0, openTempStore } from '../../../resources/tests/observer/test-support'
+import { recordInjection } from '../../../resources/store/context-store'
+import { upsertProject, upsertSession } from '../../../resources/store/writes'
+import { debugWatchRoute, observerTrace, turnTrace } from '../../daemon/debug-trace'
 
 let temp: TempStore
 let session: number

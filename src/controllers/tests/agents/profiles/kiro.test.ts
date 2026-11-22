@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { MCP_SERVER_NAME } from '../../install/mcp-config'
-import { MCP_HOST_ENV } from '../../mcp/read-reporter'
-import { jsonAgentFileInstallActions, jsonAgentFileUninstallActions } from '../families/json-agent'
-import { assertWriterContract, fileWriter } from '../families/writer-contract.test-support'
-import { hookSpecFor } from '../hook-specs'
-import { capabilityLine } from '../profile'
+import { MCP_SERVER_NAME } from '../../../../resources/install-plan/mcp-config'
+import { MCP_HOST_ENV } from '../../../mcp/read-reporter'
+import { jsonAgentFileInstallActions, jsonAgentFileUninstallActions } from '../../../../plugins/agents/families/json-agent'
+import { assertWriterContract, fileWriter } from '../../../../plugins/tests/agents/families/writer-contract.test-support'
+import { hookSpecFor } from '../../../../plugins/agents/hook-specs'
+import { capabilityLine } from '../../../../plugins/agents/profile'
 import { type HookBench, apply, hookBench, profile, writesOf } from './custom-hooks.test-support'
-import { KIRO_MCP_FILE, kiroHooksFileActions, kiroHooksFileUninstallActions, kiroHooksPath } from './kiro'
+import { KIRO_MCP_FILE, kiroHooksFileActions, kiroHooksFileUninstallActions, kiroHooksPath } from '../../../../plugins/agents/profiles/kiro'
 
 let bench: HookBench
 beforeEach(() => {

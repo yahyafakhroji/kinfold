@@ -6,8 +6,8 @@
 import { expect } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { writeBackup, writeFileAtomic } from '../../install/files'
-import type { Action } from '../../install/plan'
+import { writeBackup, writeFileAtomic } from '../../../../resources/install-plan/files'
+import type { Action } from '../../../../resources/install-plan/plan'
 
 /**
  * write: the file text after an install run over `before` (null: no file),

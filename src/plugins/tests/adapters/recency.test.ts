@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { recent, recentlySeen } from './recency'
+import { recent, recentlySeen } from '../../adapters/recency'
 
 test('recent moves a read key to the newest end and leaves a missing key alone', () => {
   const map = new Map([['a', 1], ['b', 2], ['c', 3]])

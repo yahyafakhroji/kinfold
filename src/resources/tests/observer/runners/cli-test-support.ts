@@ -2,9 +2,9 @@
 // opencode: they drive the core through a fake adapter and a spawn that
 // records each request and answers from a script.
 
-import { ObserverError } from '../types'
-import type { CliAdapter, CliParsed, Semver } from './cli-core'
-import type { SpawnFn, SpawnRequest, SpawnResult } from './claude-cli'
+import { ObserverError } from '../../../observer/types'
+import type { CliAdapter, CliParsed, Semver } from '../../../observer/runners/cli-core'
+import type { SpawnFn, SpawnRequest, SpawnResult } from '../../../observer/runners/claude-cli'
 
 const VERSION_PATTERN = /(\d+)\.(\d+)\.(\d+)/
 

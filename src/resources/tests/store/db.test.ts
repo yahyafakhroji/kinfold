@@ -3,11 +3,11 @@ import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openTestDatabase } from '../sqlite/test-support'
-import type { Database } from '../sqlite/types'
-import { readOrCreateSecret } from './data-dir'
-import { type Store, migrate, openStore } from './db'
-import { LATEST_SCHEMA_VERSION, MIGRATIONS, MIGRATION_STEPS } from './schema'
-import { posixOnly } from '../../test/platform-guards'
+import type { Database } from '../../sqlite/types'
+import { readOrCreateSecret } from '../../store/data-dir'
+import { type Store, migrate, openStore } from '../../store/db'
+import { LATEST_SCHEMA_VERSION, MIGRATIONS, MIGRATION_STEPS } from '../../store/schema'
+import { posixOnly } from '../../../../test/platform-guards'
 
 let root: string
 let dataDir: string

@@ -50,7 +50,7 @@ jobs:
         timeout-minutes: 5
         run: bun install --frozen-lockfile
 
-      # The build depends only on the pinned zip in src/sqlite/release.ts and
+      # The build depends only on the pinned zip in src/resources/sqlite/release.ts and
       # the scripts that fetch and compile it, so a change to any of them
       # misses the cache and rebuilds.
       - name: Restore the sqlite3mc build
@@ -58,7 +58,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/sqlite3mc
-          key: sqlite3mc-${{ runner.os }}-${{ hashFiles('src/sqlite/release.ts', 'src/sqlite/build.ts', 'tools/build-sqlite3mc.ts', 'tools/pinned-download.ts') }}
+          key: sqlite3mc-${{ runner.os }}-${{ hashFiles('src/resources/sqlite/release.ts', 'src/resources/sqlite/build.ts', 'tools/build-sqlite3mc.ts', 'tools/pinned-download.ts') }}
 
       - name: Build sqlite3mc for the test preload
         if: steps.sqlite3mc.outputs.cache-hit != 'true'
@@ -86,7 +86,7 @@ jobs:
 
       # 20 s per test: the 5 s default trips timing-sensitive daemon tests on
       # shared runners. Windows never delivers the 5 ms abort that
-      # src/mcp/semantic-client.test.ts and src/vectors/embedder.test.ts await,
+      # src/controllers/tests/mcp/semantic-client.test.ts and src/resources/tests/vectors/embedder.test.ts await,
       # and the per-test timeout cannot end that await, so those two files are
       # skipped there and every other file still reports.
       # The Windows runner takes 9 to 11 minutes on a good run and has slow stretches, so it gets 20; the others keep 12.
@@ -179,7 +179,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/sqlite3mc
-          key: sqlite3mc-${{ runner.os }}-${{ hashFiles('src/sqlite/release.ts', 'src/sqlite/build.ts', 'tools/build-sqlite3mc.ts', 'tools/pinned-download.ts') }}
+          key: sqlite3mc-${{ runner.os }}-${{ hashFiles('src/resources/sqlite/release.ts', 'src/resources/sqlite/build.ts', 'tools/build-sqlite3mc.ts', 'tools/pinned-download.ts') }}
 
       - name: Build sqlite3mc for the test preload
         if: steps.sqlite3mc.outputs.cache-hit != 'true'

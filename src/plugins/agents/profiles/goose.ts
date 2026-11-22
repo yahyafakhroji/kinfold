@@ -15,7 +15,7 @@
 //   goose-docs.ai/docs/getting-started/using-extensions/ (MCP servers are
 //     extensions in ~/.config/goose/config.yaml, YAML only; no command adds
 //     one for good without prompts)
-// The parser is src/adapters/goose.ts. The docs show a working folder on tool
+// The parser is src/plugins/adapters/goose.ts. The docs show a working folder on tool
 // events only, so only those are registered and capture is tool results only. Kinfold never edits YAML, so
 // the MCP server is a manual step. Goose's hook runner calls `sh` on Windows
 // too, which the docs don't cover, so Windows gets nothing until a live run.
@@ -24,13 +24,13 @@
 
 import { join } from 'node:path'
 import { GOOSE_EVENTS } from '../../adapters/goose'
-import { isRecord } from '../../contract/event'
-import { detectGoose } from '../../install/detectors'
-import { entryCommand, parseEntry } from '../../install/entry'
-import { type InstallEnv, platformOf } from '../../install/env'
-import type { Action } from '../../install/plan'
-import { MCP_HOST_ENV } from '../../mcp/read-reporter'
-import type { OsName } from '../../platform/platform'
+import { isRecord } from '../../../system/contract/event'
+import { detectGoose } from '../../../resources/install-plan/detectors'
+import { entryCommand, parseEntry } from '../../../resources/install-plan/entry'
+import { type InstallEnv, platformOf } from '../../../resources/install-plan/env'
+import type { Action } from '../../../resources/install-plan/plan'
+import { MCP_HOST_ENV } from '../../../controllers/mcp/read-reporter'
+import type { OsName } from '../../../system/platform/platform'
 import { AGENT_HOOK_TIMEOUT_S } from '../families/json-agent'
 import { hookTarget, shellCommand } from '../families/json-hooks'
 import { type OwnedFileSpec, ownedFileActions, ownedFilesState, ownedFileUninstallActions } from '../families/owned-file'

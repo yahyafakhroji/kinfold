@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { LOCK_MAX_AGE_MS, TAKEOVER_CLAIM_FILE, TAKEOVER_CLAIM_MAX_AGE_MS, UPDATE_LOCK_FILE, acquireUpdateLock, updateLockHolder } from './lock'
+import { LOCK_MAX_AGE_MS, TAKEOVER_CLAIM_FILE, TAKEOVER_CLAIM_MAX_AGE_MS, UPDATE_LOCK_FILE, acquireUpdateLock, updateLockHolder } from '../../update/lock'
 
 let dir: string
 beforeEach(() => {
@@ -121,7 +121,7 @@ test('of many runs racing for one dead lock, exactly one wins', async () => {
   writeFileSync(join(dir, UPDATE_LOCK_FILE), `4194000\n${Date.now()}\n`)
   const script = join(dir, 'race.ts')
   writeFileSync(script, [
-    `import { acquireUpdateLock } from ${JSON.stringify(pathToFileURL(join(import.meta.dir, 'lock.ts')).href)}`,
+    `import { acquireUpdateLock } from ${JSON.stringify(pathToFileURL(join(import.meta.dir, '../../update/lock.ts')).href)}`,
     'const lock = acquireUpdateLock(process.argv[2] ?? "")',
     'process.stdout.write(lock === null ? "lost" : "won")',
     // The winner stays alive while the others look, as a real update would.

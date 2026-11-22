@@ -2,17 +2,17 @@
 // flag that does not apply to the command is an error rather than ignored, so
 // `kinfold status --dry-run` cannot be mistaken for a promise.
 
-import { KNOWN_HOSTS } from '../contract/event'
-import type { Parsed } from '../context/types'
-import { parsePurgeBody, parseRetentionPut } from '../data-control/requests'
-import type { ResolveAction } from '../data-control/resolve'
-import type { DataSettingsChange } from '../store/data-settings-store'
-import { builtProfiles } from '../agents/install-profiles'
+import { KNOWN_HOSTS } from '../../system/contract/event'
+import type { Parsed } from '../../resources/context/types'
+import { parsePurgeBody, parseRetentionPut } from '../../resources/data-control/requests'
+import type { ResolveAction } from '../../resources/data-control/resolve'
+import type { DataSettingsChange } from '../../resources/store/data-settings-store'
+import { builtProfiles } from '../../plugins/agents/install-profiles'
 import { INSTALL_HOSTS, type InstallHost } from './detect'
-import type { DisplayChange } from '../store/display-settings'
-import { type EmbeddingSettings, parseEmbeddingSettings } from '../vectors/embedding-settings'
+import type { DisplayChange } from '../../resources/store/display-settings'
+import { type EmbeddingSettings, parseEmbeddingSettings } from '../../resources/vectors/embedding-settings'
 import { type ObserverFlag, defaultInput, parseProviderModel, withObserverEndpoint } from './observer-choice'
-import { type UpdateLevel, isUpdateLevel } from './setup/record'
+import { type UpdateLevel, isUpdateLevel } from '../../resources/install-plan/setup/record'
 import { parseVersion } from '../update/version-order'
 import { MAX_PORT } from '../daemon/port'
 

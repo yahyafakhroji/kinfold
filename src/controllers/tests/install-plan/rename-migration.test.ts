@@ -2,26 +2,26 @@ import { afterEach, expect, test } from 'bun:test'
 import { randomBytes } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { RunningDaemon } from '../daemon/daemon'
-import { LEGACY_LAUNCH_AGENT_LABEL, LEGACY_MCP_SERVER_NAME, MCP_SERVER_NAME } from '../names'
-import { newDbKey } from '../sqlite/keys'
-import { fileState } from '../sqlite/open'
-import { openStore } from '../store/db'
-import { checkHealth, readDaemonInfo } from './daemon-client'
-import { installPaths } from './env'
-import { EXIT_FAILED, EXIT_OK, install } from './install'
-import { TAKEOVER_WAIT_MS } from './plan'
-import { ObserverError } from '../observer/types'
-import { LAUNCHCTL } from './launch-agent'
-import { claudeMcpEntry, openCodeMcpEntry, removeMcpEntryNamed } from './mcp-config'
-import { isOwnShim, shimContent } from './opencode-shim'
-import { mcpPaths, mcpTarget } from './mcp-wiring'
-import { renameMigrationActions } from './rename-migration'
-import { fakeTerminal } from './prompt/fake-terminal'
-import { PromptCancelled } from './prompt/prompts'
-import { LOCKED_FOLDER_NOTE } from './setup/prefill'
-import { type FakeWorld, UID, YES, createWorld, placeBuiltLibrary, snapshotTree, startWorldDaemon } from './test-support'
-import { posixOnly } from '../../test/platform-guards'
+import type { RunningDaemon } from '../../daemon/daemon'
+import { LEGACY_LAUNCH_AGENT_LABEL, LEGACY_MCP_SERVER_NAME, MCP_SERVER_NAME } from '../../../system/names'
+import { newDbKey } from '../../../resources/sqlite/keys'
+import { fileState } from '../../../resources/sqlite/open'
+import { openStore } from '../../../resources/store/db'
+import { checkHealth, readDaemonInfo } from '../../install/daemon-client'
+import { installPaths } from '../../../resources/install-plan/env'
+import { EXIT_FAILED, EXIT_OK, install } from '../../install/install'
+import { TAKEOVER_WAIT_MS } from '../../../resources/install-plan/plan'
+import { ObserverError } from '../../../resources/observer/types'
+import { LAUNCHCTL } from '../../install/launch-agent'
+import { claudeMcpEntry, openCodeMcpEntry, removeMcpEntryNamed } from '../../../resources/install-plan/mcp-config'
+import { isOwnShim, shimContent } from '../../install/opencode-shim'
+import { mcpPaths, mcpTarget } from '../../../resources/install-plan/mcp-wiring'
+import { renameMigrationActions } from '../../../resources/install-plan/rename-migration'
+import { fakeTerminal } from '../install/prompt/fake-terminal'
+import { PromptCancelled } from '../../install/prompt/prompts'
+import { LOCKED_FOLDER_NOTE } from '../../install/setup/prefill'
+import { type FakeWorld, UID, YES, createWorld, placeBuiltLibrary, snapshotTree, startWorldDaemon } from '../install/test-support'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const CLAUDE = '2.1.310 (Claude Code)'
 const OPENCODE = 'opencode v2.1.4'
@@ -275,7 +275,7 @@ posixOnly('POSIX paths')('the dry run lists every step and shows no Keychain val
 })
 
 test('a shim is ours under either marker; one without a marker, or not re-exporting the plugin, is not', () => {
-  const entry = '/repo/src/plugins/opencode.ts'
+  const entry = '/repo/src/plugins/plugins/opencode.ts'
   expect(isOwnShim(shimContent(entry, '/data'))).toBe(true)
   expect(shimContent(entry, '/data')).toStartWith('// kinfold: ')
   expect(isOwnShim(legacyShim(entry))).toBe(true)
@@ -295,7 +295,7 @@ test('a foreign file under the old shim name stays, and the rest still migrates'
 })
 
 test('removeMcpEntryNamed takes only our entry under that name', () => {
-  const target = { entry: { command: '/b/bun', args: ['/r/src/mcp/server.ts'] } }
+  const target = { entry: { command: '/b/bun', args: ['/r/src/controllers/mcp/server.ts'] } }
   const config = { mcp: { [LEGACY_MCP_SERVER_NAME]: openCodeMcpEntry(target), [MCP_SERVER_NAME]: openCodeMcpEntry(target) } }
   expect(removeMcpEntryNamed(config, 'opencode', LEGACY_MCP_SERVER_NAME)).toEqual({ config: { mcp: { [MCP_SERVER_NAME]: openCodeMcpEntry(target) } }, removed: true })
   const foreign = { mcp: { [LEGACY_MCP_SERVER_NAME]: { type: 'local', command: ['node', 'x.js'] } } }

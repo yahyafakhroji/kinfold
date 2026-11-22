@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { T0, type TempStore, openTempStore } from '../observer/test-support'
-import { readEmbeddingSettings, writeEmbeddingSettings } from '../vectors/embedding-settings'
-import { embeddingSettingsRoute } from './embedding-route'
+import { T0, type TempStore, openTempStore } from '../../../resources/tests/observer/test-support'
+import { readEmbeddingSettings, writeEmbeddingSettings } from '../../../resources/vectors/embedding-settings'
+import { embeddingSettingsRoute } from '../../daemon/embedding-route'
 
 let temp: TempStore
 let applied: number

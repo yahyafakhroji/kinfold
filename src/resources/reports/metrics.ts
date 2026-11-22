@@ -1,5 +1,5 @@
 // GET /metrics/summary: the dashboard's metrics page, built from what the
-// store already records (src/store/metrics-reads.ts). Everything here is a
+// store already records (src/resources/store/metrics-reads.ts). Everything here is a
 // pure function over rows, so tests can check the numbers on seeded data.
 // A run's stored error is "<class>: <detail>"; only a known class leaves this
 // module, anything else counts as "other", so no free text reaches the page.
@@ -10,7 +10,7 @@
 
 // Over the same window it reports `injectionLatency` (duration_ms per host and
 // channel, p50/p95) and `hitRate`, two proxies for whether injected memory is
-// used (src/dashboard/hit-rate.ts says what each one does and does not show).
+// used (src/resources/reports/hit-rate.ts says what each one does and does not show).
 
 import type { StoreReader } from '../workers/store-reader'
 import { errorClassOf } from '../observer/types'
@@ -21,7 +21,7 @@ import { type InjectionDuration, type InjectionTotals, type RunRow, type StateCo
 import { relatedServedSince } from '../store/related-served-store'
 import { type HitRateSummary, summarizeHitRate } from './hit-rate'
 import { type ImpactSummary, impactSummary } from './impact'
-import { type KeptReport, keptReport } from './kept-report'
+import { type KeptReport, keptReport } from '../../controllers/dashboard/kept-report'
 
 export interface Percentiles {
   samples: number
@@ -89,7 +89,7 @@ export interface MetricsSummary {
   injectionLatency: InjectionLatency[]
   /** Proxies only: fetch-after-inject and search-hit over the window. */
   hitRate: HitRateSummary & { window: MetricsWindow; since: number }
-  /** What memory costs over the window, and the opt-in holdout comparison (src/dashboard/impact.ts). */
+  /** What memory costs over the window, and the opt-in holdout comparison (src/resources/reports/impact.ts). */
   impact: ImpactSummary
 }
 

@@ -8,7 +8,7 @@
 
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { DEVELOPMENT_VERSION } from '../src/install/self-install'
+import { DEVELOPMENT_VERSION } from '../src/controllers/install/self-install'
 
 export interface NpmTarget {
   /** The release target, matching tools/build-release.ts. */

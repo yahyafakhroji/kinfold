@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { runPlantedCheck } from '../planted-check'
+import { runPlantedCheck } from '../../../observer/planted-check'
 import { type TempStore, openTempStore } from '../test-support'
-import { ObserverError, type ObserverPrompt } from '../types'
-import { createCliObserverRunner } from './cli-core'
+import { ObserverError, type ObserverPrompt } from '../../../observer/types'
+import { createCliObserverRunner } from '../../../observer/runners/cli-core'
 import { recordingSpawn } from './cli-test-support'
-import { GOOSE_MIN_VERSION, GOOSE_PROVIDERS, gooseAdapter, parseGooseModel } from './goose-cli'
+import { GOOSE_MIN_VERSION, GOOSE_PROVIDERS, gooseAdapter, parseGooseModel } from '../../../observer/runners/goose-cli'
 
 let temp: TempStore
 beforeEach(() => {

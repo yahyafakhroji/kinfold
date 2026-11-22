@@ -3,7 +3,7 @@
 // speak. The request carries no tools, so no tool can run; an answer that asks
 // for one anyway is refused as tool_attempt rather than read as text.
 
-import { isRecord } from '../../contract/event'
+import { isRecord } from '../../../system/contract/event'
 import { ObserverError, type ObserverPrompt, type ObserverRunner, type RunnerResult } from '../types'
 import { DEFAULT_HTTP_TIMEOUT_MS, type FetchFn, postJson } from './http-core'
 

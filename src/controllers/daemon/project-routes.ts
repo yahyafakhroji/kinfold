@@ -4,9 +4,9 @@
 // dryRun: false. On a central device they are refused: the hub holds the
 // memory and decides. Logs carry the reason and counts; never a key or name.
 
-import type { Parsed } from '../context/types'
-import type { Database } from '../sqlite/types'
-import { type MaintenanceAnswer, listProjects, mergeProjects, recentMerges, splitProject } from '../store/project-merge'
+import type { Parsed } from '../../resources/context/types'
+import type { Database } from '../../resources/sqlite/types'
+import { type MaintenanceAnswer, listProjects, mergeProjects, recentMerges, splitProject } from '../../resources/store/project-merge'
 import type { RouteAnswer } from './data-routes'
 
 /** Merges this recent are said in status and watch. */

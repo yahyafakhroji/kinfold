@@ -5,16 +5,16 @@
 // capture. Purge, forget, retention, backup, restore, encryption, keys and
 // observer settings are not here, so they can only be done on the hub.
 
-import { type ContextRequest, type ContextResult, parseContextRequest } from '../context/types'
+import { type ContextRequest, type ContextResult, parseContextRequest } from '../../resources/context/types'
 import { parseMcpRead } from '../daemon/mcp-read-route'
 import { READ_TOOLS, type ReadTool } from '../daemon/read-routes'
 import type { ToolOutcome } from '../mcp/tools'
-import type { McpRead } from '../store/mcp-read-store'
-import type { ProjectKey } from '../store/project-key'
-import { type SemanticAnswer, type SemanticRequest, parseSemanticRequest } from '../vectors/search'
+import type { McpRead } from '../../resources/store/mcp-read-store'
+import type { ProjectKey } from '../../resources/store/project-key'
+import { type SemanticAnswer, type SemanticRequest, parseSemanticRequest } from '../../resources/vectors/search'
 import { MAX_BATCH_BYTES, type HubAnswer, type HubContext, type HubRoute } from './hub-server'
 import { parseDeviceProject } from './project-key'
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 
 /** What the hub's current store answers with; rebuilt when a restore replaces the store. */
 export interface CentralCore {

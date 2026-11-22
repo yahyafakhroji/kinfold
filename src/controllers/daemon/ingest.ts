@@ -4,14 +4,14 @@
 // No observer work here: rows wait with observer_state 'pending'.
 
 import { createHash } from 'node:crypto'
-import type { PrepareOptions } from '../capture/prepare'
-import type { NormalizedEvent } from '../contract/event'
-import { type QuarantinedEntry, type SpoolCursor, type SpoolEntry, type SpoolRead, createSpoolCursor, removeSpoolEntry } from '../spool/spool'
-import type { Database } from '../sqlite/types'
-import { HOLDOUT_HOSTS } from '../context/holdout'
-import { stampInjectionPrompts } from '../store/context-store'
+import type { PrepareOptions } from '../../resources/capture/prepare'
+import type { NormalizedEvent } from '../../system/contract/event'
+import { type QuarantinedEntry, type SpoolCursor, type SpoolEntry, type SpoolRead, createSpoolCursor, removeSpoolEntry } from '../../resources/spool/spool'
+import type { Database } from '../../resources/sqlite/types'
+import { HOLDOUT_HOSTS } from '../../resources/context/holdout'
+import { stampInjectionPrompts } from '../../resources/store/context-store'
 import type { TurnEnd } from './transcript-usage'
-import type { ProjectKey, ProjectKeyResolver } from '../store/project-key'
+import type { ProjectKey, ProjectKeyResolver } from '../../resources/store/project-key'
 import {
   eventExists,
   insertEvent,
@@ -22,10 +22,10 @@ import {
   setPromptReply,
   LOCAL_DEVICE,
   upsertSession,
-} from '../store/writes'
-import { registerProject } from '../store/project-merge'
-import { errorMessage } from '../errors'
-import { secondPass } from '../capture/second-pass'
+} from '../../resources/store/writes'
+import { registerProject } from '../../resources/store/project-merge'
+import { errorMessage } from '../../system/errors'
+import { secondPass } from '../../resources/capture/second-pass'
 
 export interface DrainOptions extends PrepareOptions {
   spoolDir: string

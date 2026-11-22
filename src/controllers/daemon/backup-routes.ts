@@ -16,7 +16,7 @@
 // logged, stored or sent back: every error here is fixed wording.
 //
 // A restore runs inside the daemon. The code is checked against the snapshot
-// first (src/backup/restore.ts); only then does the daemon close its store,
+// first (src/resources/backup/restore.ts); only then does the daemon close its store,
 // let the engine swap the files, and open the restored store again. The
 // server and the sessions stay up throughout, so a dashboard page watching
 // /restore/status keeps its session.
@@ -24,18 +24,18 @@
 import { closeSync, mkdirSync, openSync, readdirSync, rmSync, statSync, statfsSync, writeSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
-import { type ArchiveHeader, BACKUP_FILE_EXTENSION, BackupError } from '../backup/archive'
-import { BACKUP_TMP_DIR, createBackup, privateTmpDir } from '../backup/create'
-import { readBackupRecord, writeBackupRecord } from '../backup/record'
-import { type RestoreStep, type Staged, applyRestore, checkRestore, discardStaged, inspectBackup, stageSnapshot } from '../backup/restore'
-import { applyUndo, checkUndo, keptStore } from '../backup/undo'
-import type { Parsed } from '../context/types'
-import { isRecord } from '../contract/event'
-import type { KeyStore } from '../secrets/key-store'
-import { RecoveryCodeError, decodeRecoveryCode } from '../sqlite/recovery'
-import { DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
+import { type ArchiveHeader, BACKUP_FILE_EXTENSION, BackupError } from '../../resources/backup/archive'
+import { BACKUP_TMP_DIR, createBackup, privateTmpDir } from '../../resources/backup/create'
+import { readBackupRecord, writeBackupRecord } from '../../resources/backup/record'
+import { type RestoreStep, type Staged, applyRestore, checkRestore, discardStaged, inspectBackup, stageSnapshot } from '../../resources/backup/restore'
+import { applyUndo, checkUndo, keptStore } from '../../resources/backup/undo'
+import type { Parsed } from '../../resources/context/types'
+import { isRecord } from '../../system/contract/event'
+import type { KeyStore } from '../../resources/secrets/key-store'
+import { RecoveryCodeError, decodeRecoveryCode } from '../../resources/sqlite/recovery'
+import { DATA_DIR_MODE, DATA_FILE_MODE } from '../../resources/store/data-dir'
 import type { RouteAnswer } from './data-routes'
-import { errorName } from '../errors'
+import { errorName } from '../../system/errors'
 
 export const RESTORE_INCOMING_DIR = 'restore-incoming'
 /** The upload, the staged copy and the store it becomes all sit on this disk for a moment. */

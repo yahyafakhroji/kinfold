@@ -1,7 +1,7 @@
 // The data dir check on macOS and Linux: the mode rules in permissions.ts.
 
 import { existsSync } from 'node:fs'
-import type { InstallEnv } from '../env'
+import type { InstallEnv } from '../../../resources/install-plan/env'
 import { describeModeChange, scanDataDirModes } from '../permissions'
 import type { DataDirAccess } from './check'
 

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import type { NormalizedEvent } from '../contract/event'
-import { ulid } from '../contract/ulid'
-import { FAKE_SECRETS, leakyOutput } from '../../test/fixtures/secrets'
-import { prepareForSpool, toolTargets } from './prepare'
+import type { NormalizedEvent } from '../../../system/contract/event'
+import { ulid } from '../../../system/contract/ulid'
+import { FAKE_SECRETS, leakyOutput } from '../../../../test/fixtures/secrets'
+import { prepareForSpool, toolTargets } from '../../capture/prepare'
 
 const options = { hmacKey: 'test-hmac-key' }
 

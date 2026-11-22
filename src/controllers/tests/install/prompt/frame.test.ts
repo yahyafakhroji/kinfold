@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test'
-import type { InstallEnv } from '../env'
+import type { InstallEnv } from '../../../../resources/install-plan/env'
 import { type FakeWorld, createWorld } from '../test-support'
 import { fakeTerminal } from './fake-terminal'
-import { EXIT_CANCELLED, runFramed } from './frame'
+import { EXIT_CANCELLED, runFramed } from '../../../install/prompt/frame'
 
 let world: FakeWorld | null = null
 afterEach(async () => {

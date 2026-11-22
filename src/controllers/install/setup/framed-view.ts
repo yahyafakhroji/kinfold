@@ -4,7 +4,7 @@
 // command or the step that failed, its reason and where the full log is. The
 // plan tells it what happens through plan events; it never runs anything.
 
-import type { PlanListener } from '../plan'
+import type { PlanListener } from '../../../resources/install-plan/plan'
 import type { Output, Progress, Row } from '../prompt/prompts'
 
 export interface FramedViewOptions {

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { ApiError, CLOSED_PATH, LOGIN_PATH, api, navigation } from './api'
+import { ApiError, CLOSED_PATH, LOGIN_PATH, api, navigation } from '../../../../dashboard/src/lib/api'
 
 const realFetch = globalThis.fetch
 const realAssign = navigation.assign

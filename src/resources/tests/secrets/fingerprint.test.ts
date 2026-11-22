@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { MISSING_CREDENTIAL, credentialFingerprint } from './fingerprint'
+import { MISSING_CREDENTIAL, credentialFingerprint } from '../../secrets/fingerprint'
 
 const KEY = 'ab'.repeat(32)
 const OTHER_KEY = 'cd'.repeat(32)

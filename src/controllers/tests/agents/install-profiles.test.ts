@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { KNOWN_HOSTS } from '../contract/event'
-import { parseHosts, parseObserverFlag } from '../install/args'
-import { detectFromSpec, detectHosts } from '../install/detect'
+import { KNOWN_HOSTS } from '../../../system/contract/event'
+import { parseHosts, parseObserverFlag } from '../../install/args'
+import { detectFromSpec, detectHosts } from '../../install/detect'
 import { type FakeWorld, createWorld } from '../install/test-support'
-import { builtInSettings } from '../observer/settings'
-import { INSTALL_PROFILES, hasWiring, isWired, profileOf } from './install-profiles'
-import { UNPROVEN_CLI_PROVIDERS } from '../observer/types'
-import { ACTS_HEADLESS, type AgentId, NO_HEADLESS, NO_TOOLS_OFF, UPDATE_NEWS_LIMIT, capabilityLine } from './profile'
+import { builtInSettings } from '../../../resources/observer/settings'
+import { INSTALL_PROFILES, hasWiring, isWired, profileOf } from '../../../plugins/agents/install-profiles'
+import { UNPROVEN_CLI_PROVIDERS } from '../../../resources/observer/types'
+import { ACTS_HEADLESS, type AgentId, NO_HEADLESS, NO_TOOLS_OFF, UPDATE_NEWS_LIMIT, capabilityLine } from '../../../plugins/agents/profile'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -91,10 +91,10 @@ describe('every agent has a profile', () => {
 
 describe('profile modules', () => {
   test('every profile module can be imported first in a fresh process', () => {
-    const dir = join(import.meta.dir, 'profiles')
+    const dir = join(import.meta.dir, '../../../plugins/agents/profiles')
     const files = [...new Bun.Glob('*.ts').scanSync(dir)].filter((file) => !file.endsWith('.test.ts')).sort()
     expect(files.length).toBeGreaterThanOrEqual(4)
-    const table = join(import.meta.dir, 'install-profiles.ts')
+    const table = join(import.meta.dir, '../../../plugins/agents/install-profiles.ts')
     for (const file of files) {
       const script = `await import(${JSON.stringify(join(dir, file))}); const { INSTALL_PROFILES } = await import(${JSON.stringify(table)}); console.log(Object.keys(INSTALL_PROFILES).length)`
       const run = Bun.spawnSync([process.execPath, '-e', script], { stdout: 'pipe', stderr: 'pipe' })

@@ -8,7 +8,7 @@
 // mentions within one event and can never be verified.
 
 import { createHmac } from 'node:crypto'
-import type { RedactionNote } from '../contract/event'
+import type { RedactionNote } from '../../system/contract/event'
 import {
   ENTROPY_TOKEN,
   type EntropyMode,

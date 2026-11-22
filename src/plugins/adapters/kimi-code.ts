@@ -7,8 +7,8 @@
 // UserPromptQueued) and the tool output from tool_output or tool_response,
 // whichever is there; a failure carries its error.
 
-import type { EventKind, NormalizedEvent } from '../contract/event'
-import { isRecord } from '../contract/event'
+import type { EventKind, NormalizedEvent } from '../../system/contract/event'
+import { isRecord } from '../../system/contract/event'
 import { normalizeClaudeStyle } from './families/claude-style-parse'
 import type { AdapterContext } from './context'
 

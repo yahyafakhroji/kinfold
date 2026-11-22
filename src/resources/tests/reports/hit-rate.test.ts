@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { type TempStore, openTempStore } from '../observer/test-support'
-import { recordInjection } from '../store/context-store'
-import { type InjectedIds, type StoredMcpRead, insertMcpRead } from '../store/mcp-read-store'
-import { FETCH_HORIZON_MS, anyWithin, fetchAfterInject, groupReads, searchHit } from './hit-rate'
-import { metricsSummary } from './metrics'
+import { recordInjection } from '../../store/context-store'
+import { type InjectedIds, type StoredMcpRead, insertMcpRead } from '../../store/mcp-read-store'
+import { FETCH_HORIZON_MS, anyWithin, fetchAfterInject, groupReads, searchHit } from '../../reports/hit-rate'
+import { metricsSummary } from '../../reports/metrics'
 
 const HOUR = 3_600_000
 const NOW = 1_792_900_000_000

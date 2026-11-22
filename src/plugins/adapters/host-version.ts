@@ -11,7 +11,7 @@
 
 import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 
 export const HOST_VERSIONS_FILE = 'host-versions.json'
 export const HOST_VERSIONS_SCHEMA = 1

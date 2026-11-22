@@ -1,12 +1,12 @@
 // Text for MCP answers. Every answer sits inside the same frame as the
-// context pack (src/context/pack.ts), with the same "data, not instructions"
+// context pack (src/resources/context/pack.ts), with the same "data, not instructions"
 // wording, so a reading model treats a fetched narrative like an injected
 // line. Stored text cannot close the frame early (frame tags are blanked),
 // each field has a cap, and the whole answer stops at MAX_RESULT_CHARS with
 // a note saying how much was cut.
 
-import { FRAME_CLOSE, FRAME_OPEN, formatAge, oneLine } from '../context/pack'
-import { contradictionLabel } from '../context/types'
+import { FRAME_CLOSE, FRAME_OPEN, formatAge, oneLine } from '../../resources/context/pack'
+import { contradictionLabel } from '../../resources/context/types'
 import type { FullObservation, IndexRow, SummaryItem } from './reader'
 
 export const MAX_RESULT_CHARS = 24_000

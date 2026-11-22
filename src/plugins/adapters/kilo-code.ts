@@ -12,7 +12,7 @@
 // ends a quiet session by its own idle rule.
 
 import { isAbsolute } from 'node:path'
-import { type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../contract/event'
+import { type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../../system/contract/event'
 import { type AdapterContext, nonEmpty } from './context'
 import { recent } from './recency'
 import { resolveInputPaths } from './opencode'

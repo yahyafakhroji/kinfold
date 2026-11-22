@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { cmdCommand, cmdWords, hookCommandText, posixCommand, powershellCommand, powershellWords } from './hook-shell'
+import { cmdCommand, cmdWords, hookCommandText, posixCommand, powershellCommand, powershellWords } from '../../../agents/families/hook-shell'
 
 const PROGRAM = 'C:\\Users\\dev\\.kinfold\\bin\\kinfold.exe'
 const DATA = 'C:\\Users\\dev\\.kinfold'

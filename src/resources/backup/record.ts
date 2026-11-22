@@ -3,8 +3,8 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { isRecord } from '../contract/event'
-import { writeFileAtomic } from '../fs/atomic'
+import { isRecord } from '../../system/contract/event'
+import { writeFileAtomic } from '../../system/fs/atomic'
 import { DATA_FILE_MODE } from '../store/data-dir'
 
 export const BACKUP_RECORD_FILE = 'backup.json'

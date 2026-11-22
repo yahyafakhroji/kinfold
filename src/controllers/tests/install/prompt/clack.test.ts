@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test'
 import { PassThrough } from 'node:stream'
 import { stripVTControlCharacters } from 'node:util'
-import { createClackPrompts } from './clack'
-import { type Choice, PromptCancelled, type Prompts } from './prompts'
+import { createClackPrompts } from '../../../install/prompt/clack'
+import { type Choice, PromptCancelled, type Prompts } from '../../../install/prompt/prompts'
 
 const ENTER = '\r'
 const DOWN = '\u001b[B'

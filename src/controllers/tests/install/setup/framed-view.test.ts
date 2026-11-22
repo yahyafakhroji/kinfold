@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test'
-import type { PlanEvent } from '../plan'
+import type { PlanEvent } from '../../../../resources/install-plan/plan'
 import { fakeTerminal } from '../prompt/fake-terminal'
-import { createPrompts } from '../prompt/prompts'
-import { uiFor } from '../prompt/ui'
+import { createPrompts } from '../../../install/prompt/prompts'
+import { uiFor } from '../../../install/prompt/ui'
 import { createWorld } from '../test-support'
-import { createFramedView } from './framed-view'
-import { openSession } from './session'
+import { createFramedView } from '../../../install/setup/framed-view'
+import { openSession } from '../../../install/setup/session'
 
 const LOG = '/home/u/.kinfold/logs/install.log'
 

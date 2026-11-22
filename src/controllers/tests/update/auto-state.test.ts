@@ -2,8 +2,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { posixOnly } from '../../test/platform-guards'
-import { AUTO_STATE_FILE, type AutoUpdateState, mergeAutoState, readAutoState } from './auto-state'
+import { posixOnly } from '../../../../test/platform-guards'
+import { AUTO_STATE_FILE, type AutoUpdateState, mergeAutoState, readAutoState } from '../../update/auto-state'
 
 let dir: string
 beforeEach(() => {

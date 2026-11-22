@@ -12,7 +12,7 @@
 //     its file only through "Copy Config File Path")
 //   antigravity.google/docs/cli/reference (the `agy` binary; no variable
 //     moves its config folder)
-// The parser is src/adapters/antigravity.ts. The hooks page shows no tool
+// The parser is src/plugins/adapters/antigravity.ts. The hooks page shows no tool
 // output on PostToolUse, so tool calls are recorded without their output,
 // which the capability line says. A prompt is the first PreInvocation of a
 // run (invocationNum 0), and the docs don't say whether that count restarts
@@ -31,8 +31,8 @@
 
 import { join } from 'node:path'
 import { ANTIGRAVITY_EVENTS } from '../../adapters/antigravity'
-import { type InstallEnv, platformOf } from '../../install/env'
-import type { OsName } from '../../platform/platform'
+import { type InstallEnv, platformOf } from '../../../resources/install-plan/env'
+import type { OsName } from '../../../system/platform/platform'
 import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentWiring, mcpServersFile } from '../families/json-agent'
 import { type AgentProfile, type Capabilities, NO_TOOLS_OFF, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
 

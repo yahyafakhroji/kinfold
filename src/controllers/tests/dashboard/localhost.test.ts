@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { localhostRedirect } from '../daemon/server'
-import { type TempStore, openTempStore } from '../observer/test-support'
-import { SECURITY_HEADERS } from './headers'
+import { localhostRedirect } from '../../daemon/server'
+import { type TempStore, openTempStore } from '../../../resources/tests/observer/test-support'
+import { SECURITY_HEADERS } from '../../dashboard/headers'
 import { type DashboardRig, startRig } from './test-support'
 
 let temp: TempStore

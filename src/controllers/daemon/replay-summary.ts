@@ -1,4 +1,4 @@
-// Pure numbers over a replay (src/daemon/replay.ts). The two lag definitions:
+// Pure numbers over a replay (src/controllers/daemon/replay.ts). The two lag definitions:
 //   lag from event    run finish - occurred_at, for every citable event
 //                     (user_prompt, tool_result, turn_end): how long any one
 //                     thing the agent did took to become searchable.
@@ -10,8 +10,8 @@
 // newest event that has a prompt number. Runs per turn is cost: every run is
 // one paid observer call.
 
-import { type Percentiles, percentiles } from '../dashboard/metrics'
-import type { TimelineEvent } from '../store/replay-reads'
+import { type Percentiles, percentiles } from '../../resources/reports/metrics'
+import type { TimelineEvent } from '../../resources/store/replay-reads'
 import type { ReplayRun } from './replay'
 
 export interface ReplaySummary {

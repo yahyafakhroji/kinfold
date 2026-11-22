@@ -3,7 +3,7 @@
 // match handed to a host), event observer states, and the gap between an
 // observation's newest cited event and the observation row. Each query
 // returns raw rows or counts; percentiles and grouping are pure functions in
-// src/dashboard/metrics.ts. Run error text is reduced to its class there.
+// src/resources/reports/metrics.ts. Run error text is reduced to its class there.
 
 import type { Database } from '../sqlite/types'
 

@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { seedObservation } from '../context/test-support'
-import { type RunningDaemon, startDaemon } from '../daemon/daemon'
-import { type TempStore, T0, openTempStore } from '../observer/test-support'
-import { upsertProject, upsertSession } from '../store/writes'
-import { REPORT_TIMEOUT_MS, createReadReporter, hostFromEnv } from './read-reporter'
-import { createMcpServer } from './server'
+import { seedObservation } from '../../../resources/tests/context/test-support'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import { type TempStore, T0, openTempStore } from '../../../resources/tests/observer/test-support'
+import { upsertProject, upsertSession } from '../../../resources/store/writes'
+import { REPORT_TIMEOUT_MS, createReadReporter, hostFromEnv } from '../../mcp/read-reporter'
+import { createMcpServer } from '../../mcp/server'
 
 let temp: TempStore
 let daemon: RunningDaemon | null

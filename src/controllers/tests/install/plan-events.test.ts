@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { type Action, type PlanEvent, linesListener, runPlan, shortLabel } from './plan'
+import { type Action, type PlanEvent, linesListener, runPlan, shortLabel } from '../../../resources/install-plan/plan'
 import { type FakeWorld, createWorld } from './test-support'
 
 let world: FakeWorld | null = null

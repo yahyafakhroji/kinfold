@@ -4,20 +4,20 @@
 // compiled with the system C compiler in an empty directory inside lib/. The
 // build lands under its own hash-named file, then lib/sqlite3mc.json is
 // replaced atomically, so a process opening the store sees the old build or
-// the new one (src/sqlite/library.ts). Every process opens the store through
+// the new one (src/resources/sqlite/library.ts). Every process opens the store through
 // this library, so the daemon restarts after a new build.
 
 import { createHash } from 'node:crypto'
 import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { type EmbeddedAssets, embeddedAssets } from '../runtime/embedded'
-import { type BuildInput, buildSqlite3mc } from '../sqlite/build'
-import { type LibraryManifest, checkLibrary, hasLibraryBuild, installLibraryBuild, libDir, libraryFileName, manifestPath, sha256File } from '../sqlite/library'
-import { MAX_SQLITE3MC_ZIP_BYTES, SQLITE3MC_VERSION, SQLITE3MC_ZIP_SHA256, SQLITE3MC_ZIP_URL, sqlite3mcLibraryExtension } from '../sqlite/release'
-import { DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
-import type { InstallEnv } from './env'
-import { writeFileAtomic } from './files'
-import type { Action } from './plan'
+import { type EmbeddedAssets, embeddedAssets } from '../../system/runtime/embedded'
+import { type BuildInput, buildSqlite3mc } from '../../resources/sqlite/build'
+import { type LibraryManifest, checkLibrary, hasLibraryBuild, installLibraryBuild, libDir, libraryFileName, manifestPath, sha256File } from '../../resources/sqlite/library'
+import { MAX_SQLITE3MC_ZIP_BYTES, SQLITE3MC_VERSION, SQLITE3MC_ZIP_SHA256, SQLITE3MC_ZIP_URL, sqlite3mcLibraryExtension } from '../../resources/sqlite/release'
+import { DATA_DIR_MODE, DATA_FILE_MODE } from '../../resources/store/data-dir'
+import type { InstallEnv } from '../../resources/install-plan/env'
+import { writeFileAtomic } from '../../resources/install-plan/files'
+import type { Action } from '../../resources/install-plan/plan'
 
 export const SQLITE3MC_DOWNLOAD_TIMEOUT_MS = 60_000
 const BUILD_DIR_PREFIX = '.sqlite3mc-build-'

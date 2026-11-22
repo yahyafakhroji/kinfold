@@ -3,7 +3,7 @@
 // command can load it.
 
 import type { AdapterContext } from '../adapters/context'
-import type { NormalizedEvent } from '../contract/event'
+import type { NormalizedEvent } from '../../system/contract/event'
 import type { AgentId } from './profile'
 
 export interface HookHostSpec {

@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { type TempStore, openTempStore } from '../observer/test-support'
-import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
-import { openStore } from '../store/db'
-import { type Checkpointer, startCheckpointer } from './checkpointer'
+import { SQLITE3MC_LIB_ENV } from '../../sqlite/library'
+import { openStore } from '../../store/db'
+import { type Checkpointer, startCheckpointer } from '../../workers/checkpointer'
 
 let temp: TempStore
 let checkpointer: Checkpointer | null
@@ -97,7 +97,7 @@ test('the timer checkpoints on its own, and close stops it', async () => {
 test('a process killed in the middle of a checkpoint loses nothing: the WAL is replayed at the next open', async () => {
   // A whole process, as a crash takes one: the system then lets go of every file it held, Windows included.
   const dataDir = join(temp.root, 'crashed')
-  const child = Bun.spawn([process.execPath, join(import.meta.dir, '..', '..', 'test', 'fixtures', 'checkpoint-crash.ts'), dataDir, '400'], { stdout: 'pipe', stderr: 'pipe', env: process.env })
+  const child = Bun.spawn([process.execPath, join(import.meta.dir, '..', '..', '..', '..', 'test', 'fixtures', 'checkpoint-crash.ts'), dataDir, '400'], { stdout: 'pipe', stderr: 'pipe', env: process.env })
   const reader = child.stdout.getReader()
   let seen = ''
   while (!seen.includes('checkpointing')) {

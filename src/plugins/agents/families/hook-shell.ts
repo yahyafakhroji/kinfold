@@ -17,7 +17,7 @@
 // the real shells on a Windows runner.
 // Types only from the installer, so entry.ts can import the readers.
 
-import type { EntryCommand } from '../../install/entry'
+import type { EntryCommand } from '../../../resources/install-plan/entry'
 
 export type HookShell = 'posix' | 'powershell' | 'cmd'
 

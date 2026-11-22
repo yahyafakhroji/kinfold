@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { SHUTDOWN_SIGNALS, parseDaemonArgs, shutdownSignalsFor } from './daemon-args'
-import { currentPlatform } from '../platform/platform'
+import { SHUTDOWN_SIGNALS, parseDaemonArgs, shutdownSignalsFor } from '../../daemon/daemon-args'
+import { currentPlatform } from '../../../system/platform/platform'
 
 test('daemon flags', () => {
   expect(parseDaemonArgs(['--port', '40000', '--log-file', '/t/d.log'])).toEqual({ port: 40000, logFile: '/t/d.log' })

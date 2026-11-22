@@ -8,7 +8,7 @@
 // the exit code is read out of that text when it is there.
 
 import { isAbsolute } from 'node:path'
-import { type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../contract/event'
+import { type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../../system/contract/event'
 import { type AdapterContext, AdapterInputError, str } from './context'
 
 export const CODEX_HOST = 'codex'

@@ -17,7 +17,7 @@ import { pendingInvite, redeemInvite } from './invites'
 import { bodyHash, signReply } from './keys'
 import { isLoopbackAddress, isTailscaleAddress } from './tailscale'
 import { versionGap } from './version-rule'
-import { readCapped } from '../http/capped'
+import { readCapped } from '../../system/http/capped'
 
 export const DEFAULT_HUB_PORT = 37_812
 export const MAX_BODY_BYTES = 16_384

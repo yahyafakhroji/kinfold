@@ -5,11 +5,11 @@
 // the budget is dropped. A compiled program has no SQLite in its hook, so it
 // asks the daemon only. Never throws: a host sees a result or null.
 
-import { isCompiledProgram } from '../runtime/program'
+import { isCompiledProgram } from '../../system/runtime/program'
 import { type DaemonMiss, DAEMON_SHARE_MS, type FetchFn, askDaemon } from './daemon'
 import { readStoredContext } from './fallback'
 import { type ContextRequest, type ContextResult } from './types'
-import { errorName } from '../errors'
+import { errorName } from '../../system/errors'
 
 export { DAEMON_SHARE_MS, type FetchFn } from './daemon'
 

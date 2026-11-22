@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { prepareForSpool } from '../capture/prepare'
-import { type NormalizedEvent, validateEvent } from '../contract/event'
-import { flattenToolResponse, normalizeClaudeCode } from './claude-code'
-import { AdapterInputError } from './context'
+import { prepareForSpool } from '../../../resources/capture/prepare'
+import { type NormalizedEvent, validateEvent } from '../../../system/contract/event'
+import { flattenToolResponse, normalizeClaudeCode } from '../../adapters/claude-code'
+import { AdapterInputError } from '../../adapters/context'
 
-const FIXTURES = join(import.meta.dir, '../../test/fixtures/claude-code')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures/claude-code')
 const fixture = (name: string): Record<string, unknown> => JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8'))
 
 let counter = 0

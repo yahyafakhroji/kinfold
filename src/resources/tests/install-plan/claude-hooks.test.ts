@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
-import { CLAUDE_HOOK_EVENTS, inspectSamHooks, mergeSamHooks, removeSamHooks, samHookGroup, samHookScript } from './claude-hooks'
+import { CLAUDE_HOOK_EVENTS, inspectSamHooks, mergeSamHooks, removeSamHooks, samHookGroup, samHookScript } from '../../install-plan/claude-hooks'
 
-const TARGET = { bunPath: '/Users/dev/.bun/bin/bun', hookScript: '/Users/dev/sam/src/cli/hook.ts', entry: { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/sam/src/cli/hook.ts'] } }
-const OLD = { bunPath: '/Users/dev/.bun/bin/bun', hookScript: '/Users/dev/old-checkout/src/cli/hook.ts', entry: { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/old-checkout/src/cli/hook.ts'] } }
+const TARGET = { bunPath: '/Users/dev/.bun/bin/bun', hookScript: '/Users/dev/sam/src/controllers/cli/hook.ts', entry: { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/sam/src/controllers/cli/hook.ts'] } }
+const OLD = { bunPath: '/Users/dev/.bun/bin/bun', hookScript: '/Users/dev/old-checkout/src/controllers/cli/hook.ts', entry: { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/old-checkout/src/controllers/cli/hook.ts'] } }
 const OTHER_HOOK = { matcher: 'Bash', hooks: [{ type: 'command', command: '/usr/local/bin/other-tool', timeout: 5 }] }
 
 const userSettings = () => ({
@@ -71,9 +71,9 @@ test('remove takes out only ours; lists and the hooks object go only when we emp
 })
 
 test('ours is recognised by the bun + hook.ts path, including the older command-string form', () => {
-  expect(samHookScript({ type: 'command', command: '/x/bun', args: ['/a/src/cli/hook.ts'] })).toBe('/a/src/cli/hook.ts')
-  expect(samHookScript({ type: 'command', command: 'bun /a/src/cli/hook.ts' })).toBe('/a/src/cli/hook.ts')
-  expect(samHookScript({ type: 'command', command: '/x/node', args: ['/a/src/cli/hook.ts'] })).toBeNull()
+  expect(samHookScript({ type: 'command', command: '/x/bun', args: ['/a/src/controllers/cli/hook.ts'] })).toBe('/a/src/controllers/cli/hook.ts')
+  expect(samHookScript({ type: 'command', command: 'bun /a/src/controllers/cli/hook.ts' })).toBe('/a/src/controllers/cli/hook.ts')
+  expect(samHookScript({ type: 'command', command: '/x/node', args: ['/a/src/controllers/cli/hook.ts'] })).toBeNull()
   expect(samHookScript({ type: 'command', command: 'node /plugin/scripts/hook.js' })).toBeNull()
   expect(inspectSamHooks({ hooks: { Stop: [samHookGroup('Stop', TARGET)] } }, TARGET.entry)).toBe('partial')
   expect(inspectSamHooks({}, TARGET.entry)).toBe('no')

@@ -3,11 +3,11 @@
 // plistContent writes.
 
 import { existsSync, readFileSync } from 'node:fs'
-import { envName } from '../../env-names'
-import { type InstallEnv, installPaths } from '../env'
+import { envName } from '../../../system/env-names'
+import { type InstallEnv, installPaths } from '../../../resources/install-plan/env'
 import { bootoutArgv, bootstrapArgv, isAgentLoaded, plistContent } from '../launch-agent'
 import { parsePortValue } from '../../daemon/port'
-import { COMMAND_TIMEOUT_MS, HEALTH_WAIT_MS, runLaunchctl } from '../plan'
+import { COMMAND_TIMEOUT_MS, HEALTH_WAIT_MS, runLaunchctl } from '../../../resources/install-plan/plan'
 import type { ServiceControl, ServiceStep } from './control'
 
 export const LSOF = '/usr/sbin/lsof'

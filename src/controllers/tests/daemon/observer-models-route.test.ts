@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
-import { type TempStore, openTempStore } from '../observer/test-support'
-import type { CliObserverRunner } from '../observer/runners/cli-core'
-import { ObserverError, type ObserverSettings } from '../observer/types'
-import { observerModelsRoute } from './observer-models-route'
+import { type TempStore, openTempStore } from '../../../resources/tests/observer/test-support'
+import type { CliObserverRunner } from '../../../resources/observer/runners/cli-core'
+import { ObserverError, type ObserverSettings } from '../../../resources/observer/types'
+import { observerModelsRoute } from '../../daemon/observer-models-route'
 
 const LEAK = 'LISTING-OUTPUT-AND-/Users/secret/path'
 let temp: TempStore

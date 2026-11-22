@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { MAX_QUERY_TERMS } from '../mcp/fts'
-import { MAX_PROMPT_CHARS, PROMPT_MAX_TERMS, promptHasSecrets, promptSecretRules, promptTerms, termMatches } from './prompt-query'
+import { MAX_QUERY_TERMS } from '../../mcp/fts'
+import { MAX_PROMPT_CHARS, PROMPT_MAX_TERMS, promptHasSecrets, promptSecretRules, promptTerms, termMatches } from '../../../resources/context/prompt-query'
 
 test('terms are lowercase words of three or more characters, minus stopwords, each once, in prompt order', () => {
   expect(promptTerms('Can you please fix the Parser? The parser drops "quotes" in CSV v2')).toEqual(['fix', 'parser', 'drops', 'quotes', 'csv'])

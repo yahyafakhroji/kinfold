@@ -3,7 +3,7 @@
 // join it with the code the hub showed. Without an answer to the question
 // (no terminal and no --yes) or without a code, it says what to run instead.
 
-import type { InstallEnv } from '../install/env'
+import type { InstallEnv } from '../../resources/install-plan/env'
 import { type CentralArgs, runCentralCommand, splitHub } from './cli'
 import { DEFAULT_HUB_PORT } from './hub-server'
 import { centralModeOf } from './mode'

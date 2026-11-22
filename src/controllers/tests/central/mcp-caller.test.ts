@@ -2,8 +2,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { mcpToolCallerFor } from '../wsl/mcp-backend'
-import { centralToolCaller } from './mcp-caller'
+import { mcpToolCallerFor } from '../../wsl/mcp-backend'
+import { centralToolCaller } from '../../central/mcp-caller'
 
 let dir: string
 beforeEach(() => {

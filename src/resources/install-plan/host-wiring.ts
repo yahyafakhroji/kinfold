@@ -12,18 +12,18 @@
 // CODEX_HOME would have put our entries.
 
 import { existsSync } from 'node:fs'
-import { normalizeVersion, parseHostVersions, serializeHostVersions, statMtime, type HostVersionRecord, type HostVersionRecords } from '../adapters/host-version'
-import { type EmbeddedAssets, embeddedAssets } from '../runtime/embedded'
+import { normalizeVersion, parseHostVersions, serializeHostVersions, statMtime, type HostVersionRecord, type HostVersionRecords } from '../../plugins/adapters/host-version'
+import { type EmbeddedAssets, embeddedAssets } from '../../system/runtime/embedded'
 import { DATA_FILE_MODE } from '../store/data-dir'
-import type { HostDetection } from './detect'
+import type { HostDetection } from '../../controllers/install/detect'
 import { type InstallEnv, codexHomeProblem, errorMessage, installPaths , noticeOf } from './env'
 import { describeTextChange, plannedBackup, readJsonObject, readTextOrNull, serializeJson } from './files'
 import type { WiringState } from './claude-hooks'
-import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, type CommandHookHost, type CommandHookSpec, inspectHostHooks, mergeHostHooks, removeHostHooks } from './host-hooks'
-import { hookTarget } from '../agents/families/json-hooks'
+import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, type CommandHookHost, type CommandHookSpec, inspectHostHooks, mergeHostHooks, removeHostHooks } from '../../controllers/install/host-hooks'
+import { hookTarget } from '../../plugins/agents/families/json-hooks'
 import type { Action } from './plan'
-import { type PluginFileSpec, pluginFileActions, pluginFileLine, pluginFileState, pluginFileUninstallActions } from '../agents/families/plugin-file'
-import { PLUGIN_FILE_NAME } from '../names'
+import { type PluginFileSpec, pluginFileActions, pluginFileLine, pluginFileState, pluginFileUninstallActions } from '../../plugins/agents/families/plugin-file'
+import { PLUGIN_FILE_NAME } from '../../system/names'
 
 const DIR_MODE = 0o755
 const FILE_MODE = 0o644

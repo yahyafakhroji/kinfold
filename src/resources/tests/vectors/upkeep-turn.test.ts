@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createUpkeepTurns } from './upkeep-turn'
+import { createUpkeepTurns } from '../../vectors/upkeep-turn'
 
 test('a turn runs slices while there is more, yielding to the event loop between them', async () => {
   const order: string[] = []

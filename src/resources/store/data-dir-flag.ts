@@ -4,7 +4,7 @@
 // the store environment variable wins for the rest of the process.
 
 import { isAbsolute } from 'node:path'
-import { envName } from '../env-names'
+import { envName } from '../../system/env-names'
 
 /** Takes `--data-dir <path>` or `--data-dir=<path>` out of argv, sets the data folder variable from it, and returns the rest. */
 export function applyDataDirFlag(argv: readonly string[], env: Record<string, string | undefined> = process.env): string[] {

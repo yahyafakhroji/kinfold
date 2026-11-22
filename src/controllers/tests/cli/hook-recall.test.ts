@@ -6,19 +6,19 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { userPromptContextOutput } from '../adapters/claude-code'
-import { DEVIN_HOOK_ENV } from '../agents/hook-specs'
-import type { AgentId } from '../agents/profile'
-import { writeDisplayFile } from '../context/display-file'
-import { DAEMON_DOWN_LINE, DAEMON_DOWN_START_LINE, HELD_OUT_LINE, NO_ANSWER_LINE, NO_ANSWER_START_LINE, NO_PROMPT_MEMORY_LINE, idsInLine } from '../context/recall-line'
-import { seedObservation } from '../context/test-support'
-import type { ContextRequest } from '../context/types'
-import { type RunningDaemon, startDaemon } from '../daemon/daemon'
-import { openStore } from '../store/db'
-import { upsertProject, upsertSession } from '../store/writes'
-import { runHook } from './hook'
+import { userPromptContextOutput } from '../../../plugins/adapters/claude-code'
+import { DEVIN_HOOK_ENV } from '../../../plugins/agents/hook-specs'
+import type { AgentId } from '../../../plugins/agents/profile'
+import { writeDisplayFile } from '../../../resources/context/display-file'
+import { DAEMON_DOWN_LINE, DAEMON_DOWN_START_LINE, HELD_OUT_LINE, NO_ANSWER_LINE, NO_ANSWER_START_LINE, NO_PROMPT_MEMORY_LINE, idsInLine } from '../../../resources/context/recall-line'
+import { seedObservation } from '../../../resources/tests/context/test-support'
+import type { ContextRequest } from '../../../resources/context/types'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import { openStore } from '../../../resources/store/db'
+import { upsertProject, upsertSession } from '../../../resources/store/writes'
+import { runHook } from '../../cli/hook'
 
-const FIXTURES = join(import.meta.dir, '../../test/fixtures')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures')
 
 let root: string
 let dataDir: string

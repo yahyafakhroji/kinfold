@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { MAX_KNOWN_OBSERVATIONS, dropEchoes, injectedObservations } from './injected'
-import { processSessionBatch } from './process'
-import { BEGIN_KNOWN, buildObserverPrompt } from './prompt'
+import { MAX_KNOWN_OBSERVATIONS, dropEchoes, injectedObservations } from '../../observer/injected'
+import { processSessionBatch } from '../../observer/process'
+import { BEGIN_KNOWN, buildObserverPrompt } from '../../observer/prompt'
 import { PROJECT, type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from './test-support'
-import type { ObserverEvent, ObserverPrompt, ParsedObservation } from './types'
+import type { ObserverEvent, ObserverPrompt, ParsedObservation } from '../../observer/types'
 
 let temp: TempStore
 beforeEach(() => {

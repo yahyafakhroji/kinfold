@@ -4,7 +4,7 @@
 // JSON escaping means text inside a payload cannot close the data block or
 // forge another event, whatever it contains.
 
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 import type { KnownObservation } from './injected'
 import { OBSERVATION_TYPES, type ObserverEvent, type ObserverPrompt } from './types'
 

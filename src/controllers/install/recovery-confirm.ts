@@ -2,8 +2,8 @@
 // last two groups. The code goes to `say` only, never into the question, an
 // error or a log, and only a sink minted from a terminal can show it.
 
-import { RECOVERY_GROUP } from '../sqlite/recovery'
-import type { InstallEnv } from './env'
+import { RECOVERY_GROUP } from '../../resources/sqlite/recovery'
+import type { InstallEnv } from '../../resources/install-plan/env'
 import type { Prompts } from './prompt/prompts'
 
 const normalize = (text: string): string => text.toUpperCase().replace(/[\s-]/g, '').replace(/[IL]/g, '1').replace(/O/g, '0')

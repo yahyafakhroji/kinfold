@@ -2,18 +2,18 @@ import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runHook } from '../cli/hook'
-import type { ContextRequest } from '../context/types'
-import { agentWiringActions } from '../install/install'
-import type { Action } from '../install/plan'
-import { hostStatusLines } from '../install/status'
+import { runHook } from '../../cli/hook'
+import type { ContextRequest } from '../../../resources/context/types'
+import { agentWiringActions } from '../../install/install'
+import type { Action } from '../../../resources/install-plan/plan'
+import { hostStatusLines } from '../../install/status'
 import { type FakeWorld, createWorld } from '../install/test-support'
-import { HOOK_SPECS } from './hook-specs'
-import { INSTALL_PROFILES, overlapPlan, overlapState } from './install-profiles'
-import type { AgentProfile } from './profile'
-import { DEVIN_PROFILE } from './profiles/devin'
+import { HOOK_SPECS } from '../../../plugins/agents/hook-specs'
+import { INSTALL_PROFILES, overlapPlan, overlapState } from '../../../plugins/agents/install-profiles'
+import type { AgentProfile } from '../../../plugins/agents/profile'
+import { DEVIN_PROFILE } from '../../../plugins/agents/profiles/devin'
 
-const FIXTURES = join(import.meta.dir, '../../test/fixtures')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures')
 
 let worlds: FakeWorld[] = []
 let roots: string[] = []

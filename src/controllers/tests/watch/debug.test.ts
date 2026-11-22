@@ -5,11 +5,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { TraceEvent } from '../debug/trace'
-import { parseWatchArgs } from '../install/args'
-import { type TempStore, T0, openTempStore } from '../observer/test-support'
-import { type WatchEnv, runWatch } from './cli'
-import { formatDebugEvent } from './debug'
+import type { TraceEvent } from '../../../system/debug/trace'
+import { parseWatchArgs } from '../../install/args'
+import { type TempStore, T0, openTempStore } from '../../../resources/tests/observer/test-support'
+import { type WatchEnv, runWatch } from '../../watch/cli'
+import { formatDebugEvent } from '../../watch/debug'
 
 let temp: TempStore
 beforeEach(() => {

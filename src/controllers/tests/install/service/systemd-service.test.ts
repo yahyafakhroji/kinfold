@@ -2,12 +2,12 @@ import { afterEach, expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { posixOnly } from '../../../test/platform-guards'
-import { DEFAULT_PORT } from '../../daemon/daemon'
-import { envName } from '../../env-names'
-import type { CommandResult, InstallEnv } from '../env'
+import { posixOnly } from '../../../../../test/platform-guards'
+import { DEFAULT_PORT } from '../../../daemon/daemon'
+import { envName } from '../../../../system/env-names'
+import type { CommandResult, InstallEnv } from '../../../../resources/install-plan/env'
 import { type FakeWorld, createWorld } from '../test-support'
-import { SYSTEMCTL_CANDIDATES, SYSTEMD_UNIT, SystemdUserService, procFileHolders, systemctlArgv, systemdQuote, systemdUserDir, unitContent, unitEnvironment, userManagerOf } from './systemd-service'
+import { SYSTEMCTL_CANDIDATES, SYSTEMD_UNIT, SystemdUserService, procFileHolders, systemctlArgv, systemdQuote, systemdUserDir, unitContent, unitEnvironment, userManagerOf } from '../../../install/service/systemd-service'
 
 let world: FakeWorld | null = null
 afterEach(async () => {

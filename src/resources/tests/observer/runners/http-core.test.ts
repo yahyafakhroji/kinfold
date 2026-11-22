@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { ObserverError } from '../types'
-import { postJson } from './http-core'
+import { ObserverError } from '../../../observer/types'
+import { postJson } from '../../../observer/runners/http-core'
 
 test('a redirect is refused: the session text and the key are never sent on to where an endpoint points', async () => {
   const received: { path: string; authorization: string | null; body: string }[] = []

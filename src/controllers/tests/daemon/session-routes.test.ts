@@ -4,14 +4,14 @@
 // went through the secret scan; a redaction marker is shown as it is stored.
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { seedObservation } from '../context/test-support'
-import { type TempStore, T0, openTempStore } from '../observer/test-support'
-import { recordInjection } from '../store/context-store'
-import { upsertSummary } from '../store/observer-store'
-import { PROMPT_EXPIRED_MARKER, expirePromptTexts } from '../store/retention-store'
-import { SESSIONS_PAGE, TURNS_PAGE, listSessions, sessionTurns } from '../store/session-reads'
-import { insertPrompt, setPromptReply, upsertProject, upsertSession } from '../store/writes'
-import { sessionRoute } from './session-routes'
+import { seedObservation } from '../../../resources/tests/context/test-support'
+import { type TempStore, T0, openTempStore } from '../../../resources/tests/observer/test-support'
+import { recordInjection } from '../../../resources/store/context-store'
+import { upsertSummary } from '../../../resources/store/observer-store'
+import { PROMPT_EXPIRED_MARKER, expirePromptTexts } from '../../../resources/store/retention-store'
+import { SESSIONS_PAGE, TURNS_PAGE, listSessions, sessionTurns } from '../../../resources/store/session-reads'
+import { insertPrompt, setPromptReply, upsertProject, upsertSession } from '../../../resources/store/writes'
+import { sessionRoute } from '../../daemon/session-routes'
 
 const MINUTE = 60_000
 let temp: TempStore

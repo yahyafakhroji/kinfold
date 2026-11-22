@@ -14,7 +14,7 @@
 
 import { closeSync, fstatSync, fsyncSync, openSync, readSync, rmSync, writeSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 import { DATA_FILE_MODE } from '../store/data-dir'
 
 export const BACKUP_FORMAT_VERSION = 1

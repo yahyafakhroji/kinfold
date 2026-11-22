@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { upsertProject } from '../store/writes'
-import { processSessionBatch } from './process'
-import { BEGIN_KNOWN } from './prompt'
+import { upsertProject } from '../../store/writes'
+import { processSessionBatch } from '../../observer/process'
+import { BEGIN_KNOWN } from '../../observer/prompt'
 import { PROJECT, type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from './test-support'
-import type { ObserverPrompt } from './types'
+import type { ObserverPrompt } from '../../observer/types'
 
 let temp: TempStore
 let logs: string[]

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { type SpawnDetachedFn, detachPlan, spawnDetached } from './detach'
+import { type SpawnDetachedFn, detachPlan, spawnDetached } from '../../update/detach'
 
 const ARGS = ['--data-dir', '/home/u/.kinfold', 'update', '--auto']
 const none = (): boolean => false

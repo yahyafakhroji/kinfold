@@ -23,11 +23,11 @@
 // replaced by the next prompt's: it matches one prompt, so it is not sticky.
 // Logs carry session ids, counts and durations only, never prompt text.
 
-import { promptForRecall } from '../context/prompt-text'
-import { type ContextRequest, type ContextResult, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
+import { promptForRecall } from '../../resources/context/prompt-text'
+import { type ContextRequest, type ContextResult, MAX_CONTEXT_PROMPT_CHARS } from '../../resources/context/types'
 import { recent } from '../adapters/recency'
-import { errorName } from '../errors'
-import { isRecord } from '../contract/event'
+import { errorName } from '../../system/errors'
+import { isRecord } from '../../system/contract/event'
 
 export const MAX_CACHED_SESSIONS = 256
 export const DELTA_INTERVAL_MS = 30_000

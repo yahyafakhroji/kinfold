@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { SECRET_KEY_NAME, isSensitiveCommand, isSensitivePath, looksLikeSecretValue, looksRandom, shannonEntropy } from './rules'
+import { SECRET_KEY_NAME, isSensitiveCommand, isSensitivePath, looksLikeSecretValue, looksRandom, shannonEntropy } from '../../redaction/rules'
 
 describe('isSensitivePath', () => {
   test.each([

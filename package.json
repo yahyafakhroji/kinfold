@@ -7,17 +7,17 @@
   "description": "A local memory your coding agents share: Claude Code, OpenCode, Codex and Cursor.",
   "scripts": {
     "test": "bun test",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p src/dashboard/app",
-    "daemon": "bun src/daemon/main.ts",
-    "hook": "bun src/cli/hook.ts",
-    "observe": "bun src/observer/once.ts",
-    "kinfold": "bun src/cli/kinfold.ts",
-    "mcp": "bun src/mcp/server.ts",
-    "dashboard": "bun src/cli/kinfold.ts dashboard",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/ui/dashboard",
+    "daemon": "bun src/controllers/daemon/main.ts",
+    "hook": "bun src/controllers/cli/hook.ts",
+    "observe": "bun src/resources/observer/once.ts",
+    "kinfold": "bun src/controllers/cli/kinfold.ts",
+    "mcp": "bun src/controllers/mcp/server.ts",
+    "dashboard": "bun src/controllers/cli/kinfold.ts dashboard",
     "build:release": "bun tools/build-release.ts",
     "changeset": "changeset",
-    "dashboard:build": "bun --bun node_modules/vite/bin/vite.js build --config src/dashboard/app/vite.config.ts",
-    "dashboard:dev": "bun --bun node_modules/vite/bin/vite.js build --watch --config src/dashboard/app/vite.config.ts"
+    "dashboard:build": "bun --bun node_modules/vite/bin/vite.js build --config src/ui/dashboard/vite.config.ts",
+    "dashboard:dev": "bun --bun node_modules/vite/bin/vite.js build --watch --config src/ui/dashboard/vite.config.ts"
   },
   "devDependencies": {
     "@changesets/cli": "3.0.3",

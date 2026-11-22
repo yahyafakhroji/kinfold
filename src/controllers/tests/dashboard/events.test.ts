@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createDashboardEvents, notableEvent } from './events'
+import { createDashboardEvents, notableEvent } from '../../dashboard/events'
 
 test('a settings change, a backup or a restore that succeeded gets its own line after the request', () => {
   const events = createDashboardEvents(() => 5)

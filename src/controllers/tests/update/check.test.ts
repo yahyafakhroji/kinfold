@@ -2,10 +2,10 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type RunningDaemon, startDaemon } from '../daemon/daemon'
-import { CHECK_INTERVAL_MS, LATEST_RELEASE_URL, MAX_RELEASE_BYTES, RELEASES_URL, type UpdateCheckDeps, runUpdateCheck } from './check'
-import { UPDATE_STATE_FILE, knownRelease, readUpdateState, writeUpdateState } from './state'
-import { posixOnly } from '../../test/platform-guards'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import { CHECK_INTERVAL_MS, LATEST_RELEASE_URL, MAX_RELEASE_BYTES, RELEASES_URL, type UpdateCheckDeps, runUpdateCheck } from '../../update/check'
+import { UPDATE_STATE_FILE, knownRelease, readUpdateState, writeUpdateState } from '../../update/state'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const HOUR = 3_600_000
 const T0 = 1_800_000_000_000

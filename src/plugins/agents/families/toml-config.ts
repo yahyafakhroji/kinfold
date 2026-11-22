@@ -18,8 +18,8 @@
 // bytes when nothing else changed. Ours are found by what their command runs
 // (entry.ts), never by position.
 
-import { MCP_SERVER_NAME, mcpServerScript } from '../../install/mcp-config'
-import { entryRole } from '../../install/entry'
+import { MCP_SERVER_NAME, mcpServerScript } from '../../../resources/install-plan/mcp-config'
+import { entryRole } from '../../../resources/install-plan/entry'
 import type { HookTarget } from './json-hooks'
 import { shellCommand } from './json-hooks'
 

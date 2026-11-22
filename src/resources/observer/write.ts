@@ -5,7 +5,7 @@
 // shared with an identical earlier prompt of the project.
 // Relations become links from the stored row (or, on a retry, the row the
 // first attempt stored), and the rows they name are settled in the same
-// transaction (src/store/observation-links.ts holds the evidence rule).
+// transaction (src/resources/store/observation-links.ts holds the evidence rule).
 
 import { createHash } from 'node:crypto'
 import type { Database } from '../sqlite/types'
@@ -73,7 +73,7 @@ export function observationRow(
   }
 }
 
-/** A repeat of a summarized prompt shares that summary even when the observer returned none (src/store/summary-share.ts). */
+/** A repeat of a summarized prompt shares that summary even when the observer returned none (src/resources/store/summary-share.ts). */
 function writeSummary(db: Database, output: ObserverOutput, batch: readonly ObserverEvent[], session: ObserverSession, now: number): SummaryWrite {
   const promptNumber = latest(batch.map((event) => event.promptNumber), Math.max)
   if (promptNumber === null) return 'none'

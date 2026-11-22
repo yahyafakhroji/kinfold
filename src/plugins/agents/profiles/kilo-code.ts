@@ -5,7 +5,7 @@
 //     plugin contract: the default export must be { id, server }, and a 2.x
 //     plugin ({ id, setup }) is rejected ("must default export an object
 //     with server()"). Kinfold up to 0.4 wrote OpenCode's plugin here, so it
-//     captured nothing; Kilo now gets its own (src/plugins/kilo.ts), and an
+//     captured nothing; Kilo now gets its own (src/plugins/plugins/kilo.ts), and an
 //     install over the old file replaces it.
 //   the plugin's experimental.chat.system.transform adds the context pack,
 //     and what other sessions wrote since, to each request: seen reaching the
@@ -31,10 +31,10 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { type InstallEnv, errorMessage } from '../../install/env'
-import { openCodeMcpEntry } from '../../install/mcp-config'
-import { MCP_HOST_ENV } from '../../mcp/read-reporter'
-import { PLUGIN_FILE_NAME } from '../../names'
+import { type InstallEnv, errorMessage } from '../../../resources/install-plan/env'
+import { openCodeMcpEntry } from '../../../resources/install-plan/mcp-config'
+import { MCP_HOST_ENV } from '../../../controllers/mcp/read-reporter'
+import { PLUGIN_FILE_NAME } from '../../../system/names'
 import { type PluginFileSpec, pluginFileActions, pluginFileLine, pluginFileState, pluginFileUninstallActions } from '../families/plugin-file'
 import { kiloTuiInstallActions, kiloTuiLine, kiloTuiUninstallActions } from '../families/kilo-tui'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpEntryText } from '../families/json-agent'

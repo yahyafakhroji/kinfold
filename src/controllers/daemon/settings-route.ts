@@ -4,19 +4,19 @@
 // later refuse, so a stored row never fails a batch as config_invalid. Errors
 // name the field, never echo its value.
 
-import type { Parsed } from '../context/types'
-import { backoffLine, clearBackoff, providerBackoffs } from '../observer/backoff'
-import type { ProbeFailure } from '../observer/safety-gate'
-import { KNOWN_HOSTS, isRecord } from '../contract/event'
-import { checkEndpoint } from '../observer/endpoint'
-import { parseGooseModel } from '../observer/runners/goose-cli'
-import { CLAUDE_TOKEN_REF, credentialRefProblem, isEndpointProvider, providerTakesKey, resolveObserverSettings } from '../observer/settings'
-import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError, isCliLoginProvider } from '../observer/types'
-import { assertCredentialRef, assertStorableValue, isSystemCredentialRef } from '../secrets/credentials'
-import type { KeyStore } from '../secrets/key-store'
-import { type SafetyRow, clearFailedSafety, listSafety } from '../store/observer-safety-store'
-import type { Database } from '../sqlite/types'
-import { type ObserverSettingsInput, type ObserverSettingsRow, listObserverSettings, upsertObserverSettings } from '../store/observer-settings-store'
+import type { Parsed } from '../../resources/context/types'
+import { backoffLine, clearBackoff, providerBackoffs } from '../../resources/observer/backoff'
+import type { ProbeFailure } from '../../resources/observer/safety-gate'
+import { KNOWN_HOSTS, isRecord } from '../../system/contract/event'
+import { checkEndpoint } from '../../resources/observer/endpoint'
+import { parseGooseModel } from '../../resources/observer/runners/goose-cli'
+import { CLAUDE_TOKEN_REF, credentialRefProblem, isEndpointProvider, providerTakesKey, resolveObserverSettings } from '../../resources/observer/settings'
+import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError, isCliLoginProvider } from '../../resources/observer/types'
+import { assertCredentialRef, assertStorableValue, isSystemCredentialRef } from '../../resources/secrets/credentials'
+import type { KeyStore } from '../../resources/secrets/key-store'
+import { type SafetyRow, clearFailedSafety, listSafety } from '../../resources/store/observer-safety-store'
+import type { Database } from '../../resources/sqlite/types'
+import { type ObserverSettingsInput, type ObserverSettingsRow, listObserverSettings, upsertObserverSettings } from '../../resources/store/observer-settings-store'
 
 const HOST_PATTERN = /^(\*|[a-z0-9][a-z0-9._-]{0,63})$/
 export const MAX_MODEL_CHARS = 200

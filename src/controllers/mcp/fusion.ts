@@ -14,7 +14,7 @@ export const RRF_K = 60
  * Tuned 2026-11-01 on the live store: random pairs of observations in one
  * project sit at a median distance of 0.675 (p5 0.52), so 0.8 let through
  * nearly every unrelated row. A hit past 0.7 is farther away than a typical
- * unrelated one. The prompt-time ranking (src/context/related.ts) fuses through
+ * unrelated one. The prompt-time ranking (src/resources/context/related.ts) fuses through
  * here too.
  */
 export const MAX_VECTOR_DISTANCE = 0.7

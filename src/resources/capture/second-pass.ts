@@ -4,7 +4,7 @@
 // and below the daemon, so the scanner does not load the ingest path to get it.
 
 import { type RedactedEvent, DEFAULT_MAX_FIELD_CHARS, type PrepareOptions, prepareForSpool } from './prepare'
-import type { NormalizedEvent } from '../contract/event'
+import type { NormalizedEvent } from '../../system/contract/event'
 
 /** The edge already capped fields; the slack lets a capped field plus its truncation marker through untouched. */
 const SECOND_PASS_SLACK = 256

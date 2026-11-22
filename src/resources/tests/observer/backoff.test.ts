@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { finishRun, startRun } from '../store/observer-store'
-import { upsertObserverSettings } from '../store/observer-settings-store'
-import { BACKOFF_FIRST_MS, BACKOFF_MAX_MS, backoffDelayMs, backoffLine, backsOff, clearBackoff, ensureBackoffIndex, providerBackoff, providerBackoffs, returnsToPending } from './backoff'
+import { finishRun, startRun } from '../../store/observer-store'
+import { upsertObserverSettings } from '../../store/observer-settings-store'
+import { BACKOFF_FIRST_MS, BACKOFF_MAX_MS, backoffDelayMs, backoffLine, backsOff, clearBackoff, ensureBackoffIndex, providerBackoff, providerBackoffs, returnsToPending } from '../../observer/backoff'
 import { type TempStore, T0, openTempStore, seedSession } from './test-support'
 
 let temp: TempStore

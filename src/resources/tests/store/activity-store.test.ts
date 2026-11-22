@@ -2,8 +2,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ACTIVITY_MAX_AGE_MS, listActivity, pruneActivity, recordActivity } from './activity-store'
-import { type Store, openStore } from './db'
+import { ACTIVITY_MAX_AGE_MS, listActivity, pruneActivity, recordActivity } from '../../store/activity-store'
+import { type Store, openStore } from '../../store/db'
 
 let root: string
 let store: Store

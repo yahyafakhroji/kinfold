@@ -6,7 +6,7 @@
 // with a reason; workerOrInline then moves searches back to the daemon's own
 // connection.
 
-import { isCompiledProgram } from '../runtime/program'
+import { isCompiledProgram } from '../../system/runtime/program'
 import type { Database } from '../sqlite/types'
 import { type NearestQuery, type VectorHit, distancesFor } from '../store/vector-store'
 import { nearestFor } from './vec-index'
@@ -19,11 +19,11 @@ export const CLOSE_WAIT_MS = 2_000
 
 /**
  * The worker inside a compiled program. bun build --compile lays its entries
- * out from their common folder (src/, for src/cli/kinfold.ts and this worker),
+ * out from their common folder (src/, for src/controllers/cli/kinfold.ts and this worker),
  * and a Worker names an entry by that path, not by this module's own URL.
  * tools/build-release.test.ts holds the two in step.
  */
-export const COMPILED_WORKER_PATH = './vectors/search-worker.ts'
+export const COMPILED_WORKER_PATH = './resources/vectors/search-worker.ts'
 
 /**
  * Runs fn once no vector read holds a snapshot of the store, holding new reads

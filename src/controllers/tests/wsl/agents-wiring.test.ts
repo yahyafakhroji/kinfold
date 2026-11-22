@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { KNOWN_HOSTS } from '../contract/event'
-import { EXIT_OK } from '../install/install'
+import { KNOWN_HOSTS } from '../../../system/contract/event'
+import { EXIT_OK } from '../../install/install'
 import { BUN, type FakeWorld, snapshotTree } from '../install/test-support'
-import { wslInstall, wslStatus, wslUninstall } from './entry'
-import { WSL_HOME_DIR } from './link'
+import { wslInstall, wslStatus, wslUninstall } from '../../wsl/entry'
+import { WSL_HOME_DIR } from '../../wsl/link'
 import { type Stand, mentions, stand, wslProgram } from './test-support'
 
 const worlds: FakeWorld[] = []

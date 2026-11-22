@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { ALL_SECRET_VALUES, FAKE_SECRETS, leakyOutput } from '../../test/fixtures/secrets'
-import { UNKEYED_EPOCH, formatRef, markerRefs, parseRef, redactJson, redactText, refMatches, secretRef } from './redact'
+import { ALL_SECRET_VALUES, FAKE_SECRETS, leakyOutput } from '../../../../test/fixtures/secrets'
+import { UNKEYED_EPOCH, formatRef, markerRefs, parseRef, redactJson, redactText, refMatches, secretRef } from '../../redaction/redact'
 
 const options = { hmacKey: 'test-hmac-key' }
 

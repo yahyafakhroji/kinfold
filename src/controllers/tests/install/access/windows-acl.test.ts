@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import type { CommandRequest, CommandResult } from '../env'
+import type { CommandRequest, CommandResult } from '../../../../resources/install-plan/env'
 import { type FakeWorld, createWorld } from '../test-support'
 import {
   POWERSHELL_RELATIVE_PATH, READ_RIGHTS, TRUSTED_SIDS, WINDOWS_QUERY_TIMEOUT_MS, aclScript, otherReaders, parseAclOutput, powershellArgv, psLiteral, windowsAclAccess,
-} from './windows-acl'
+} from '../../../install/access/windows-acl'
 
 let world: FakeWorld | null = null
 afterEach(async () => {

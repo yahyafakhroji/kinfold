@@ -1,6 +1,6 @@
 // The prompt path's reads of memory.db, as plain functions of a connection,
 // so the daemon runs them in its recall reader worker and, until that is up,
-// on its own connection, with one result either way (src/workers). Each takes
+// on its own connection, with one result either way (src/resources/workers). Each takes
 // and returns plain data: ids, counts, titles of memory, never the prompt.
 
 import type { Database } from '../sqlite/types'

@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { inlineStoreReader } from '../workers/store-reader'
-import { type LatencySummary, metricsRoute, summarizeLatency } from '../dashboard/metrics'
+import { inlineStoreReader } from '../../../resources/workers/store-reader'
+import { type LatencySummary, metricsRoute, summarizeLatency } from '../../../resources/reports/metrics'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
-import { PROJECT, T0, type TempStore, openTempStore, seedEvent, seedSession } from '../observer/test-support'
-import { eventStages, turnLags } from './latency-reads'
-import { finishRun, insertObservation, startRun } from './observer-store'
+import { PROJECT, T0, type TempStore, openTempStore, seedEvent, seedSession } from '../../../resources/tests/observer/test-support'
+import { eventStages, turnLags } from '../../../resources/store/latency-reads'
+import { finishRun, insertObservation, startRun } from '../../../resources/store/observer-store'
 
 let temp: TempStore
 beforeEach(() => {

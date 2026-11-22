@@ -5,8 +5,8 @@
 // text as stored, which is after the secret scan. Errors name the parameter,
 // never echo it; the log line holds counts and a duration, never text.
 
-import type { Database } from '../sqlite/types'
-import { SESSIONS_PAGE, TURNS_PAGE, listSessions, sessionTurns } from '../store/session-reads'
+import type { Database } from '../../resources/sqlite/types'
+import { SESSIONS_PAGE, TURNS_PAGE, listSessions, sessionTurns } from '../../resources/store/session-reads'
 import type { RouteAnswer } from './data-routes'
 import { HOST_PATTERN, MAX_PROJECT_CHARS, optional } from './list-params'
 

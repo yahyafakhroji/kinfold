@@ -8,7 +8,7 @@
 // the plain way is gone after the stop and the detached one is not.
 
 import { existsSync } from 'node:fs'
-import type { OsName } from '../platform/platform'
+import type { OsName } from '../../system/platform/platform'
 
 type Env = Readonly<Record<string, string | undefined>>
 

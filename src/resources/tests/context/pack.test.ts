@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
-import { FRAME_CLOSE, FRAME_OPEN, buildPack, formatAge } from './pack'
-import { shortAge } from './recall-line'
-import { isStatusNote } from './status-notes'
-import { type PackObservation, estimateTokens } from './types'
+import { FRAME_CLOSE, FRAME_OPEN, buildPack, formatAge } from '../../context/pack'
+import { shortAge } from '../../context/recall-line'
+import { isStatusNote } from '../../context/status-notes'
+import { type PackObservation, estimateTokens } from '../../context/types'
 
 const NOW = 1_792_900_000_000
 const HOUR = 3_600_000

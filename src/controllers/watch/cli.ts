@@ -9,11 +9,11 @@
 // with exit 0. Lines go through `env.out`, so a terminal gets the CLI's framed
 // look and a pipe gets plain lines.
 
-import { HELD_OUT_LINE, type Recalled, cleanTitle, lateLine, recallLine } from '../context/recall-line'
-import { isRecord } from '../contract/event'
+import { HELD_OUT_LINE, type Recalled, cleanTitle, lateLine, recallLine } from '../../resources/context/recall-line'
+import { isRecord } from '../../system/contract/event'
 import { readDaemonEndpoint } from '../daemon/daemon-info'
 import type { WatchArgs } from '../install/args'
-import type { InstallEnv } from '../install/env'
+import type { InstallEnv } from '../../resources/install-plan/env'
 import type { WatchRow } from './reads'
 import { debugLines, parseDebugEvent } from './debug'
 

@@ -1,19 +1,19 @@
-// Entry for the stdio MCP server: `bun src/mcp/server.ts`, registered with
-// Claude Code and OpenCode (src/install/mcp-config.ts builds the entries).
+// Entry for the stdio MCP server: `bun src/controllers/mcp/server.ts`, registered with
+// Claude Code and OpenCode (src/resources/install-plan/mcp-config.ts builds the entries).
 // stdout carries the protocol only; logs go to stderr. The project key is
 // resolved once from the cwd the host started us in, and the database is
 // opened read-only on first use and kept, so it works with the daemon up or
 // down and never writes. A missing database is asked for again on each
 // call, so memory recorded after start is picked up. Each answered tool call
-// is reported to the daemon after the reply (src/mcp/read-reporter.ts), which
+// is reported to the daemon after the reply (src/controllers/mcp/read-reporter.ts), which
 // writes the mcp_reads row; the host comes from KINFOLD_MCP_HOST. Search asks the
-// daemon for semantic matches too (src/mcp/semantic-client.ts) and falls
+// daemon for semantic matches too (src/controllers/mcp/semantic-client.ts) and falls
 // back to keyword-only when the daemon is down or slow.
 
-import { resolveDataDir } from '../store/data-dir'
-import { applyDataDirFlag } from '../store/data-dir-flag'
-import { DAEMON_GIT_TIMEOUT_MS, type GitRunner, GitTimeoutError, gitRunnerWithTimeout, resolveProjectKey } from '../store/project-key'
-import { currentPlatform } from '../platform/platform'
+import { resolveDataDir } from '../../resources/store/data-dir'
+import { applyDataDirFlag } from '../../resources/store/data-dir-flag'
+import { DAEMON_GIT_TIMEOUT_MS, type GitRunner, GitTimeoutError, gitRunnerWithTimeout, resolveProjectKey } from '../../resources/store/project-key'
+import { currentPlatform } from '../../system/platform/platform'
 import { mcpToolCallerFor } from '../wsl/mcp-backend'
 import { MAX_LINE_CHARS, handleLine, oversizeReply } from './protocol'
 import { type ReadReporter, createReadReporter, hostFromEnv } from './read-reporter'
@@ -32,7 +32,7 @@ export interface McpServerOptions {
   reporter?: ReadReporter
   /** Vector search through the daemon; main() builds one, tests may leave it out for keyword-only search. */
   semantic?: SemanticClient
-  /** Where tool calls go instead of the local reader; serveMcp asks src/wsl/mcp-backend.ts for one. */
+  /** Where tool calls go instead of the local reader; serveMcp asks src/controllers/wsl/mcp-backend.ts for one. */
   call?: ToolCaller
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createWordPiece } from './tokenizer'
+import { createWordPiece } from '../../vectors/tokenizer'
 import { testModelDir } from './local-test-support'
 
 const TINY = ['[PAD]', '[UNK]', '[CLS]', '[SEP]', 'hello', 'world', 'un', '##aff', '##able', ',', '!', 'cafe', '中'].join('\n')
@@ -50,7 +50,7 @@ const modelDir = testModelDir()
 describe.skipIf(modelDir === null)('the real vocabulary', () => {
   test('matches the reference tokenizer on every fixture', () => {
     const tokenizer = createWordPiece(readFileSync(join(modelDir!, 'vocab.txt'), 'utf8'), 512)
-    const fixtures = JSON.parse(readFileSync(join(import.meta.dir, '..', '..', 'test', 'minilm-reference.json'), 'utf8')) as { text: string; ids: number[] }[]
+    const fixtures = JSON.parse(readFileSync(join(import.meta.dir, '..', '..', '..', '..', 'test', 'minilm-reference.json'), 'utf8')) as { text: string; ids: number[] }[]
     for (const fixture of fixtures) expect({ text: fixture.text, ids: tokenizer.encode(fixture.text) }).toEqual({ text: fixture.text, ids: fixture.ids })
   })
 })

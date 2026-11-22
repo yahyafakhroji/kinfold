@@ -2,7 +2,7 @@
 // loads a whole table. Every sort column comes from a fixed map and every
 // value is a bound parameter. Each list breaks ties on id, so a page never
 // repeats or skips a row. Memory search takes an FTS5 MATCH expression the
-// route built with src/mcp/fts.ts; text is never read for the list itself.
+// route built with src/controllers/mcp/fts.ts; text is never read for the list itself.
 
 import type { Database } from '../sqlite/types'
 

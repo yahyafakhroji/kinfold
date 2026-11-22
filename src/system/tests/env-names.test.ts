@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { deprecationLines, envName, readEnv } from './env-names'
+import { deprecationLines, envName, readEnv } from '../env-names'
 
 test('envName prefixes the key with KINFOLD_', () => {
   expect(envName('PORT')).toBe('KINFOLD_PORT')

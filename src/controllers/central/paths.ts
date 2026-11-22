@@ -4,8 +4,8 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { writeFileAtomic } from '../fs/atomic'
-import { DATA_FILE_MODE } from '../store/data-dir'
+import { writeFileAtomic } from '../../system/fs/atomic'
+import { DATA_FILE_MODE } from '../../resources/store/data-dir'
 
 export const CENTRAL_DIR = 'central'
 const DIR_MODE = 0o700

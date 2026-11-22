@@ -26,10 +26,10 @@
 // The edits are exported too, so an agent whose hooks and MCP server share one
 // file plans both through one json-file.ts call: one read, one write.
 
-import { isRecord } from '../../contract/event'
-import { type InstallEnv, platformOf } from '../../install/env'
-import { type EntryCommand, entryCommand, entryPath, entryRole, parseEntry, sameEntry } from '../../install/entry'
-import type { Action } from '../../install/plan'
+import { isRecord } from '../../../system/contract/event'
+import { type InstallEnv, platformOf } from '../../../resources/install-plan/env'
+import { type EntryCommand, entryCommand, entryPath, entryRole, parseEntry, sameEntry } from '../../../resources/install-plan/entry'
+import type { Action } from '../../../resources/install-plan/plan'
 import type { AgentId } from '../profile'
 import { type HookShell, hookCommandText, posixCommand } from './hook-shell'
 import { type JsonEdit, type Settings, plainJsonFileActions, plainJsonFileUninstallActions } from './json-file'

@@ -1,5 +1,5 @@
 // The daemon as a per-user LaunchAgent (macOS). ProgramArguments is the
-// absolute bun plus the absolute src/daemon/main.ts; launchd starts it at
+// absolute bun plus the absolute src/controllers/daemon/main.ts; launchd starts it at
 // login and restarts it if it dies. Its log goes to <dataDir>/logs/daemon.log,
 // which the installer creates 0600 first, because launchd opens that file
 // before the daemon can set its umask. PATH carries the installer's absolute
@@ -8,10 +8,10 @@
 
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { DEFAULT_PORT } from '../daemon/port'
-import { envName } from '../env-names'
-import { LEGACY_LAUNCH_AGENT_LABEL } from '../names'
-import { type InstallEnv, LAUNCH_AGENT_LABEL, installPaths, platformOf } from './env'
-import { entryCommand } from './entry'
+import { envName } from '../../system/env-names'
+import { LEGACY_LAUNCH_AGENT_LABEL } from '../../system/names'
+import { type InstallEnv, LAUNCH_AGENT_LABEL, installPaths, platformOf } from '../../resources/install-plan/env'
+import { entryCommand } from '../../resources/install-plan/entry'
 
 /** 0o077 as launchd's decimal Umask key. */
 const OWNER_ONLY_UMASK = 63

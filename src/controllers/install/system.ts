@@ -4,7 +4,7 @@
 // is echoed, and the typed value goes back to the caller only.
 
 import { createInterface } from 'node:readline/promises'
-import type { CommandRunner, PromptIO } from './env'
+import type { CommandRunner, PromptIO } from '../../resources/install-plan/env'
 
 /** The shell's "command not found" exit: only a missing binary maps here. */
 export const NOT_FOUND_EXIT = 127

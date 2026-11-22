@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { readBodyCapped } from './capped-body'
+import { readBodyCapped } from '../../fs/capped-body'
 
 /** A body that never ends, in 64 KB pieces, counting how many were asked for. */
 export function endless(): { response: Response; pulls: () => number } {

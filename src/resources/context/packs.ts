@@ -88,7 +88,7 @@ export function preparePack(db: Database, request: ContextRequest, projectKey: s
   return { text: pack.body, observationIds: pack.observationIds, tokens: pack.tokenCount, rebuilt }
 }
 
-/** The pack for session_start and request, the delta for prompt (src/context/delta.ts); records nothing. */
+/** The pack for session_start and request, the delta for prompt (src/resources/context/delta.ts); records nothing. */
 export function prepareContext(db: Database, request: ContextRequest, projectKey: string, now: number): PreparedContext {
   return request.channel === 'prompt' ? { ...computeDelta(db, request, projectKey, now), rebuilt: false } : preparePack(db, request, projectKey, now)
 }

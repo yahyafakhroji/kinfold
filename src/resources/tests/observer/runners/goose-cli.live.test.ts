@@ -7,10 +7,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { runPlantedCheck } from '../planted-check'
+import { runPlantedCheck } from '../../../observer/planted-check'
 import { type TempStore, openTempStore } from '../test-support'
-import { createCliObserverRunner } from './cli-core'
-import { gooseAdapter } from './goose-cli'
+import { createCliObserverRunner } from '../../../observer/runners/cli-core'
+import { gooseAdapter } from '../../../observer/runners/goose-cli'
 
 const LIVE = process.env.KINFOLD_TEST_GOOSE_LIVE === '1'
 const MODEL = process.env.KINFOLD_TEST_GOOSE_MODEL ?? ''

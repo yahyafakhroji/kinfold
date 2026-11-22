@@ -8,9 +8,9 @@
 import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { MAX_VEC0_TARBALL_BYTES, tarMember } from '../src/install/vec0-install'
+import { MAX_VEC0_TARBALL_BYTES, tarMember } from '../src/controllers/install/vec0-install'
 import { downloadPinned } from './pinned-download'
-import { vec0AssetFor } from '../src/vectors/vec0-release'
+import { vec0AssetFor } from '../src/resources/vectors/vec0-release'
 
 const CACHE_DIR = join(import.meta.dir, '..', '.cache', 'vec0')
 const DOWNLOAD_TIMEOUT_MS = 60_000

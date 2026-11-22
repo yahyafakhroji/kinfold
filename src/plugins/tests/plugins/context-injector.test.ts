@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { type ContextRequest, type ContextResult, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
-import { DELTA_INTERVAL_MS, MAX_CACHED_SESSIONS, MAX_DELTAS_PER_SESSION, PACK_RETRY_INTERVAL_MS, createContextInjector } from './context-injector'
+import { type ContextRequest, type ContextResult, MAX_CONTEXT_PROMPT_CHARS } from '../../../resources/context/types'
+import { DELTA_INTERVAL_MS, MAX_CACHED_SESSIONS, MAX_DELTAS_PER_SESSION, PACK_RETRY_INTERVAL_MS, createContextInjector } from '../../plugins/context-injector'
 
 const PACK: ContextResult = { text: '<kinfold>pack</kinfold>', observationIds: [1], tokens: 10 }
 const delta = (n: number): ContextResult => ({ text: `<kinfold>delta ${n}</kinfold>`, observationIds: [100 + n], tokens: 8 })

@@ -6,8 +6,8 @@ import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readF
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
-import { envName, readEnv } from '../env-names'
-import { DATA_DIR_NAME, LEGACY_DATA_DIR_NAME } from '../names'
+import { envName, readEnv } from '../../system/env-names'
+import { DATA_DIR_NAME, LEGACY_DATA_DIR_NAME } from '../../system/names'
 
 export const DATA_DIR_MODE = 0o700
 export const DATA_FILE_MODE = 0o600

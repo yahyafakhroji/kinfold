@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { newDbKey } from './keys'
-import { RECOVERY_CHARS, RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode, lastGroup } from './recovery'
+import { newDbKey } from '../../sqlite/keys'
+import { RECOVERY_CHARS, RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode, lastGroup } from '../../sqlite/recovery'
 
 test('a code is 55 characters in 11 groups of 5 from the Crockford alphabet, and round-trips to the key', () => {
   for (let i = 0; i < 200; i++) {

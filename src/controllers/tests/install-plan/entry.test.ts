@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import { inspectSamHooks, mergeSamHooks } from './claude-hooks'
-import { entryCommand, entryIdentity, entryPath, entryRole, installedProgramPath, isCompiledProgram, isOurEntry, parseEntry, sameEntry } from './entry'
-import { cmdCommand, powershellCommand } from '../agents/families/hook-shell'
-import { serializeJson } from './files'
-import { samCommand, samCommandScript } from './host-hooks'
-import { DEFAULT_PORT } from '../daemon/daemon'
-import { plistContent } from './launch-agent'
-import { MCP_SERVER_NAME, claudeMcpEntry, inspectMcpEntry, openCodeMcpEntry } from './mcp-config'
-import { posixOnly } from '../../test/platform-guards'
+import { inspectSamHooks, mergeSamHooks } from '../../../resources/install-plan/claude-hooks'
+import { entryCommand, entryIdentity, entryPath, entryRole, installedProgramPath, isCompiledProgram, isOurEntry, parseEntry, sameEntry } from '../../../resources/install-plan/entry'
+import { cmdCommand, powershellCommand } from '../../../plugins/agents/families/hook-shell'
+import { serializeJson } from '../../../resources/install-plan/files'
+import { samCommand, samCommandScript } from '../../install/host-hooks'
+import { DEFAULT_PORT } from '../../daemon/daemon'
+import { plistContent } from '../../install/launch-agent'
+import { MCP_SERVER_NAME, claudeMcpEntry, inspectMcpEntry, openCodeMcpEntry } from '../../../resources/install-plan/mcp-config'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const HOME = '/Users/me'
 const DATA_DIR = '/Users/me/My Memory'
@@ -32,21 +32,21 @@ describe('the entry command', () => {
   test('a checkout hook is bun on the checkout script with the data folder, and the host when one is named', () => {
     expect(entryCommand(CHECKOUT, 'hook', DATA_DIR)).toEqual({
       command: CHECKOUT.bunPath,
-      args: [join(CHECKOUT.projectRoot, 'src/cli/hook.ts'), '--data-dir', DATA_DIR],
+      args: [join(CHECKOUT.projectRoot, 'src/controllers/cli/hook.ts'), '--data-dir', DATA_DIR],
     })
-    expect(entryCommand(CHECKOUT, 'hook', DATA_DIR, 'codex').args).toEqual([join(CHECKOUT.projectRoot, 'src/cli/hook.ts'), '--data-dir', DATA_DIR, '--host', 'codex'])
+    expect(entryCommand(CHECKOUT, 'hook', DATA_DIR, 'codex').args).toEqual([join(CHECKOUT.projectRoot, 'src/controllers/cli/hook.ts'), '--data-dir', DATA_DIR, '--host', 'codex'])
   })
 
   test('a checkout MCP server carries the data folder too, and entries with or without it are ours', () => {
     const mcp = entryCommand(CHECKOUT, 'mcp', DATA_DIR)
-    expect(mcp.args).toEqual([join(CHECKOUT.projectRoot, 'src/mcp/server.ts'), '--data-dir', DATA_DIR])
+    expect(mcp.args).toEqual([join(CHECKOUT.projectRoot, 'src/controllers/mcp/server.ts'), '--data-dir', DATA_DIR])
     expect(entryRole(mcp.command, mcp.args)).toBe('mcp')
     expect(entryRole(mcp.command, [mcp.args[0]!])).toBe('mcp')
     expect(entryRole(mcp.command, [...mcp.args, 'extra'])).toBeNull()
   })
 
   test('a checkout daemon keeps its script path and takes its folder from the plist environment', () => {
-    expect(entryCommand(CHECKOUT, 'daemon', DATA_DIR).args).toEqual([join(CHECKOUT.projectRoot, 'src/daemon/main.ts')])
+    expect(entryCommand(CHECKOUT, 'daemon', DATA_DIR).args).toEqual([join(CHECKOUT.projectRoot, 'src/controllers/daemon/main.ts')])
   })
 
   test('the installed program lives in the data folder and is an .exe on Windows', () => {
@@ -56,9 +56,9 @@ describe('the entry command', () => {
   })
 
   test('a compiled program is recognised by the virtual path bun runs it from', () => {
-    expect(isCompiledProgram('/$bunfs/root/src/cli/kinfold.ts')).toBe(true)
+    expect(isCompiledProgram('/$bunfs/root/src/controllers/cli/kinfold.ts')).toBe(true)
     expect(isCompiledProgram('B:\\~BUN\\root\\src\\cli\\kinfold.ts')).toBe(true)
-    expect(isCompiledProgram('/Users/me/kinfold/src/cli/kinfold.ts')).toBe(false)
+    expect(isCompiledProgram('/Users/me/kinfold/src/controllers/cli/kinfold.ts')).toBe(false)
   })
 })
 
@@ -68,7 +68,7 @@ describe('recognising our entries', () => {
     expect(isOurEntry(program.command, program.args)).toBe(true)
     const checkout = entryCommand(CHECKOUT, 'hook', DATA_DIR, 'codex')
     expect(isOurEntry(checkout.command, checkout.args)).toBe(true)
-    expect(isOurEntry("'/opt/bun/bin/bun' '/Users/me/kinfold/src/cli/hook.ts' --host codex", [])).toBe(true)
+    expect(isOurEntry("'/opt/bun/bin/bun' '/Users/me/kinfold/src/controllers/cli/hook.ts' --host codex", [])).toBe(true)
   })
 
   test('another program, even one whose path contains kinfold, is not ours', () => {

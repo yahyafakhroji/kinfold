@@ -1,8 +1,8 @@
 // `kinfold <command>` (also `bun run kinfold`). One program serves every role:
 // `hook`, `mcp`, `daemon` and `observe` start the programs that hosts wire up,
 // while `install|uninstall|status`, the data-control commands
-// `size|retention|scan|findings|purge` (src/data-control/cli.ts), `dashboard`
-// (src/dashboard/cli.ts), `backup|restore` (src/install/backup-cli.ts) and the
+// `size|retention|scan|findings|purge` (src/controllers/data-control/cli.ts), `dashboard`
+// (src/controllers/dashboard/cli.ts), `backup|restore` (src/controllers/install/backup-cli.ts) and the
 // `key` family stay in this process.
 //
 // Only the store location is read here at startup. Each command's modules are
@@ -14,13 +14,13 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
-import type { Parsed } from '../context/types'
-import { envName, readEnv } from '../env-names'
-import type { InstallEnv } from '../install/env'
-import type { InstallMode } from '../install/entry'
-import { currentPlatform } from '../platform/platform'
-import { DAEMON_INFO_FILE, DB_FILE, resolveDataDir, resolveInstallDataDir } from '../store/data-dir'
-import { VERSION } from '../version'
+import type { Parsed } from '../../resources/context/types'
+import { envName, readEnv } from '../../system/env-names'
+import type { InstallEnv } from '../../resources/install-plan/env'
+import type { InstallMode } from '../../resources/install-plan/entry'
+import { currentPlatform } from '../../system/platform/platform'
+import { DAEMON_INFO_FILE, DB_FILE, resolveDataDir, resolveInstallDataDir } from '../../resources/store/data-dir'
+import { VERSION } from '../../system/version'
 import { envForDataDir } from './data-dir-env'
 
 /** Repeated rather than imported from the installer, which the hook path must not load. */
@@ -52,7 +52,7 @@ async function loadSubcommand(name: SubcommandName): Promise<SubcommandRunners[S
     case 'hook': return (await import('./hook')).runHookCli
     case 'mcp': return (await import('../mcp/server')).runMcpServer
     case 'daemon': return (await import('../daemon/main')).runDaemon
-    case 'observe': return (await import('../observer/once')).runObserveOnce
+    case 'observe': return (await import('../../resources/observer/once')).runObserveOnce
   }
 }
 
@@ -130,7 +130,7 @@ export async function runKinfold(argv: readonly string[], env?: InstallEnv, runn
     return 0
   }
   if (name === 'embed-check' && args.length === 1) {
-    return (runners.embedCheck ?? (await import('../vectors/embed-check')).runEmbedCheck)()
+    return (runners.embedCheck ?? (await import('../../resources/vectors/embed-check')).runEmbedCheck)()
   }
   if (isSubcommand(name)) {
     const run = runners[name] ?? (await loadSubcommand(name))
@@ -366,11 +366,11 @@ export function dataDirForCommand(command: string | undefined, configured: strin
 
 async function systemEnv(args: readonly string[], configuredDataDir: string | null): Promise<InstallEnv> {
   const [{ createCliRunner, createRunner }, { NO_CREDENTIALS }, { createSecurityRunner }, { createCommandRunner, createPromptIO }, { installedProgramPath, isCompiledProgram }, { nodeTerminal }] = await Promise.all([
-    import('../observer/runners'),
-    import('../secrets/credentials'),
-    import('../secrets/stores/keychain'),
+    import('../../resources/observer/runners'),
+    import('../../resources/secrets/credentials'),
+    import('../../resources/secrets/stores/keychain'),
     import('../install/system'),
-    import('../install/entry'),
+    import('../../resources/install-plan/entry'),
     import('../install/prompt/terminal'),
   ])
   const homeDir = homedir()
@@ -379,7 +379,7 @@ async function systemEnv(args: readonly string[], configuredDataDir: string | nu
   const dataDir = dataDirForCommand(args[0], configuredDataDir, process.env, homeDir, program)
   const unflaggedDataDir = dataDirForCommand(args[0], null, process.env, homeDir, program)
   const pathEnv = process.env.PATH ?? '/usr/bin:/bin'
-  const projectRoot = resolve(import.meta.dir, '..', '..')
+  const projectRoot = resolve(import.meta.dir, '..', '..', '..')
   // A compiled program wires hosts to the program installed in the data
   // folder, not to where this copy happens to run; a checkout run keeps
   // pointing bun at the checkout's scripts.

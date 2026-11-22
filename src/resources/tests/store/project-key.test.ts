@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, posix, win32 } from 'node:path'
-import { GIT_RETRY_AFTER_TIMEOUT_MS, type GitRunner, GitTimeoutError, PROJECT_KEY_TTL_MS, ROOT_RETRY_AFTER_TIMEOUT_MS, createProjectKeyResolver, gitRunnerWithTimeout, nativeTopLevel, remoteSlug, resolveProjectKey } from './project-key'
+import { GIT_RETRY_AFTER_TIMEOUT_MS, type GitRunner, GitTimeoutError, PROJECT_KEY_TTL_MS, ROOT_RETRY_AFTER_TIMEOUT_MS, createProjectKeyResolver, gitRunnerWithTimeout, nativeTopLevel, remoteSlug, resolveProjectKey } from '../../store/project-key'
 
 let root: string
 beforeEach(() => {

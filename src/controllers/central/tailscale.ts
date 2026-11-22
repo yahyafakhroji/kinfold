@@ -7,8 +7,8 @@
 
 import { existsSync } from 'node:fs'
 import { isIP } from 'node:net'
-import { currentPlatform } from '../platform/platform'
-import { isRecord } from '../contract/event'
+import { currentPlatform } from '../../system/platform/platform'
+import { isRecord } from '../../system/contract/event'
 
 export interface TailscaleIdentity {
   /** The owning user's numeric id, as a string. */

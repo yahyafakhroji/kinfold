@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { PROBLEMS, activitySentence } from './activity'
-import { OBSERVER_ERROR_CLASSES } from '../../../../observer/types'
-import type { ActivityRow } from './types'
+import { PROBLEMS, activitySentence } from '../../../../dashboard/src/lib/activity'
+import { OBSERVER_ERROR_CLASSES } from '../../../../../resources/observer/types'
+import type { ActivityRow } from '../../../../dashboard/src/lib/types'
 
 const row = (change: Partial<ActivityRow>): ActivityRow => ({ id: 1, at: 1, kind: 'recall', host: 'claude-code', projectKey: 'k', project: 'kinfold', sessionId: 1, device: null, count: 3, detail: null, ...change })
 

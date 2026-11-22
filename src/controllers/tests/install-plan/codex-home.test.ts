@@ -1,14 +1,14 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { resolveCodexHome } from './codex-home'
-import { installPaths } from './env'
-import { CODEX_HOOK_SPEC } from './host-hooks'
-import { EXIT_OK, install } from './install'
-import { status } from './status'
-import { type FakeWorld, YES, createWorld } from './test-support'
-import { uninstall } from './uninstall'
-import { posixOnly } from '../../test/platform-guards'
+import { resolveCodexHome } from '../../../resources/install-plan/codex-home'
+import { installPaths } from '../../../resources/install-plan/env'
+import { CODEX_HOOK_SPEC } from '../../install/host-hooks'
+import { EXIT_OK, install } from '../../install/install'
+import { status } from '../../install/status'
+import { type FakeWorld, YES, createWorld } from '../install/test-support'
+import { uninstall } from '../../install/uninstall'
+import { posixOnly } from '../../../../test/platform-guards'
 
 let world: FakeWorld | null = null
 afterEach(async () => {

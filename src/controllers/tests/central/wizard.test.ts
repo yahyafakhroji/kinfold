@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { type FakeWorld, createWorld } from '../install/test-support'
-import type { CentralArgs } from './cli'
-import { offerCentral } from './wizard'
+import type { CentralArgs } from '../../central/cli'
+import { offerCentral } from '../../central/wizard'
 
 let world: FakeWorld | null = null
 afterEach(async () => {

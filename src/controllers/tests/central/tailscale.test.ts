@@ -2,7 +2,7 @@ import { afterAll, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { TAILSCALE_MISSING, TAILSCALE_STOPPED, type TailscaleRunner, cachedWhois, cliTailscale, firstLine, isLoopbackAddress, isTailscaleAddress, processRunner, sameOwner } from './tailscale'
+import { TAILSCALE_MISSING, TAILSCALE_STOPPED, type TailscaleRunner, cachedWhois, cliTailscale, firstLine, isLoopbackAddress, isTailscaleAddress, processRunner, sameOwner } from '../../central/tailscale'
 
 const WHOIS = JSON.stringify({
   Node: { ID: 7, StableID: 'nLAPTOP1', Name: 'laptop.tail1234.ts.net.', Tags: null },

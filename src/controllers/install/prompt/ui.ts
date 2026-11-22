@@ -3,7 +3,7 @@
 // terminal, because the run an update starts, a CI job and a script all pass
 // it and none of them may draw a frame or wait at a question.
 
-import type { InstallEnv } from '../env'
+import type { InstallEnv } from '../../../resources/install-plan/env'
 import { createPlainOutput } from './plain'
 import { type Output, type Prompts, withShortHome } from './prompts'
 

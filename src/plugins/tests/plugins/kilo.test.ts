@@ -2,11 +2,11 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ContextRequest, ContextResult } from '../context/types'
-import * as entry from './kilo'
-import { type KiloHooks, KILO_LOG_FILE, MAX_LOG_BYTES, createKiloPlugin, fileLog } from './kilo-plugin'
+import type { ContextRequest, ContextResult } from '../../../resources/context/types'
+import * as entry from '../../plugins/kilo'
+import { type KiloHooks, KILO_LOG_FILE, MAX_LOG_BYTES, createKiloPlugin, fileLog } from '../../plugins/kilo-plugin'
 
-const FIXTURES = join(import.meta.dir, '../../test/fixtures/kilo-code')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures/kilo-code')
 const fixture = <T = Record<string, any>>(name: string): T => JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8')) as T
 
 const SESSION = 'ses_e1e6d0192ffe7pZ5J19xRJk76C'

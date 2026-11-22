@@ -2,7 +2,7 @@
 // the OS keychain and are read at call time; a value goes back to the caller
 // only, never into the database, settings, logs or an error message.
 
-import { KEYCHAIN_SERVICE } from '../names'
+import { KEYCHAIN_SERVICE } from '../../system/names'
 
 export interface CredentialProvider {
   /** The secret for `ref`, or null when no such entry exists. Throws only on a lookup failure. */

@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { seedObservation } from '../context/test-support'
-import { purge } from '../data-control/purge'
+import { purge } from '../../data-control/purge'
 import { PROJECT, T0, type TempStore, openTempStore, seedSession } from '../observer/test-support'
 import { FAKE_DIMS, fakeVector } from '../vectors/test-support'
 import {
   EMBEDDING_INPUTS_SQL, type EmbeddingInput, INDEXED_COUNT_SQL, MAX_EMBED_CHARS, PENDING_COUNT_SQL,
   backlogExceeds, decodeVector, embeddingInputs, embeddingText, encodeVector, upsertVectors, vectorCounts,
-} from './vector-store'
+} from '../../store/vector-store'
 
 let temp: TempStore
 let session: number

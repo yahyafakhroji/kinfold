@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { T0 } from '../observer/test-support'
-import { readPack } from '../store/context-store'
-import { insertFinding } from '../store/findings-store'
+import { readPack } from '../../store/context-store'
+import { insertFinding } from '../../store/findings-store'
 import { DAY, type Fixture, MARKERS, count, ftsMatch, seedFixture, tableCounts } from './test-support'
-import { describePurge, purge } from './purge'
-import { recordActivity } from '../store/activity-store'
+import { describePurge, purge } from '../../data-control/purge'
+import { recordActivity } from '../../store/activity-store'
 
 let fx: Fixture
 beforeEach(() => {

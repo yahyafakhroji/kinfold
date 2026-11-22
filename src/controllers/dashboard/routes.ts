@@ -2,16 +2,16 @@
 // the login exchange and the static pages. server.ts
 // has already run the Host check and checkAccess (access.ts), so a request
 // that reaches a cookie route here holds a live session. A checkout serves
-// the built app from src/dashboard/app/dist (src/dashboard/app-files.ts); a
-// compiled program serves the files it carries (src/runtime/embedded.ts).
+// the built app from src/ui/dashboard/dist (src/controllers/dashboard/app-files.ts); a
+// compiled program serves the files it carries (src/system/runtime/embedded.ts).
 // Either way a name must be one plain file name the build wrote, so no path in
 // a URL can walk out of that folder. Logs carry the step and its outcome only, never a code, a cookie or
 // a body.
 
 import { join } from 'node:path'
-import type { Parsed } from '../context/types'
-import { isRecord } from '../contract/event'
-import { type EmbeddedAssets, embeddedAssets, safeDashboardName } from '../runtime/embedded'
+import type { Parsed } from '../../resources/context/types'
+import { isRecord } from '../../system/contract/event'
+import { type EmbeddedAssets, embeddedAssets, safeDashboardName } from '../../system/runtime/embedded'
 import { isOwnPageRequest } from './access'
 import { IMMUTABLE_ASSET_CACHE } from './headers'
 import { APP_ASSETS, APP_DIST, ASSET_NAME, listAssets } from './app-files'

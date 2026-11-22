@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../observer/test-support'
-import { startDataTicks } from './data-ticks'
+import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../../../resources/tests/observer/test-support'
+import { startDataTicks } from '../../daemon/data-ticks'
 
 const DAY = 86_400_000
 

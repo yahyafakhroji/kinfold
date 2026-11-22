@@ -210,7 +210,7 @@ The local model and its runtime make the program about 36 MB larger: the model i
 
 ## Performance
 
-Measured on 2026-11-16 by `src/vectors/knn.bench.test.ts` on an Apple-silicon Mac, against a store seeded with 50,000 vectors of 384 dimensions:
+Measured on 2026-11-16 by `src/resources/tests/vectors/knn.bench.test.ts` on an Apple-silicon Mac, against a store seeded with 50,000 vectors of 384 dimensions:
 
 | What | Time |
 | --- | --- |
@@ -219,7 +219,7 @@ Measured on 2026-11-16 by `src/vectors/knn.bench.test.ts` on an Apple-silicon Ma
 | Loading the local model | 0.2 to 1 s on the five release targets |
 | Embedding three short texts with the local model | 39 to 176 ms on the same runners |
 
-Prompt-time recall, measured on 2026-11-17 by `src/daemon/recall.bench.test.ts` on an Apple-silicon Mac. The store is encrypted, with 30,000 memories, 150,000 captured events and 20,000 recall records. While the prompts ran, an observer failed and retried, captures arrived, and the dashboard read the data size, metrics and facets the whole time. Each prompt was a long one with a paste, timed from the client as a hook sees it:
+Prompt-time recall, measured on 2026-11-17 by `src/controllers/tests/daemon/recall.bench.test.ts` on an Apple-silicon Mac. The store is encrypted, with 30,000 memories, 150,000 captured events and 20,000 recall records. While the prompts ran, an observer failed and retried, captures arrived, and the dashboard read the data size, metrics and facets the whole time. Each prompt was a long one with a paste, timed from the client as a hook sees it:
 
 | | p50 | p95 | max |
 | --- | --- | --- | --- |
@@ -351,7 +351,7 @@ bun install
 bun tools/build-sqlite3mc.ts   # builds the pinned sqlite3mc into .cache
 bun tools/fetch-vec0.ts        # downloads the pinned sqlite-vec build for semantic search
 bun tools/fetch-model.ts       # downloads the pinned embedding model and checks every file
-bun run dashboard:build        # builds the dashboard (src/dashboard/app) the daemon serves
+bun run dashboard:build        # builds the dashboard (src/ui/dashboard) the daemon serves
 ```
 
 Run the tests and the type check:
@@ -361,7 +361,7 @@ bun test
 bun run typecheck
 ```
 
-Run any command from source with `bun src/cli/kinfold.ts`, for example `bun src/cli/kinfold.ts install --dry-run`. A source run reports version `0.0.0-dev` and skips the release checksum check. It wires your real agents and service the same way a release does, so try changes with `--dry-run` first, or give the run a throwaway home: `HOME=$(mktemp -d) bun src/cli/kinfold.ts install --dry-run`.
+Run any command from source with `bun src/controllers/cli/kinfold.ts`, for example `bun src/controllers/cli/kinfold.ts install --dry-run`. A source run reports version `0.0.0-dev` and skips the release checksum check. It wires your real agents and service the same way a release does, so try changes with `--dry-run` first, or give the run a throwaway home: `HOME=$(mktemp -d) bun src/controllers/cli/kinfold.ts install --dry-run`.
 
 To build a single program for this machine, pick its target (`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64` or `windows-x64`) and a version:
 

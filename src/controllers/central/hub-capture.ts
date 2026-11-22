@@ -5,13 +5,13 @@
 // rest is stored in one transaction. A retry after a lost answer is a no-op
 // (event ids are unique).
 
-import type { PrepareOptions } from '../capture/prepare'
-import { validateEvent } from '../contract/event'
+import type { PrepareOptions } from '../../resources/capture/prepare'
+import { validateEvent } from '../../system/contract/event'
 import { type ResolvedEvent, ingestResolved } from '../daemon/ingest'
-import type { Database } from '../sqlite/types'
+import type { Database } from '../../resources/sqlite/types'
 import type { HubAnswer, HubContext } from './hub-server'
 import { parseDeviceProject } from './project-key'
-import { canonicalKey } from '../store/project-merge'
+import { canonicalKey } from '../../resources/store/project-merge'
 
 /** Far above what one relay batch sends; the byte cap is the real bound. */
 export const MAX_CAPTURE_EVENTS = 1_000

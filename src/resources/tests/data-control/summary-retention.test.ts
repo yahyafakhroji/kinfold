@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { T0, type TempStore, openTempStore } from '../observer/test-support'
-import { writeDataSettings } from '../store/data-settings-store'
-import { scopeFor } from '../store/purge-store'
-import { writeSharedSummary } from '../store/summary-share'
-import { insertPrompt, upsertProject, upsertSession } from '../store/writes'
-import { purge } from './purge'
-import { DAY_MS, applyRetention, previewRetention } from './retention'
+import { writeDataSettings } from '../../store/data-settings-store'
+import { scopeFor } from '../../store/purge-store'
+import { writeSharedSummary } from '../../store/summary-share'
+import { insertPrompt, upsertProject, upsertSession } from '../../store/writes'
+import { purge } from '../../data-control/purge'
+import { DAY_MS, applyRetention, previewRetention } from '../../data-control/retention'
 
 // Summaries age from their last use: coalesce(last_seen_at,
 // occurred_at). A shared summary first written long ago but repeated lately

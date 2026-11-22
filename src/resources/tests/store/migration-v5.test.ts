@@ -3,10 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openTestDatabase } from '../sqlite/test-support'
-import type { Database } from '../sqlite/types'
-import { openStore } from './db'
-import { insertLinks, settleContradictions } from './observation-links'
-import { LATEST_SCHEMA_VERSION, MIGRATIONS } from './schema'
+import type { Database } from '../../sqlite/types'
+import { openStore } from '../../store/db'
+import { insertLinks, settleContradictions } from '../../store/observation-links'
+import { LATEST_SCHEMA_VERSION, MIGRATIONS } from '../../store/schema'
 
 let root: string
 beforeEach(() => {

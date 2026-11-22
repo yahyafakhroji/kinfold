@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { QUERY_CACHE_LIMIT } from './driver'
+import { QUERY_CACHE_LIMIT } from '../../sqlite/driver'
 import { openTestDatabase } from './test-support'
 
 let dir: string

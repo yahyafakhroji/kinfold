@@ -2,11 +2,11 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { FRAME_CLOSE, FRAME_OPEN } from '../context/pack'
-import { FRAME_NOTICE, MAX_RESULT_CHARS } from './format'
-import { type MemoryReader, openMemoryReader } from './reader'
+import { FRAME_CLOSE, FRAME_OPEN } from '../../../resources/context/pack'
+import { FRAME_NOTICE, MAX_RESULT_CHARS } from '../../mcp/format'
+import { type MemoryReader, openMemoryReader } from '../../mcp/reader'
 import { type McpFixture, NOW, PAYLOAD_MARKER, PROJECT_A, PROJECT_B, T0, openMcpFixture, seedMcpObservation } from './test-support'
-import { type ToolResult, callTool } from './tools'
+import { type ToolResult, callTool } from '../../mcp/tools'
 
 let fixture: McpFixture
 let reader: MemoryReader | null

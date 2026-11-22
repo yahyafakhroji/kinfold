@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { seedObservation } from '../context/test-support'
 import { PROJECT, T0, type TempStore, openTempStore, seedSession } from '../observer/test-support'
-import { vectorCounts } from '../store/vector-store'
-import { EmbedError } from './embedder'
-import { BACKOFF_BASE_MS, BACKOFF_MAX_MS, backoffMs, createVectorIndexer } from './indexer'
+import { vectorCounts } from '../../store/vector-store'
+import { EmbedError } from '../../vectors/embedder'
+import { BACKOFF_BASE_MS, BACKOFF_MAX_MS, backoffMs, createVectorIndexer } from '../../vectors/indexer'
 import { type FakeEmbedder, fakeEmbedder } from './test-support'
 
 let temp: TempStore

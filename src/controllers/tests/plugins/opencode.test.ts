@@ -2,17 +2,17 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { rebuildProjectPacks } from '../context/packs'
-import { seedObservation } from '../context/test-support'
-import type { ContextRequest, ContextResult } from '../context/types'
-import { type RunningDaemon, startDaemon } from '../daemon/daemon'
-import { openStore } from '../store/db'
-import { shimContent } from '../install/opencode-shim'
-import { upsertProject, upsertSession } from '../store/writes'
-import * as entry from './opencode'
-import { type ContextFetcher, type OpenCodeSetupContext, createInstanceFilter, createOpenCodePlugin, createStartSynthesizer } from './opencode-plugin'
+import { rebuildProjectPacks } from '../../../resources/context/packs'
+import { seedObservation } from '../../../resources/tests/context/test-support'
+import type { ContextRequest, ContextResult } from '../../../resources/context/types'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import { openStore } from '../../../resources/store/db'
+import { shimContent } from '../../install/opencode-shim'
+import { upsertProject, upsertSession } from '../../../resources/store/writes'
+import * as entry from '../../../plugins/plugins/opencode'
+import { type ContextFetcher, type OpenCodeSetupContext, createInstanceFilter, createOpenCodePlugin, createStartSynthesizer } from '../../../plugins/plugins/opencode-plugin'
 
-const FIXTURES = join(import.meta.dir, '../../test/fixtures/opencode')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures/opencode')
 const fixture = <T = unknown>(name: string): T =>
   (JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8')) as { payload: T }).payload
 
@@ -332,7 +332,7 @@ test('a prompt is spooled and its text rides on the next delta ask, never in a l
 test('the checkout shim carries a non-default folder', async () => {
   const dataDir = join(root, 'x y', 'data')
   const shim = join(root, 'shim.ts')
-  writeFileSync(shim, shimContent(join(import.meta.dir, 'opencode.ts'), dataDir))
+  writeFileSync(shim, shimContent(join(import.meta.dir, '../../../plugins/plugins/opencode.ts'), dataDir))
   // A temp HOME keeps a regression from spooling into the real default folder.
   const saved = { global: (globalThis as Record<string, unknown>).KINFOLD_DATA_DIR, env: process.env.KINFOLD_DATA_DIR, home: process.env.HOME }
   delete process.env.KINFOLD_DATA_DIR

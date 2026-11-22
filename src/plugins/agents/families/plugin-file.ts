@@ -14,13 +14,13 @@
 // marker and the bundle, with no re-export, and is recognised by the marker.
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { InstallEnv } from '../../install/env'
-import { installPaths } from '../../install/env'
-import type { InstallMode } from '../../install/entry'
-import { describeTextChange, readTextOrNull } from '../../install/files'
-import type { Action } from '../../install/plan'
-import { LEGACY_SHIM_MARKER, SHIM_MARKER } from '../../names'
-import { type EmbeddedAssets, embeddedAssets } from '../../runtime/embedded'
+import type { InstallEnv } from '../../../resources/install-plan/env'
+import { installPaths } from '../../../resources/install-plan/env'
+import type { InstallMode } from '../../../resources/install-plan/entry'
+import { describeTextChange, readTextOrNull } from '../../../resources/install-plan/files'
+import type { Action } from '../../../resources/install-plan/plan'
+import { LEGACY_SHIM_MARKER, SHIM_MARKER } from '../../../system/names'
+import { type EmbeddedAssets, embeddedAssets } from '../../../system/runtime/embedded'
 import type { AgentId } from '../profile'
 
 const DIR_MODE = 0o755
@@ -49,12 +49,12 @@ export interface PluginFileSpec {
 
 export type PluginName = 'opencode' | 'kilo'
 
-/** The entry file of each plugin, under src/plugins in a checkout. */
+/** The entry file of each plugin, under src/plugins/plugins in a checkout. */
 const PLUGIN_ENTRY_FILES: Readonly<Record<PluginName, string>> = { opencode: 'opencode.ts', kilo: 'kilo.ts' }
 
 /** Where a checkout keeps a plugin's entry file. */
 export function pluginEntryPath(projectRoot: string, plugin: PluginName = 'opencode'): string {
-  return join(projectRoot, 'src', 'plugins', PLUGIN_ENTRY_FILES[plugin])
+  return join(projectRoot, 'src', 'plugins', 'plugins', PLUGIN_ENTRY_FILES[plugin])
 }
 
 export const OPENCODE_HOST_ID: AgentId = 'opencode'
@@ -65,7 +65,7 @@ export const HOST_CONSTANT = 'KINFOLD_HOST'
 const REEXPORT_PATTERN = /export\s*\{\s*default\s*\}\s*from\s*("(?:[^"\\]|\\.)*")/
 // The current form loads the plugin with a dynamic import.
 const IMPORT_PATTERN = /await\s+import\(\s*("(?:[^"\\]|\\.)*")\s*\)/
-const PLUGIN_SUFFIXES = Object.values(PLUGIN_ENTRY_FILES).map((file) => `/src/plugins/${file}`)
+const PLUGIN_SUFFIXES = Object.values(PLUGIN_ENTRY_FILES).map((file) => `/src/plugins/plugins/${file}`)
 
 export type ShimState = 'yes' | 'no' | 'stale' | 'foreign'
 

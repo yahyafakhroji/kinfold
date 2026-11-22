@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test'
-import type { InstallMode } from './entry'
-import { shimTarget } from '../agents/families/plugin-file'
-import { inspectShim, isOwnShim, pluginFileContent, shimContent } from './opencode-shim'
-import { posixOnly } from '../../test/platform-guards'
+import type { InstallMode } from '../../../resources/install-plan/entry'
+import { shimTarget } from '../../../plugins/agents/families/plugin-file'
+import { inspectShim, isOwnShim, pluginFileContent, shimContent } from '../../install/opencode-shim'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const CHECKOUT: InstallMode = { kind: 'checkout', bunPath: '/opt/bun/bin/bun', projectRoot: '/repo' }
 const PROGRAM: InstallMode = { kind: 'program', binPath: '/home/u/.kinfold/bin/kinfold' }
-const PLUGIN_ENTRY = '/repo/src/plugins/opencode.ts'
+const PLUGIN_ENTRY = '/repo/src/plugins/plugins/opencode.ts'
 const DATA = '/home/u/.kinfold'
 const EXPECTED = { pluginEntry: PLUGIN_ENTRY, dataDir: DATA }
 const BUNDLE = [
@@ -53,7 +53,7 @@ test('the old marker still marks a program file as ours', () => {
 })
 
 test('a shim for another checkout is stale, not foreign', () => {
-  expect(inspectShim(shimContent('/old/src/plugins/opencode.ts', DATA), EXPECTED)).toBe('stale')
+  expect(inspectShim(shimContent('/old/src/plugins/plugins/opencode.ts', DATA), EXPECTED)).toBe('stale')
 })
 
 test('a shim for another folder is stale', () => {

@@ -6,13 +6,13 @@
 // without it.
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { readEnv } from '../env-names'
+import { readEnv } from '../../../system/env-names'
 import { PROJECT, T0, type TempStore, openTempStore, seedSession } from '../observer/test-support'
-import { setVecReady, startActive } from '../store/vector-spaces'
-import { encodeVector, nearestObservations } from '../store/vector-store'
-import { upsertProject } from '../store/writes'
-import { LOCAL_MODEL_DIMS, LOCAL_MODEL_ID } from './local-model'
-import { createVecIndex, nearestFor } from './vec-index'
+import { setVecReady, startActive } from '../../store/vector-spaces'
+import { encodeVector, nearestObservations } from '../../store/vector-store'
+import { upsertProject } from '../../store/writes'
+import { LOCAL_MODEL_DIMS, LOCAL_MODEL_ID } from '../../vectors/local-model'
+import { createVecIndex, nearestFor } from '../../vectors/vec-index'
 import { reconcileVecIndex } from './vec-index.test-support'
 
 const VEC0 = readEnv(process.env, 'TEST_VEC0')

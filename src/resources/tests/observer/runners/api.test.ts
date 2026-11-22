@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { runPlantedCheck } from '../planted-check'
-import { HTTP_API_PROVIDERS, type HttpApiProvider, ObserverError, type ObserverPrompt } from '../types'
-import { ANTHROPIC_ENDPOINT, GEMINI_ENDPOINT, OPENAI_ENDPOINT, createApiRunner, plantedCheckRunner } from './api'
-import { MAX_RESPONSE_BYTES } from './http-core'
-import type { FetchFn } from './openrouter'
+import { runPlantedCheck } from '../../../observer/planted-check'
+import { HTTP_API_PROVIDERS, type HttpApiProvider, ObserverError, type ObserverPrompt } from '../../../observer/types'
+import { ANTHROPIC_ENDPOINT, GEMINI_ENDPOINT, OPENAI_ENDPOINT, createApiRunner, plantedCheckRunner } from '../../../observer/runners/api'
+import { MAX_RESPONSE_BYTES } from '../../../observer/runners/http-core'
+import type { FetchFn } from '../../../observer/runners/openrouter'
 
 const KEY = 'sk-test-fake-key-000000000000000000000000'
 const PROMPT: ObserverPrompt = { system: 'SYSTEM RULES', user: 'EVENTS', eventIds: ['01JA'] }

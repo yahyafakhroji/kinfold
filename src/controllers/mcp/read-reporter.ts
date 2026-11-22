@@ -9,12 +9,12 @@
 // the query, arguments or any text.
 
 import { readDaemonEndpoint } from '../daemon/daemon-info'
-import { envName, readEnv } from '../env-names'
-import type { McpRead } from '../store/mcp-read-store'
-import { HOST_NAME_PATTERN } from '../names'
+import { envName, readEnv } from '../../system/env-names'
+import type { McpRead } from '../../resources/store/mcp-read-store'
+import { HOST_NAME_PATTERN } from '../../system/names'
 
 export const REPORT_TIMEOUT_MS = 200
-/** The env var each host's MCP entry sets to name itself (src/install/mcp-config.ts). */
+/** The env var each host's MCP entry sets to name itself (src/resources/install-plan/mcp-config.ts). */
 export const MCP_HOST_ENV = envName('MCP_HOST')
 /** Same cap the daemon enforces. */
 export const MAX_REPORTED_IDS = 100

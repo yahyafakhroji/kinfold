@@ -1,7 +1,7 @@
 // The Windows disk check. It reads the shell's BitLockerProtection property of
 // the data folder's drive, which needs no admin rights, unlike manage-bde.
 
-import type { CommandResult } from '../env'
+import type { CommandResult } from '../../../resources/install-plan/env'
 import { WINDOWS_QUERY_TIMEOUT_MS, powershellArgv, psLiteral } from '../access/windows-acl'
 import type { DiskEncryptionCheck, DiskEncryptionState } from './check'
 

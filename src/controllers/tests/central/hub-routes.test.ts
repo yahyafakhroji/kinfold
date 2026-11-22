@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import type { ContextRequest } from '../context/types'
-import { type CentralCore, VIEW_PATHS, hubRoutes } from './hub-routes'
+import type { ContextRequest } from '../../../resources/context/types'
+import { type CentralCore, VIEW_PATHS, hubRoutes } from '../../central/hub-routes'
 
 const context = { deviceId: 'dev-a', deviceName: 'laptop', version: '0.6.0' }
 const remote = { key: 'github.com/acme/app', kind: 'git-remote', displayName: 'app' }

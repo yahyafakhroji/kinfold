@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { SizeStillComputingError, createSizeCache } from './size-cache'
+import { SizeStillComputingError, createSizeCache } from '../../daemon/size-cache'
 
 /** A size read that takes `ms` and answers with how many reads ran so far. */
 function slowRead(ms: number) {

@@ -5,7 +5,7 @@
 
 import { chmodSync, existsSync, lstatSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
+import { DATA_DIR_MODE, DATA_FILE_MODE } from '../../resources/store/data-dir'
 import { PROGRAM_MODE } from './self-install'
 
 export interface ModeChange {

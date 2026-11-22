@@ -7,19 +7,19 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runHook } from '../cli/hook'
-import { seedObservation } from '../context/test-support'
-import { type RunningDaemon, startDaemon } from '../daemon/daemon'
-import { openStore } from '../store/db'
-import { upsertProject, upsertSession } from '../store/writes'
-import { loadOrCreateKey, pairWithHub } from './client'
-import { listDevices, removeDevice } from './devices'
-import { createInvite } from './invites'
-import type { CentralMode } from './mode'
-import { UNREACHABLE_PROMPT_LINE } from './relay'
-import type { Tailscale, TailscaleIdentity } from './tailscale'
+import { runHook } from '../../cli/hook'
+import { seedObservation } from '../../../resources/tests/context/test-support'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import { openStore } from '../../../resources/store/db'
+import { upsertProject, upsertSession } from '../../../resources/store/writes'
+import { loadOrCreateKey, pairWithHub } from '../../central/client'
+import { listDevices, removeDevice } from '../../central/devices'
+import { createInvite } from '../../central/invites'
+import type { CentralMode } from '../../central/mode'
+import { UNREACHABLE_PROMPT_LINE } from '../../central/relay'
+import type { Tailscale, TailscaleIdentity } from '../../central/tailscale'
 
-const FIXTURES = join(import.meta.dir, '../../test/fixtures/claude-code')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures/claude-code')
 const ME: TailscaleIdentity = { userId: '42', loginName: 'me', nodeId: 'nLAPTOP', nodeName: 'laptop', tags: [] }
 const tailscale: Tailscale = {
   self: async () => ({ identity: { ...ME, nodeId: 'nHUB', nodeName: 'mini' }, addresses: ['127.0.0.1'], dnsName: 'mini.tail.ts.net' }),

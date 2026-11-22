@@ -10,7 +10,7 @@
 //     hold hooks.
 //   - GOOSE_MODE=chat: goose still offers its built-in load_skill tool, but
 //     in chat mode answers any call to it with a fixed "skipped" text and
-//     never runs it (crates/goose/src/agents/state_machine/ops_skills.rs). A
+//     never runs it (crates/goose/src/plugins/agents/state_machine/ops_skills.rs). A
 //     tool request in the output still rejects the run.
 // The model names a goose provider: `<provider>/<model>`. Only providers that
 // call a model over HTTP are allowed; one that wraps another agent's CLI
@@ -18,7 +18,7 @@
 // agent's tools where goose's output cannot show them.
 
 import { join } from 'node:path'
-import { isRecord } from '../../contract/event'
+import { isRecord } from '../../../system/contract/event'
 import type { Parsed } from '../../context/types'
 import { checkEndpoint } from '../endpoint'
 import { ObserverError } from '../types'

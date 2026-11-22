@@ -12,7 +12,7 @@
 // and those are wired through their own profiles.
 
 import { join } from 'node:path'
-import { type InstallEnv, platformOf } from '../../install/env'
+import { type InstallEnv, platformOf } from '../../../resources/install-plan/env'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpEntryText, stdioMcpEntry } from '../families/json-agent'
 import { mcpEntryState } from '../families/mcp-entry'
 import { type AgentProfile, type Capabilities, NO_HEADLESS, SHORT_NO_HOOKS } from '../profile'

@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { DEVELOPMENT_VERSION } from '../src/install/self-install'
+import { DEVELOPMENT_VERSION } from '../src/controllers/install/self-install'
 
 export interface ReleasePaths {
   root: string
@@ -68,11 +68,11 @@ export class BuildError extends Error {
 export function releasePaths(root: string): ReleasePaths {
   return {
     root,
-    entry: join(root, 'src', 'cli', 'kinfold.ts'),
-    workers: [join(root, 'src', 'vectors', 'search-worker.ts'), join(root, 'src', 'backup', 'snapshot-worker.ts'), join(root, 'src', 'vectors', 'local-embed-worker.ts'), join(root, 'src', 'workers', 'store-reader-worker.ts'), join(root, 'src', 'workers', 'checkpoint-worker.ts')],
+    entry: join(root, 'src', 'controllers', 'cli', 'kinfold.ts'),
+    workers: [join(root, 'src', 'resources', 'vectors', 'search-worker.ts'), join(root, 'src', 'resources', 'backup', 'snapshot-worker.ts'), join(root, 'src', 'resources', 'vectors', 'local-embed-worker.ts'), join(root, 'src', 'resources', 'workers', 'store-reader-worker.ts'), join(root, 'src', 'resources', 'workers', 'checkpoint-worker.ts')],
     generator: join(root, 'tools', 'gen-embedded.ts'),
-    generated: join(root, 'src', 'runtime', 'embedded.generated.ts'),
-    versionFile: join(root, 'src', 'version.ts'),
+    generated: join(root, 'src', 'system', 'runtime', 'embedded.generated.ts'),
+    versionFile: join(root, 'src', 'system', 'version.ts'),
     dist: join(root, 'dist'),
   }
 }

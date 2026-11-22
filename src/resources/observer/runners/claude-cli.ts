@@ -6,7 +6,7 @@
 
 import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { isRecord } from '../../contract/event'
+import { isRecord } from '../../../system/contract/event'
 import { DATA_DIR_MODE } from '../../store/data-dir'
 import { LEGACY_OBSERVER_ENV_FLAG, OBSERVER_ENV_FLAG } from '../env'
 import { ObserverError, type ObserverPrompt, type ObserverRunner, type RunnerResult } from '../types'

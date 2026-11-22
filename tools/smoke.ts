@@ -17,8 +17,8 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
-import { currentPlatform } from '../src/platform/platform'
-import { detachPlan, spawnDetached } from '../src/update/detach'
+import { currentPlatform } from '../src/system/platform/platform'
+import { detachPlan, spawnDetached } from '../src/controllers/update/detach'
 import { SmokeError, loadSmokePlatform } from './smoke/platform'
 import type { SmokePlatform, SmokeResult, SmokeWorld } from './smoke/platform'
 
@@ -517,7 +517,7 @@ async function probeCompiledStatus(ctx: Run): Promise<void> {
     await ctx.kinfold(probe, ['status'], undefined, PROBE_TIMEOUT_MS)
   } catch (error: unknown) {
     if (!(error instanceof SmokeError) || error.step !== 'timeout') throw error
-    throw new SmokeError('compiled', `status in an empty home did not finish in ${PROBE_TIMEOUT_MS / 1000} s; the compiled program never finished loading its modules (a module that imports src/cli/kinfold.ts spins it)\n${error.message}`)
+    throw new SmokeError('compiled', `status in an empty home did not finish in ${PROBE_TIMEOUT_MS / 1000} s; the compiled program never finished loading its modules (a module that imports src/controllers/cli/kinfold.ts spins it)\n${error.message}`)
   }
 }
 

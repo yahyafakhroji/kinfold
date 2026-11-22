@@ -1,14 +1,14 @@
 // What every agent is described by. Types only plus two pure formatters, so the
 // hook path can import this without pulling in installer code.
 
-import type { KnownHost } from '../contract/event'
-import type { WiringState } from '../install/claude-hooks'
-import type { HostDetection, Semver } from '../install/detectors'
-import type { InstallEnv } from '../install/env'
-import type { Action } from '../install/plan'
-import type { ObserverProvider } from '../observer/types'
-import type { OsName } from '../platform/platform'
-import type { EmbeddedAssets } from '../runtime/embedded'
+import type { KnownHost } from '../../system/contract/event'
+import type { WiringState } from '../../resources/install-plan/claude-hooks'
+import type { HostDetection, Semver } from '../../resources/install-plan/detectors'
+import type { InstallEnv } from '../../resources/install-plan/env'
+import type { Action } from '../../resources/install-plan/plan'
+import type { ObserverProvider } from '../../resources/observer/types'
+import type { OsName } from '../../system/platform/platform'
+import type { EmbeddedAssets } from '../../system/runtime/embedded'
 
 export type AgentId = KnownHost
 export type AgentFamily = 'claude-style' | 'gemini-style' | 'opencode-plugin' | 'command-hooks' | 'mcp-only' | 'custom'

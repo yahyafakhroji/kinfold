@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openTestDatabase } from '../sqlite/test-support'
-import { openStore } from './db'
-import { LATEST_SCHEMA_VERSION, MIGRATIONS } from './schema'
-import { promptTextHash } from './summary-share'
+import { openStore } from '../../store/db'
+import { LATEST_SCHEMA_VERSION, MIGRATIONS } from '../../store/schema'
+import { promptTextHash } from '../../store/summary-share'
 
 let root: string
 beforeEach(() => {

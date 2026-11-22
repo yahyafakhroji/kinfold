@@ -3,7 +3,7 @@
 // prompt into text; parsing, evidence and storage stay in the daemon, so a
 // provider swap never changes what gets stored.
 
-import type { EvidenceStrength } from '../evidence'
+import type { EvidenceStrength } from '../../system/evidence'
 
 export const OBSERVATION_TYPES = ['discovery', 'decision', 'change', 'bugfix', 'feature', 'refactor', 'problem'] as const
 export type ObservationType = (typeof OBSERVATION_TYPES)[number]

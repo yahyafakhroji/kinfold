@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { NOT_LINKED_LINE, unreachableRefusal } from '../../src/wsl/entry'
+import { NOT_LINKED_LINE, unreachableRefusal } from '../../src/controllers/wsl/entry'
 import { SmokeError } from './platform'
 import { distroArgv, expectNatRefusal, expectNotLinked, hookPayload, sessionEventCount } from './wsl'
 

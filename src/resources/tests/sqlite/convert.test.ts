@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { seedObservation } from '../context/test-support'
 import { T0, seedSession } from '../observer/test-support'
-import { openStore } from '../store/db'
-import { upsertProject } from '../store/writes'
-import { ConvertError, backupPath, convertStore } from './convert'
-import { type DbKeyStore, NO_DB_KEYS, newDbKey } from './keys'
-import { fileState, maintenancePath, openEncrypted, openPlain, openStoreFile } from './open'
-import { posixOnly } from '../../test/platform-guards'
+import { openStore } from '../../store/db'
+import { upsertProject } from '../../store/writes'
+import { ConvertError, backupPath, convertStore } from '../../sqlite/convert'
+import { type DbKeyStore, NO_DB_KEYS, newDbKey } from '../../sqlite/keys'
+import { fileState, maintenancePath, openEncrypted, openPlain, openStoreFile } from '../../sqlite/open'
+import { posixOnly } from '../../../../test/platform-guards'
 
 let dataDir: string
 let path: string

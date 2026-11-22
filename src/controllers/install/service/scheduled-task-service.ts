@@ -11,13 +11,13 @@ import { join } from 'node:path'
 import { DEFAULT_PORT, parsePortValue } from '../../daemon/port'
 import { WINDOWS_QUERY_TIMEOUT_MS, powershellArgv, psLiteral } from '../access/windows-acl'
 import { checkHealth, readDaemonInfo } from '../daemon-client'
-import { decodeText } from '../files'
-import type { CommandResult, InstallEnv } from '../env'
-import { HEALTH_WAIT_MS } from '../plan'
+import { decodeText } from '../../../resources/install-plan/files'
+import type { CommandResult, InstallEnv } from '../../../resources/install-plan/env'
+import { HEALTH_WAIT_MS } from '../../../resources/install-plan/plan'
 import { windowsJoin, windowsSystemTool } from '../windows-system-path'
 import type { ServiceControl, ServiceStep } from './control'
 import { SERVICE_PATH_FILE, servicePathContent, servicePathFor } from './service-path'
-import { errorCode } from '../../errors'
+import { errorCode } from '../../../system/errors'
 
 export const TASK_NAME = 'KinfoldDaemon'
 /** In <LOCALAPPDATA>\Kinfold: outside the data folder, so WSL can find it without knowing that folder. */
@@ -28,7 +28,7 @@ const SCHTASKS_TIMEOUT_MS = 15_000
 const ACTIVE_TASK_STATES: readonly number[] = [2, 4]
 const NO_USERNAME = 'USERNAME is not set, so the task cannot name its user'
 /** The checkout's CLI entry, which takes `--data-dir` and `daemon` the way the program does. */
-const CHECKOUT_CLI = 'src/cli/kinfold.ts'
+const CHECKOUT_CLI = 'src/controllers/cli/kinfold.ts'
 
 export interface TaskXmlInput {
   user: string

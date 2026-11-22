@@ -6,10 +6,10 @@
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { newDbKey } from '../sqlite/keys'
-import { openEncrypted } from '../sqlite/open'
-import { DB_FILE, enforceFileMode, ensureDataDir } from '../store/data-dir'
-import { openStore } from '../store/db'
+import { newDbKey } from '../../sqlite/keys'
+import { openEncrypted } from '../../sqlite/open'
+import { DB_FILE, enforceFileMode, ensureDataDir } from '../../store/data-dir'
+import { openStore } from '../../store/db'
 
 export type StoreKind = 'encrypted' | 'plain'
 

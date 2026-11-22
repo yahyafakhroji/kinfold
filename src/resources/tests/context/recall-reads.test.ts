@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { type TempStore, openTempStore } from '../observer/test-support'
-import { upsertProject, upsertSession } from '../store/writes'
-import { chooseTerms, recallKeyword } from './recall-reads'
-import { TERM_COUNT_TTL_MS, termDocCounts } from '../store/related-store'
+import { upsertProject, upsertSession } from '../../store/writes'
+import { chooseTerms, recallKeyword } from '../../context/recall-reads'
+import { TERM_COUNT_TTL_MS, termDocCounts } from '../../store/related-store'
 import { seedObservation } from './test-support'
 
 const CWD = '/work/terms-repo'

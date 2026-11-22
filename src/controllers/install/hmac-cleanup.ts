@@ -21,15 +21,15 @@
 
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { HMAC_LEGACY_REF, HMAC_MASTER_REF, isHexKey } from '../secrets/hmac-keys'
-import type { KeyStore } from '../secrets/key-store'
-import { DATA_FILE_MODE, HMAC_KEY_FILE } from '../store/data-dir'
-import { listSubKeyEpochs, subKeyDir } from '../store/hmac-key'
+import { HMAC_LEGACY_REF, HMAC_MASTER_REF, isHexKey } from '../../resources/secrets/hmac-keys'
+import type { KeyStore } from '../../resources/secrets/key-store'
+import { DATA_FILE_MODE, HMAC_KEY_FILE } from '../../resources/store/data-dir'
+import { listSubKeyEpochs, subKeyDir } from '../../resources/store/hmac-key'
 import { checkHealth, readDaemonInfo } from './daemon-client'
-import { type InstallEnv, errorMessage } from './env'
-import { existingBackups, writeFileAtomic } from './files'
+import { type InstallEnv, errorMessage } from '../../resources/install-plan/env'
+import { existingBackups, writeFileAtomic } from '../../resources/install-plan/files'
 import { keyStoreOf, noStoreWord, secretDeleteAction } from './key-store-choice'
-import type { Action, StepNote } from './plan'
+import type { Action, StepNote } from '../../resources/install-plan/plan'
 
 export function backupRemovalSummary(storeLabel: string): string {
   return `plain-text backup of epoch 0; the value is in ${storeLabel} entry ${HMAC_LEGACY_REF}`

@@ -1,5 +1,5 @@
 // Loading sqlite-vec into the daemon. Every process opens the store
-// through sqlite3mc (src/sqlite/), which allows extension loading, so
+// through sqlite3mc (src/resources/sqlite/), which allows extension loading, so
 // the Homebrew SQLite swap vector search once needed on macOS is gone. The
 // pinned vec0 member from the data dir is hashed against the release and
 // loaded into the daemon's connection and its search worker's, never into a
@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { currentPlatform, type OsName, osOf } from '../platform/platform'
+import { currentPlatform, type OsName, osOf } from '../../system/platform/platform'
 import type { Database } from '../sqlite/types'
 import { vec0AssetFor } from './vec0-release'
 

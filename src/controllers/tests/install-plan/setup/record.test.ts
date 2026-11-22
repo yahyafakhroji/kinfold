@@ -1,11 +1,11 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { envName } from '../../env-names'
-import { runPlan } from '../plan'
-import { type FakeWorld, createWorld } from '../test-support'
-import { AGENT_HOME_VARS, INSTALL_RECORD_FILE, type InstallRecord, agentHomesOf, applyAgentHomes, currentChannel, installRecordAction, readInstallRecord, setAutoUpdate, setUpdateSettings, updateLevel, writeInstallRecord } from './record'
-import { posixOnly } from '../../../test/platform-guards'
+import { envName } from '../../../../system/env-names'
+import { runPlan } from '../../../../resources/install-plan/plan'
+import { type FakeWorld, createWorld } from '../../install/test-support'
+import { AGENT_HOME_VARS, INSTALL_RECORD_FILE, type InstallRecord, agentHomesOf, applyAgentHomes, currentChannel, installRecordAction, readInstallRecord, setAutoUpdate, setUpdateSettings, updateLevel, writeInstallRecord } from '../../../../resources/install-plan/setup/record'
+import { posixOnly } from '../../../../../test/platform-guards'
 
 let world: FakeWorld | null = null
 afterEach(async () => {

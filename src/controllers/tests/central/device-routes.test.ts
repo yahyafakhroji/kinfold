@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import type { Parsed } from '../context/types'
-import { HUB_ONLY_ERROR, deviceRoute, isHubOnly } from './device-routes'
-import type { Relay } from './relay'
+import type { Parsed } from '../../../resources/context/types'
+import { HUB_ONLY_ERROR, deviceRoute, isHubOnly } from '../../central/device-routes'
+import type { Relay } from '../../central/relay'
 
 function fakeRelay(calls: string[]): Relay {
   return {

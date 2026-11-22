@@ -3,12 +3,12 @@
 // recorded even when the request fails, so a broken network or a rate limit
 // is retried in a day, not on every tick.
 
-import { readInstallRecord } from '../install/setup/record'
+import { readInstallRecord } from '../../resources/install-plan/setup/record'
 import { betaChannelOn, updatesEnabled } from './enabled'
 import { type ReleaseInfo, releaseFromGithub } from './release'
 import { mergeUpdateState, readUpdateState } from './state'
 import { compareVersions, isPatchUpdate } from './version-order'
-import { readCappedText } from '../http/capped'
+import { readCappedText } from '../../system/http/capped'
 
 export const LATEST_RELEASE_URL = 'https://api.github.com/repos/yahyafakhroji/kinfold/releases/latest'
 /** The beta channel's one URL: /releases/latest never names a prerelease. */

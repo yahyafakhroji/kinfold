@@ -7,9 +7,9 @@ import { afterAll, describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readEnv } from '../env-names'
+import { readEnv } from '../../../system/env-names'
 import { openTestDatabase } from './test-support'
-import type { Database } from './types'
+import type { Database } from '../../sqlite/types'
 
 const dir = mkdtempSync(join(tmpdir(), 'sam-sqlite-contract-'))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))

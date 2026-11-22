@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
-import type { PlatformInfo } from '../../platform/platform'
-import { NO_DB_KEYS, dbKeyStoreOf } from '../../sqlite/keys'
-import { type KeyStoreDeps, type KeyStoreKind, type KeyStoreModule, credentialProviderOf } from '../key-store'
-import { KEY_STORE_MODULES, candidateKeyStores, chooseKeyStore, openKeyStore, probeKeyStores } from './select'
+import type { PlatformInfo } from '../../../../system/platform/platform'
+import { NO_DB_KEYS, dbKeyStoreOf } from '../../../sqlite/keys'
+import { type KeyStoreDeps, type KeyStoreKind, type KeyStoreModule, credentialProviderOf } from '../../../secrets/key-store'
+import { KEY_STORE_MODULES, candidateKeyStores, chooseKeyStore, openKeyStore, probeKeyStores } from '../../../secrets/stores/select'
 
 const MAC: PlatformInfo = { os: 'macos', wsl: false, node: 'darwin' }
 const LINUX: PlatformInfo = { os: 'linux', wsl: false, node: 'linux' }

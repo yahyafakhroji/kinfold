@@ -10,13 +10,13 @@
 // mistake; and a stored fingerprint under the other key scheme (hmac.key
 // before the migration, the master after) is re-baselined, not a change.
 
-import { clearBackoff, providerBackoffs } from '../observer/backoff'
-import { credentialRefFor, resolveObserverSettings, settingsFingerprint } from '../observer/settings'
-import type { ObserverSettings } from '../observer/types'
-import { type CredentialProvider, isSystemCredentialRef } from '../secrets/credentials'
-import { type FingerprintKey, NO_CREDENTIAL_NEEDED, credentialFingerprint, fingerprintScheme } from '../secrets/fingerprint'
-import type { Database } from '../sqlite/types'
-import { type HostFingerprints, hostsWithFailedEvents, readFingerprints, resetExhaustedForHost, writeFingerprints } from '../store/observer-reset'
+import { clearBackoff, providerBackoffs } from '../../resources/observer/backoff'
+import { credentialRefFor, resolveObserverSettings, settingsFingerprint } from '../../resources/observer/settings'
+import type { ObserverSettings } from '../../resources/observer/types'
+import { type CredentialProvider, isSystemCredentialRef } from '../../resources/secrets/credentials'
+import { type FingerprintKey, NO_CREDENTIAL_NEEDED, credentialFingerprint, fingerprintScheme } from '../../resources/secrets/fingerprint'
+import type { Database } from '../../resources/sqlite/types'
+import { type HostFingerprints, hostsWithFailedEvents, readFingerprints, resetExhaustedForHost, writeFingerprints } from '../../resources/store/observer-reset'
 
 export const DEFAULT_RESET_CHECK_MS = 30_000
 /** How long a credential's fingerprint is trusted before the key store is asked again. On macOS each ask spawns `security`, on the thread that answers hooks. */

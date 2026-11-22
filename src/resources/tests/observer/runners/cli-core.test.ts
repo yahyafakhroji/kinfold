@@ -3,11 +3,11 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { type TempStore, openTempStore } from '../test-support'
-import { ObserverError, type ObserverPrompt } from '../types'
-import { type SpawnFn, type SpawnRequest, spawnProcess } from './claude-cli'
-import { type CliAdapter, type CliRunContext, RUNS_DIR, cliEnv, createCliObserverRunner } from './cli-core'
+import { ObserverError, type ObserverPrompt } from '../../../observer/types'
+import { type SpawnFn, type SpawnRequest, spawnProcess } from '../../../observer/runners/claude-cli'
+import { type CliAdapter, type CliRunContext, RUNS_DIR, cliEnv, createCliObserverRunner } from '../../../observer/runners/cli-core'
 import { fakeCliAdapter, recordingSpawn } from './cli-test-support'
-import { posixOnly } from '../../../test/platform-guards'
+import { posixOnly } from '../../../../../test/platform-guards'
 
 let temp: TempStore
 beforeEach(() => {

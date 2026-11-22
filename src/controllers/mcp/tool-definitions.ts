@@ -1,6 +1,6 @@
 // What tools/list returns: names, the descriptions an agent reads to decide
 // how to recall (search first, then fetch by id), and JSON Schemas whose caps
-// match src/mcp/args.ts. All three tools are read-only.
+// match src/controllers/mcp/args.ts. All three tools are read-only.
 
 import { EVIDENCE_FILTERS, IDS_MAX, SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, TIMELINE_DEPTH_DEFAULT, TIMELINE_DEPTH_MAX } from './args'
 

@@ -6,11 +6,11 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { parseContextResult } from '../context/types'
-import { readInstallRecord } from '../install/setup/record'
-import { bannerNotice, pendingNotice, takeNotice, updateCommand, userMessage } from './notice'
-import { STAGE_DIR } from './stage'
-import { type UpdateState, writeUpdateState } from './state'
+import { parseContextResult } from '../../../resources/context/types'
+import { readInstallRecord } from '../../../resources/install-plan/setup/record'
+import { bannerNotice, pendingNotice, takeNotice, updateCommand, userMessage } from '../../update/notice'
+import { STAGE_DIR } from '../../update/stage'
+import { type UpdateState, writeUpdateState } from '../../update/state'
 
 let dir: string
 beforeEach(() => {

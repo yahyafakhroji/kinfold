@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { launchdPath } from './launch-agent'
-import { posixOnly } from '../../test/platform-guards'
+import { launchdPath } from '../../install/launch-agent'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const BUN = '/opt/bun/bin/bun'
 const SYSTEM = '/usr/bin:/bin:/usr/sbin:/sbin'

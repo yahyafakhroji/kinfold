@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { CredentialProvider } from '../../secrets/credentials'
+import type { CredentialProvider } from '../../../secrets/credentials'
 import { type TempStore, openTempStore } from '../test-support'
-import { ObserverError, type ObserverPrompt, type ObserverSettings } from '../types'
-import { createCliObserverRunner } from './cli-core'
+import { ObserverError, type ObserverPrompt, type ObserverSettings } from '../../../observer/types'
+import { createCliObserverRunner } from '../../../observer/runners/cli-core'
 import { recordingSpawn } from './cli-test-support'
-import { CODEX_MIN_VERSION, codexAdapter, tomlBasicString } from './codex-cli'
-import { createCliRunner, createRunner } from '.'
-import { posixOnly } from '../../../test/platform-guards'
+import { CODEX_MIN_VERSION, codexAdapter, tomlBasicString } from '../../../observer/runners/codex-cli'
+import { createCliRunner, createRunner } from '../../../observer/runners'
+import { posixOnly } from '../../../../../test/platform-guards'
 
 let temp: TempStore
 beforeEach(() => {

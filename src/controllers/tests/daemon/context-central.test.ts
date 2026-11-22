@@ -3,11 +3,11 @@
 // handed out, since it is about the hub's program, not the device's.
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { seedObservation } from '../context/test-support'
-import type { ContextRequest } from '../context/types'
-import { type TempStore, T0, openTempStore } from '../observer/test-support'
-import { upsertProject, upsertSession } from '../store/writes'
-import { contextHandler } from './context-route'
+import { seedObservation } from '../../../resources/tests/context/test-support'
+import type { ContextRequest } from '../../../resources/context/types'
+import { type TempStore, T0, openTempStore } from '../../../resources/tests/observer/test-support'
+import { upsertProject, upsertSession } from '../../../resources/store/writes'
+import { contextHandler } from '../../daemon/context-route'
 
 let temp: TempStore
 beforeEach(() => {

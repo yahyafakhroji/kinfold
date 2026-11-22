@@ -1,7 +1,7 @@
 // Kilo Code loads this file. Its default export must be { id, server }, and
 // the file exports nothing more: the plugin body lives in kilo-plugin.ts.
 
-import { resolveDataDir } from '../store/data-dir'
+import { resolveDataDir } from '../../resources/store/data-dir'
 import { createKiloPlugin } from './kilo-plugin'
 
 // The folder comes from, in order: the constant an installed program writes

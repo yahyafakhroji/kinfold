@@ -22,8 +22,8 @@
 //     still gets its context.
 // A hook that fails, times out or prints nothing adds nothing.
 
-import type { EntryCommand } from '../../install/entry'
-import { SHIM_MARKER } from '../../names'
+import type { EntryCommand } from '../../../resources/install-plan/entry'
+import { SHIM_MARKER } from '../../../system/names'
 
 /** How long a handler waits for the hook; the hook's own context budget is 300 ms. */
 const HOOK_TIMEOUT_MS = 5000

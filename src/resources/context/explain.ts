@@ -4,7 +4,7 @@
 // runs only when the daemon records the trace, after the hook has its answer,
 // so none of its work (the title lookup included) is on the prompt's clock.
 
-import type { CandidateSource, SearchTrace, TraceCandidate } from '../debug/trace'
+import type { CandidateSource, SearchTrace, TraceCandidate } from '../../system/debug/trace'
 import type { Database } from '../sqlite/types'
 import { titlesFor } from '../store/context-store'
 import { oneLine } from './pack'

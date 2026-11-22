@@ -6,8 +6,8 @@
 // release that is not the staged one; the updater re-checks the program
 // against SHA256SUMS before it installs it.
 
-import { readInstallRecord, setUpdateSettings, updateLevel } from '../install/setup/record'
-import type { OsName } from '../platform/platform'
+import { readInstallRecord, setUpdateSettings, updateLevel } from '../../resources/install-plan/setup/record'
+import type { OsName } from '../../system/platform/platform'
 import { detachPlan, spawnDetached } from '../update/detach'
 import { autoUpdateSetting, updatesEnabled } from '../update/enabled'
 import { type InstallRun, readInstallRun, writeInstallRun } from '../update/install-run'

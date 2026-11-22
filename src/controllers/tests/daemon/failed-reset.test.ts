@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from '../observer/test-support'
-import type { CredentialProvider } from '../secrets/credentials'
-import { LEGACY_FINGERPRINT_SCHEME, MASTER_FINGERPRINT_SCHEME } from '../secrets/fingerprint'
-import { MAX_OBSERVER_ATTEMPTS, finishRun, startRun } from '../store/observer-store'
-import { providerBackoff } from '../observer/backoff'
-import { startDaemon } from './daemon'
-import { BACKOFF_HOSTS_WINDOW_MS, CREDENTIAL_RECHECK_MS, checkFailedResets, createResetMemo } from './failed-reset'
+import { type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from '../../../resources/tests/observer/test-support'
+import type { CredentialProvider } from '../../../resources/secrets/credentials'
+import { LEGACY_FINGERPRINT_SCHEME, MASTER_FINGERPRINT_SCHEME } from '../../../resources/secrets/fingerprint'
+import { MAX_OBSERVER_ATTEMPTS, finishRun, startRun } from '../../../resources/store/observer-store'
+import { providerBackoff } from '../../../resources/observer/backoff'
+import { startDaemon } from '../../daemon/daemon'
+import { BACKOFF_HOSTS_WINDOW_MS, CREDENTIAL_RECHECK_MS, checkFailedResets, createResetMemo } from '../../daemon/failed-reset'
 
 const HMAC_KEY = 'ef'.repeat(32)
 const LEGACY_KEY = { key: HMAC_KEY, scheme: LEGACY_FINGERPRINT_SCHEME }

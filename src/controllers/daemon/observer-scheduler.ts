@@ -11,12 +11,12 @@
 // An ended session that gets new events is live again: the old rule made each
 // of those events its own run (replay: 257 of 511 runs).
 
-import { envName } from '../env-names'
-import type { BatchOutcome } from '../observer/process'
-import type { Database } from '../sqlite/types'
-import { type QueueStats, endIdleSessions, queueStats } from '../store/observer-store'
-import { oldestPendingIngest } from '../store/schedule-reads'
-import { errorName } from '../errors'
+import { envName } from '../../system/env-names'
+import type { BatchOutcome } from '../../resources/observer/process'
+import type { Database } from '../../resources/sqlite/types'
+import { type QueueStats, endIdleSessions, queueStats } from '../../resources/store/observer-store'
+import { oldestPendingIngest } from '../../resources/store/schedule-reads'
+import { errorName } from '../../system/errors'
 
 export interface ObserverScheduleConfig {
   maxGlobal: number

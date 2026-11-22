@@ -3,8 +3,8 @@
 // request that arrives while the store is closed does, and not 500.
 
 import { expect, test } from 'bun:test'
-import { createDashboardAuth } from '../dashboard/auth'
-import { type ServerDeps, handleRequest } from './server'
+import { createDashboardAuth } from '../../dashboard/auth'
+import { type ServerDeps, handleRequest } from '../../daemon/server'
 
 const PORT = 37_998
 const TOKEN = 'b'.repeat(64)

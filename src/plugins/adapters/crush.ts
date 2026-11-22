@@ -6,7 +6,7 @@
 // only the common fields, no prompt text, so it is not recorded as a prompt.
 // Interrupt and StopFailure end a turn as TurnEnd does.
 
-import type { EventKind, NormalizedEvent } from '../contract/event'
+import type { EventKind, NormalizedEvent } from '../../system/contract/event'
 import { normalizeClaudeStyle } from './families/claude-style-parse'
 import type { AdapterContext } from './context'
 

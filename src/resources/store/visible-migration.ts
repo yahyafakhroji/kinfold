@@ -1,5 +1,5 @@
 // The TypeScript half of migration v12, in the same transaction as its SQL
-// (src/store/db.ts). The agent's reply used to live only in a turn_end event's
+// (src/resources/store/db.ts). The agent's reply used to live only in a turn_end event's
 // payload, under the shorter events retention; this copies every reply still
 // readable there next to its prompt. A payload retention already replaced has
 // no reply to copy, and one that is not JSON is skipped rather than failing

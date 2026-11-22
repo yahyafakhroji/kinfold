@@ -4,7 +4,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { type DaemonOptions, type RunningDaemon, startDaemon } from '../daemon/daemon'
+import { type DaemonOptions, type RunningDaemon, startDaemon } from '../../daemon/daemon'
 
 export interface DashboardRig {
   daemon: RunningDaemon

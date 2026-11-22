@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
-import { AUTO_STATE_FILE } from '../update/auto-state'
-import { openStore } from '../store/db'
+import { AUTO_STATE_FILE } from '../../update/auto-state'
+import { openStore } from '../../../resources/store/db'
 
 let root: string
 let dataDir: string

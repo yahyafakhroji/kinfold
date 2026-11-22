@@ -21,6 +21,6 @@
   "include": [
     "src",
     "vite.config.ts",
-    "dom-tests.test.ts"
+    "../tests/dashboard"
   ]
 }

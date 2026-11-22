@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { agentName, ago, bytes, deviceName, measuredSentence, savedLabel, tokens, when } from './format'
+import { agentName, ago, bytes, deviceName, measuredSentence, savedLabel, tokens, when } from '../../../../dashboard/src/lib/format'
 
 test('token figures are rounded to what a reader takes in', () => {
   expect([tokens(181_937), tokens(14_049), tokens(3_215), tokens(412)]).toEqual(['182,000', '14,000', '3,220', '412'])
@@ -46,7 +46,7 @@ test('devices and sizes', () => {
 test('every agent Kinfold has a profile for reads by its own name, not its id', async () => {
   const { readdirSync } = await import('node:fs')
   const { join } = await import('node:path')
-  const ids = readdirSync(join(import.meta.dir, '../../../../agents/profiles')).filter((name) => /^[a-z-]+\.ts$/.test(name)).map((name) => name.slice(0, -3))
+  const ids = readdirSync(join(import.meta.dir, '../../../../../plugins/agents/profiles')).filter((name) => /^[a-z-]+\.ts$/.test(name)).map((name) => name.slice(0, -3))
   expect(ids.length).toBeGreaterThan(10)
   expect(ids.filter((id) => agentName(id) === id)).toEqual([])
 })

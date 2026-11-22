@@ -1,4 +1,4 @@
-// Read-only input for the scheduler replay (src/daemon/replay.ts): the event
+// Read-only input for the scheduler replay (src/controllers/daemon/replay.ts): the event
 // timeline without payloads, and the stored durations of succeeded observer
 // runs per host. Timestamps and kinds only, so a replay never sees content.
 

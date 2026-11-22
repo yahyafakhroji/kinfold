@@ -1,24 +1,24 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { runHook } from '../cli/hook'
-import { T0, seedSession } from '../observer/test-support'
-import { seedObservation } from '../context/test-support'
-import { DB_KEY_REF } from '../secrets/credentials'
-import { recordMismatchMessage } from '../secrets/key-store-record'
-import { NO_DB_KEYS } from '../sqlite/keys'
-import { maintenancePath } from '../sqlite/open'
-import { openStore } from '../store/db'
-import { upsertProject } from '../store/writes'
-import { runKeyCommand } from '../install/encrypt'
-import { type InstallEnv, platformOf } from '../install/env'
-import { EXIT_FAILED, EXIT_OK } from '../install/install'
-import { serviceFor } from '../install/service/control'
-import { SystemdUserService } from '../install/service/systemd-service'
+import { runHook } from '../../cli/hook'
+import { T0, seedSession } from '../../../resources/tests/observer/test-support'
+import { seedObservation } from '../../../resources/tests/context/test-support'
+import { DB_KEY_REF } from '../../../resources/secrets/credentials'
+import { recordMismatchMessage } from '../../../resources/secrets/key-store-record'
+import { NO_DB_KEYS } from '../../../resources/sqlite/keys'
+import { maintenancePath } from '../../../resources/sqlite/open'
+import { openStore } from '../../../resources/store/db'
+import { upsertProject } from '../../../resources/store/writes'
+import { runKeyCommand } from '../../install/encrypt'
+import { type InstallEnv, platformOf } from '../../../resources/install-plan/env'
+import { EXIT_FAILED, EXIT_OK } from '../../install/install'
+import { serviceFor } from '../../install/service/control'
+import { SystemdUserService } from '../../install/service/systemd-service'
 import { type FakeWorld, recordingKeyStore, snapshotTree } from '../install/test-support'
-import { NOT_LINKED_LINE, wslInstall, wslStatus, wslUninstall } from './entry'
-import { WSL_LINK_FILE, readWslLink, wslHomeDir } from './link'
-import { LINKED_SERVICE_LABEL, LINKED_SERVICE_REFUSAL, WslLinkedService } from './linked-service'
+import { NOT_LINKED_LINE, wslInstall, wslStatus, wslUninstall } from '../../wsl/entry'
+import { WSL_LINK_FILE, readWslLink, wslHomeDir } from '../../wsl/link'
+import { LINKED_SERVICE_LABEL, LINKED_SERVICE_REFUSAL, WslLinkedService } from '../../wsl/linked-service'
 import { PORT, type Stand, type StandOptions, WIN_DATA_DIR, stand as makeStand } from './test-support'
 
 const worlds: FakeWorld[] = []
@@ -134,7 +134,7 @@ test('--data-dir in WSL asks for a separate memory', async () => {
 
 test('a linked hook spools into the Windows folder', async () => {
   const s = await linked()
-  const input = readFileSync(join(import.meta.dir, '../../test/fixtures/claude-code/post-tool-use.bash.json'), 'utf8')
+  const input = readFileSync(join(import.meta.dir, '../../../../test/fixtures/claude-code/post-tool-use.bash.json'), 'utf8')
   const errors: string[] = []
   await runHook(input, s.dataDir, (line) => errors.push(line), { NODE_ENV: 'test', KINFOLD_DB_KEYSTORE: 'none', HOME: s.world.home })
   expect(readdirSync(join(s.dataDir, 'spool')).filter((name) => name.endsWith('.json'))).toHaveLength(1)

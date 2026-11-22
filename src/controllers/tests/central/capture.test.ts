@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { FAKE_SECRETS } from '../../test/fixtures/secrets'
-import { type NormalizedEvent, SCHEMA_VERSION } from '../contract/event'
-import { ulid } from '../contract/ulid'
-import { type TempStore, openTempStore } from '../observer/test-support'
-import { upsertProject, upsertSession } from '../store/writes'
-import { MAX_CAPTURE_EVENTS, captureHandler, sessionWritable } from './hub-capture'
-import { centralProjectKey, parseDeviceProject } from './project-key'
-import { registerProject } from '../store/project-merge'
+import { FAKE_SECRETS } from '../../../../test/fixtures/secrets'
+import { type NormalizedEvent, SCHEMA_VERSION } from '../../../system/contract/event'
+import { ulid } from '../../../system/contract/ulid'
+import { type TempStore, openTempStore } from '../../../resources/tests/observer/test-support'
+import { upsertProject, upsertSession } from '../../../resources/store/writes'
+import { MAX_CAPTURE_EVENTS, captureHandler, sessionWritable } from '../../central/hub-capture'
+import { centralProjectKey, parseDeviceProject } from '../../central/project-key'
+import { registerProject } from '../../../resources/store/project-merge'
 
 let temp: TempStore
 beforeEach(() => {

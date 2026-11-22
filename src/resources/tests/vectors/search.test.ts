@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { type TempStore, openTempStore } from '../observer/test-support'
-import { EmbedError } from './embedder'
-import { MAX_DEADLINE_MS, MAX_K, MAX_QUERY_CHARS, createSemanticSearch, parseSemanticRequest } from './search'
+import { EmbedError } from '../../vectors/embedder'
+import { MAX_DEADLINE_MS, MAX_K, MAX_QUERY_CHARS, createSemanticSearch, parseSemanticRequest } from '../../vectors/search'
 import { fakeEmbedder } from './test-support'
 
 let temp: TempStore

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { runKinfold } from '../cli/kinfold'
-import { USAGE } from '../install/args'
-import { type InstallRecord, setCentralMode, writeInstallRecord } from '../install/setup/record'
+import { runKinfold } from '../../cli/kinfold'
+import { USAGE } from '../../install/args'
+import { type InstallRecord, setCentralMode, writeInstallRecord } from '../../../resources/install-plan/setup/record'
 import { type FakeWorld, createWorld } from '../install/test-support'
 
 const RECORD: InstallRecord = { channel: 'curl', updateCheck: true, autoUpdate: true, autoUpdateIntro: false, agentHomes: {}, firstInstalledAt: 1 }

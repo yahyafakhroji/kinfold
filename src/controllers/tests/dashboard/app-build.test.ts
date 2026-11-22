@@ -8,7 +8,7 @@ import { beforeAll, expect, test } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
-import { APP_ASSETS, APP_DIST, APP_PAGES, ASSET_NAME, ensureAppBuilt, listAssets } from './app-files'
+import { APP_ASSETS, APP_DIST, APP_PAGES, ASSET_NAME, ensureAppBuilt, listAssets } from '../../dashboard/app-files'
 
 /** JS and CSS together, compressed: the design's ceiling for the whole dashboard. */
 export const BUNDLE_BUDGET_GZIP_BYTES = 400 * 1024

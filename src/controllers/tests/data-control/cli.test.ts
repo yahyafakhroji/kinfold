@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { templateStore } from '../backup/store-templates.test-support'
+import { templateStore } from '../../../resources/tests/backup/store-templates.test-support'
 import { fakeTerminal } from '../install/prompt/fake-terminal'
-import { runKinfold } from '../cli/kinfold'
-import { startDaemon } from '../daemon/daemon'
-import { parseArgs, parseDataArgs } from '../install/args'
-import { EXIT_USAGE } from '../install/install'
+import { runKinfold } from '../../cli/kinfold'
+import { startDaemon } from '../../daemon/daemon'
+import { parseArgs, parseDataArgs } from '../../install/args'
+import { EXIT_USAGE } from '../../install/install'
 import { type FakeWorld, createWorld } from '../install/test-support'
-import { planFor } from './cli'
+import { planFor } from '../../data-control/cli'
 
 let world: FakeWorld
 beforeEach(() => {
@@ -137,7 +137,7 @@ test('on a terminal each data command is one titled section, with the next comma
 })
 
 test('only a finding that is still pending is flagged in the list', async () => {
-  const { rowOf } = await import('./cli')
+  const { rowOf } = await import('../../data-control/cli')
   expect(rowOf('  #4 events 12 payload aws-key v2 x1 pending')).toEqual({ mark: 'warn', text: '#4 events 12 payload aws-key v2 x1 pending' })
   expect(rowOf('  #5 events 13 payload aws-key v2 x1 redacted').mark).toBe('none')
   expect(rowOf('  #6 prompts 2 - github-token v1 x3 purged').mark).toBe('none')
@@ -405,7 +405,7 @@ test('kinfold size lists the store by part, and past the threshold names the lar
 })
 
 test('the threshold row and the line naming the largest part are flagged', async () => {
-  const { rowOf } = await import('./cli')
+  const { rowOf } = await import('../../data-control/cli')
   expect(rowOf('warning threshold 1000 B: OVER').mark).toBe('warn')
   expect(rowOf('warning: replies are 61% of 2.0 KB; set prompts retention to trim them').mark).toBe('warn')
   expect(rowOf('warning threshold 1000 B: ok').mark).toBe('none')

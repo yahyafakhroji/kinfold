@@ -2,11 +2,11 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ingestResolved } from '../daemon/ingest'
-import { listActivity } from './activity-store'
-import { recordInjection } from './context-store'
-import { type Store, openStore } from './db'
-import { LOCAL_DEVICE, upsertProject, upsertSession } from './writes'
+import { ingestResolved } from '../../daemon/ingest'
+import { listActivity } from '../../../resources/store/activity-store'
+import { recordInjection } from '../../../resources/store/context-store'
+import { type Store, openStore } from '../../../resources/store/db'
+import { LOCAL_DEVICE, upsertProject, upsertSession } from '../../../resources/store/writes'
 
 let root: string
 let store: Store

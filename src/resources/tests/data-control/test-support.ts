@@ -4,11 +4,11 @@
 // unique to its owner, so a test can grep the database file for it.
 // Tests only; nothing in the daemon imports it.
 
-import { rebuildProjectPacks } from '../context/packs'
+import { rebuildProjectPacks } from '../../context/packs'
 import { seedObservation, seedSummary } from '../context/test-support'
 import { type TempStore, T0, openTempStore, seedEvent } from '../observer/test-support'
-import { recordInjection } from '../store/context-store'
-import { insertPrompt, upsertProject, upsertSession } from '../store/writes'
+import { recordInjection } from '../../store/context-store'
+import { insertPrompt, upsertProject, upsertSession } from '../../store/writes'
 
 /** A key fragment of the shape the key_fragment rule (rules v2) catches and v1 kept: `sk-or-v1-` plus five characters. */
 export const FRAGMENT = 'sk-or-v1-' + 'Qz7Wx'

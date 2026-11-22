@@ -7,34 +7,34 @@
 import { randomBytes } from 'node:crypto'
 import { chmodSync, closeSync, fsyncSync, linkSync, mkdirSync, openSync, rmSync, writeSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { fsyncDirectory } from '../fs/atomic'
+import { fsyncDirectory } from '../../system/fs/atomic'
 import { HMAC_LEGACY_REF } from '../secrets/hmac-keys'
 import { type KeyStoreRecord, keyStoreRecordContent, readKeyStoreRecord, recordUnreadableMessage } from '../secrets/key-store-record'
 import { KEY_STORE_MODULES } from '../secrets/stores/select'
-import type { EmbeddedAssets } from '../runtime/embedded'
+import type { EmbeddedAssets } from '../../system/runtime/embedded'
 import type { ObserverSettingsInput } from '../store/observer-settings-store'
 import type { DisplayChange } from '../store/display-settings'
-import { START_WAIT_MS, putDisplaySettings, putEmbeddingSettings, putObserverSettings, waitForHealth, waitForStart } from './daemon-client'
+import { START_WAIT_MS, putDisplaySettings, putEmbeddingSettings, putObserverSettings, waitForHealth, waitForStart } from '../../controllers/install/daemon-client'
 import type { EmbeddingSettings } from '../vectors/embedding-settings'
-import { createDbKey, createPlainStore, describeCreateDbKey, describeCreatePlainStore } from './db-encryption'
+import { createDbKey, createPlainStore, describeCreateDbKey, describeCreatePlainStore } from '../../controllers/install/db-encryption'
 import { type InstallEnv, installPaths, noticeOf } from './env'
-import { NOT_FOUND_EXIT } from './system'
-import { requireKeyStore } from './key-store-choice'
+import { NOT_FOUND_EXIT } from '../../controllers/install/system'
+import { requireKeyStore } from '../../controllers/install/key-store-choice'
 import { type TextEncoding, encodeText, readTextOrNull, writeBackup, writeFileAtomic } from './files'
-import { backupRemovalSummary, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
-import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
-import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbeddedSqlite3mc, installSqlite3mc } from './sqlite3mc-install'
-import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from './vec0-install'
+import { backupRemovalSummary, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from '../../controllers/install/hmac-cleanup'
+import { type ModeChange, applyModeChange, describeModeChange } from '../../controllers/install/permissions'
+import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbeddedSqlite3mc, installSqlite3mc } from '../../controllers/install/sqlite3mc-install'
+import { describeEmbeddedVec0Install, installEmbeddedVec0, installVec0 } from '../../controllers/install/vec0-install'
 import { CLAUDE_MCP_REMOVE_ARGV, claudeAddArgv, rollbackSafe } from './mcp-wiring'
-import { installProgram } from './self-install'
-import { leftBehindLine, programFilesOf } from './program-files'
+import { installProgram } from '../../controllers/install/self-install'
+import { leftBehindLine, programFilesOf } from '../../controllers/install/program-files'
 import { checkDaemonDown, copyKeychainEntry, describeCopyKeychainEntry, describeMoveDataDir, describeRemoveLegacyEntry, moveDataDir, removeLegacyEntry, stopLegacyAgent } from './rename-migration'
-import { legacyBootoutArgv } from './launch-agent'
+import { legacyBootoutArgv } from '../../controllers/install/launch-agent'
 import type { Vec0Asset } from '../vectors/vec0-release'
-import type { ServiceStep } from './service/control'
+import type { ServiceStep } from '../../controllers/install/service/control'
 import { type InstallRecord, writeInstallRecord } from './setup/record'
-import { linkCommand, unlinkCommand } from './path-setup'
-import { type UserPathChange, changeWindowsUserPath } from './path-windows'
+import { linkCommand, unlinkCommand } from '../../controllers/install/path-setup'
+import { type UserPathChange, changeWindowsUserPath } from '../../controllers/install/path-windows'
 
 export const HEALTH_WAIT_MS = 15_000
 /** How long launchctl, a host's own CLI or any other command a plan step runs may take. */
@@ -246,7 +246,7 @@ async function waitFor(env: InstallEnv, wantUp: boolean, timeoutMs: number, fail
 }
 
 // Loaded on use: the service module imports this one for HEALTH_WAIT_MS at its top level.
-const loadServiceControl = (): Promise<typeof import('./service/control')> => import('./service/control')
+const loadServiceControl = (): Promise<typeof import('../../controllers/install/service/control')> => import('../../controllers/install/service/control')
 
 async function runServiceStep(env: InstallEnv, step: ServiceStep): Promise<void> {
   const service = (await loadServiceControl()).serviceOf(env)

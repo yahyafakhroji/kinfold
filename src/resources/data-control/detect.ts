@@ -6,8 +6,8 @@
 // "redact" resolution) and the notes; callers keep the notes' rule, field
 // and count only. The matched text never leaves this function's caller.
 
-import type { NormalizedEvent, RedactionNote } from '../contract/event'
-import { isRecord } from '../contract/event'
+import type { NormalizedEvent, RedactionNote } from '../../system/contract/event'
+import { isRecord } from '../../system/contract/event'
 import { secondPass } from '../capture/second-pass'
 import { type RedactOptions, redactText } from '../redaction/redact'
 import type { ScanRow } from '../store/scan-store'

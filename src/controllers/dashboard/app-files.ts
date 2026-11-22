@@ -1,5 +1,5 @@
 // Where the built dashboard lives and how to build it. The app's source is in
-// src/dashboard/app; `bun run dashboard:build` (Vite) writes dist/index.html,
+// src/ui/dashboard; `bun run dashboard:build` (Vite) writes dist/index.html,
 // dist/login.html and dist/assets/<name>-<hex>.js|css there. dist is not
 // committed: a checkout's daemon serves it once built, the release build
 // (tools/gen-embedded.ts) builds it and embeds every file, and tests that need
@@ -8,7 +8,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-export const APP_DIR = join(import.meta.dir, 'app')
+export const APP_DIR = join(import.meta.dir, '../../ui/dashboard')
 export const APP_DIST = join(APP_DIR, 'dist')
 export const APP_ASSETS = join(APP_DIST, 'assets')
 export const APP_PAGES = ['index.html', 'login.html'] as const

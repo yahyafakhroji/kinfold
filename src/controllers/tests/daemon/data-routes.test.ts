@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { FRAGMENT, markV1 } from '../data-control/test-support'
-import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../observer/test-support'
-import type { Exclusive } from '../vectors/vector-worker'
-import { type RunningDaemon, startDaemon } from './daemon'
-import { type DataHandlers, dataRoute } from './data-routes'
-import { SizeStillComputingError } from './size-cache'
+import { FRAGMENT, markV1 } from '../../../resources/tests/data-control/test-support'
+import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../../../resources/tests/observer/test-support'
+import type { Exclusive } from '../../../resources/vectors/vector-worker'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import { type DataHandlers, dataRoute } from '../../daemon/data-routes'
+import { SizeStillComputingError } from '../../daemon/size-cache'
 
 let temp: TempStore
 let daemon: RunningDaemon

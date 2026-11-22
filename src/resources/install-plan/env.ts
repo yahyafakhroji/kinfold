@@ -2,28 +2,28 @@
 // InstallEnv value: the home and data dirs, the platform, the install mode
 // (a checkout run through bun or an installed program), the command runner,
 // the keychain command, the clock, HTTP and the prompts. Only
-// src/cli/kinfold.ts builds the real one; tests build a temp home with fakes,
+// src/controllers/cli/kinfold.ts builds the real one; tests build a temp home with fakes,
 // so no test can reach ~/.claude, launchctl or the keychain.
 
 import { join } from 'node:path'
-import { HOST_VERSIONS_FILE } from '../adapters/host-version'
-import { LAUNCH_AGENT_LABEL, LEGACY_DATA_DIR_NAME, LEGACY_LAUNCH_AGENT_LABEL, LEGACY_PLUGIN_FILE_NAME, PLUGIN_FILE_NAME } from '../names'
+import { HOST_VERSIONS_FILE } from '../../plugins/adapters/host-version'
+import { LAUNCH_AGENT_LABEL, LEGACY_DATA_DIR_NAME, LEGACY_LAUNCH_AGENT_LABEL, LEGACY_PLUGIN_FILE_NAME, PLUGIN_FILE_NAME } from '../../system/names'
 import { resolveCodexHome } from './codex-home'
 import type { InstallMode } from './entry'
-import type { CommandUi } from './prompt/frame'
-import type { Prompts } from './prompt/prompts'
-import type { TerminalIO } from './prompt/terminal'
+import type { CommandUi } from '../../controllers/install/prompt/frame'
+import type { Prompts } from '../../controllers/install/prompt/prompts'
+import type { TerminalIO } from '../../controllers/install/prompt/terminal'
 import type { CredentialProvider } from '../secrets/credentials'
 import type { KeyStore } from '../secrets/key-store'
 import type { SecurityRunner } from '../secrets/stores/keychain'
-import type { ServiceControl } from './service/control'
-import type { DiskEncryptionCheck } from './disk/check'
-import type { DataDirAccess } from './access/check'
-import type { ProgramFiles } from './program-files'
+import type { ServiceControl } from '../../controllers/install/service/control'
+import type { DiskEncryptionCheck } from '../../controllers/install/disk/check'
+import type { DataDirAccess } from '../../controllers/install/access/check'
+import type { ProgramFiles } from '../../controllers/install/program-files'
 import type { BuildInput } from '../sqlite/build'
 import type { CliObserverRunner } from '../observer/runners/cli-core'
 import type { ObserverRunner, ObserverSettings } from '../observer/types'
-import { type PlatformInfo, requireOs } from '../platform/platform'
+import { type PlatformInfo, requireOs } from '../../system/platform/platform'
 
 export interface CommandRequest {
   argv: readonly string[]
@@ -110,7 +110,7 @@ export interface InstallEnv {
   clineMcpSettingsPathEnv?: string
   /** process.arch; picks the pinned sqlite-vec build. Default: this process's. */
   arch?: string
-  /** Test seam for the sqlite3mc compile (about 10 s); default src/sqlite/build.ts. */
+  /** Test seam for the sqlite3mc compile (about 10 s); default src/resources/sqlite/build.ts. */
   buildSqlite3mc?: (input: BuildInput) => string
   /** Test seam for the migration's one data dir rename; default fs.renameSync. */
   renameDir?: (from: string, to: string) => void
@@ -186,7 +186,7 @@ export function installPaths(env: Pick<InstallEnv, 'homeDir' | 'dataDir' | 'proj
     launchAgentsDir,
     launchAgentPlist: join(launchAgentsDir, `${LAUNCH_AGENT_LABEL}.plist`),
     legacyLaunchAgentPlist: join(launchAgentsDir, `${LEGACY_LAUNCH_AGENT_LABEL}.plist`),
-    pluginEntry: join(env.projectRoot, 'src', 'plugins', 'opencode.ts'),
+    pluginEntry: join(env.projectRoot, 'src', 'plugins', 'plugins', 'opencode.ts'),
     logsDir,
     logFile: join(logsDir, 'daemon.log'),
     codexDir,
@@ -209,4 +209,4 @@ export function noticeOf(env: Pick<InstallEnv, 'out' | 'notice'>): (line: string
   return env.notice ?? env.out
 }
 
-export { errorMessage } from '../errors'
+export { errorMessage } from '../../system/errors'

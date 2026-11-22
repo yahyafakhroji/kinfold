@@ -5,8 +5,8 @@
 
 import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { writeFileAtomic } from '../fs/atomic'
-import { DATA_FILE_MODE } from '../store/data-dir'
+import { writeFileAtomic } from '../../system/fs/atomic'
+import { DATA_FILE_MODE } from '../../resources/store/data-dir'
 import { STAGE_DIR } from './stage'
 
 export const INSTALL_RUN_FILE = 'run.json'

@@ -1,31 +1,31 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { envForDataDir } from '../../cli/data-dir-env'
-import { DB_KEY_REF } from '../../secrets/credentials'
-import { NO_DB_KEYS, newDbKey } from '../../sqlite/keys'
-import { fileState, openEncrypted } from '../../sqlite/open'
-import { encodeRecoveryCode } from '../../sqlite/recovery'
-import { DB_FILE } from '../../store/data-dir'
-import { openStore } from '../../store/db'
-import { DB_KEY_MISMATCH, STALE_DB_KEY } from '../db-encryption'
-import { type InstallEnv, installPaths } from '../env'
-import { installedProgramPath } from '../entry'
-import { EXIT_FAILED, EXIT_OK, type InstallOptions, install } from '../install'
-import { LAUNCHCTL, bootoutArgv } from '../launch-agent'
-import { MCP_SERVER_NAME, claudeMcpEntry } from '../mcp-config'
-import { mcpPaths, mcpTarget } from '../mcp-wiring'
-import type { ObserverChoice } from '../observer-choice'
+import { envForDataDir } from '../../../cli/data-dir-env'
+import { DB_KEY_REF } from '../../../../resources/secrets/credentials'
+import { NO_DB_KEYS, newDbKey } from '../../../../resources/sqlite/keys'
+import { fileState, openEncrypted } from '../../../../resources/sqlite/open'
+import { encodeRecoveryCode } from '../../../../resources/sqlite/recovery'
+import { DB_FILE } from '../../../../resources/store/data-dir'
+import { openStore } from '../../../../resources/store/db'
+import { DB_KEY_MISMATCH, STALE_DB_KEY } from '../../../install/db-encryption'
+import { type InstallEnv, installPaths } from '../../../../resources/install-plan/env'
+import { installedProgramPath } from '../../../../resources/install-plan/entry'
+import { EXIT_FAILED, EXIT_OK, type InstallOptions, install } from '../../../install/install'
+import { LAUNCHCTL, bootoutArgv } from '../../../install/launch-agent'
+import { MCP_SERVER_NAME, claudeMcpEntry } from '../../../../resources/install-plan/mcp-config'
+import { mcpPaths, mcpTarget } from '../../../../resources/install-plan/mcp-wiring'
+import type { ObserverChoice } from '../../../install/observer-choice'
 import { fakeTerminal } from '../prompt/fake-terminal'
-import type { TerminalIO } from '../prompt/terminal'
-import type { ServiceControl } from '../service/control'
-import { LaunchAgentService } from '../service/launch-agent-service'
+import type { TerminalIO } from '../../../install/prompt/terminal'
+import type { ServiceControl } from '../../../install/service/control'
+import { LaunchAgentService } from '../../../install/service/launch-agent-service'
 import { type FakeWorld, UID, YES, createWorld, fakeService, snapshotTree } from '../test-support'
-import { SHOW_RECOVERY_LINE, applySetup, doneLines, doneSummary } from './apply'
-import { type SetupState, readSetupState } from './prefill'
-import { INSTALL_RECORD_FILE } from './record'
-import type { EncryptionAnswer, SetupAnswers } from './wizard'
-import { posixOnly } from '../../../test/platform-guards'
+import { SHOW_RECOVERY_LINE, applySetup, doneLines, doneSummary } from '../../../install/setup/apply'
+import { type SetupState, readSetupState } from '../../../install/setup/prefill'
+import { INSTALL_RECORD_FILE } from '../../../../resources/install-plan/setup/record'
+import type { EncryptionAnswer, SetupAnswers } from '../../../install/setup/wizard'
+import { posixOnly } from '../../../../../test/platform-guards'
 
 const CLAUDE = '2.1.310 (Claude Code)'
 const OPENCODE = 'opencode v2.1.4'
@@ -253,7 +253,7 @@ test('a checkout install on another folder prints a usable status command', asyn
   const w = make()
   const env = envForDataDir(w.env, '/x y')
   const state = { ...(await readSetupState(w.env)), dataDir: '/x y' }
-  expect(doneLines(env, keeping(state), state)[0]).toBe("installed. Check it with: bun src/cli/kinfold.ts --data-dir '/x y' status")
+  expect(doneLines(env, keeping(state), state)[0]).toBe("installed. Check it with: bun src/controllers/cli/kinfold.ts --data-dir '/x y' status")
 })
 
 test('a folder or program path with shell characters is quoted so the printed command runs nothing else when pasted', async () => {
@@ -263,7 +263,7 @@ test('a folder or program path with shell characters is quoted so the printed co
     const state = { ...(await readSetupState(w.env)), dataDir }
     return doneLines(env, keeping(state), state)[0]!
   }
-  const prefix = 'installed. Check it with: bun src/cli/kinfold.ts --data-dir '
+  const prefix = 'installed. Check it with: bun src/controllers/cli/kinfold.ts --data-dir '
   expect(await first('/data/$(touch x)')).toBe(`${prefix}'/data/$(touch x)' status`)
   expect(await first('/data/a;b&c|d`e`')).toBe(`${prefix}'/data/a;b&c|d\`e\`' status`)
   expect(await first("/data/it's here")).toBe(`${prefix}'/data/it'\\''s here' status`)

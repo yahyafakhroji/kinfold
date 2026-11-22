@@ -8,17 +8,17 @@
 // Observations already superseded on the device are not sent.
 
 import { join } from 'node:path'
-import { openReadOnly } from '../context/fallback'
-import type { DbKeyStore } from '../sqlite/keys'
-import type { Database } from '../sqlite/types'
-import { DB_FILE } from '../store/data-dir'
-import type { ProjectKey, ProjectKeyKind } from '../store/project-key'
-import { registerProject } from '../store/project-merge'
-import { type PrepareOptions, cleanText } from '../capture/prepare'
+import { openReadOnly } from '../../resources/context/fallback'
+import type { DbKeyStore } from '../../resources/sqlite/keys'
+import type { Database } from '../../resources/sqlite/types'
+import { DB_FILE } from '../../resources/store/data-dir'
+import type { ProjectKey, ProjectKeyKind } from '../../resources/store/project-key'
+import { registerProject } from '../../resources/store/project-merge'
+import { type PrepareOptions, cleanText } from '../../resources/capture/prepare'
 import { sessionWritable } from './hub-capture'
 import type { HubAnswer } from './hub-server'
 import { centralProjectKey, parseDeviceProject } from './project-key'
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 
 /** Well under the hub's 4 MB cap. */
 export const IMPORT_CHUNK_BYTES = 1_500_000

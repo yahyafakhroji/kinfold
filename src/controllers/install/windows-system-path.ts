@@ -3,7 +3,7 @@
 // powershell.exe or schtasks.exe planted in a cloned repo would run instead;
 // every tool is therefore named by its full path under SystemRoot.
 
-import type { InstallEnv } from './env'
+import type { InstallEnv } from '../../resources/install-plan/env'
 
 const DEFAULT_SYSTEM_ROOT = 'C:\\Windows'
 

@@ -2,7 +2,7 @@
 // recorded payloads in test/fixtures/claude-code/, not from documentation.
 
 import type { AdapterContext } from './context'
-import type { NormalizedEvent } from '../contract/event'
+import type { NormalizedEvent } from '../../system/contract/event'
 import { type ClaudeStyleEventMap, flattenToolResponse, parseClaudeStyle } from './families/claude-style-parse'
 
 export { flattenToolResponse }

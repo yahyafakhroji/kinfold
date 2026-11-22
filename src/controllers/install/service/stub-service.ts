@@ -2,8 +2,8 @@
 // nothing configured and nothing running, and refuses to start or stop, so
 // install prints the manual-start line and never plans a step through it.
 
-import { notSupportedYet } from '../../platform/platform'
-import type { InstallEnv } from '../env'
+import { notSupportedYet } from '../../../system/platform/platform'
+import type { InstallEnv } from '../../../resources/install-plan/env'
 import type { ServiceControl, ServiceStep } from './control'
 
 export const NOT_SET_UP_REASON = 'not set up on this platform yet'

@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expectedMode, scanDataDirModes } from './permissions'
-import { posixOnly } from '../../test/platform-guards'
+import { expectedMode, scanDataDirModes } from '../../install/permissions'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const roots: string[] = []
 afterEach(() => {

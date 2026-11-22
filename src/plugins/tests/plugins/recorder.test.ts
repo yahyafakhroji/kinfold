@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import type { NormalizedEvent } from '../contract/event'
-import { createPluginRecorder } from './recorder'
+import type { NormalizedEvent } from '../../../system/contract/event'
+import { createPluginRecorder } from '../../plugins/recorder'
 
 const event = (eventId: string): NormalizedEvent => ({ eventId }) as NormalizedEvent
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))

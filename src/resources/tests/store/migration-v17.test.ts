@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { seedObservation } from '../context/test-support'
 import { openTestDatabase } from '../sqlite/test-support'
-import { openStore } from './db'
-import { RECALL_INDEX, keywordCandidates, keywordIdsPlan } from './related-store'
-import { MIGRATIONS } from './schema'
-import { upsertProject, upsertSession } from './writes'
+import { openStore } from '../../store/db'
+import { RECALL_INDEX, keywordCandidates, keywordIdsPlan } from '../../store/related-store'
+import { MIGRATIONS } from '../../store/schema'
+import { upsertProject, upsertSession } from '../../store/writes'
 
 let root: string
 beforeEach(() => {

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { LOCAL_ENDPOINT, defaultEndpoint, parseProviderModel, settingsInputFor } from './observer-choice'
+import { LOCAL_ENDPOINT, defaultEndpoint, parseProviderModel, settingsInputFor } from '../../install/observer-choice'
 
 
 test('settingsInputFor gives a CLI-login provider no credential ref', () => {
@@ -12,14 +12,14 @@ test('parseProviderModel keeps the slash in the model and splits only on the fir
 })
 
 import { afterEach } from 'bun:test'
-import type { CliObserverRunner } from '../observer/runners/cli-core'
-import { ObserverError } from '../observer/types'
-import { CLAUDE_TOKEN_REF } from '../observer/settings'
-import { parseObserverFlag } from './args'
-import { NO_TOOLS_OFF } from '../agents/profile'
-import { UNPROVEN_CLI_PROVIDERS } from '../observer/types'
-import { INSTALL_PROFILES } from '../agents/install-profiles'
-import { ChoiceError, chooseObservers, describeInput, runCheck, selfObserverNote, withObserverEndpoint } from './observer-choice'
+import type { CliObserverRunner } from '../../../resources/observer/runners/cli-core'
+import { ObserverError } from '../../../resources/observer/types'
+import { CLAUDE_TOKEN_REF } from '../../../resources/observer/settings'
+import { parseObserverFlag } from '../../install/args'
+import { NO_TOOLS_OFF } from '../../../plugins/agents/profile'
+import { UNPROVEN_CLI_PROVIDERS } from '../../../resources/observer/types'
+import { INSTALL_PROFILES } from '../../../plugins/agents/install-profiles'
+import { ChoiceError, chooseObservers, describeInput, runCheck, selfObserverNote, withObserverEndpoint } from '../../install/observer-choice'
 import { type FakeWorld, createWorld } from './test-support'
 
 let world: FakeWorld | null = null

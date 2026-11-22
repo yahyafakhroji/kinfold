@@ -4,21 +4,21 @@
 // daemon stays the only writer. Answers carry ids, counts, rule names,
 // sizes and project keys; never stored text. Logs drop project keys too.
 
-import type { Parsed } from '../context/types'
-import { type PurgeReport, describePurge, purge } from '../data-control/purge'
-import { type PurgeRequest, parseFindingsQuery, parsePurgeBody, parseResolveBody, parseRetentionRequest } from '../data-control/requests'
-import { type ResolveAction, type ResolveOutcome, resolveFinding } from '../data-control/resolve'
-import { type RetentionOutcome, type RetentionPreview, applyRetention, describePreview, describeRetention, previewRetention } from '../data-control/retention'
-import { type ScanResult, describeScan, scanUntil } from '../data-control/scanner'
-import type { SizeReport } from '../data-control/size'
+import type { Parsed } from '../../resources/context/types'
+import { type PurgeReport, describePurge, purge } from '../../resources/data-control/purge'
+import { type PurgeRequest, parseFindingsQuery, parsePurgeBody, parseResolveBody, parseRetentionRequest } from '../../resources/data-control/requests'
+import { type ResolveAction, type ResolveOutcome, resolveFinding } from '../../resources/data-control/resolve'
+import { type RetentionOutcome, type RetentionPreview, applyRetention, describePreview, describeRetention, previewRetention } from '../../resources/data-control/retention'
+import { type ScanResult, describeScan, scanUntil } from '../../resources/data-control/scanner'
+import type { SizeReport } from '../../resources/data-control/size'
 import { SizeStillComputingError, createSizeCache } from './size-cache'
-import type { Database } from '../sqlite/types'
-import { type DataSettings, type DataSettingsChange, readDataSettings, writeDataSettings } from '../store/data-settings-store'
-import { type DisplayChange, type DisplaySettings, readDisplaySettings, writeDisplaySettings } from '../store/display-settings'
-import { type Finding, type FindingQuery, getFinding, listFindings, pendingByRule } from '../store/findings-store'
-import type { MarkerKey } from '../redaction/redact'
-import { type Exclusive, runNow } from '../vectors/vector-worker'
-import { type StoreReader, inlineStoreReader } from '../workers/store-reader'
+import type { Database } from '../../resources/sqlite/types'
+import { type DataSettings, type DataSettingsChange, readDataSettings, writeDataSettings } from '../../resources/store/data-settings-store'
+import { type DisplayChange, type DisplaySettings, readDisplaySettings, writeDisplaySettings } from '../../resources/store/display-settings'
+import { type Finding, type FindingQuery, getFinding, listFindings, pendingByRule } from '../../resources/store/findings-store'
+import type { MarkerKey } from '../../resources/redaction/redact'
+import { type Exclusive, runNow } from '../../resources/vectors/vector-worker'
+import { type StoreReader, inlineStoreReader } from '../../resources/workers/store-reader'
 
 /** An on-demand scan works this long, then answers with what is left; the tick carries on. */
 export const SCAN_REQUEST_BUDGET_MS = 2_000

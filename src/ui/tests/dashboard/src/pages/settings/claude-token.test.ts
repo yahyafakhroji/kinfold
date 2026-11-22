@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { claudeAuthText, showsClaudeToken } from './claude-token'
+import { claudeAuthText, showsClaudeToken } from '../../../../../dashboard/src/pages/settings/claude-token'
 
 const view = (provider: string, claudeAuth?: 'token' | 'login' | 'unknown') => ({
   rows: [], effective: [{ host: 'claude-code', settings: { provider, model: 'haiku', credentialRef: null, enabled: true } }], ...(claudeAuth === undefined ? {} : { claudeAuth }),

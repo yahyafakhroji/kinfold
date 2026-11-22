@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { MAX_QUERY_CHARS, MAX_QUERY_TERMS, ftsMatch, parseSearchQuery } from './fts'
+import { MAX_QUERY_CHARS, MAX_QUERY_TERMS, ftsMatch, parseSearchQuery } from '../../mcp/fts'
 
 test('every term is quoted, inner quotes doubled, so FTS syntax stays literal', () => {
   const parsed = parseSearchQuery('say "hi" NEAR(a b) OR c* col:x')

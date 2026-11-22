@@ -2,15 +2,19 @@
 // plugins run inside the agent's own process. Neither may load the installer:
 // it is large, and it reads and writes agent config. This walks the imports
 // that survive compilation (type-only ones are erased) and fails when one of
-// those entry points reaches src/install.
+// those entry points reaches the installer (src/controllers/install or
+// src/resources/install-plan).
 
 import { expect, test } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 
-const SRC = resolve(import.meta.dir, '..')
+const SRC = resolve(import.meta.dir, '..', '..', '..')
 
-/** A file's path under src with forward slashes on every platform, so a check such as startsWith('install/') means the same on Windows. */
+/** The installer's folders under src. */
+const INSTALLER = ['controllers/install/', 'resources/install-plan/']
+
+/** A file's path under src with forward slashes on every platform, so a check such as startsWith('controllers/install/') means the same on Windows. */
 const under = (file: string): string => relative(SRC, file).split(sep).join('/')
 
 /** The relative modules a file loads at runtime: static imports and re-exports that are not type-only, and dynamic imports. */
@@ -62,27 +66,27 @@ test('runtimeImports skips what the compiler erases and keeps the rest', () => {
   expect(runtimeImports(text).sort()).toEqual(['./d', './f', './g', './lazy', './side'])
 })
 
-for (const entry of ['cli/hook.ts', 'plugins/opencode.ts', 'plugins/kilo.ts']) {
-  test(`${entry} loads nothing from src/install`, () => {
+for (const entry of ['controllers/cli/hook.ts', 'plugins/plugins/opencode.ts', 'plugins/plugins/kilo.ts']) {
+  test(`${entry} loads nothing from the installer`, () => {
     const files = reachable(join(SRC, entry))
     // Guards the walk itself: an entry that resolved nothing would pass for the wrong reason.
     expect(files.size).toBeGreaterThan(20)
-    const installer = [...files.values()].filter((chain) => chain.at(-1)!.startsWith('install/')).map((chain) => chain.join(' -> '))
+    const installer = [...files.values()].filter((chain) => INSTALLER.some((dir) => chain.at(-1)!.startsWith(dir))).map((chain) => chain.join(' -> '))
     expect(installer).toEqual([])
   })
 }
 
 // The other direction: `kinfold install`, `status` and `uninstall` need the daemon's port and nothing else of it.
-for (const entry of ['install/install.ts', 'install/status.ts', 'install/uninstall.ts']) {
+for (const entry of ['controllers/install/install.ts', 'controllers/install/status.ts', 'controllers/install/uninstall.ts']) {
   test(`${entry} does not load the daemon module`, () => {
     const files = reachable(join(SRC, entry))
     expect(files.size).toBeGreaterThan(20)
-    expect([...files.values()].filter((chain) => chain.at(-1) === 'daemon/daemon.ts').map((chain) => chain.join(' -> '))).toEqual([])
+    expect([...files.values()].filter((chain) => chain.at(-1) === 'controllers/daemon/daemon.ts').map((chain) => chain.join(' -> '))).toEqual([])
   })
 }
 
 test('the leak scanner gets the second redaction pass from capture, not through the daemon\'s ingest path', () => {
-  const files = reachable(join(SRC, 'data-control/detect.ts'))
-  expect([...files.keys()].map((file) => under(file))).toContain('capture/second-pass.ts')
-  expect([...files.values()].filter((chain) => chain.at(-1)!.startsWith('daemon/')).map((chain) => chain.join(' -> '))).toEqual([])
+  const files = reachable(join(SRC, 'resources/data-control/detect.ts'))
+  expect([...files.keys()].map((file) => under(file))).toContain('resources/capture/second-pass.ts')
+  expect([...files.values()].filter((chain) => chain.at(-1)!.startsWith('controllers/daemon/')).map((chain) => chain.join(' -> '))).toEqual([])
 })

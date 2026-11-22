@@ -2,10 +2,10 @@ import { afterEach, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runKinfold } from './cli/kinfold'
-import { startDaemon } from './daemon/daemon'
+import { runKinfold } from '../cli/kinfold'
+import { startDaemon } from '../daemon/daemon'
 import { type FakeWorld, createWorld } from './install/test-support'
-import { VERSION } from './version'
+import { VERSION } from '../../system/version'
 
 let world: FakeWorld | null = null
 let root: string | null = null
@@ -29,7 +29,7 @@ async function healthVersion(version?: string): Promise<string> {
 
 test('a checkout reports the development version while package.json carries the released one', () => {
   // changesets writes the release version into package.json; only a release build stamps it into the program.
-  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../package.json'), 'utf8')) as { version: string }
+  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../../package.json'), 'utf8')) as { version: string }
   expect(VERSION).toBe('0.0.0-dev')
   expect(pkg.version).toMatch(/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/)
   expect(pkg.version).not.toBe(VERSION)

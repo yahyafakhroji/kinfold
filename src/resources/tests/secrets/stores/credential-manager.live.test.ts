@@ -6,9 +6,9 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
-import { currentPlatform } from '../../platform/platform'
-import type { KeyStoreDeps } from '../key-store'
-import { credentialManagerModule, credentialTarget, loadCredApi } from './credential-manager'
+import { currentPlatform } from '../../../../system/platform/platform'
+import type { KeyStoreDeps } from '../../../secrets/key-store'
+import { credentialManagerModule, credentialTarget, loadCredApi } from '../../../secrets/stores/credential-manager'
 
 const LIVE = currentPlatform().os === 'windows' && process.env.KINFOLD_TEST_CREDENTIAL_MANAGER === '1'
 const PREFIX = `live-${randomBytes(4).toString('hex')}`

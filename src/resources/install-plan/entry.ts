@@ -12,10 +12,10 @@
 // arguments therefore never matches.
 
 import { join } from 'node:path'
-import { cmdWords, powershellWords } from '../agents/families/hook-shell'
-import { osOf } from '../platform/platform'
+import { cmdWords, powershellWords } from '../../plugins/agents/families/hook-shell'
+import { osOf } from '../../system/platform/platform'
 
-export { isCompiledProgram } from '../runtime/program'
+export { isCompiledProgram } from '../../system/runtime/program'
 
 export type EntryRole = 'hook' | 'mcp' | 'daemon'
 
@@ -35,9 +35,9 @@ export interface ParsedEntry {
 }
 
 const CHECKOUT_SCRIPTS: Readonly<Record<EntryRole, string>> = {
-  hook: 'src/cli/hook.ts',
-  mcp: 'src/mcp/server.ts',
-  daemon: 'src/daemon/main.ts',
+  hook: 'src/controllers/cli/hook.ts',
+  mcp: 'src/controllers/mcp/server.ts',
+  daemon: 'src/controllers/daemon/main.ts',
 }
 
 const PROGRAM_SUBCOMMANDS: readonly EntryRole[] = ['hook', 'mcp', 'daemon']

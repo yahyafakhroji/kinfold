@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { MAX_CONTEXT_PROMPT_CHARS, parseContextRequest, parseContextResult } from './types'
+import { MAX_CONTEXT_PROMPT_CHARS, parseContextRequest, parseContextResult } from '../../context/types'
 
 const base = { host: 'claude-code', cwd: '/work/repo', hostSessionId: 's1' }
 

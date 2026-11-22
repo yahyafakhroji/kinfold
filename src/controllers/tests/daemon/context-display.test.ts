@@ -3,12 +3,12 @@
 // sends nothing, says so, and leaves the delta's cursor where it was.
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { seedObservation } from '../context/test-support'
-import type { ContextRequest } from '../context/types'
-import { type TempStore, T0, openTempStore } from '../observer/test-support'
-import { recordInjection, stampInjectionPrompts } from '../store/context-store'
-import { insertPrompt, upsertProject, upsertSession } from '../store/writes'
-import { HOLDOUT_HOSTS, HOLDOUT_RATE, type ContextRouteDeps, contextHandler } from './context-route'
+import { seedObservation } from '../../../resources/tests/context/test-support'
+import type { ContextRequest } from '../../../resources/context/types'
+import { type TempStore, T0, openTempStore } from '../../../resources/tests/observer/test-support'
+import { recordInjection, stampInjectionPrompts } from '../../../resources/store/context-store'
+import { insertPrompt, upsertProject, upsertSession } from '../../../resources/store/writes'
+import { HOLDOUT_HOSTS, HOLDOUT_RATE, type ContextRouteDeps, contextHandler } from '../../daemon/context-route'
 
 const MINUTE = 60_000
 let temp: TempStore

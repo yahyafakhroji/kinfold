@@ -1,23 +1,23 @@
 // The new dashboard's views, all GET under /memory/ so they take the token or
 // the dashboard cookie like the rest of /memory/, and a central device relays
 // them to its hub through the /memory/ prefix of the hub's allowlist
-// (src/central/hub-routes.ts):
+// (src/controllers/central/hub-routes.ts):
 //   /memory/list/sessions, /memory/list/memories, /memory/list/activity,
 //   /memory/list/projects, /memory/list/devices: pages of 50, sorted and
 //     filtered on the reports reader, so the daemon's own thread never scans.
 //   /memory/sessions/:id: one session's header with its saved box.
 //   /memory/overview, /memory/impact?window=7d|30d: kept reports with their
-//     as-of time (src/dashboard/kept-report.ts).
+//     as-of time (src/controllers/dashboard/kept-report.ts).
 // Answers hold titles, names and counts; errors name the parameter.
 
 import { type KeptReport, keptReport } from '../dashboard/kept-report'
-import { IMPACT_WINDOWS, type ImpactReport, type ImpactWindow, type MeasuredEntries, type OverviewReport, sessionHeaderWithSaved } from '../dashboard/overview'
+import { IMPACT_WINDOWS, type ImpactReport, type ImpactWindow, type MeasuredEntries, type OverviewReport, sessionHeaderWithSaved } from '../../resources/reports/overview'
 import { ftsMatch, parseSearchQuery } from '../mcp/fts'
-import { OBSERVATION_TYPES, type ObservationType } from '../observer/types'
-import type { Database } from '../sqlite/types'
-import { ACTIVITY_KINDS, type ActivityKind, isActivityKind } from '../store/activity-store'
-import { MEMORY_SORTS, PROJECT_SORTS, SESSION_SORTS } from '../store/list-reads'
-import type { StoreReader } from '../workers/store-reader'
+import { OBSERVATION_TYPES, type ObservationType } from '../../resources/observer/types'
+import type { Database } from '../../resources/sqlite/types'
+import { ACTIVITY_KINDS, type ActivityKind, isActivityKind } from '../../resources/store/activity-store'
+import { MEMORY_SORTS, PROJECT_SORTS, SESSION_SORTS } from '../../resources/store/list-reads'
+import type { StoreReader } from '../../resources/workers/store-reader'
 import type { RouteAnswer } from './data-routes'
 import { FILTERS, type ListParams, LIST_PAGE_SIZE, parseListParams } from './list-params'
 

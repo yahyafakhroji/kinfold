@@ -5,7 +5,7 @@
 // `--data-dir` is taken out earlier by applyDataDirFlag.
 
 import { isAbsolute } from 'node:path'
-import { type PlatformInfo, currentPlatform } from '../platform/platform'
+import { type PlatformInfo, currentPlatform } from '../../system/platform/platform'
 import { MAX_PORT } from './port'
 
 export interface DaemonArgs {

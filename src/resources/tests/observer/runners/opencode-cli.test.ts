@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { CredentialProvider } from '../../secrets/credentials'
+import type { CredentialProvider } from '../../../secrets/credentials'
 import { type TempStore, openTempStore } from '../test-support'
-import { ObserverError, type ObserverPrompt, type ObserverSettings } from '../types'
-import { type CliRunContext, createCliObserverRunner } from './cli-core'
-import type { SpawnFn, SpawnRequest } from './claude-cli'
+import { ObserverError, type ObserverPrompt, type ObserverSettings } from '../../../observer/types'
+import { type CliRunContext, createCliObserverRunner } from '../../../observer/runners/cli-core'
+import type { SpawnFn, SpawnRequest } from '../../../observer/runners/claude-cli'
 import { recordingSpawn } from './cli-test-support'
-import { OBSERVER_AGENT, OPENCODE_MIN_VERSION, OPENCODE_SYSTEM_DIR, createOpencodeAdapter, opencodeAdapter } from './opencode-cli'
-import { createCliRunner, createRunner } from '.'
-import { posixOnly } from '../../../test/platform-guards'
+import { OBSERVER_AGENT, OPENCODE_MIN_VERSION, OPENCODE_SYSTEM_DIR, createOpencodeAdapter, opencodeAdapter } from '../../../observer/runners/opencode-cli'
+import { createCliRunner, createRunner } from '../../../observer/runners'
+import { posixOnly } from '../../../../../test/platform-guards'
 
 let temp: TempStore
 let runDir: string

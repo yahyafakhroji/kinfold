@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { finalStrength, toSourceEvent } from './sources'
-import type { ObserverEvent, ParsedObservation } from './types'
+import { finalStrength, toSourceEvent } from '../../observer/sources'
+import type { ObserverEvent, ParsedObservation } from '../../observer/types'
 
 function stored(id: string, kind: string, tool?: Record<string, unknown>, withheld: string | null = null): ObserverEvent {
   return {

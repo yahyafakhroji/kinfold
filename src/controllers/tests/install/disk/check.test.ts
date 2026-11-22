@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test'
-import { dbStatusLines } from '../db-encryption'
+import { dbStatusLines } from '../../../install/db-encryption'
 import { type FakeWorld, createWorld } from '../test-support'
-import { diskCheckOf, diskEncryptionCheckFor, diskEncryptionLine } from './check'
-import { stubDiskCheck } from './stub-check'
+import { diskCheckOf, diskEncryptionCheckFor, diskEncryptionLine } from '../../../install/disk/check'
+import { stubDiskCheck } from '../../../install/disk/stub-check'
 
 let world: FakeWorld | null = null
 afterEach(async () => {

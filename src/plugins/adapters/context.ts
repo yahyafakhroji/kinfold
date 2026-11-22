@@ -1,7 +1,7 @@
 // What every host adapter needs from its caller. Injected so tests can pin
 // time and ids; the capture CLI and the OpenCode plugin use the defaults.
 
-import { ulid } from '../contract/ulid'
+import { ulid } from '../../system/contract/ulid'
 
 export interface AdapterContext {
   /** Neither host puts an event time on its hook payloads, so capture time stands in. */

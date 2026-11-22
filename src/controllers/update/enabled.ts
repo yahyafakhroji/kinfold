@@ -1,8 +1,8 @@
 // The one answer to "may Kinfold check for, and announce, updates here":
 // the daily check, the notices, the dashboard banner and `kinfold status` all ask it.
 
-import { envName, readEnv } from '../env-names'
-import type { InstallRecord } from '../install/setup/record'
+import { envName, readEnv } from '../../system/env-names'
+import type { InstallRecord } from '../../resources/install-plan/setup/record'
 import { parseVersion } from './version-order'
 
 const DEV_VERSION = '0.0.0-dev'

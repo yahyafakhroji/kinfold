@@ -4,7 +4,7 @@
 // daemon holds the store open and unlocked, so it writes the snapshot, and a
 // restore runs inside it without stopping the service. With the daemon down,
 // this process opens the store itself and runs the same steps
-// (src/backup/create.ts, src/backup/restore.ts).
+// (src/resources/backup/create.ts, src/resources/backup/restore.ts).
 //
 // The recovery code is read without echo (or from stdin), checked by its
 // checksum here, and then lives only in this process and, on the daemon path,
@@ -13,23 +13,23 @@
 
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, renameSync, rmSync, writeSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
-import { type BackupManifest, BackupError, readArchive } from '../backup/archive'
-import { createBackup } from '../backup/create'
-import { applyRestore, inspectBackup, stageSnapshot } from '../backup/restore'
-import { snapshotStoreFile } from '../backup/snapshot'
-import { applyUndo } from '../backup/undo'
-import { isRecord } from '../contract/event'
+import { type BackupManifest, BackupError, readArchive } from '../../resources/backup/archive'
+import { createBackup } from '../../resources/backup/create'
+import { applyRestore, inspectBackup, stageSnapshot } from '../../resources/backup/restore'
+import { snapshotStoreFile } from '../../resources/backup/snapshot'
+import { applyUndo } from '../../resources/backup/undo'
+import { isRecord } from '../../system/contract/event'
 import { readDaemonEndpoint } from '../daemon/daemon-info'
-import { DB_KEY_REF } from '../secrets/credentials'
-import { dbKeyStoreOf } from '../sqlite/keys'
-import { fileState, maintenancePath } from '../sqlite/open'
-import { RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../sqlite/recovery'
-import { DATA_DIR_MODE, DATA_FILE_MODE, DB_FILE } from '../store/data-dir'
+import { DB_KEY_REF } from '../../resources/secrets/credentials'
+import { dbKeyStoreOf } from '../../resources/sqlite/keys'
+import { fileState, maintenancePath } from '../../resources/sqlite/open'
+import { RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../../resources/sqlite/recovery'
+import { DATA_DIR_MODE, DATA_FILE_MODE, DB_FILE } from '../../resources/store/data-dir'
 import { type UpdateLock, acquireLock, lockHolder } from '../update/lock'
-import { VERSION } from '../version'
+import { VERSION } from '../../system/version'
 import type { BackupArgs } from './args'
 import { checkHealth, readDaemonInfo } from './daemon-client'
-import { type InstallEnv, errorMessage } from './env'
+import { type InstallEnv, errorMessage } from '../../resources/install-plan/env'
 import { EXIT_FAILED, EXIT_OK } from './install'
 import { keyStoreOf } from './key-store-choice'
 import type { CommandBusy } from './prompt/frame'

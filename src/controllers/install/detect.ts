@@ -1,5 +1,5 @@
 // Which hosts live on this machine; each agent's profile says how it is found
-// (src/agents/install-profiles.ts). Claude Code counts when `claude --version`
+// (src/plugins/agents/install-profiles.ts). Claude Code counts when `claude --version`
 // answers or ~/.claude exists. OpenCode counts only when `opencode --version`
 // reports 2.x or later (the plugin targets the V2 plugin contract), so a
 // 1.x OpenCode is refused with a reason while the others still install.
@@ -11,11 +11,11 @@
 // Each detection also names the file that pins its version (the resolved
 // binary or the app's Info.plist), so host-versions.ts can tell an upgrade.
 
-import { INSTALL_PROFILES } from '../agents/install-profiles'
-import type { AgentId, ProfileTable } from '../agents/profile'
-import { KNOWN_HOSTS } from '../contract/event'
-import { type HostDetection, detectFromSpec } from './detectors'
-import type { InstallEnv } from './env'
+import { INSTALL_PROFILES } from '../../plugins/agents/install-profiles'
+import type { AgentId, ProfileTable } from '../../plugins/agents/profile'
+import { KNOWN_HOSTS } from '../../system/contract/event'
+import { type HostDetection, detectFromSpec } from '../../resources/install-plan/detectors'
+import type { InstallEnv } from '../../resources/install-plan/env'
 
 export {
   VERSION_TIMEOUT_MS,
@@ -27,8 +27,8 @@ export {
   parseOpenCodeVersion,
   resolveBinary,
   versionOf,
-} from './detectors'
-export type { HostDetection, Semver, VersionAnswer } from './detectors'
+} from '../../resources/install-plan/detectors'
+export type { HostDetection, Semver, VersionAnswer } from '../../resources/install-plan/detectors'
 
 export const INSTALL_HOSTS = KNOWN_HOSTS
 export type InstallHost = AgentId

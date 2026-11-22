@@ -7,7 +7,7 @@
 // long report never queues ahead of a prompt. Until a worker is up, and after
 // one stops, reads run on the daemon's own connection, as they always did.
 
-import { isCompiledProgram } from '../runtime/program'
+import { isCompiledProgram } from '../../system/runtime/program'
 import type { Database } from '../sqlite/types'
 import type { StoreReaderReply, StoreReaderRequest, StoreReaderStart } from './store-reader-protocol'
 import { type StoreReadArgs, type StoreReadName, type StoreReadResult, runStoreRead } from './store-reads'
@@ -22,7 +22,7 @@ export const HOLD_START_WAIT_MS = 2_000
 export const CLOSE_WAIT_MS = 2_000
 
 /** The worker inside a compiled program, by its path from the entries' common folder (tools/build-release.test.ts holds them in step). */
-export const COMPILED_STORE_READER_PATH = './workers/store-reader-worker.ts'
+export const COMPILED_STORE_READER_PATH = './resources/workers/store-reader-worker.ts'
 
 export interface RunOptions {
   /** The worker skips the read if it has not started it by then: its caller stopped waiting. */

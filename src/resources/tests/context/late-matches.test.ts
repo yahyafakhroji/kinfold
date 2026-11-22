@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createLateMatches, lateSessionKey } from './late-matches'
+import { createLateMatches, lateSessionKey } from '../../context/late-matches'
 
 const hit = (id: number) => ({ id, distance: 0.3, matchedTerms: 1, promptTerms: 2 })
 

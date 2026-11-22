@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import type { SemanticAnswer } from '../vectors/search'
-import { type MemoryReader, openMemoryReader } from './reader'
-import type { SemanticQuery } from './semantic-client'
-import { MAX_K } from '../vectors/search'
+import type { SemanticAnswer } from '../../../resources/vectors/search'
+import { type MemoryReader, openMemoryReader } from '../../mcp/reader'
+import type { SemanticQuery } from '../../mcp/semantic-client'
+import { MAX_K } from '../../../resources/vectors/search'
 import { type McpFixture, NOW, PROJECT_A, T0, openMcpFixture, seedMcpObservation } from './test-support'
-import { type ToolResult, callTool } from './tools'
+import { type ToolResult, callTool } from '../../mcp/tools'
 
 let fixture: McpFixture
 let reader: MemoryReader

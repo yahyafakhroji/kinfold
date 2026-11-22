@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { deviceNotice } from './central'
-import type { CentralStatus } from './types'
+import { deviceNotice } from '../../../../dashboard/src/lib/central'
+import type { CentralStatus } from '../../../../dashboard/src/lib/types'
 
 type Device = Extract<CentralStatus, { role: 'device' }>
 const device = (change: Partial<Device> = {}): Device => ({

@@ -4,8 +4,8 @@
 // told once per burst and not once per event: a turn with twenty tool calls
 // used to read daemon.json and the token twenty times and send twenty requests.
 
-import { type NudgeResult, nudgeDaemon, spoolEvent } from '../cli/record'
-import type { NormalizedEvent } from '../contract/event'
+import { type NudgeResult, nudgeDaemon, spoolEvent } from '../../controllers/cli/record'
+import type { NormalizedEvent } from '../../system/contract/event'
 
 /** Events that arrive within this of each other share one nudge. Far below the daemon's own fallback interval. */
 export const NUDGE_COALESCE_MS = 100

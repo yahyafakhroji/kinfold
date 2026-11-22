@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { ERROR_CODES, MAX_LINE_CHARS, PROTOCOL_VERSIONS, handleLine } from './protocol'
-import { type ToolOutcome, callTool as localCallTool } from './tools'
-import { openMemoryReader } from './reader'
-import { mcpToolCallerFor } from '../wsl/mcp-backend'
-import { type McpServer, createMcpServer, runStdio } from './server'
+import { ERROR_CODES, MAX_LINE_CHARS, PROTOCOL_VERSIONS, handleLine } from '../../mcp/protocol'
+import { type ToolOutcome, callTool as localCallTool } from '../../mcp/tools'
+import { openMemoryReader } from '../../mcp/reader'
+import { mcpToolCallerFor } from '../../wsl/mcp-backend'
+import { type McpServer, createMcpServer, runStdio } from '../../mcp/server'
 import { type McpFixture, NOW, PAYLOAD_MARKER, PROJECT_A, gitForProjectA, openMcpFixture } from './test-support'
 
 let fixture: McpFixture

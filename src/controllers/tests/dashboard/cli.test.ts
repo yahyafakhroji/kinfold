@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { runKinfold } from '../cli/kinfold'
-import { startDaemon } from '../daemon/daemon'
-import type { CommandRequest } from '../install/env'
-import { parseDashboardArgs } from '../install/args'
-import { EXIT_USAGE } from '../install/install'
+import { runKinfold } from '../../cli/kinfold'
+import { startDaemon } from '../../daemon/daemon'
+import type { CommandRequest } from '../../../resources/install-plan/env'
+import { parseDashboardArgs } from '../../install/args'
+import { EXIT_USAGE } from '../../install/install'
 import { type FakeWorld, createWorld } from '../install/test-support'
-import { OPEN_FILE, SIGN_IN_GRACE_MS, runDashboard } from './cli'
-import { CLOSED_MESSAGE } from './routes'
+import { OPEN_FILE, SIGN_IN_GRACE_MS, runDashboard } from '../../dashboard/cli'
+import { CLOSED_MESSAGE } from '../../dashboard/routes'
 
 let world: FakeWorld
 beforeEach(() => {

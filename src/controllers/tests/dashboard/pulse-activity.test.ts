@@ -3,8 +3,8 @@
 // automatic update would wait for as long as a dashboard runs.
 
 import { expect, test } from 'bun:test'
-import { type ServerDeps, handleRequest } from '../daemon/server'
-import { createDashboardAuth, sessionCookie } from './auth'
+import { type ServerDeps, handleRequest } from '../../daemon/server'
+import { createDashboardAuth, sessionCookie } from '../../dashboard/auth'
 
 const PORT = 37_997
 const TOKEN = 'c'.repeat(64)

@@ -16,18 +16,18 @@
 // Under the observer (KINFOLD_OBSERVER=1) setup registers nothing, so an observer
 // process can never feed events back into the store.
 
-import type { NormalizedEvent } from '../contract/event'
+import type { NormalizedEvent } from '../../system/contract/event'
 import { type OpenCodeContext, OPENCODE_HOST, createOpenCodeBusMapper, normalizeOpenCodePrompt, normalizeOpenCodeToolAfter } from '../adapters/opencode'
 import { defaultAdapterContext } from '../adapters/context'
 import { recordedHostVersion } from '../adapters/host-version'
-import { DAEMON_ONLY_TIMEOUT_MS, fetchDaemonContext } from '../context/daemon'
-import type { ContextRequest, ContextResult } from '../context/types'
-import { isObserverProcess } from '../observer/env'
-import { resolveDataDir } from '../store/data-dir'
+import { DAEMON_ONLY_TIMEOUT_MS, fetchDaemonContext } from '../../resources/context/daemon'
+import type { ContextRequest, ContextResult } from '../../resources/context/types'
+import { isObserverProcess } from '../../resources/observer/env'
+import { resolveDataDir } from '../../resources/store/data-dir'
 import { recent, recentlySeen } from '../adapters/recency'
 import { createContextInjector } from './context-injector'
 import { createPluginRecorder } from './recorder'
-import { errorMessage } from '../errors'
+import { errorMessage } from '../../system/errors'
 
 export const OPENCODE_PLUGIN_ID = 'kinfold'
 

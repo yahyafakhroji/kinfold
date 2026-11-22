@@ -5,11 +5,11 @@
 // the new embedder and space start cleanly. Errors name the field or the
 // failure, never echo a value.
 
-import type { Parsed } from '../context/types'
-import type { Database } from '../sqlite/types'
-import { type EmbeddingSettings, parseEmbeddingSettings, readEmbeddingSettings, writeEmbeddingSettings } from '../vectors/embedding-settings'
-import type { probeLocalLlmDims } from '../vectors/local-llm-embedder'
-import type { SpaceStatus } from '../vectors/space-manager'
+import type { Parsed } from '../../resources/context/types'
+import type { Database } from '../../resources/sqlite/types'
+import { type EmbeddingSettings, parseEmbeddingSettings, readEmbeddingSettings, writeEmbeddingSettings } from '../../resources/vectors/embedding-settings'
+import type { probeLocalLlmDims } from '../../resources/vectors/local-llm-embedder'
+import type { SpaceStatus } from '../../resources/vectors/space-manager'
 import type { RouteAnswer } from './data-routes'
 
 export interface EmbeddingStatus {

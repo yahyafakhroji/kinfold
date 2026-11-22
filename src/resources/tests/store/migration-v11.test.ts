@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openTestDatabase } from '../sqlite/test-support'
-import { openStore } from './db'
-import { LATEST_SCHEMA_VERSION, MIGRATIONS } from './schema'
-import { embeddingInputs, vectorCounts } from './vector-store'
+import { openStore } from '../../store/db'
+import { LATEST_SCHEMA_VERSION, MIGRATIONS } from '../../store/schema'
+import { embeddingInputs, vectorCounts } from '../../store/vector-store'
 
 let root: string
 beforeEach(() => {

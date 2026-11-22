@@ -10,8 +10,8 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { currentPlatform } from '../platform/platform'
-import { DAEMON_INFO_FILE, TOKEN_FILE } from '../store/data-dir'
+import { currentPlatform } from '../../system/platform/platform'
+import { DAEMON_INFO_FILE, TOKEN_FILE } from '../../resources/store/data-dir'
 
 export interface DaemonEndpoint {
   port: number

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { seedObservation } from '../context/test-support'
-import { type TempStore, openTempStore } from '../observer/test-support'
-import { registerProject } from '../store/project-merge'
-import { upsertSession } from '../store/writes'
-import { DEVICE_REFUSAL, projectRoute } from './project-routes'
+import { seedObservation } from '../../../resources/tests/context/test-support'
+import { type TempStore, openTempStore } from '../../../resources/tests/observer/test-support'
+import { registerProject } from '../../../resources/store/project-merge'
+import { upsertSession } from '../../../resources/store/writes'
+import { DEVICE_REFUSAL, projectRoute } from '../../daemon/project-routes'
 
 const T0 = 1_792_900_000_000
 let temp: TempStore

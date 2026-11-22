@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { type EventKind, validateEvent } from '../contract/event'
-import { CRUSH_EVENTS, normalizeCrush } from './crush'
+import { type EventKind, validateEvent } from '../../../system/contract/event'
+import { CRUSH_EVENTS, normalizeCrush } from '../../adapters/crush'
 
-const DIR = join(import.meta.dir, '../../test/fixtures/crush')
+const DIR = join(import.meta.dir, '../../../../test/fixtures/crush')
 const fixture = (file: string): Record<string, unknown> => JSON.parse(readFileSync(join(DIR, file), 'utf8'))
 let counter = 0
 const context = { now: () => 1_792_841_878_000, newId: () => `01JB${String(++counter).padStart(22, '0')}` }

@@ -3,8 +3,8 @@
 // replaced found.
 
 import { describe, expect, test } from 'bun:test'
-import { lineVerdicts, redactText } from './redact'
-import { PREFIXED_RULES, SECRET_KEY_NAME, looksLikeSecretValue } from './rules'
+import { lineVerdicts, redactText } from '../../redaction/redact'
+import { PREFIXED_RULES, SECRET_KEY_NAME, looksLikeSecretValue } from '../../redaction/rules'
 
 // The patterns as they were before they were made linear, kept here as the reference.
 const OLD_KEY_NAME = String.raw`[A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|credential)s?[A-Za-z0-9_.-]*|[A-Za-z0-9_]+_pwd`

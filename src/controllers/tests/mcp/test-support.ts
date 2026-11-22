@@ -2,12 +2,12 @@
 // observations of any type, host and evidence, a summary, and one event whose
 // payload carries a marker no MCP answer may contain. Tests only.
 
-import type { Store } from '../store/db'
-import { insertObservation, upsertSummary } from '../store/observer-store'
-import { upsertProject, upsertSession } from '../store/writes'
-import { type TempStore, T0, openTempStore, seedEvent } from '../observer/test-support'
-import type { EvidenceStrength } from '../evidence'
-import type { GitRunner } from '../store/project-key'
+import type { Store } from '../../../resources/store/db'
+import { insertObservation, upsertSummary } from '../../../resources/store/observer-store'
+import { upsertProject, upsertSession } from '../../../resources/store/writes'
+import { type TempStore, T0, openTempStore, seedEvent } from '../../../resources/tests/observer/test-support'
+import type { EvidenceStrength } from '../../../system/evidence'
+import type { GitRunner } from '../../../resources/store/project-key'
 
 export { T0 }
 

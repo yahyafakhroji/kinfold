@@ -4,8 +4,8 @@
 // tables and held the daemon's thread for seconds on a large store. Tests use
 // this to seed an index, so it lives with them and not in what ships.
 
-import type { Database } from '../sqlite/types'
-import { type IndexedSpace, RECONCILE_CHUNK, tableOf } from './vec-index'
+import type { Database } from '../../sqlite/types'
+import { type IndexedSpace, RECONCILE_CHUNK, tableOf } from '../../vectors/vec-index'
 
 /** Deletes are cheaper and carry purged data, so a pass removes more of them. */
 const REMOVE_CHUNK = 5_000

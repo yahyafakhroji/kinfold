@@ -12,7 +12,7 @@
 // The docs show no PostToolUse payload; tool_response is read when present,
 // as in the other Claude-shaped agents, and the output is empty otherwise.
 
-import type { EventKind, NormalizedEvent } from '../contract/event'
+import type { EventKind, NormalizedEvent } from '../../system/contract/event'
 import { normalizeClaudeStyle } from './families/claude-style-parse'
 import type { AdapterContext } from './context'
 

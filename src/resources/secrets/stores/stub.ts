@@ -2,7 +2,7 @@
 // and every operation refuses with one fixed message, so nothing falls back to
 // a weaker place to keep a key.
 
-import { notSupportedYet } from '../../platform/platform'
+import { notSupportedYet } from '../../../system/platform/platform'
 import type { KeyStore, KeyStoreKind, KeyStoreModule } from '../key-store'
 
 const NOT_YET = 'not supported on this platform yet'

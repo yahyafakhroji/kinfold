@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { builtProfiles } from '../src/agents/install-profiles'
-import type { AgentProfile, Capabilities } from '../src/agents/profile'
-import type { OsName } from '../src/platform/platform'
+import { builtProfiles } from '../src/plugins/agents/install-profiles'
+import type { AgentProfile, Capabilities } from '../src/plugins/agents/profile'
+import type { OsName } from '../src/system/platform/platform'
 import { AgentTableError, README_PATH, SHORT_LIMIT_MAX, renderAgentTable, replaceSection } from './gen-agent-table'
 
 const FULL: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: true }, search: true, observer: false }

@@ -8,7 +8,7 @@
 // redaction would only flag, keeps the prompt local (the user's choice,
 // 2026-10-26). Neither function logs or keeps the text.
 
-import { ftsMatch } from '../mcp/fts'
+import { ftsMatch } from '../../controllers/mcp/fts'
 import { redactText } from '../redaction/redact'
 import { splitPrompt } from './prompt-text'
 import { MAX_CONTEXT_PROMPT_CHARS } from './types'

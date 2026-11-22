@@ -3,7 +3,7 @@
 // the caller from the keychain and only ever goes into the Authorization
 // header; errors carry an HTTP status or an error name, never the body.
 
-import { CLI_NAME } from '../../names'
+import { CLI_NAME } from '../../../system/names'
 import type { ObserverRunner } from '../types'
 import { DEFAULT_HTTP_TIMEOUT_MS, type FetchFn } from './http-core'
 import { createChatRunner } from './openai-chat'

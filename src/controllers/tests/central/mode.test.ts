@@ -2,8 +2,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { INSTALL_RECORD_FILE, type InstallRecord, readInstallRecord, setAutoUpdate, setCentralMode, writeInstallRecord } from '../install/setup/record'
-import { type CentralMode, centralModeOf, parseCentralMode } from './mode'
+import { INSTALL_RECORD_FILE, type InstallRecord, readInstallRecord, setAutoUpdate, setCentralMode, writeInstallRecord } from '../../../resources/install-plan/setup/record'
+import { type CentralMode, centralModeOf, parseCentralMode } from '../../central/mode'
 
 const RECORD: InstallRecord = { channel: 'curl', updateCheck: true, autoUpdate: true, autoUpdateIntro: false, agentHomes: {}, firstInstalledAt: 1_792_900_000_000 }
 const HUB: CentralMode = { role: 'hub', port: 37_812 }

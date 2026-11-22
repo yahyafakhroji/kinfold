@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { DASHSCOPE_DEFAULT_ENDPOINT, checkEndpoint, isLoopbackEndpoint } from './endpoint'
+import { DASHSCOPE_DEFAULT_ENDPOINT, checkEndpoint, isLoopbackEndpoint } from '../../observer/endpoint'
 
 describe('checkEndpoint for the OpenAI-compatible provider', () => {
   test.each([

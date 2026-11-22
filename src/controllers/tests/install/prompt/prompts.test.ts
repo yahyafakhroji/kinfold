@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { fakeTerminal } from './fake-terminal'
-import { decodeKeys } from './keys'
-import { type Choice, PromptCancelled, createPrompts } from './prompts'
+import { decodeKeys } from '../../../install/prompt/keys'
+import { type Choice, PromptCancelled, createPrompts } from '../../../install/prompt/prompts'
 
 const choices: Choice<string>[] = [
   { value: 'a', label: 'Alpha' },

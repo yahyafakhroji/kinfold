@@ -1,11 +1,11 @@
 // The restore's entry in the maintenance marker. The marker keeps hooks and
-// MCP servers off memory.db while it is there (src/sqlite/open.ts), and its
+// MCP servers off memory.db while it is there (src/resources/sqlite/open.ts), and its
 // content is the journal `kinfold key resume` reads to finish or undo a run
 // that was killed. It names states and choices only; a key never goes in it.
 
 import { readFileSync } from 'node:fs'
-import { isRecord } from '../contract/event'
-import { writeFileAtomic } from '../fs/atomic'
+import { isRecord } from '../../system/contract/event'
+import { writeFileAtomic } from '../../system/fs/atomic'
 import { maintenancePath } from '../sqlite/open'
 import { DATA_FILE_MODE } from '../store/data-dir'
 import type { BackupManifest } from './archive'

@@ -15,12 +15,12 @@
 
 import { chmodSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { isRecord } from '../../contract/event'
+import { isRecord } from '../../../system/contract/event'
 import { ObserverError } from '../types'
 import { type CliAdapter, type CliParsed, type CliRunContext, type Semver, parseSemver } from './cli-core'
 import { cliFailure } from './cli-error'
 import type { SpawnFn, SpawnRequest, SpawnResult } from './claude-cli'
-import { errorCode } from '../../errors'
+import { errorCode } from '../../../system/errors'
 
 export const OPENCODE_MIN_VERSION: Semver = [2, 0, 0]
 export const OBSERVER_AGENT = 'kinfold-observer'

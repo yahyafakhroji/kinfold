@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { applyAction } from './plan'
-import { HIDDEN_WINDOW, CANNOT_RUN_EXIT, KILL_GRACE_MS, NOT_FOUND_EXIT, createCommandRunner } from './system'
+import { applyAction } from '../../../resources/install-plan/plan'
+import { HIDDEN_WINDOW, CANNOT_RUN_EXIT, KILL_GRACE_MS, NOT_FOUND_EXIT, createCommandRunner } from '../../install/system'
 import { type FakeWorld, createWorld } from './test-support'
 
 const CHILD_ENV = { PATH: '/usr/bin:/bin' }

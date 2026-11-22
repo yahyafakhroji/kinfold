@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openTestDatabase } from '../sqlite/test-support'
-import { openStore } from './db'
-import { listObserverSettings, upsertObserverSettings } from './observer-settings-store'
-import { LATEST_SCHEMA_VERSION, MIGRATIONS } from './schema'
+import { openStore } from '../../store/db'
+import { listObserverSettings, upsertObserverSettings } from '../../store/observer-settings-store'
+import { LATEST_SCHEMA_VERSION, MIGRATIONS } from '../../store/schema'
 
 let root: string
 beforeEach(() => {

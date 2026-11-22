@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { openStore } from '../store/db'
-import { type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from '../observer/test-support'
-import type { SafetyGate } from '../observer/safety-gate'
-import { type RunningDaemon, startDaemon } from './daemon'
+import { openStore } from '../../../resources/store/db'
+import { type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from '../../../resources/tests/observer/test-support'
+import type { SafetyGate } from '../../../resources/observer/safety-gate'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
 
 let temp: TempStore
 let daemon: RunningDaemon | null

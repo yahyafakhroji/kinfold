@@ -2,8 +2,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { posixOnly } from '../../../test/platform-guards'
-import { SERVICE_PATH_FILE, applyServicePath, readServicePath, servicePathFor, writeServicePath } from './service-path'
+import { posixOnly } from '../../../../../test/platform-guards'
+import { SERVICE_PATH_FILE, applyServicePath, readServicePath, servicePathFor, writeServicePath } from '../../../install/service/service-path'
 
 let dataDir: string
 beforeEach(() => {

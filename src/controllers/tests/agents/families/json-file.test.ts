@@ -1,14 +1,14 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { MCP_SERVER_NAME } from '../../install/mcp-config'
-import { mcpTarget } from '../../install/mcp-wiring'
+import { MCP_SERVER_NAME } from '../../../../resources/install-plan/mcp-config'
+import { mcpTarget } from '../../../../resources/install-plan/mcp-wiring'
 import { type FakeWorld, createWorld } from '../../install/test-support'
-import { MCP_HOST_ENV } from '../../mcp/read-reporter'
-import { plainJsonFileActions, plainJsonFileUninstallActions } from './json-file'
-import { type JsonHooksSpec, hookTarget, jsonHooksEdit, jsonHooksRemoveEdit } from './json-hooks'
-import { type McpEntrySpec, mcpEntryEdit, mcpEntryRemoveEdit } from './mcp-entry'
-import { assertWriterContract, fileWriter } from './writer-contract.test-support'
+import { MCP_HOST_ENV } from '../../../mcp/read-reporter'
+import { plainJsonFileActions, plainJsonFileUninstallActions } from '../../../../plugins/agents/families/json-file'
+import { type JsonHooksSpec, hookTarget, jsonHooksEdit, jsonHooksRemoveEdit } from '../../../../plugins/agents/families/json-hooks'
+import { type McpEntrySpec, mcpEntryEdit, mcpEntryRemoveEdit } from '../../../../plugins/agents/families/mcp-entry'
+import { assertWriterContract, fileWriter } from '../../../../plugins/tests/agents/families/writer-contract.test-support'
 
 let worlds: FakeWorld[] = []
 afterEach(async () => {

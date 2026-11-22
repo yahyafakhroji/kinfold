@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
-import { recordActivity } from '../store/activity-store'
-import { recordInjection } from '../store/context-store'
-import { openStore } from '../store/db'
-import { insertPrompt, upsertProject, upsertSession } from '../store/writes'
+import { recordActivity } from '../../../resources/store/activity-store'
+import { recordInjection } from '../../../resources/store/context-store'
+import { openStore } from '../../../resources/store/db'
+import { insertPrompt, upsertProject, upsertSession } from '../../../resources/store/writes'
 
 let root: string
 let rig: DashboardRig

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { askDaemon } from './daemon'
+import { askDaemon } from '../../context/daemon'
 
 let dataDir: string
 beforeEach(() => {

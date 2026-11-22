@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { declaredLength, readCapped, readCappedText } from './capped'
+import { declaredLength, readCapped, readCappedText } from '../../http/capped'
 
 /** A body sent in `sizes` chunks with no Content-Length; counts how many chunks the reader pulled. */
 function chunked(sizes: readonly number[]): { message: { headers: Headers; body: ReadableStream<Uint8Array> }; pulled: () => number; cancelled: () => boolean } {

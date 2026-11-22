@@ -2,10 +2,10 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ContextRequest, ContextResult } from '../context/types'
-import { runHook } from './hook'
+import type { ContextRequest, ContextResult } from '../../../resources/context/types'
+import { runHook } from '../../cli/hook'
 
-const FIXTURES = join(import.meta.dir, '../../test/fixtures')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures')
 const NOTICE = { version: '0.2.0', channel: 'curl' } as const
 
 let root: string

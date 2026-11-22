@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { entryCommand } from '../../install/entry'
+import { entryCommand } from '../../../../resources/install-plan/entry'
 import { createWorld } from '../../install/test-support'
-import { MCP_HOST_ENV } from '../../mcp/read-reporter'
-import { assertWriterContract, fileWriter } from '../families/writer-contract.test-support'
-import { hookSpecFor } from '../hook-specs'
-import { capabilityLine } from '../profile'
+import { MCP_HOST_ENV } from '../../../mcp/read-reporter'
+import { assertWriterContract, fileWriter } from '../../../../plugins/tests/agents/families/writer-contract.test-support'
+import { hookSpecFor } from '../../../../plugins/agents/hook-specs'
+import { capabilityLine } from '../../../../plugins/agents/profile'
 import { type HookBench, apply, hookBench, profile, writesOf } from './custom-hooks.test-support'
-import { gooseFileActions, gooseFileUninstallActions, gooseHooksPath, goosePluginDir, goosePluginManifestPath } from './goose'
+import { gooseFileActions, gooseFileUninstallActions, gooseHooksPath, goosePluginDir, goosePluginManifestPath } from '../../../../plugins/agents/profiles/goose'
 
 let bench: HookBench
 beforeEach(() => {

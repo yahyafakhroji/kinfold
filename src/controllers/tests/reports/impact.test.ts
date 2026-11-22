@@ -3,16 +3,16 @@
 // minimum sample the comparison says so and draws no conclusion.
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { countedEmbedder } from '../daemon/daemon'
-import { type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from '../observer/test-support'
-import { processSessionBatch } from '../observer/process'
-import type { ObserverPrompt, ObserverRunner } from '../observer/types'
-import { recordInjection } from '../store/context-store'
-import { writeDisplaySettings } from '../store/display-settings'
-import { DAY_MS, contextCosts, countEmbeddingCall, embeddingCalls, observerCosts, turnUsageRows } from '../store/impact-reads'
-import { insertPrompt, upsertProject, upsertSession } from '../store/writes'
-import { MIN_HOLDOUT_SAMPLE, type TurnSample, holdoutComparison, impactSummary, spread } from './impact'
-import { metricsSummary } from './metrics'
+import { countedEmbedder } from '../../daemon/daemon'
+import { type TempStore, T0, fakeRunner, openTempStore, seedEvent, seedSession } from '../../../resources/tests/observer/test-support'
+import { processSessionBatch } from '../../../resources/observer/process'
+import type { ObserverPrompt, ObserverRunner } from '../../../resources/observer/types'
+import { recordInjection } from '../../../resources/store/context-store'
+import { writeDisplaySettings } from '../../../resources/store/display-settings'
+import { DAY_MS, contextCosts, countEmbeddingCall, embeddingCalls, observerCosts, turnUsageRows } from '../../../resources/store/impact-reads'
+import { insertPrompt, upsertProject, upsertSession } from '../../../resources/store/writes'
+import { MIN_HOLDOUT_SAMPLE, type TurnSample, holdoutComparison, impactSummary, spread } from '../../../resources/reports/impact'
+import { metricsSummary } from '../../../resources/reports/metrics'
 
 let temp: TempStore
 beforeEach(() => {

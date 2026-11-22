@@ -1,16 +1,16 @@
 // POST /observer/test: the dashboard's "test this model" button. The body is
 // the same as PUT /observer/settings, so a choice can be tried before it is
 // saved. It builds that provider's runner through the daemon's RunnerFactory
-// (src/observer/runners) and sends the installer's fixed check prompt, which
+// (src/resources/observer/runners) and sends the installer's fixed check prompt, which
 // carries no project data. The answer is ok or the ObserverError class only;
 // the reply, the detail and any credential stay inside this function. One
 // test runs at a time, so a held button cannot queue paid calls.
 
-import type { Parsed } from '../context/types'
+import type { Parsed } from '../../resources/context/types'
 import { CHECK_PROMPT } from '../install/observer-choice'
-import type { RunnerFactory } from '../observer/runners'
-import { toObserverError } from '../observer/types'
-import type { ObserverSettingsInput } from '../store/observer-settings-store'
+import type { RunnerFactory } from '../../resources/observer/runners'
+import { toObserverError } from '../../resources/observer/types'
+import type { ObserverSettingsInput } from '../../resources/store/observer-settings-store'
 import type { RouteAnswer } from './data-routes'
 import { parseSettingsPut } from './settings-route'
 

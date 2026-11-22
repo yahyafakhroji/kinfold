@@ -3,9 +3,9 @@
 // An unknown parameter, sort or filter value is refused, and the error names
 // the parameter without echoing what was sent.
 
-import type { Parsed } from '../context/types'
-import { HOST_NAME_PATTERN } from '../names'
-import type { SortDir } from '../store/list-reads'
+import type { Parsed } from '../../resources/context/types'
+import { HOST_NAME_PATTERN } from '../../system/names'
+import type { SortDir } from '../../resources/store/list-reads'
 
 export const LIST_PAGE_SIZE = 50
 export const MAX_LIST_PAGE = 10_000

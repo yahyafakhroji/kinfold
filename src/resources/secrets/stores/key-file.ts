@@ -23,8 +23,8 @@ import {
   writeSync,
 } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { fsyncDirectory, writeFileAtomic } from '../../fs/atomic'
-import { CLI_NAME } from '../../names'
+import { fsyncDirectory, writeFileAtomic } from '../../../system/fs/atomic'
+import { CLI_NAME } from '../../../system/names'
 import { assertCredentialRef, assertStorableValue } from '../credentials'
 import type { KeyStore, KeyStoreDeps, KeyStoreModule, KeyStoreProbe } from '../key-store'
 

@@ -10,7 +10,7 @@
 // write stage reads 0 today and is kept to catch a future split. A turn's lag
 // is measured from its turn_end to the first succeeded run of the session that
 // started after that turn_end was ingested (runs take events oldest first).
-// Percentiles and grouping are pure functions in src/dashboard/metrics.ts.
+// Percentiles and grouping are pure functions in src/resources/reports/metrics.ts.
 
 import type { Database } from '../sqlite/types'
 import { METRICS_SAMPLE_LIMIT } from './metrics-reads'

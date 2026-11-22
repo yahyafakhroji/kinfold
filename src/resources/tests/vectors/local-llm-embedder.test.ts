@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { EmbedError } from './embedder'
-import { createLocalLlmEmbedder, probeLocalLlmDims } from './local-llm-embedder'
+import { EmbedError } from '../../vectors/embedder'
+import { createLocalLlmEmbedder, probeLocalLlmDims } from '../../vectors/local-llm-embedder'
 
 interface Seen {
   url: string

@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { prepareForSpool } from '../capture/prepare'
-import { type NormalizedEvent, validateEvent } from '../contract/event'
-import { AdapterInputError } from './context'
+import { prepareForSpool } from '../../../resources/capture/prepare'
+import { type NormalizedEvent, validateEvent } from '../../../system/contract/event'
+import { AdapterInputError } from '../../adapters/context'
 import {
   createOpenCodeBusMapper,
   extractResultText,
   normalizeOpenCodePrompt,
   normalizeOpenCodeToolAfter,
-} from './opencode'
+} from '../../adapters/opencode'
 
-const FIXTURES = join(import.meta.dir, '../../test/fixtures/opencode')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures/opencode')
 const fixture = <T = Record<string, unknown>>(name: string): T =>
   (JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8')) as { payload: T }).payload
 

@@ -5,8 +5,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readInstallRun } from '../update/install-run'
-import { updateRouteHandlers } from './update-routes'
+import { readInstallRun } from '../../update/install-run'
+import { updateRouteHandlers } from '../../daemon/update-routes'
 
 let dir: string
 beforeEach(() => {

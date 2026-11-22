@@ -3,7 +3,7 @@
 // Never throws: a missing daemon, a refused request or a malformed reply is a
 // reason for the caller to log, and no result.
 
-import { readDaemonEndpoint } from '../daemon/daemon-info'
+import { readDaemonEndpoint } from '../../controllers/daemon/daemon-info'
 import { type ContextRequest, type ContextResult, parseContextResult } from './types'
 
 export const DAEMON_SHARE_MS = 200

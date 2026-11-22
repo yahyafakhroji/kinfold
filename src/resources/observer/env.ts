@@ -3,7 +3,7 @@
 // observer call would create new events to observe. The runner sets this
 // flag in the child's env and every capture entry point checks it first.
 
-import { envName, legacyName, readEnv } from '../env-names'
+import { envName, legacyName, readEnv } from '../../system/env-names'
 
 export const OBSERVER_ENV_FLAG = envName('OBSERVER')
 /**

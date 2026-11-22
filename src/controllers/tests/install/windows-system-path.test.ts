@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { windowsJoin, windowsSystemTool } from './windows-system-path'
+import { windowsJoin, windowsSystemTool } from '../../install/windows-system-path'
 
 test('a Windows tool is named under SystemRoot, else C:\\Windows, never by bare name', () => {
   expect(windowsSystemTool({ envVars: { SystemRoot: 'D:\\Win' } }, 'System32\\schtasks.exe')).toBe('D:\\Win\\System32\\schtasks.exe')

@@ -1,6 +1,6 @@
 // Cursor (IDE and cursor-agent): command hooks in ~/.cursor/hooks.json. Built
 // from the Cursor hooks docs (cursor.com/docs/agent/hooks, read 2026-10-25,
-// rechecked 2026-10-26) and public captures; see src/adapters/cursor.ts.
+// rechecked 2026-10-26) and public captures; see src/plugins/adapters/cursor.ts.
 // Cursor takes context at session start only, and ships no CLI login the
 // observer could borrow.
 // On Windows the command is written for PowerShell (install/host-hooks.ts).
@@ -8,7 +8,7 @@
 // ("On Windows, the desktop app runs hook commands through PowerShell"); they
 // don't say which shell cursor-agent uses there, and it gets the same form.
 
-import { hostHookInstallActions, hostHookUninstallActions, hostWiringLine, hostWiringState } from '../../install/host-wiring'
+import { hostHookInstallActions, hostHookUninstallActions, hostWiringLine, hostWiringState } from '../../../resources/install-plan/host-wiring'
 import { ACTS_HEADLESS, type AgentProfile, type Capabilities } from '../profile'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: true, prompt: false }, search: true, observer: false }

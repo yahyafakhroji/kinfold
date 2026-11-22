@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { credentialRefFor, defaultModelFor, providerTakesKey, resolveObserverSettings } from './settings'
+import { credentialRefFor, defaultModelFor, providerTakesKey, resolveObserverSettings } from '../../observer/settings'
 import { type TempStore, openTempStore } from './test-support'
-import { ObserverError } from './types'
+import { ObserverError } from '../../observer/types'
 
 let temp: TempStore
 beforeEach(() => {

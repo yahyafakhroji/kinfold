@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createPlainOutput } from './plain'
+import { createPlainOutput } from '../../../install/prompt/plain'
 
 function plain(): { lines: string[]; output: ReturnType<typeof createPlainOutput> } {
   const lines: string[] = []

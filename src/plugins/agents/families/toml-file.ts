@@ -6,9 +6,9 @@
 
 import { existsSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { type InstallEnv, errorMessage } from '../../install/env'
-import { plannedBackup, readTextOrNull } from '../../install/files'
-import type { Action } from '../../install/plan'
+import { type InstallEnv, errorMessage } from '../../../resources/install-plan/env'
+import { plannedBackup, readTextOrNull } from '../../../resources/install-plan/files'
+import type { Action } from '../../../resources/install-plan/plan'
 import type { AgentId } from '../profile'
 import { type WiringState, hookTarget } from './json-hooks'
 import { type TomlDoc, mergeTomlHooks, readTomlConfig, removeTomlOurs, renderToml } from './toml-config'

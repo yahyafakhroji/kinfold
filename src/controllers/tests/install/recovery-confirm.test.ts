@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { fakeTerminal } from './prompt/fake-terminal'
-import { createPrompts } from './prompt/prompts'
-import { NOT_A_TERMINAL, type RecoverySink, confirmRecoveryCode, recoverySinkFromEnv, recoverySinkFromPrompts } from './recovery-confirm'
+import { createPrompts } from '../../install/prompt/prompts'
+import { NOT_A_TERMINAL, type RecoverySink, confirmRecoveryCode, recoverySinkFromEnv, recoverySinkFromPrompts } from '../../install/recovery-confirm'
 
 const CODE = 'ABCDE-FGH23-45678-JKMNP-QRSTV'
 

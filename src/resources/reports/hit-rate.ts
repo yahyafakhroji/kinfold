@@ -63,7 +63,7 @@ export interface HitRateSummary {
   relatedByDistance: RelatedBand[]
 }
 
-/** Bands on the gate's own cutoffs (src/context/related.ts): strong, supported, up to the veto. */
+/** Bands on the gate's own cutoffs (src/resources/context/related.ts): strong, supported, up to the veto. */
 export const RELATED_BANDS: readonly { band: string; test: (distance: number | null) => boolean }[] = [
   { band: 'keyword only', test: (d) => d === null },
   { band: '0.00-0.35', test: (d) => d !== null && d <= 0.35 },

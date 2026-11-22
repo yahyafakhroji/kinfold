@@ -22,8 +22,8 @@
 
 import { existsSync, mkdirSync, renameSync, rmSync, statfsSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
-import { writeFileAtomic } from '../fs/atomic'
-import { readInstallRecord, writeInstallRecord } from '../install/setup/record'
+import { writeFileAtomic } from '../../system/fs/atomic'
+import { readInstallRecord, writeInstallRecord } from '../install-plan/setup/record'
 import { DB_KEY_NEXT_REF, DB_KEY_REF, DB_KEY_REPLACED_REF } from '../secrets/credentials'
 import type { KeyStore } from '../secrets/key-store'
 import { foundBackupPath } from '../sqlite/convert'

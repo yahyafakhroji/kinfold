@@ -5,15 +5,15 @@
 // no silent fallback: a failed check is reported by its error class and asked
 // again, or under --yes ends the install with a non-zero exit.
 
-import { type CredentialProvider, NO_CREDENTIALS, assertStorableValue, isSystemCredentialRef } from '../secrets/credentials'
-import { type KeyStore, credentialProviderOf } from '../secrets/key-store'
-import { CHECK_PROMPT } from '../observer/check-prompt'
-import type { AgentProfile } from '../agents/profile'
-import type { Parsed } from '../context/types'
-import { DASHSCOPE_DEFAULT_ENDPOINT, checkEndpoint, isLoopbackEndpoint } from '../observer/endpoint'
-import { parseGooseModel } from '../observer/runners/goose-cli'
-import { CLAUDE_TOKEN_REF, DEFAULT_CREDENTIAL_REFS, OPENAI_COMPATIBLE_CREDENTIAL_REF, builtInSettings, credentialRefFor, isEndpointProvider } from '../observer/settings'
-import { runPlantedCheck } from '../observer/planted-check'
+import { type CredentialProvider, NO_CREDENTIALS, assertStorableValue, isSystemCredentialRef } from '../../resources/secrets/credentials'
+import { type KeyStore, credentialProviderOf } from '../../resources/secrets/key-store'
+import { CHECK_PROMPT } from '../../resources/observer/check-prompt'
+import type { AgentProfile } from '../../plugins/agents/profile'
+import type { Parsed } from '../../resources/context/types'
+import { DASHSCOPE_DEFAULT_ENDPOINT, checkEndpoint, isLoopbackEndpoint } from '../../resources/observer/endpoint'
+import { parseGooseModel } from '../../resources/observer/runners/goose-cli'
+import { CLAUDE_TOKEN_REF, DEFAULT_CREDENTIAL_REFS, OPENAI_COMPATIBLE_CREDENTIAL_REF, builtInSettings, credentialRefFor, isEndpointProvider } from '../../resources/observer/settings'
+import { runPlantedCheck } from '../../resources/observer/planted-check'
 import {
   CLI_LOGIN_PROVIDERS,
   type CliLoginProvider,
@@ -24,13 +24,13 @@ import {
   type ObserverSettings,
   UNPROVEN_CLI_PROVIDERS,
   toObserverError,
-} from '../observer/types'
-import type { ObserverSettingsInput } from '../store/observer-settings-store'
+} from '../../resources/observer/types'
+import type { ObserverSettingsInput } from '../../resources/store/observer-settings-store'
 import type { InstallHost } from './detect'
-import type { InstallEnv } from './env'
+import type { InstallEnv } from '../../resources/install-plan/env'
 import type { MissingClis } from './observer-clis'
 import { keyStoreOf } from './key-store-choice'
-import { isCliLoginProvider } from '../observer/types'
+import { isCliLoginProvider } from '../../resources/observer/types'
 
 export const MAX_CHOICE_ATTEMPTS = 5
 

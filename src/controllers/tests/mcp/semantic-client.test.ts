@@ -2,8 +2,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DAEMON_INFO_FILE, TOKEN_FILE } from '../store/data-dir'
-import { createSemanticClient, parseSemanticAnswer } from './semantic-client'
+import { DAEMON_INFO_FILE, TOKEN_FILE } from '../../../resources/store/data-dir'
+import { createSemanticClient, parseSemanticAnswer } from '../../mcp/semantic-client'
 
 let dataDir: string
 beforeEach(() => {

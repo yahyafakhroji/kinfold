@@ -8,10 +8,10 @@
 
 import { existsSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { InstallEnv } from '../../install/env'
-import { readTextOrNull } from '../../install/files'
-import type { Action } from '../../install/plan'
-import { osOf } from '../../platform/platform'
+import type { InstallEnv } from '../../../resources/install-plan/env'
+import { readTextOrNull } from '../../../resources/install-plan/files'
+import type { Action } from '../../../resources/install-plan/plan'
+import { osOf } from '../../../system/platform/platform'
 
 export type OwnedFileState = 'no' | 'yes' | 'stale' | 'foreign'
 

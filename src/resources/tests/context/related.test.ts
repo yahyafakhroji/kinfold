@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { FRAME_CLOSE, FRAME_OPEN } from './pack'
-import { type RelatedCandidate, buildRelated, isRelated, joinContext, rankRelated } from './related'
-import type { PackObservation } from './types'
+import { FRAME_CLOSE, FRAME_OPEN } from '../../context/pack'
+import { type RelatedCandidate, buildRelated, isRelated, joinContext, rankRelated } from '../../context/related'
+import type { PackObservation } from '../../context/types'
 
 const row = (id: number, title = `Observation ${id}`): PackObservation => ({
   id, host: 'opencode', title, evidence: 'tool-verified', contradictedBy: null, contradictionKind: null, occurredAt: 0, confirmedBy: 0,

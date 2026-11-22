@@ -17,8 +17,8 @@
 // hooks and search only.
 
 import { join } from 'node:path'
-import { platformOf } from '../../install/env'
-import type { OsName } from '../../platform/platform'
+import { platformOf } from '../../../resources/install-plan/env'
+import type { OsName } from '../../../system/platform/platform'
 import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentWiring, mcpServersFile } from '../families/json-agent'
 import { ACTS_HEADLESS, type AgentProfile, type Capabilities, SHORT_WINDOWS_HOOKS_UNCHECKED } from '../profile'
 

@@ -8,8 +8,8 @@
 
 import { closeSync, linkSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
-import { DATA_FILE_MODE } from '../store/data-dir'
-import { errorCode } from '../errors'
+import { DATA_FILE_MODE } from '../../resources/store/data-dir'
+import { errorCode } from '../../system/errors'
 
 export const UPDATE_LOCK_FILE = 'auto-update.lock'
 /** Far longer than an update takes: the download gives up after five minutes and the install after fifteen. */

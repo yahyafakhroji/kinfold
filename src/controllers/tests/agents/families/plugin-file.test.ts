@@ -1,17 +1,17 @@
 import { expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { OPENCODE_PLUGIN_SPEC } from '../../install/host-wiring'
-import type { InstallMode } from '../../install/entry'
+import { OPENCODE_PLUGIN_SPEC } from '../../../../resources/install-plan/host-wiring'
+import type { InstallMode } from '../../../../resources/install-plan/entry'
 import { createWorld } from '../../install/test-support'
-import { posixOnly } from '../../../test/platform-guards'
-import { KILO_PLUGIN_SPEC } from '../profiles/kilo-code'
-import { pluginFileActions, pluginFileContent, pluginFileState, pluginFileUninstallActions, shimContent } from './plugin-file'
+import { posixOnly } from '../../../../../test/platform-guards'
+import { KILO_PLUGIN_SPEC } from '../../../../plugins/agents/profiles/kilo-code'
+import { pluginFileActions, pluginFileContent, pluginFileState, pluginFileUninstallActions, shimContent } from '../../../../plugins/agents/families/plugin-file'
 
 const PROGRAM: InstallMode = { kind: 'program', binPath: '/home/u/.kinfold/bin/kinfold' }
 const BUNDLE = '// @bun\nvar plugin_default = { id: "kinfold", setup() {} };\nexport { plugin_default as default };\n'
 const DATA = '/home/u/.kinfold'
-const ENTRY = '/repo/src/plugins/opencode.ts'
+const ENTRY = '/repo/src/plugins/plugins/opencode.ts'
 
 test('the plugin file for kilo-code names host kilo-code and the data dir', () => {
   const program = pluginFileContent(PROGRAM, DATA, BUNDLE, 'kilo-code')
@@ -110,10 +110,10 @@ test("Kilo's checkout shim loads Kilo's plugin, and OpenCode's shim still loads 
   const w = createWorld()
   try {
     const written = readFileSync(await writeKiloShim(w), 'utf8')
-    expect(written).toContain(`await import(${JSON.stringify(join(w.projectRoot, 'src', 'plugins', 'kilo.ts'))})`)
+    expect(written).toContain(`await import(${JSON.stringify(join(w.projectRoot, 'src', 'plugins', 'plugins', 'kilo.ts'))})`)
     expect(written).not.toContain('opencode.ts')
     const [, opencode] = await pluginFileActions(w.env, OPENCODE_PLUGIN_SPEC)
-    expect(opencode?.kind === 'write' && opencode.content).toContain(JSON.stringify(join(w.projectRoot, 'src', 'plugins', 'opencode.ts')))
+    expect(opencode?.kind === 'write' && opencode.content).toContain(JSON.stringify(join(w.projectRoot, 'src', 'plugins', 'plugins', 'opencode.ts')))
   } finally {
     await w.cleanup()
   }
@@ -124,7 +124,7 @@ test('a Kilo shim from an older Kinfold, which loaded the plugin Kilo rejects, i
   try {
     const path = join(KILO_PLUGIN_SPEC.dir(w.env), KILO_PLUGIN_SPEC.fileName)
     mkdirSync(KILO_PLUGIN_SPEC.dir(w.env), { recursive: true })
-    writeFileSync(path, shimContent(join(w.projectRoot, 'src', 'plugins', 'opencode.ts'), w.env.dataDir, 'kilo-code', 'Kilo Code'))
+    writeFileSync(path, shimContent(join(w.projectRoot, 'src', 'plugins', 'plugins', 'opencode.ts'), w.env.dataDir, 'kilo-code', 'Kilo Code'))
     expect(pluginFileState(w.env, KILO_PLUGIN_SPEC)).toBe('stale')
     const actions = await pluginFileActions(w.env, KILO_PLUGIN_SPEC)
     const write = actions.find((action) => action.kind === 'write')

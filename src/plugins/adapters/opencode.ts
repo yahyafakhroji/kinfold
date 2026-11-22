@@ -2,7 +2,7 @@
 // shapes come from recorded OpenCode 2.1.4 events in test/fixtures/opencode/.
 
 import { isAbsolute, resolve } from 'node:path'
-import { type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../contract/event'
+import { type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../../system/contract/event'
 import { type AdapterContext, AdapterInputError, str } from './context'
 
 export const OPENCODE_HOST = 'opencode'

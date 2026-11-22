@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { CHECK_PROMPT } from '../install/observer-choice'
-import { type FakeRunner, type TempStore, fakeRunner, openTempStore } from '../observer/test-support'
-import { ObserverError, type ObserverSettings } from '../observer/types'
-import { createObserverTester } from './observer-test'
+import { CHECK_PROMPT } from '../../install/observer-choice'
+import { type FakeRunner, type TempStore, fakeRunner, openTempStore } from '../../../resources/tests/observer/test-support'
+import { ObserverError, type ObserverSettings } from '../../../resources/observer/types'
+import { createObserverTester } from '../../daemon/observer-test'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
 
 const LEAKY_DETAIL = 'sk-or-v1-REPLY-TEXT-THAT-MUST-NOT-LEAK'

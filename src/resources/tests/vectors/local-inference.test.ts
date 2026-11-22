@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { LOCAL_MODEL_DIMS, LOCAL_MODEL_FILES } from './local-model'
-import { createLocalInference, meanPoolNormalized, verifyModelFiles } from './local-inference'
+import { LOCAL_MODEL_DIMS, LOCAL_MODEL_FILES } from '../../vectors/local-model'
+import { createLocalInference, meanPoolNormalized, verifyModelFiles } from '../../vectors/local-inference'
 import { testModelDir } from './local-test-support'
 
 describe('meanPoolNormalized', () => {
@@ -40,7 +40,7 @@ describe.skipIf(modelDir === null)('the real model', () => {
 
   test('matches the reference vectors', async () => {
     const inference = await createLocalInference(files)
-    const fixtures = JSON.parse(readFileSync(join(import.meta.dir, '..', '..', 'test', 'minilm-reference.json'), 'utf8')) as { text: string; vector: number[] }[]
+    const fixtures = JSON.parse(readFileSync(join(import.meta.dir, '..', '..', '..', '..', 'test', 'minilm-reference.json'), 'utf8')) as { text: string; vector: number[] }[]
     for (const fixture of fixtures) {
       const vector = await inference.embed(fixture.text)
       expect(vector).toHaveLength(LOCAL_MODEL_DIMS)

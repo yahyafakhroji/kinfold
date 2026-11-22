@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { BEGIN_EVENTS, END_EVENTS, buildObserverPrompt, renderEvent } from './prompt'
-import type { ObserverEvent } from './types'
+import { BEGIN_EVENTS, END_EVENTS, buildObserverPrompt, renderEvent } from '../../observer/prompt'
+import type { ObserverEvent } from '../../observer/types'
 
 let counter = 0
 function event(payload: Record<string, unknown>, kind = 'tool_result'): ObserverEvent {

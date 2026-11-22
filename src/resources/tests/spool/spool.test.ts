@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type RedactedEvent, prepareForSpool } from '../capture/prepare'
-import type { NormalizedEvent } from '../contract/event'
-import { ulid } from '../contract/ulid'
-import { ALL_SECRET_VALUES, FAKE_SECRETS, leakyOutput } from '../../test/fixtures/secrets'
-import { DIR_MODE, FILE_MODE, QUARANTINE_DIR, readSpool, removeSpoolEntry, writeSpoolEntry } from './spool'
-import { posixOnly } from '../../test/platform-guards'
+import { type RedactedEvent, prepareForSpool } from '../../capture/prepare'
+import type { NormalizedEvent } from '../../../system/contract/event'
+import { ulid } from '../../../system/contract/ulid'
+import { ALL_SECRET_VALUES, FAKE_SECRETS, leakyOutput } from '../../../../test/fixtures/secrets'
+import { DIR_MODE, FILE_MODE, QUARANTINE_DIR, readSpool, removeSpoolEntry, writeSpoolEntry } from '../../spool/spool'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const options = { hmacKey: 'test-hmac-key' }
 let root: string

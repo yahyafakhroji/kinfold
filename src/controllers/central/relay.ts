@@ -8,20 +8,20 @@
 // is asked under the hook's own wait and answers "unavailable" rather than
 // make a prompt wait.
 
-import { cleanText, type PrepareOptions } from '../capture/prepare'
+import { cleanText, type PrepareOptions } from '../../resources/capture/prepare'
 import { shownBudgetMs } from '../daemon/context-route'
 import type { RouteAnswer } from '../daemon/data-routes'
 import { unavailableOutcome } from '../mcp/outcome'
 import type { ToolOutcome } from '../mcp/tools'
-import { type ContextRequest, type ContextResult, EMPTY_CONTEXT } from '../context/types'
-import type { McpRead } from '../store/mcp-read-store'
-import type { ProjectKey, ProjectKeyResolver } from '../store/project-key'
-import { type SpoolEntry, countSpool, createSpoolCursor, quarantineSpoolEntry, removeSpoolEntry } from '../spool/spool'
-import type { SemanticAnswer, SemanticRequest } from '../vectors/search'
+import { type ContextRequest, type ContextResult, EMPTY_CONTEXT } from '../../resources/context/types'
+import type { McpRead } from '../../resources/store/mcp-read-store'
+import type { ProjectKey, ProjectKeyResolver } from '../../resources/store/project-key'
+import { type SpoolEntry, countSpool, createSpoolCursor, quarantineSpoolEntry, removeSpoolEntry } from '../../resources/spool/spool'
+import type { SemanticAnswer, SemanticRequest } from '../../resources/vectors/search'
 import { type HubCall, type HubEndpoint, type HubFailure, callHub } from './client'
 import { centralProjectKey } from './project-key'
 import { type VersionGap, gapLine } from './version-rule'
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 
 /** Events per capture call; the byte budget below usually ends a batch first. */
 export const RELAY_BATCH_EVENTS = 200

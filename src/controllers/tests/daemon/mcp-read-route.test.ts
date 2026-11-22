@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { seedObservation } from '../context/test-support'
-import { type TempStore, T0, openTempStore } from '../observer/test-support'
-import { upsertProject, upsertSession } from '../store/writes'
-import { type RunningDaemon, startDaemon } from './daemon'
-import { MAX_REPORTED_IDS, parseMcpRead } from './mcp-read-route'
+import { seedObservation } from '../../../resources/tests/context/test-support'
+import { type TempStore, T0, openTempStore } from '../../../resources/tests/observer/test-support'
+import { upsertProject, upsertSession } from '../../../resources/store/writes'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import { MAX_REPORTED_IDS, parseMcpRead } from '../../daemon/mcp-read-route'
 
 let temp: TempStore
 let daemon: RunningDaemon

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { MAX_CHANGE_CHARS, MAX_CHANGE_LINES, changeLines, isDevVersion, releaseFromGithub, releaseKind } from './release'
+import { MAX_CHANGE_CHARS, MAX_CHANGE_LINES, changeLines, isDevVersion, releaseFromGithub, releaseKind } from '../../update/release'
 
 const gh = (tag: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ tag_name: tag, draft: false, prerelease: tag.includes('-'), body: '', ...extra })
 

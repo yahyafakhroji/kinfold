@@ -8,7 +8,7 @@
 
 import { appendFileSync, chmodSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { DATA_FILE_MODE } from '../store/data-dir'
+import { DATA_FILE_MODE } from '../../resources/store/data-dir'
 
 export const INSTALL_LOG_FILE = 'install.log'
 

@@ -2,9 +2,9 @@ import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { detectPlatform } from '../platform/platform'
-import { type ProgramFiles, leftBehindLine, posixProgramFiles, programFilesFor, programFilesOf } from './program-files'
-import { windowsProgramFiles } from './program-files-windows'
+import { detectPlatform } from '../../../system/platform/platform'
+import { type ProgramFiles, leftBehindLine, posixProgramFiles, programFilesFor, programFilesOf } from '../../install/program-files'
+import { windowsProgramFiles } from '../../install/program-files-windows'
 import { createWorld, type FakeWorld } from './test-support'
 
 let root: string | null = null

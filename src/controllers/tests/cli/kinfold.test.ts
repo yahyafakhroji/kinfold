@@ -2,20 +2,20 @@ import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
-import { USAGE, parseArgs } from '../install/args'
-import { HOOK_TIMEOUT_S } from '../install/claude-hooks'
-import { EXIT_USAGE } from '../install/install'
+import { USAGE, parseArgs } from '../../install/args'
+import { HOOK_TIMEOUT_S } from '../../../resources/install-plan/claude-hooks'
+import { EXIT_USAGE } from '../../install/install'
 import { fakeTerminal } from '../install/prompt/fake-terminal'
-import { LOCKED_FOLDER_NOTE } from '../install/setup/prefill'
+import { LOCKED_FOLDER_NOTE } from '../../install/setup/prefill'
 import { type FakeWorld, createWorld, snapshotTree } from '../install/test-support'
-import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
-import { VERSION } from '../version'
-import { mergeSamHooks } from '../install/claude-hooks'
-import { installPaths } from '../install/env'
-import { entryCommand } from '../install/entry'
-import { envForDataDir } from './data-dir-env'
-import { EXIT_CANCELLED, type SubcommandRunners, dataDirFor, parseGlobalArgs, runKinfold } from './kinfold'
-import { posixOnly } from '../../test/platform-guards'
+import { SQLITE3MC_LIB_ENV } from '../../../resources/sqlite/library'
+import { VERSION } from '../../../system/version'
+import { mergeSamHooks } from '../../../resources/install-plan/claude-hooks'
+import { installPaths } from '../../../resources/install-plan/env'
+import { entryCommand } from '../../../resources/install-plan/entry'
+import { envForDataDir } from '../../cli/data-dir-env'
+import { EXIT_CANCELLED, type SubcommandRunners, dataDirFor, parseGlobalArgs, runKinfold } from '../../cli/kinfold'
+import { posixOnly } from '../../../../test/platform-guards'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -76,7 +76,7 @@ test('no non-test source file still tells the user to run `sam <command>`', () =
     readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
       entry.isDirectory() ? walk(join(dir, entry.name)) : entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [join(dir, entry.name)] : [])
   const stderrPrefix = /`sam: /
-  const hits = walk(join(import.meta.dir, '..')).filter((file) => stale.test(readFileSync(file, 'utf8')) || stderrPrefix.test(readFileSync(file, 'utf8')))
+  const hits = walk(join(import.meta.dir, '..', '..', '..')).filter((file) => stale.test(readFileSync(file, 'utf8')) || stderrPrefix.test(readFileSync(file, 'utf8')))
   expect(hits).toEqual([])
 })
 
@@ -190,12 +190,12 @@ test('a bare kinfold installs, and --help prints usage without installing', asyn
   world = createWorld({ claudeVersion: '2.1.310 (Claude Code)', interactive: true })
 
   expect(await runKinfold([], world.env)).toBe(0)
-  expect(world.out).toContain('installed. Check it with: bun src/cli/kinfold.ts status')
+  expect(world.out).toContain('installed. Check it with: bun src/controllers/cli/kinfold.ts status')
 
   world.out.length = 0
   expect(await runKinfold(['--help'], world.env)).toBe(0)
   expect(world.out[0]).toStartWith('usage: kinfold ')
-  expect(world.out).not.toContain('installed. Check it with: bun src/cli/kinfold.ts status')
+  expect(world.out).not.toContain('installed. Check it with: bun src/controllers/cli/kinfold.ts status')
 })
 
 test('--data-dir before the subcommand wins over the environment and reaches the subcommand', async () => {
@@ -228,8 +228,8 @@ test('kinfold hook with empty stdin finishes inside the host hook timeout', asyn
   const home = mkdtempSync(join(tmpdir(), 'kinfold-hook-cli-'))
   try {
     const started = performance.now()
-    const child = Bun.spawn([process.execPath, join(import.meta.dir, 'kinfold.ts'), 'hook'], {
-      cwd: join(import.meta.dir, '..', '..'),
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, '../../cli/kinfold.ts'), 'hook'], {
+      cwd: join(import.meta.dir, '..', '..', '..', '..'),
       env: { PATH: process.env.PATH ?? '', HOME: home, KINFOLD_DATA_DIR: home, NODE_ENV: 'test', KINFOLD_DB_KEYSTORE: 'none' },
       stdin: 'ignore',
       stdout: 'pipe',
@@ -249,19 +249,19 @@ test('kinfold hook with empty stdin finishes inside the host hook timeout', asyn
 test('the hook subcommand loads no installer module', async () => {
   const home = mkdtempSync(join(tmpdir(), 'kinfold-hook-load-'))
   try {
-    const installerDir = join(import.meta.dir, '..', 'install')
+    const installerDirs = [join(import.meta.dir, '..', '..', 'install'), join(import.meta.dir, '..', '..', '..', 'resources', 'install-plan')]
     const probe = join(home, 'probe.ts')
     const loadedFile = join(home, 'loaded.json')
     writeFileSync(probe, [
       "import { writeFileSync } from 'node:fs'",
       "process.on('exit', () => {",
       // The wizard's renderer is the program's one runtime dependency; a hook must never pay for it either.
-      `  const loaded = Object.keys(require.cache).filter((path) => path.startsWith(${JSON.stringify(installerDir)}) || path.includes('@clack'))`,
+      `  const loaded = Object.keys(require.cache).filter((path) => ${JSON.stringify(installerDirs)}.some((dir) => path.startsWith(dir)) || path.includes('@clack'))`,
       `  writeFileSync(${JSON.stringify(loadedFile)}, JSON.stringify(loaded))`,
       '})',
     ].join('\n'))
-    const child = Bun.spawn([process.execPath, '--preload', probe, join(import.meta.dir, 'kinfold.ts'), 'hook'], {
-      cwd: join(import.meta.dir, '..', '..'),
+    const child = Bun.spawn([process.execPath, '--preload', probe, join(import.meta.dir, '../../cli/kinfold.ts'), 'hook'], {
+      cwd: join(import.meta.dir, '..', '..', '..', '..'),
       env: { PATH: process.env.PATH ?? '', HOME: home, KINFOLD_DATA_DIR: home, NODE_ENV: 'test', KINFOLD_DB_KEYSTORE: 'none' },
       stdin: 'ignore',
       stdout: 'pipe',
@@ -339,8 +339,8 @@ test('--data-dir elsewhere on an installed machine is refused with the locked-fo
 posixOnly('POSIX signals')('the daemon subcommand stays up and stops cleanly on SIGTERM', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kinfold-daemon-cli-'))
   const dataDir = join(root, 'data')
-  const child = Bun.spawn([process.execPath, join(import.meta.dir, 'kinfold.ts'), '--data-dir', dataDir, 'daemon'], {
-    cwd: join(import.meta.dir, '..', '..'),
+  const child = Bun.spawn([process.execPath, join(import.meta.dir, '../../cli/kinfold.ts'), '--data-dir', dataDir, 'daemon'], {
+    cwd: join(import.meta.dir, '..', '..', '..', '..'),
     env: {
       PATH: process.env.PATH ?? '',
       HOME: root,
@@ -395,8 +395,8 @@ posixOnly('POSIX signals')('the daemon subcommand stays up and stops cleanly on 
 test('the mcp subcommand keeps running while its stdin is open', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kinfold-mcp-cli-'))
   const dataDir = join(root, 'data')
-  const child = Bun.spawn([process.execPath, join(import.meta.dir, 'kinfold.ts'), '--data-dir', dataDir, 'mcp'], {
-    cwd: join(import.meta.dir, '..', '..'),
+  const child = Bun.spawn([process.execPath, join(import.meta.dir, '../../cli/kinfold.ts'), '--data-dir', dataDir, 'mcp'], {
+    cwd: join(import.meta.dir, '..', '..', '..', '..'),
     env: {
       PATH: process.env.PATH ?? '',
       HOME: root,
@@ -427,8 +427,8 @@ test('the mcp subcommand keeps running while its stdin is open', async () => {
 test('a fatal mcp error logs only its name, not the message', async () => {
   const home = mkdtempSync(join(tmpdir(), 'kinfold-mcp-fatal-'))
   try {
-    const child = Bun.spawn([process.execPath, join(import.meta.dir, 'kinfold.ts'), 'mcp'], {
-      cwd: join(import.meta.dir, '..', '..'),
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, '../../cli/kinfold.ts'), 'mcp'], {
+      cwd: join(import.meta.dir, '..', '..', '..', '..'),
       env: { PATH: process.env.PATH ?? '', HOME: home, KINFOLD_DATA_DIR: 'relative/path', NODE_ENV: 'test', KINFOLD_DB_KEYSTORE: 'none' },
       stdin: 'ignore',
       stdout: 'pipe',
@@ -450,7 +450,7 @@ test('`kinfold update` dispatches to the updater, which refuses a checkout', asy
   const fetched: string[] = []
   world.env = { ...world.env, fetch: async (url) => (fetched.push(url), new Response('', { status: 500 })) }
   expect(await runKinfold(['update', '--dry-run'], world.env)).toBe(1)
-  expect(world.out.at(-1)).toBe('kinfold update: this is a checkout install; update it with git pull and bun src/cli/kinfold.ts install')
+  expect(world.out.at(-1)).toBe('kinfold update: this is a checkout install; update it with git pull and bun src/controllers/cli/kinfold.ts install')
   expect(fetched).toEqual([])
 })
 
@@ -484,6 +484,6 @@ test('Ctrl-C at a question of any framed command exits 130', async () => {
   // decrypt asks to type "decrypt"; the store must be encrypted for it to reach the question, so restore is used: it asks for the code.
   const term = fakeTerminal(['\u0003'])
   world = createWorld({ interactive: true, terminal: term })
-  const { runFramed } = await import('../install/prompt/frame')
+  const { runFramed } = await import('../../install/prompt/frame')
   expect(await runFramed(world.env, 'restore', async (env) => ((await env.io.askSecret('Recovery code: ')), 0))).toBe(EXIT_CANCELLED)
 })

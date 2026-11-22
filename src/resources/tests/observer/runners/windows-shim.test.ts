@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ObserverError } from '../types'
-import { type SpawnRequest, claudeCliArgs, createClaudeCliRunner } from './claude-cli'
-import { resolveCmdShim, withCmdShims } from './windows-shim'
+import { ObserverError } from '../../../observer/types'
+import { type SpawnRequest, claudeCliArgs, createClaudeCliRunner } from '../../../observer/runners/claude-cli'
+import { resolveCmdShim, withCmdShims } from '../../../observer/runners/windows-shim'
 
 let npmDir: string
 beforeEach(() => {

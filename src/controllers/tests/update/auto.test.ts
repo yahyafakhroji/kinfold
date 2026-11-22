@@ -2,11 +2,11 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { InstallRecord } from '../install/setup/record'
-import { type AutoUpdateDeps, ERROR_BACKOFF_MS, QUIET_MS, autoUpdateDecision, createAutoUpdateTicker, runAutoUpdateTick, startAutoUpdates } from './auto'
-import { type AutoUpdateState, mergeAutoState, readAutoState } from './auto-state'
-import { acquireUpdateLock } from './lock'
-import { type UpdateState, writeUpdateState } from './state'
+import type { InstallRecord } from '../../../resources/install-plan/setup/record'
+import { type AutoUpdateDeps, ERROR_BACKOFF_MS, QUIET_MS, autoUpdateDecision, createAutoUpdateTicker, runAutoUpdateTick, startAutoUpdates } from '../../update/auto'
+import { type AutoUpdateState, mergeAutoState, readAutoState } from '../../update/auto-state'
+import { acquireUpdateLock } from '../../update/lock'
+import { type UpdateState, writeUpdateState } from '../../update/state'
 
 const RECORD: InstallRecord = { channel: 'curl', updateCheck: true, autoUpdate: true, autoUpdateIntro: false, agentHomes: {}, firstInstalledAt: 1 }
 const NOW = 1_792_900_000_000

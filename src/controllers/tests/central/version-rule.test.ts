@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { versionGap } from './version-rule'
+import { versionGap } from '../../central/version-rule'
 
 test('the same major.minor is compatible whatever the patch', () => {
   expect(versionGap('0.6.0', '0.6.3')).toBeNull()

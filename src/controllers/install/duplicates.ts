@@ -6,10 +6,10 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { samScriptsIn } from './claude-hooks'
-import { readJsonObject } from './files'
+import { samScriptsIn } from '../../resources/install-plan/claude-hooks'
+import { readJsonObject } from '../../resources/install-plan/files'
 import { shimTarget } from './opencode-shim'
-import { CLI_NAME, PRODUCT } from '../names'
+import { CLI_NAME, PRODUCT } from '../../system/names'
 
 const PROJECT_SETTINGS = [join('.claude', 'settings.local.json'), join('.claude', 'settings.json')]
 const PROJECT_PLUGINS_DIR = join('.opencode', 'plugins')

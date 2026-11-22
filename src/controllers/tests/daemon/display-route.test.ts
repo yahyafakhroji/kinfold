@@ -5,10 +5,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { DISPLAY_FILE, readDisplayFile, writeDisplayFile } from '../context/display-file'
-import { type TempStore, openTempStore } from '../observer/test-support'
-import { readDisplaySettings, writeDisplaySettings } from '../store/display-settings'
-import { type RunningDaemon, startDaemon } from './daemon'
+import { DISPLAY_FILE, readDisplayFile, writeDisplayFile } from '../../../resources/context/display-file'
+import { type TempStore, openTempStore } from '../../../resources/tests/observer/test-support'
+import { readDisplaySettings, writeDisplaySettings } from '../../../resources/store/display-settings'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
 
 let temp: TempStore
 let daemon: RunningDaemon | null

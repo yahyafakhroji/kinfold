@@ -5,9 +5,9 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type RunningDaemon, startDaemon } from '../daemon/daemon'
-import { openStore } from '../store/db'
-import { loadOrCreateKey } from './client'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import { openStore } from '../../../resources/store/db'
+import { loadOrCreateKey } from '../../central/client'
 
 let root: string
 let daemon: RunningDaemon | null

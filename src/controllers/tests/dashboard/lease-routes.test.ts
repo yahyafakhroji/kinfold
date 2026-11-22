@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { LIVE_LEASE_TTL_MS } from './auth'
-import { CLOSED_MESSAGE } from './routes'
+import { LIVE_LEASE_TTL_MS } from '../../dashboard/auth'
+import { CLOSED_MESSAGE } from '../../dashboard/routes'
 import { type DashboardRig, cookiePair, startRig } from './test-support'
 
 const LEASE = 'L'.repeat(43)

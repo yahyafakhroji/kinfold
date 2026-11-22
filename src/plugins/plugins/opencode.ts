@@ -2,7 +2,7 @@
 // nothing else, and the file exports nothing more: the plugin body lives in
 // opencode-plugin.ts.
 
-import { resolveDataDir } from '../store/data-dir'
+import { resolveDataDir } from '../../resources/store/data-dir'
 import { createOpenCodePlugin } from './opencode-plugin'
 
 // The folder comes from, in order: the constant an installed program writes

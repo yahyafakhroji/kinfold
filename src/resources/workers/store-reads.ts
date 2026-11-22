@@ -4,14 +4,14 @@
 // one answer. Only reads: the daemon stays the only writer.
 
 import { recallDelivered, recallDelta, recallKeyword, recallRows, recallWarm } from '../context/recall-reads'
-import { type MetricsWindow, metricsSummary } from '../dashboard/metrics'
+import { type MetricsWindow, metricsSummary } from '../reports/metrics'
 import { sizeReport } from '../data-control/size'
 import type { Database } from '../sqlite/types'
 import { type BrowseFilters, browseObservations, observationFacets } from '../store/memory-reads'
 import { type ActivityQuery, listActivity } from '../store/activity-store'
 import { type MemoriesQuery, type ProjectsQuery, type SessionsQuery, devicesSeen, memoriesPage, projectsPage } from '../store/list-reads'
-import { type ImpactWindow, type MeasuredEntries, impactReport, overviewReport, sessionsWithSaved } from '../dashboard/overview'
-import { hostTurns, measureSaving } from '../dashboard/saved'
+import { type ImpactWindow, type MeasuredEntries, impactReport, overviewReport, sessionsWithSaved } from '../reports/overview'
+import { hostTurns, measureSaving } from '../reports/saved'
 
 export const STORE_READS = {
   /** For tests of the worker itself: answers with its argument. */

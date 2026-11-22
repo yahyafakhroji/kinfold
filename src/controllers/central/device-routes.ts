@@ -7,11 +7,11 @@
 // local store is kept untouched as its backup. Everything else (update
 // settings, dashboard pages and login, health, the spool nudge) stays local.
 
-import type { Parsed } from '../context/types'
+import type { Parsed } from '../../resources/context/types'
 import type { RouteAnswer } from '../daemon/data-routes'
 import { parseMcpRead } from '../daemon/mcp-read-route'
 import { READ_TOOLS, parseReadRequest } from '../daemon/read-routes'
-import { parseSemanticRequest } from '../vectors/search'
+import { parseSemanticRequest } from '../../resources/vectors/search'
 import { VIEW_PATHS } from './hub-routes'
 import type { Relay } from './relay'
 

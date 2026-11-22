@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { AdapterInputError, lenient, nonEmpty, str } from './context'
+import { AdapterInputError, lenient, nonEmpty, str } from '../../adapters/context'
 
 describe('adapter helpers', () => {
   test('str keeps an empty string and nonEmpty drops it', () => {

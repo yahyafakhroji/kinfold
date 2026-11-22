@@ -1,10 +1,10 @@
 // Turns stored events into the SourceEvent shape resolveEvidenceStrength reads
-// (src/evidence.ts decides; this file only describes what the observer saw).
+// (src/system/evidence.ts decides; this file only describes what the observer saw).
 // outputChars is the stored, redacted output length, and a withheld output
 // counts as withheld whatever its marker text says.
 
-import { isRecord } from '../contract/event'
-import { type EvidenceStrength, type SourceEvent, resolveEvidenceStrength } from '../evidence'
+import { isRecord } from '../../system/contract/event'
+import { type EvidenceStrength, type SourceEvent, resolveEvidenceStrength } from '../../system/evidence'
 import type { ObserverEvent, ParsedObservation } from './types'
 
 const CITABLE_KINDS: ReadonlySet<string> = new Set(['user_prompt', 'tool_result', 'turn_end'])

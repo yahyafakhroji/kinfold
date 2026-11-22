@@ -66,7 +66,7 @@ run_live_detach_test() {
     return
   fi
   KINFOLD_SQLITE3MC_LIB=/nonexistent KINFOLD_TEST_DETACH=1 \
-    bun test ./src/update/detach.live.test.ts 2>&1 | tee "$log"
+    bun test ./src/controllers/tests/update/detach.live.test.ts 2>&1 | tee "$log"
   if grep -q '(skip)' "$log" || ! grep -q '(pass)' "$log"; then
     echo "the live detach test skipped or passed nothing"
     exit 1
@@ -160,7 +160,7 @@ run_live_libsecret_test() {
     password="$(openssl rand -hex 24)"
     printf "%s" "$password" | gnome-keyring-daemon --unlock --components=secrets --daemonize > /dev/null
     wait_for_secret_service
-    KINFOLD_SQLITE3MC_LIB=/nonexistent KINFOLD_TEST_SECRET_SERVICE=1 bun test ./src/secrets/stores/libsecret.live.test.ts 2>&1
+    KINFOLD_SQLITE3MC_LIB=/nonexistent KINFOLD_TEST_SECRET_SERVICE=1 bun test ./src/resources/tests/secrets/stores/libsecret.live.test.ts 2>&1
   ' | tee "$log"
   if grep -q '(skip)' "$log" || ! grep -q '(pass)' "$log"; then
     echo "the live libsecret test skipped or passed nothing"
@@ -173,8 +173,8 @@ run_live_libsecret_test() {
 # source here, names the reason at once. Its reasons are fixed strings.
 probe_libsecret() {
   bun -e "
-    import { libsecretModule } from './src/secrets/stores/libsecret'
-    import { currentPlatform } from './src/platform/platform'
+    import { libsecretModule } from './src/resources/secrets/stores/libsecret'
+    import { currentPlatform } from './src/system/platform/platform'
     const probe = libsecretModule.probe({ platform: currentPlatform(), homeDir: process.env.HOME ?? '', dataDir: '', envVars: process.env, security: undefined as never })
     console.log(probe.usable ? 'libsecret probe: usable' : 'libsecret probe: ' + probe.reason)
     if (!probe.usable) process.exit(1)

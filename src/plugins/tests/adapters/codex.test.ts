@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { prepareForSpool } from '../capture/prepare'
-import { type NormalizedEvent, validateEvent } from '../contract/event'
-import { FAKE_SECRETS, leakyOutput } from '../../test/fixtures/secrets'
-import { codexExitCode, flattenCodexResponse, normalizeCodex } from './codex'
-import { AdapterInputError } from './context'
+import { prepareForSpool } from '../../../resources/capture/prepare'
+import { type NormalizedEvent, validateEvent } from '../../../system/contract/event'
+import { FAKE_SECRETS, leakyOutput } from '../../../../test/fixtures/secrets'
+import { codexExitCode, flattenCodexResponse, normalizeCodex } from '../../adapters/codex'
+import { AdapterInputError } from '../../adapters/context'
 
 // Built from the documented shapes, never captured from a live Codex (see codex.ts).
-const FIXTURES = join(import.meta.dir, '../../test/fixtures/codex')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures/codex')
 const fixture = (name: string): Record<string, unknown> => JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8'))
 const NOT_CAPTURED = new Set(['pre-tool-use'])
 
@@ -51,7 +51,7 @@ describe('normalizeCodex on documented payloads', () => {
   })
 
   test('a Bash call takes its exit code from the model-facing text', () => {
-    expect(normalize('post-tool-use.bash').tool).toMatchObject({ name: 'Bash', exitCode: 0, input: { command: 'bun test src/store' } })
+    expect(normalize('post-tool-use.bash').tool).toMatchObject({ name: 'Bash', exitCode: 0, input: { command: 'bun test src/resources/store' } })
     expect(normalize('post-tool-use.bash').tool?.isError).toBeUndefined()
     expect(normalize('post-tool-use.bash-failed').tool).toMatchObject({ exitCode: 1, isError: true })
   })

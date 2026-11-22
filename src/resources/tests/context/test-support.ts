@@ -1,11 +1,11 @@
 // Test scaffolding for context packs: seeds observations and summaries with
 // synthetic titles into a temp store. Tests only; nothing in the daemon imports it.
 
-import { type Store, openStore } from '../store/db'
-import { writeDisplaySettings } from '../store/display-settings'
-import { writeDisplayFile } from './display-file'
-import { insertObservation, upsertSummary } from '../store/observer-store'
-import type { EvidenceStrength } from '../evidence'
+import { type Store, openStore } from '../../store/db'
+import { writeDisplaySettings } from '../../store/display-settings'
+import { writeDisplayFile } from '../../context/display-file'
+import { insertObservation, upsertSummary } from '../../store/observer-store'
+import type { EvidenceStrength } from '../../../system/evidence'
 
 export interface SeedObservation {
   sessionId: number

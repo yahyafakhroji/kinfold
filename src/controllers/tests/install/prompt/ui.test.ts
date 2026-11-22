@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test'
 import { type FakeWorld, createWorld } from '../test-support'
 import { fakeTerminal } from './fake-terminal'
-import { createPrompts } from './prompts'
-import { uiFor } from './ui'
+import { createPrompts } from '../../../install/prompt/prompts'
+import { uiFor } from '../../../install/prompt/ui'
 
 let world: FakeWorld | null = null
 afterEach(async () => {

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { parseIds } from './ids'
+import { parseIds } from '../../store/ids'
 
 test('parseIds keeps safe integers and reads anything else as no ids', () => {
   expect(parseIds('[3, 1, 2]')).toEqual([3, 1, 2])

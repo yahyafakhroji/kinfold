@@ -14,12 +14,12 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { MarkerKey } from '../redaction/redact'
-import type { CredentialProvider } from '../secrets/credentials'
-import { type FingerprintKey, LEGACY_FINGERPRINT_SCHEME, MASTER_FINGERPRINT_SCHEME } from '../secrets/fingerprint'
-import { HMAC_LEGACY_REF, LEGACY_EPOCH, epochAt, epochStart, fingerprintKey, isEpoch, isHexKey, markerSubKey, nextEpoch, previousEpoch, readMaster } from '../secrets/hmac-keys'
-import { HMAC_KEY_FILE } from '../store/data-dir'
-import { listSubKeyEpochs, loadMarkerKey, readSubKey, removeSubKey, writeSubKey } from '../store/hmac-key'
+import type { MarkerKey } from '../../resources/redaction/redact'
+import type { CredentialProvider } from '../../resources/secrets/credentials'
+import { type FingerprintKey, LEGACY_FINGERPRINT_SCHEME, MASTER_FINGERPRINT_SCHEME } from '../../resources/secrets/fingerprint'
+import { HMAC_LEGACY_REF, LEGACY_EPOCH, epochAt, epochStart, fingerprintKey, isEpoch, isHexKey, markerSubKey, nextEpoch, previousEpoch, readMaster } from '../../resources/secrets/hmac-keys'
+import { HMAC_KEY_FILE } from '../../resources/store/data-dir'
+import { listSubKeyEpochs, loadMarkerKey, readSubKey, removeSubKey, writeSubKey } from '../../resources/store/hmac-key'
 
 export const ROTATION_TICK_MS = 60 * 60_000
 /** The next epoch's file appears this long before the month turns. */

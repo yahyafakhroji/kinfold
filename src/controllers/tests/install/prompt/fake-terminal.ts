@@ -2,8 +2,8 @@
 // was written and every raw-mode switch, and ends its key stream when the
 // script runs out (which a prompt reads as a closed stdin).
 
-import { type Key, decodeKeys } from './keys'
-import type { TerminalIO } from './terminal'
+import { type Key, decodeKeys } from '../../../install/prompt/keys'
+import type { TerminalIO } from '../../../install/prompt/terminal'
 
 export function fakeTerminal(input: readonly (string | Key)[]): TerminalIO & { output(): string; rawStates(): boolean[] } {
   const script = input.flatMap((item) => (typeof item === 'string' ? decodeKeys(item) : [item]))

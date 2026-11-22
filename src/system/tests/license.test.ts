@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const root = join(import.meta.dir, '..');
+const root = join(import.meta.dir, '../../..');
 
 test('the repository is Apache-2.0 with the Kinfold notice', () => {
   const license = readFileSync(join(root, 'LICENSE'), 'utf8');

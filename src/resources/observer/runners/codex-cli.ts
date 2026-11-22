@@ -7,7 +7,7 @@
 // tool-shaped event in the output rejects the run.
 // Flags and event names were checked against codex 0.166 docs and source.
 
-import { isRecord } from '../../contract/event'
+import { isRecord } from '../../../system/contract/event'
 import { ObserverError, type RunnerUsage } from '../types'
 import { type CliAdapter, type CliParsed, type CliRunContext, type Semver, parseSemver } from './cli-core'
 import { cliFailure } from './cli-error'

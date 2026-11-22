@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { compareVersions, isPatchUpdate, parseVersion } from './version-order'
+import { compareVersions, isPatchUpdate, parseVersion } from '../../update/version-order'
 
 test('a pre-release sorts before its release', () => {
   expect(compareVersions('0.1.0-rc.1', '0.1.0')).toBeLessThan(0)

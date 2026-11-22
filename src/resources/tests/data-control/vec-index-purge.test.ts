@@ -4,16 +4,16 @@
 // pinned sqlite-vec build named by KINFOLD_TEST_VEC0 and skips without it.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { readEnv } from '../env-names'
+import { readEnv } from '../../../system/env-names'
 import { T0 } from '../observer/test-support'
-import { insertFinding, listFindings } from '../store/findings-store'
-import { startActive } from '../store/vector-spaces'
-import type { Database } from '../sqlite/types'
-import { dropIndexedVectors, upsertVectors } from '../store/vector-store'
-import { createVecIndex } from '../vectors/vec-index'
+import { insertFinding, listFindings } from '../../store/findings-store'
+import { startActive } from '../../store/vector-spaces'
+import type { Database } from '../../sqlite/types'
+import { dropIndexedVectors, upsertVectors } from '../../store/vector-store'
+import { createVecIndex } from '../../vectors/vec-index'
 import { reconcileVecIndex } from '../vectors/vec-index.test-support'
-import { purge } from './purge'
-import { resolveFinding } from './resolve'
+import { purge } from '../../data-control/purge'
+import { resolveFinding } from '../../data-control/resolve'
 import { DAY, type Fixture, seedFixture } from './test-support'
 
 const VEC0 = readEnv(process.env, 'TEST_VEC0')

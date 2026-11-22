@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { processSessionBatch } from '../process'
+import { processSessionBatch } from '../../../observer/process'
 import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../test-support'
-import { ObserverError, type ObserverPrompt } from '../types'
-import { createRunner } from '.'
-import { type FetchFn, OPENROUTER_ENDPOINT, createOpenRouterRunner } from './openrouter'
+import { ObserverError, type ObserverPrompt } from '../../../observer/types'
+import { createRunner } from '../../../observer/runners'
+import { type FetchFn, OPENROUTER_ENDPOINT, createOpenRouterRunner } from '../../../observer/runners/openrouter'
 
 const KEY = 'sk-or-v1-fake-test-key-0000000000000000000000000000'
 const PROMPT: ObserverPrompt = { system: 'SYSTEM RULES', user: 'EVENTS', eventIds: ['01JA'] }

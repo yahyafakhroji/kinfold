@@ -1,6 +1,6 @@
 // Groups near-duplicate observations into one pack item. Observations arrive
 // ranked (strongest evidence plus the confirmation boost, then newest; see
-// confirmBoost in src/store/observation-links.ts), so the first of a group is the one
+// confirmBoost in src/resources/store/observation-links.ts), so the first of a group is the one
 // to show; later members only add the hosts that also saw it. Each candidate
 // is compared with group leads, never with other members, so a chain of
 // slightly different titles cannot drift into one group.

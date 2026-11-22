@@ -5,15 +5,15 @@
 // project already on the hub keeps the hub's version, and this device's own
 // store is left as it was.
 
-import type { Parsed } from '../context/types'
-import type { InstallEnv } from '../install/env'
-import { osOf } from '../platform/platform'
+import type { Parsed } from '../../resources/context/types'
+import type { InstallEnv } from '../../resources/install-plan/env'
+import { osOf } from '../../system/platform/platform'
 import { managedServiceOf } from '../install/service/control'
-import { readInstallRecord, setCentralMode } from '../install/setup/record'
-import { type DbKeyStore, dbKeyStoreFor } from '../sqlite/keys'
-import type { Database } from '../sqlite/types'
-import type { ProjectKey } from '../store/project-key'
-import { VERSION } from '../version'
+import { readInstallRecord, setCentralMode } from '../../resources/install-plan/setup/record'
+import { type DbKeyStore, dbKeyStoreFor } from '../../resources/sqlite/keys'
+import type { Database } from '../../resources/sqlite/types'
+import type { ProjectKey } from '../../resources/store/project-key'
+import { VERSION } from '../../system/version'
 import { type HubEndpoint, type HubFetch, callHub, pairWithHub, readKey } from './client'
 import { listDevices, removeDevice } from './devices'
 import { DEFAULT_HUB_PORT } from './hub-server'

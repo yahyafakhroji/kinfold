@@ -9,8 +9,8 @@
 // left alone, on install and on uninstall. The user's `enabled` switch on ours
 // survives a re-install.
 
-import { isRecord } from '../../contract/event'
-import type { InstallEnv } from '../../install/env'
+import { isRecord } from '../../../system/contract/event'
+import type { InstallEnv } from '../../../resources/install-plan/env'
 import type { AgentId } from '../profile'
 import type { JsonEdit, Settings } from './json-file'
 import { type HookTarget, type JsonHooksSpec, type WiringState, hookTarget, jsonHookScript, shellCommand } from './json-hooks'

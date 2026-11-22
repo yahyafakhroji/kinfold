@@ -6,12 +6,12 @@
 // GEMINI_CLI_HOME) is resolved
 // the way Codex's is: an unusable value skips the agent with the reason.
 
-import type { CodexHome } from '../../install/codex-home'
-import type { InstallEnv } from '../../install/env'
-import { MCP_SERVER_NAME, type McpEntryState } from '../../install/mcp-config'
-import { mcpTarget } from '../../install/mcp-wiring'
-import type { Action } from '../../install/plan'
-import { MCP_HOST_ENV } from '../../mcp/read-reporter'
+import type { CodexHome } from '../../../resources/install-plan/codex-home'
+import type { InstallEnv } from '../../../resources/install-plan/env'
+import { MCP_SERVER_NAME, type McpEntryState } from '../../../resources/install-plan/mcp-config'
+import { mcpTarget } from '../../../resources/install-plan/mcp-wiring'
+import type { Action } from '../../../resources/install-plan/plan'
+import { MCP_HOST_ENV } from '../../../controllers/mcp/read-reporter'
 import type { AgentId, AgentWiring } from '../profile'
 import { type HookDefinitionSpec, hookDefinitionEdit, hookDefinitionRemoveEdit, hookDefinitionState } from './hook-definition'
 import { type JsonEdit, plainJsonFileActions, plainJsonFileUninstallActions } from './json-file'

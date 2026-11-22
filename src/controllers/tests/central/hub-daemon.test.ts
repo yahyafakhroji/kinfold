@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startHubWhenReady } from './hub-daemon'
-import type { CentralCore } from './hub-routes'
-import { TAILSCALE_STOPPED, type Tailscale, type TailscaleProblem, type TailscaleSelf } from './tailscale'
+import { startHubWhenReady } from '../../central/hub-daemon'
+import type { CentralCore } from '../../central/hub-routes'
+import { TAILSCALE_STOPPED, type Tailscale, type TailscaleProblem, type TailscaleSelf } from '../../central/tailscale'
 
 let dir: string
 beforeEach(() => {

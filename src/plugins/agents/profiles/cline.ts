@@ -17,7 +17,7 @@
 //     ~/.cline/data/settings/cline_mcp_settings.json, mcpServers with command,
 //     args, env, disabled; CLINE_MCP_SETTINGS_PATH moves it; the extension's
 //     file is reached only through its MCP Servers panel, so it is a manual step)
-// The parser is src/adapters/cline.ts. No variable moves the hooks folder.
+// The parser is src/plugins/adapters/cline.ts. No variable moves the hooks folder.
 // Per-prompt context is claimed for the extension, which reads it on
 // UserPromptSubmit; the CLI doesn't, which the limit says. The extension runs
 // TaskStart from beforeRun, once per submitted turn
@@ -29,16 +29,16 @@
 
 import { join, resolve } from 'node:path'
 import { CLINE_HOOK_FILES } from '../../adapters/cline'
-import { parseEntry } from '../../install/entry'
-import { type InstallEnv, platformOf } from '../../install/env'
-import type { Action } from '../../install/plan'
-import type { OsName } from '../../platform/platform'
+import { parseEntry } from '../../../resources/install-plan/entry'
+import { type InstallEnv, platformOf } from '../../../resources/install-plan/env'
+import type { Action } from '../../../resources/install-plan/plan'
+import type { OsName } from '../../../system/platform/platform'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpEntryText, stdioMcpEntry } from '../families/json-agent'
 import { hookTarget, shellCommand } from '../families/json-hooks'
 import { mcpEntryState } from '../families/mcp-entry'
 import { type OwnedFileSpec, ownedFileActions, ownedFileUninstallActions, ownedFilesState } from '../families/owned-file'
 import { ACTS_HEADLESS, type AgentProfile, type Capabilities } from '../profile'
-import { SHIM_MARKER } from '../../names'
+import { SHIM_MARKER } from '../../../system/names'
 
 const CAPABILITIES: Capabilities = { capture: 'full', context: { sessionStart: false, prompt: true }, search: true, observer: false }
 const WINDOWS_CAPABILITIES: Capabilities = { capture: 'none', context: { sessionStart: false, prompt: false }, search: true, observer: false }

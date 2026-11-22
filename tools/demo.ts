@@ -63,15 +63,15 @@ process.env.TMPDIR = root
 // The daemon runs in this process and would ask GitHub for the newest release once it has a real version; a recording reaches no network.
 process.env.KINFOLD_NO_UPDATE_CHECK = '1'
 
-const { createWorld } = await import('../src/install/test-support')
-const { install } = await import('../src/install/install')
-const { status } = await import('../src/install/status')
-const { installedProgramPath } = await import('../src/install/entry')
-const { runFramed } = await import('../src/install/prompt/frame')
-const { createClackPrompts } = await import('../src/install/prompt/clack')
-const { fakeTerminal } = await import('../src/install/prompt/fake-terminal')
-const { vec0Path } = await import('../src/vectors/extension')
-const { vec0AssetFor } = await import('../src/vectors/vec0-release')
+const { createWorld } = await import('../src/controllers/tests/install/test-support')
+const { install } = await import('../src/controllers/install/install')
+const { status } = await import('../src/controllers/install/status')
+const { installedProgramPath } = await import('../src/resources/install-plan/entry')
+const { runFramed } = await import('../src/controllers/install/prompt/frame')
+const { createClackPrompts } = await import('../src/controllers/install/prompt/clack')
+const { fakeTerminal } = await import('../src/controllers/tests/install/prompt/fake-terminal')
+const { vec0Path } = await import('../src/resources/vectors/extension')
+const { vec0AssetFor } = await import('../src/resources/vectors/vec0-release')
 
 const port = freePort()
 let home = ''

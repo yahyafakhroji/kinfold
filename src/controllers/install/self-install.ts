@@ -10,13 +10,13 @@ import { createHash } from 'node:crypto'
 import { chmodSync, closeSync, copyFileSync, createReadStream, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readEnv } from '../env-names'
-import { fsyncDirectory } from '../fs/atomic'
+import { readEnv } from '../../system/env-names'
+import { fsyncDirectory } from '../../system/fs/atomic'
 import { compareVersions, parseVersion } from '../update/version-order'
-import { VERSION } from '../version'
-import type { InstallEnv } from './env'
+import { VERSION } from '../../system/version'
+import type { InstallEnv } from '../../resources/install-plan/env'
 import { programFilesOf } from './program-files'
-import type { Action } from './plan'
+import type { Action } from '../../resources/install-plan/plan'
 
 export const DEVELOPMENT_VERSION = '0.0.0-dev'
 export const RELEASE_BASE = 'https://github.com/yahyafakhroji/kinfold/releases/download'
@@ -145,7 +145,7 @@ export async function fetchReleaseSums(env: Pick<InstallEnv, 'fetch' | 'envVars'
 export interface ProgramCheckOptions {
   source: string
   dryRun: boolean
-  /** The release version; the CLI leaves it out so src/version.ts decides. */
+  /** The release version; the CLI leaves it out so src/system/version.ts decides. */
   version?: string
 }
 

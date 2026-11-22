@@ -2,7 +2,7 @@
 // one key-store.json recorded. A recorded store from another platform is
 // refused rather than swapped, so a key is never looked for in the wrong place.
 
-import type { PlatformInfo } from '../../platform/platform'
+import type { PlatformInfo } from '../../../system/platform/platform'
 import type { KeyStore, KeyStoreDeps, KeyStoreKind, KeyStoreModule } from '../key-store'
 import { credentialManagerModule } from './credential-manager'
 import { keyFileModule } from './key-file'

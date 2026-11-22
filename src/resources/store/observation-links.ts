@@ -10,7 +10,7 @@
 // it overturns and both sit in one project. The rule lives in one SQL
 // statement (SETTLE) so the write path and a purge's re-settle cannot drift.
 
-import type { EvidenceStrength } from '../evidence'
+import type { EvidenceStrength } from '../../system/evidence'
 import type { ObservationRelation, RelationKind } from '../observer/types'
 import type { Database } from '../sqlite/types'
 

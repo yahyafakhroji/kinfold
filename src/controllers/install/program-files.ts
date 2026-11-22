@@ -4,8 +4,8 @@
 // that and may have to leave a file behind until the program exits.
 
 import { renameSync, rmSync } from 'node:fs'
-import type { PlatformInfo } from '../platform/platform'
-import { type InstallEnv, platformOf } from './env'
+import type { PlatformInfo } from '../../system/platform/platform'
+import { type InstallEnv, platformOf } from '../../resources/install-plan/env'
 import { windowsProgramFiles } from './program-files-windows'
 
 export interface ProgramFiles {

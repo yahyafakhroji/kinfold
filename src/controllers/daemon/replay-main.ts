@@ -1,11 +1,11 @@
-// `bun src/daemon/replay-main.ts <copy of memory.db>`: replays the stored
+// `bun src/controllers/daemon/replay-main.ts <copy of memory.db>`: replays the stored
 // event timeline through the scheduler twice, with the pre-mid-turn rules and
 // with today's defaults, and prints runs per turn and both lag definitions as
 // JSON (counts and ms only). Point it at a .backup copy, never the live
 // database; it opens the file read-only either way.
 
-import { openStoreFile } from '../sqlite/open'
-import { type TimelineEvent, eventTimeline, runDurations } from '../store/replay-reads'
+import { openStoreFile } from '../../resources/sqlite/open'
+import { type TimelineEvent, eventTimeline, runDurations } from '../../resources/store/replay-reads'
 import { DEFAULT_SCHEDULE, LEGACY_SCHEDULE, type ObserverScheduleConfig } from './observer-scheduler'
 import { runReplay } from './replay'
 import { type ReplaySummary, summarizeReplay } from './replay-summary'
@@ -42,7 +42,7 @@ export async function replayReport(path: string): Promise<ReplayReport> {
 if (import.meta.main) {
   const path = process.argv[2]
   if (path === undefined) {
-    process.stderr.write('usage: bun src/daemon/replay-main.ts <copy of memory.db>\n')
+    process.stderr.write('usage: bun src/controllers/daemon/replay-main.ts <copy of memory.db>\n')
     process.exit(2)
   }
   replayReport(path).then(

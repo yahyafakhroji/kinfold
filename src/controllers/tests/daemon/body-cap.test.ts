@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
-import { MAX_BODY_BYTES, MAX_UPLOAD_BYTES } from './server'
+import { MAX_BODY_BYTES, MAX_UPLOAD_BYTES } from '../../daemon/server'
 
 let root: string
 let rig: DashboardRig

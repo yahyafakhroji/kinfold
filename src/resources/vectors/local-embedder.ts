@@ -7,16 +7,16 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { embedded } from '../runtime/embedded.generated'
-import { isCompiledProgram } from '../runtime/program'
+import { embedded } from '../../system/runtime/embedded.generated'
+import { isCompiledProgram } from '../../system/runtime/program'
 import { EmbedError, type Embedder } from './embedder'
 import type { EmbedWorkerReply, EmbedWorkerRequest, ModelPaths } from './local-embed-protocol'
 import { LOCAL_MODEL_DIMS, LOCAL_MODEL_FILES, LOCAL_MODEL_ID } from './local-model'
 
 /** The worker inside a compiled program, named by its path from src/ (see COMPILED_WORKER_PATH). */
-export const COMPILED_EMBED_WORKER_PATH = './vectors/local-embed-worker.ts'
+export const COMPILED_EMBED_WORKER_PATH = './resources/vectors/local-embed-worker.ts'
 export const EMBED_START_TIMEOUT_MS = 30_000
-const DEV_MODEL_DIR = join(import.meta.dir, '..', '..', '.cache', 'embed-model')
+const DEV_MODEL_DIR = join(import.meta.dir, '..', '..', '..', '.cache', 'embed-model')
 
 export interface LocalEmbedder extends Embedder {
   close(): Promise<void>

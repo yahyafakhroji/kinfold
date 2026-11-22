@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import type { InstallRecord } from '../install/setup/record'
-import { autoUpdateSetting, betaChannelOn } from './enabled'
+import type { InstallRecord } from '../../../resources/install-plan/setup/record'
+import { autoUpdateSetting, betaChannelOn } from '../../update/enabled'
 
 const RECORD: InstallRecord = { channel: 'curl', updateCheck: true, autoUpdate: true, autoUpdateIntro: false, agentHomes: {}, firstInstalledAt: 1 }
 

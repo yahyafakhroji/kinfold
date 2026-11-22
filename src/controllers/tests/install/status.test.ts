@@ -1,24 +1,24 @@
-import { writeBackupRecord } from '../backup/record'
+import { writeBackupRecord } from '../../../resources/backup/record'
 import { afterEach, expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { mergeSamHooks, samHookGroup } from './claude-hooks'
-import { entryCommand, entryIdentity, installedProgramPath } from './entry'
-import { installPaths } from './env'
-import { CODEX_HOOK_SPEC, mergeHostHooks } from './host-hooks'
-import { detectHosts } from './detect'
-import { EXIT_OK, install, reportDetections } from './install'
-import { claudeMcpEntry } from './mcp-config'
-import { mcpPaths, mcpTarget } from './mcp-wiring'
-import { VERSION } from '../version'
+import { mergeSamHooks, samHookGroup } from '../../../resources/install-plan/claude-hooks'
+import { entryCommand, entryIdentity, installedProgramPath } from '../../../resources/install-plan/entry'
+import { installPaths } from '../../../resources/install-plan/env'
+import { CODEX_HOOK_SPEC, mergeHostHooks } from '../../install/host-hooks'
+import { detectHosts } from '../../install/detect'
+import { EXIT_OK, install, reportDetections } from '../../install/install'
+import { claudeMcpEntry } from '../../../resources/install-plan/mcp-config'
+import { mcpPaths, mcpTarget } from '../../../resources/install-plan/mcp-wiring'
+import { VERSION } from '../../../system/version'
 import { fakeTerminal } from './prompt/fake-terminal'
-import { runFramed } from './prompt/frame'
-import { autoUpdateBlocker, status, statusMark } from './status'
-import { mergeAutoState } from '../update/auto-state'
+import { runFramed } from '../../install/prompt/frame'
+import { autoUpdateBlocker, status, statusMark } from '../../install/status'
+import { mergeAutoState } from '../../update/auto-state'
 import { fakeService } from './test-support'
-import { writeUpdateState } from '../update/state'
+import { writeUpdateState } from '../../update/state'
 import { BUN, type FakeWorld, YES, createWorld, profilesWithDocsAgent, snapshotTree } from './test-support'
-import { posixOnly } from '../../test/platform-guards'
+import { posixOnly } from '../../../../test/platform-guards'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -86,15 +86,15 @@ posixOnly('file modes')('stale paths, loose modes and duplicate project wiring a
   const w = make({ withLibrary: false })
   const paths = installPaths(w.env)
   mkdirSync(paths.claudeDir, { recursive: true })
-  writeFileSync(paths.claudeSettings, JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { entry: { command: BUN, args: ['/old/src/cli/hook.ts'] } })] } }))
+  writeFileSync(paths.claudeSettings, JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { entry: { command: BUN, args: ['/old/src/controllers/cli/hook.ts'] } })] } }))
   mkdirSync(paths.opencodePluginsDir, { recursive: true })
-  writeFileSync(paths.opencodePlugin, 'export { default } from "/old/src/plugins/opencode.ts";\n')
+  writeFileSync(paths.opencodePlugin, 'export { default } from "/old/src/plugins/plugins/opencode.ts";\n')
   mkdirSync(w.dataDir, { recursive: true })
   writeFileSync(join(w.dataDir, 'memory.db'), '')
   chmodSync(join(w.dataDir, 'memory.db'), 0o644)
   chmodSync(w.dataDir, 0o700)
   mkdirSync(join(w.cwd, '.claude'))
-  writeFileSync(join(w.cwd, '.claude', 'settings.json'), JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { entry: { command: BUN, args: ['/x/src/cli/hook.ts'] } })] } }))
+  writeFileSync(join(w.cwd, '.claude', 'settings.json'), JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { entry: { command: BUN, args: ['/x/src/controllers/cli/hook.ts'] } })] } }))
   await status(w.env)
   const out = w.out.join('\n')
   expect(out).toContain('claude-code: detected 2.1.310 (Claude Code); wired: stale')

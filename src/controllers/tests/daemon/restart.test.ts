@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createRestarter } from './restart'
+import { createRestarter } from '../../daemon/restart'
 
 interface FakeCore {
   name: string

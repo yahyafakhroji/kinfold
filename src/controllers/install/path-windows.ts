@@ -7,8 +7,8 @@
 // from then on see the new value.
 
 import { powershellArgv, psDecodedString } from './access/windows-acl'
-import type { InstallEnv } from './env'
-import type { StepNote } from './plan'
+import type { InstallEnv } from '../../resources/install-plan/env'
+import type { StepNote } from '../../resources/install-plan/plan'
 
 export type UserPathChange = 'add' | 'remove'
 

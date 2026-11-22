@@ -2,8 +2,8 @@
 // platform. The spool, logs and agent transcripts sit outside memory.db, so
 // status reports the disk state next to the database's own.
 
-import { type InstallEnv, platformOf } from '../env'
-import type { PlatformInfo } from '../../platform/platform'
+import { type InstallEnv, platformOf } from '../../../resources/install-plan/env'
+import type { PlatformInfo } from '../../../system/platform/platform'
 import { bitlockerCheck } from './bitlocker'
 import { fileVaultCheck } from './filevault'
 import { luksCheck } from './luks'

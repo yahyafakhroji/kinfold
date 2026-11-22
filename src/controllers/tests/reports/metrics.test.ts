@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { recordInjection } from '../store/context-store'
-import { finishRun, insertObservation, markDone, markFailed, startRun } from '../store/observer-store'
-import { PROJECT, T0, type TempStore, openTempStore, seedEvent, seedSession } from '../observer/test-support'
-import { errorClassOf, groupRuns, metricsSummary, percentile } from './metrics'
-import { type DashboardRig, startRig } from './test-support'
+import { recordInjection } from '../../../resources/store/context-store'
+import { finishRun, insertObservation, markDone, markFailed, startRun } from '../../../resources/store/observer-store'
+import { PROJECT, T0, type TempStore, openTempStore, seedEvent, seedSession } from '../../../resources/tests/observer/test-support'
+import { errorClassOf, groupRuns, metricsSummary, percentile } from '../../../resources/reports/metrics'
+import { type DashboardRig, startRig } from '../dashboard/test-support'
 
 let temp: TempStore
 let session: number

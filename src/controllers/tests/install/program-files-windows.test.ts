@@ -2,12 +2,12 @@ import { afterEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { windowsOnly } from '../../test/platform-guards'
-import { EXIT_OK } from './install'
-import { leftBehindLine } from './program-files'
-import { type ProgramFsDeps, OLD_PROGRAM_PREFIX, createWindowsProgramFiles, windowsProgramFiles } from './program-files-windows'
+import { windowsOnly } from '../../../../test/platform-guards'
+import { EXIT_OK } from '../../install/install'
+import { leftBehindLine } from '../../install/program-files'
+import { type ProgramFsDeps, OLD_PROGRAM_PREFIX, createWindowsProgramFiles, windowsProgramFiles } from '../../install/program-files-windows'
 import { type FakeWorld, createWorld } from './test-support'
-import { uninstall } from './uninstall'
+import { uninstall } from '../../install/uninstall'
 
 let world: FakeWorld | null = null
 let child: { kill(): void; exited: Promise<number> } | null = null

@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { prepareForSpool } from '../capture/prepare'
-import { type NormalizedEvent, validateEvent } from '../contract/event'
-import { FAKE_SECRETS, leakyOutput } from '../../test/fixtures/secrets'
-import { AdapterInputError } from './context'
-import { flattenCursorOutput, normalizeCursor } from './cursor'
+import { prepareForSpool } from '../../../resources/capture/prepare'
+import { type NormalizedEvent, validateEvent } from '../../../system/contract/event'
+import { FAKE_SECRETS, leakyOutput } from '../../../../test/fixtures/secrets'
+import { AdapterInputError } from '../../adapters/context'
+import { flattenCursorOutput, normalizeCursor } from '../../adapters/cursor'
 
 // Built from the documented shapes; the two marked "capture shape" follow public
 // captures from real Cursor runs, with made-up values (see cursor.ts).
-const FIXTURES = join(import.meta.dir, '../../test/fixtures/cursor')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures/cursor')
 const fixture = (name: string): Record<string, unknown> => JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8'))
 const NOT_CAPTURED = new Set(['before-shell-execution', 'stop.completed'])
 const ROOT = '/Users/dev/Dev/rea/shared-agent-memory'
@@ -53,7 +53,7 @@ describe('normalizeCursor on documented payloads', () => {
   })
 
   test('tool output is unwrapped from its JSON string, with the exit code when it is there', () => {
-    expect(normalize('post-tool-use.shell').tool).toMatchObject({ name: 'Shell', output: ' 12 pass\n 0 fail\n', exitCode: 0, input: { command: 'bun test src/store' } })
+    expect(normalize('post-tool-use.shell').tool).toMatchObject({ name: 'Shell', output: ' 12 pass\n 0 fail\n', exitCode: 0, input: { command: 'bun test src/resources/store' } })
     expect(normalize('post-tool-use.shell-cli').tool).toMatchObject({ name: 'Shell', output: ' 12 pass\n 0 fail\n', exitCode: 0 })
     expect(normalize('post-tool-use.read').tool?.exitCode).toBeUndefined()
   })

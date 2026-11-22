@@ -4,8 +4,8 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { DATA_FILE_MODE } from '../store/data-dir'
-import type { Action } from '../install/plan'
+import { DATA_FILE_MODE } from '../../resources/store/data-dir'
+import type { Action } from '../../resources/install-plan/plan'
 
 /** Starts every line Kinfold prints about WSL. */
 export const PREVIEW = 'WSL (preview)'

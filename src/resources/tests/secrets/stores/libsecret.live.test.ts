@@ -5,10 +5,10 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
-import { currentPlatform } from '../../platform/platform'
-import type { KeyStore, KeyStoreDeps } from '../key-store'
-import { runKeyStoreContract } from './contract'
-import { type BindingLoader, type SecretServiceBinding, createLibsecretStore, ffiSecretService, probeLibsecret } from './libsecret'
+import { currentPlatform } from '../../../../system/platform/platform'
+import type { KeyStore, KeyStoreDeps } from '../../../secrets/key-store'
+import { runKeyStoreContract } from '../../../secrets/stores/contract'
+import { type BindingLoader, type SecretServiceBinding, createLibsecretStore, ffiSecretService, probeLibsecret } from '../../../secrets/stores/libsecret'
 
 const LIVE = currentPlatform().os === 'linux' && process.env.KINFOLD_TEST_SECRET_SERVICE === '1'
 const PREFIX = `live-${randomBytes(4).toString('hex')}`
@@ -93,8 +93,8 @@ describe.skipIf(!LIVE)('libsecret (live)', () => {
     createLibsecretStore(liveDeps(), ffiSecretService).set(account, value)
     // The expected value goes in on stdin, never argv or env; the child prints only the verdict.
     const script = [
-      `import { createLibsecretStore, ffiSecretService } from ${JSON.stringify(join(import.meta.dir, 'libsecret.ts'))}`,
-      `import { currentPlatform } from ${JSON.stringify(join(import.meta.dir, '..', '..', 'platform', 'platform.ts'))}`,
+      `import { createLibsecretStore, ffiSecretService } from ${JSON.stringify(join(import.meta.dir, '../../../secrets/stores/libsecret.ts'))}`,
+      `import { currentPlatform } from ${JSON.stringify(join(import.meta.dir, '..', '..', '..', '..', 'system', 'platform', 'platform.ts'))}`,
       'const expected = (await Bun.stdin.text()).trim()',
       `const deps = { platform: currentPlatform(), homeDir: '/', dataDir: '/', envVars: process.env, security: () => { throw new Error('no security') } }`,
       `const got = createLibsecretStore(deps, ffiSecretService).get(${JSON.stringify(account)})`,

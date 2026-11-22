@@ -6,8 +6,8 @@
 
 import { chmodSync, copyFileSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { isRecord } from '../contract/event'
-import { writeFileAtomic } from '../fs/atomic'
+import { isRecord } from '../../system/contract/event'
+import { writeFileAtomic } from '../../system/fs/atomic'
 
 export { writeFileAtomic }
 

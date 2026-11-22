@@ -7,14 +7,14 @@
 // was sent, as the list a hook shows at session start. An agent whose plugin
 // cannot print at session start (OpenCode, Kilo Code) toasts it from here.
 
-import { FIRST_SCREEN_ROWS, HELD_OUT_LINE, type Recalled, firstScreenToast, lateLine, recallLine } from '../context/recall-line'
+import { FIRST_SCREEN_ROWS, HELD_OUT_LINE, type Recalled, firstScreenToast, lateLine, recallLine } from '../../resources/context/recall-line'
 import type { RouteAnswer } from '../daemon/data-routes'
-import type { Database } from '../sqlite/types'
-import { firstScreenFor, titlesFor } from '../store/context-store'
-import { recentMerges } from '../store/project-merge'
+import type { Database } from '../../resources/sqlite/types'
+import { firstScreenFor, titlesFor } from '../../resources/store/context-store'
+import { recentMerges } from '../../resources/store/project-merge'
 import { RECENT_MERGE_MS } from '../daemon/project-routes'
-import { parseIds } from '../store/ids'
-import { HOST_NAME_PATTERN } from '../names'
+import { parseIds } from '../../resources/store/ids'
+import { HOST_NAME_PATTERN } from '../../system/names'
 
 /**
  * A prompt is shown this long after its event time. The hook asks for recall

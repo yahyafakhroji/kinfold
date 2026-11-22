@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { pluginFileContent } from '../install/opencode-shim'
-import type { InstallMode } from '../install/entry'
-import { assertStandalone, bundlePlugin, importSpecifiers, isBuiltinSpecifier } from '../../tools/bundle-plugin'
+import { pluginFileContent } from '../../install/opencode-shim'
+import type { InstallMode } from '../../../resources/install-plan/entry'
+import { assertStandalone, bundlePlugin, importSpecifiers, isBuiltinSpecifier } from '../../../../tools/bundle-plugin'
 
 let root: string | null = null
 afterEach(() => {
@@ -41,7 +41,7 @@ test('the bundle carries no module-path comments from the build machine', async 
 })
 
 test('assertStandalone names a checkout path, an npm package and a SQLite loader', () => {
-  expect(() => assertStandalone('import x from "/Users/dev/repo/src/plugins/opencode.ts"\n')).toThrow('imports a checkout path')
+  expect(() => assertStandalone('import x from "/Users/dev/repo/src/plugins/plugins/opencode.ts"\n')).toThrow('imports a checkout path')
   expect(() => assertStandalone('import x from "left-pad"\n')).toThrow('not a Node or Bun builtin')
   expect(() => assertStandalone('import x from "bun:sqlite"\n')).toThrow('would load SQLite')
   expect(() => assertStandalone('import { join } from "node:path"\n')).not.toThrow()

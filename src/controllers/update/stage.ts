@@ -8,16 +8,16 @@
 
 import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
-import { writeFileAtomic } from '../fs/atomic'
+import { writeFileAtomic } from '../../system/fs/atomic'
 import { fetchReleaseSums, fileSha256, parseSha256Sums, releaseAssetName, RELEASE_BASE } from '../install/self-install'
-import { readInstallRecord } from '../install/setup/record'
-import { osOf } from '../platform/platform'
-import { DATA_FILE_MODE } from '../store/data-dir'
+import { readInstallRecord } from '../../resources/install-plan/setup/record'
+import { osOf } from '../../system/platform/platform'
+import { DATA_FILE_MODE } from '../../resources/store/data-dir'
 import { autoUpdateSetting, betaChannelOn } from './enabled'
 import { releaseKind } from './release'
 import { knownRelease, readUpdateState } from './state'
 import { compareVersions, parseVersion } from './version-order'
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 import { isTime } from './auto-state'
 
 type Env = Readonly<Record<string, string | undefined>>

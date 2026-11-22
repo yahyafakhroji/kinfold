@@ -1,20 +1,20 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { EmbeddedAssets } from '../runtime/embedded'
-import { DAEMON_INFO_FILE, DB_FILE } from '../store/data-dir'
-import { samHookGroup } from './claude-hooks'
-import { checkHealth, readDaemonInfo } from './daemon-client'
-import { entryCommand, installedProgramPath, type InstallMode } from './entry'
-import { installPaths } from './env'
-import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, samItem } from './host-hooks'
-import { EXIT_FAILED, EXIT_OK, install } from './install'
-import { LAUNCHCTL } from './launch-agent'
-import { MCP_SERVER_NAME, claudeMcpEntry, openCodeMcpEntry } from './mcp-config'
-import { mcpPaths, mcpTarget } from './mcp-wiring'
-import { pluginFileContent, shimContent } from './opencode-shim'
+import type { EmbeddedAssets } from '../../../system/runtime/embedded'
+import { DAEMON_INFO_FILE, DB_FILE } from '../../../resources/store/data-dir'
+import { samHookGroup } from '../../../resources/install-plan/claude-hooks'
+import { checkHealth, readDaemonInfo } from '../../install/daemon-client'
+import { entryCommand, installedProgramPath, type InstallMode } from '../../../resources/install-plan/entry'
+import { installPaths } from '../../../resources/install-plan/env'
+import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, samItem } from '../../install/host-hooks'
+import { EXIT_FAILED, EXIT_OK, install } from '../../install/install'
+import { LAUNCHCTL } from '../../install/launch-agent'
+import { MCP_SERVER_NAME, claudeMcpEntry, openCodeMcpEntry } from '../../../resources/install-plan/mcp-config'
+import { mcpPaths, mcpTarget } from '../../../resources/install-plan/mcp-wiring'
+import { pluginFileContent, shimContent } from '../../install/opencode-shim'
 import { type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
-import { posixOnly } from '../../test/platform-guards'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const CLAUDE = '2.1.310 (Claude Code)'
 const OPENCODE = 'opencode v2.1.4'
@@ -297,7 +297,7 @@ test('a checkout install afterwards moves the wiring back', async () => {
   const claudeUser = JSON.parse(readFileSync(config.claudeUserConfig, 'utf8')) as { mcpServers: Record<string, unknown> }
   expect(claudeUser.mcpServers['other-tool']).toEqual(FOREIGN_CLAUDE_MCP)
   expect(claudeUser.mcpServers[MCP_SERVER_NAME]).toEqual(claudeMcpEntry(mcpTarget(w.env)))
-  expect(readFileSync(paths.launchAgentPlist, 'utf8')).toContain(`<array><string>${checkout.bunPath}</string><string>${join(checkout.projectRoot, 'src', 'daemon', 'main.ts')}</string></array>`)
+  expect(readFileSync(paths.launchAgentPlist, 'utf8')).toContain(`<array><string>${checkout.bunPath}</string><string>${join(checkout.projectRoot, 'src', 'controllers', 'daemon', 'main.ts')}</string></array>`)
   expect(planLines(w).some((line) => line.includes('install program'))).toBe(false)
 })
 

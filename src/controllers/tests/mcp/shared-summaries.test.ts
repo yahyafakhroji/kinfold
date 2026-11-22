@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { insertLinks } from '../store/observation-links'
-import { writeSharedSummary } from '../store/summary-share'
-import { insertPrompt } from '../store/writes'
-import { type MemoryReader, openMemoryReader } from './reader'
+import { insertLinks } from '../../../resources/store/observation-links'
+import { writeSharedSummary } from '../../../resources/store/summary-share'
+import { insertPrompt } from '../../../resources/store/writes'
+import { type MemoryReader, openMemoryReader } from '../../mcp/reader'
 import { type McpFixture, NOW, PROJECT_A, T0, openMcpFixture, seedMcpObservation, seedMcpSession } from './test-support'
-import { type ToolResult, callTool } from './tools'
+import { type ToolResult, callTool } from '../../mcp/tools'
 
 // Shared summaries in MCP answers: search ranks a confirmed match higher and says
 // "confirmed by N"; a shared summary appears once with its repeat count.

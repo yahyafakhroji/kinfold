@@ -5,8 +5,8 @@
 // reason. Messages carry the path only, never file contents.
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { isRecord } from '../../contract/event'
-import { type JsonFile, existingBackups, serializeJson } from '../../install/files'
+import { isRecord } from '../../../system/contract/event'
+import { type JsonFile, existingBackups, serializeJson } from '../../../resources/install-plan/files'
 
 export const NOT_PLAIN_JSON = 'is not plain JSON (comments and trailing commas are not supported); left untouched'
 

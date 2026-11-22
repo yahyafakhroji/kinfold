@@ -1,6 +1,6 @@
 // `kinfold encrypt | decrypt | rekey | key show-recovery | key recover | key resume`
-// (`key resume` also finishes or undoes a `kinfold restore`: src/backup/restore.ts).
-// The database part is src/sqlite/convert.ts; this file
+// (`key resume` also finishes or undoes a `kinfold restore`: src/resources/backup/restore.ts).
+// The database part is src/resources/sqlite/convert.ts; this file
 // orders the rest so no step can strand the store without its key:
 //   - a new key goes into the key store, and is read back, before the store
 //     changes (rekey writes db-key-next, and moves it to db-key only once the
@@ -20,25 +20,25 @@
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { BackupError } from '../backup/archive'
-import { type RestoreJournal, type UndoJournal, readRestoreJournal, readUndoJournal } from '../backup/journal'
-import { resumeRestore } from '../backup/restore'
-import { resumeUndo } from '../backup/undo'
-import { DB_KEY_NEXT_REF, DB_KEY_REF } from '../secrets/credentials'
-import type { KeyStore } from '../secrets/key-store'
-import { createKeychainStore } from '../secrets/stores/keychain'
-import { ConvertError, checkedCounts, convertStore, foundBackupPath, restoreBackup, sameCounts } from '../sqlite/convert'
-import { type DbKeyStore, dbKeyStoreOf, newDbKey } from '../sqlite/keys'
-import { fileState, maintenancePath, openEncrypted } from '../sqlite/open'
-import { RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../sqlite/recovery'
-import { DATA_FILE_MODE, DB_FILE } from '../store/data-dir'
+import { BackupError } from '../../resources/backup/archive'
+import { type RestoreJournal, type UndoJournal, readRestoreJournal, readUndoJournal } from '../../resources/backup/journal'
+import { resumeRestore } from '../../resources/backup/restore'
+import { resumeUndo } from '../../resources/backup/undo'
+import { DB_KEY_NEXT_REF, DB_KEY_REF } from '../../resources/secrets/credentials'
+import type { KeyStore } from '../../resources/secrets/key-store'
+import { createKeychainStore } from '../../resources/secrets/stores/keychain'
+import { ConvertError, checkedCounts, convertStore, foundBackupPath, restoreBackup, sameCounts } from '../../resources/sqlite/convert'
+import { type DbKeyStore, dbKeyStoreOf, newDbKey } from '../../resources/sqlite/keys'
+import { fileState, maintenancePath, openEncrypted } from '../../resources/sqlite/open'
+import { RecoveryCodeError, decodeRecoveryCode, encodeRecoveryCode } from '../../resources/sqlite/recovery'
+import { DATA_FILE_MODE, DB_FILE } from '../../resources/store/data-dir'
 import { waitForHealth, waitForStart } from './daemon-client'
 import { diskCheckOf } from './disk/check'
-import { type InstallEnv, errorMessage, platformOf } from './env'
-import type { OsName } from '../platform/platform'
+import { type InstallEnv, errorMessage, platformOf } from '../../resources/install-plan/env'
+import type { OsName } from '../../system/platform/platform'
 import { EXIT_FAILED, EXIT_OK } from './install'
 import { capitalized, keyStoreOf } from './key-store-choice'
-import { HEALTH_WAIT_MS } from './plan'
+import { HEALTH_WAIT_MS } from '../../resources/install-plan/plan'
 import { PromptCancelled } from './prompt/prompts'
 import { confirmRecoveryCode, recoverySinkFromEnv } from './recovery-confirm'
 import { managedServiceOf } from './service/control'

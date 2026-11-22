@@ -2,11 +2,11 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { insertObservation, upsertSummary } from '../store/observer-store'
-import { type Store, openStore } from '../store/db'
-import { insertPrompt, setPromptReply, upsertProject, upsertSession } from '../store/writes'
-import { FAKE_SECRETS } from '../../test/fixtures/secrets'
-import { exportProject, importChunk, listLocalProjects, openLocalStore } from './import'
+import { insertObservation, upsertSummary } from '../../../resources/store/observer-store'
+import { type Store, openStore } from '../../../resources/store/db'
+import { insertPrompt, setPromptReply, upsertProject, upsertSession } from '../../../resources/store/writes'
+import { FAKE_SECRETS } from '../../../../test/fixtures/secrets'
+import { exportProject, importChunk, listLocalProjects, openLocalStore } from '../../central/import'
 
 let root: string
 let local: Store

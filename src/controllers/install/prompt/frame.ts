@@ -6,8 +6,8 @@
 // `ui` carries what plain text has no word for: a section of marked rows, a
 // spinner for a wait, an error, and the command to run next.
 
-import { VERSION } from '../../version'
-import type { InstallEnv } from '../env'
+import { VERSION } from '../../../system/version'
+import type { InstallEnv } from '../../../resources/install-plan/env'
 import { type Busy, PromptCancelled, type Row } from './prompts'
 import { uiFor } from './ui'
 

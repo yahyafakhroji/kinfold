@@ -8,7 +8,7 @@ import { readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 const SRC = join(import.meta.dir, 'src')
-const ROOT = join(import.meta.dir, '..', '..', '..')
+const ROOT = join(import.meta.dir, '..', '..', '..', '..')
 
 function domFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

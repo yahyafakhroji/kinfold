@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, inspectHostHooks, mergeHostHooks, removeHostHooks, samCommand, samCommandScript, samItem } from './host-hooks'
+import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, inspectHostHooks, mergeHostHooks, removeHostHooks, samCommand, samCommandScript, samItem } from '../../install/host-hooks'
 
-const TARGET = { bunPath: '/Users/dev/.bun/bin/bun', hookScript: '/Users/dev/sam/src/cli/hook.ts', entry: { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/sam/src/cli/hook.ts'] } }
-const OLD = { bunPath: '/Users/dev/.bun/bin/bun', hookScript: "/Users/dev/old's checkout/src/cli/hook.ts", entry: { command: '/Users/dev/.bun/bin/bun', args: ["/Users/dev/old's checkout/src/cli/hook.ts"] } }
+const TARGET = { bunPath: '/Users/dev/.bun/bin/bun', hookScript: '/Users/dev/sam/src/controllers/cli/hook.ts', entry: { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/sam/src/controllers/cli/hook.ts'] } }
+const OLD = { bunPath: '/Users/dev/.bun/bin/bun', hookScript: "/Users/dev/old's checkout/src/controllers/cli/hook.ts", entry: { command: '/Users/dev/.bun/bin/bun', args: ["/Users/dev/old's checkout/src/controllers/cli/hook.ts"] } }
 
 /** The target with the host flag a Codex or Cursor entry carries. */
 const forHost = (target: typeof TARGET, host: 'codex' | 'cursor') => ({ ...target, entry: { command: target.entry.command, args: [...target.entry.args, '--host', host] } })
@@ -18,13 +18,13 @@ const codexFile = () => ({ description: 'mine', hooks: { PreToolUse: [FOREIGN_CO
 
 describe('our command', () => {
   test('quotes both paths and names the host; recognised for that host only', () => {
-    expect(samCommand(forHost(TARGET, 'codex'))).toBe("'/Users/dev/.bun/bin/bun' '/Users/dev/sam/src/cli/hook.ts' --host codex")
+    expect(samCommand(forHost(TARGET, 'codex'))).toBe("'/Users/dev/.bun/bin/bun' '/Users/dev/sam/src/controllers/cli/hook.ts' --host codex")
     expect(samCommandScript({ command: samCommand(forHost(TARGET, 'codex')) }, 'codex')).toBe(TARGET.hookScript)
     expect(samCommandScript({ command: samCommand(forHost(TARGET, 'codex')) }, 'cursor')).toBeNull()
     expect(samCommandScript({ command: samCommand(forHost(OLD, 'cursor')) }, 'cursor')).toBe(OLD.hookScript)
-    expect(samCommandScript({ command: 'bun /a/src/cli/hook.ts --host cursor' }, 'cursor')).toBe('/a/src/cli/hook.ts')
+    expect(samCommandScript({ command: 'bun /a/src/controllers/cli/hook.ts --host cursor' }, 'cursor')).toBe('/a/src/controllers/cli/hook.ts')
     expect(samCommandScript(FOREIGN_CURSOR, 'cursor')).toBeNull()
-    expect(samCommandScript({ command: 'bun /a/src/cli/hook.ts' }, 'codex')).toBeNull()
+    expect(samCommandScript({ command: 'bun /a/src/controllers/cli/hook.ts' }, 'codex')).toBeNull()
   })
 
   test('Codex groups carry no matcher; PostToolUse is async; SessionEnd fits the 3 s cap', () => {

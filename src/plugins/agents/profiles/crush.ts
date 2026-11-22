@@ -18,15 +18,15 @@
 // the `hook add` lines are a manual step. A crush.json is never created
 // beside an existing crushrc, which would make Crush warn on every start;
 // the `mcp add` line is a manual step then. The parser for the hook lines is
-// src/adapters/crush.ts.
+// src/plugins/adapters/crush.ts.
 
 import { existsSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { CRUSH_EVENTS } from '../../adapters/crush'
-import { entryCommand } from '../../install/entry'
-import type { InstallEnv } from '../../install/env'
-import type { WiringState } from '../../install/claude-hooks'
-import { MCP_HOST_ENV } from '../../mcp/read-reporter'
+import { entryCommand } from '../../../resources/install-plan/entry'
+import type { InstallEnv } from '../../../resources/install-plan/env'
+import type { WiringState } from '../../../resources/install-plan/claude-hooks'
+import { MCP_HOST_ENV } from '../../../controllers/mcp/read-reporter'
 import { AGENT_HOOK_TIMEOUT_S, type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, stdioMcpEntry } from '../families/json-agent'
 import { hookTarget, shellCommand } from '../families/json-hooks'
 import { mcpEntryState } from '../families/mcp-entry'

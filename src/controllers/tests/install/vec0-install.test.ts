@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { vec0Path } from '../vectors/extension'
-import type { Vec0Asset } from '../vectors/vec0-release'
-import type { InstallEnv } from './env'
+import { vec0Path } from '../../../resources/vectors/extension'
+import type { Vec0Asset } from '../../../resources/vectors/vec0-release'
+import type { InstallEnv } from '../../../resources/install-plan/env'
 import { type FakeWorld, createWorld, placeBuiltLibrary } from './test-support'
-import { MAX_VEC0_TARBALL_BYTES, installVec0, tarMember, vec0InstallActions, vectorStatusLine } from './vec0-install'
-import { posixOnly } from '../../test/platform-guards'
+import { MAX_VEC0_TARBALL_BYTES, installVec0, tarMember, vec0InstallActions, vectorStatusLine } from '../../install/vec0-install'
+import { posixOnly } from '../../../../test/platform-guards'
 
 let w: FakeWorld
 beforeEach(() => {

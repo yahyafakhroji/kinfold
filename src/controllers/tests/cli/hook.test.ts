@@ -2,20 +2,20 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { templateStore } from '../backup/store-templates.test-support'
-import { type RunningDaemon, startDaemon } from '../daemon/daemon'
-import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
-import { listRecentSessions } from '../store/reads'
-import { openStore } from '../store/db'
-import { CONTEXT_BUDGET_MS, fetchContext } from '../context/client'
-import { rebuildProjectPacks } from '../context/packs'
-import { hideRecallLine, seedObservation } from '../context/test-support'
-import { upsertProject, upsertSession } from '../store/writes'
-import { runHook as runHookInProcess } from './hook'
-import { NUDGE_BUDGET_MS } from './record'
+import { templateStore } from '../../../resources/tests/backup/store-templates.test-support'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import { SQLITE3MC_LIB_ENV } from '../../../resources/sqlite/library'
+import { listRecentSessions } from '../../../resources/store/reads'
+import { openStore } from '../../../resources/store/db'
+import { CONTEXT_BUDGET_MS, fetchContext } from '../../../resources/context/client'
+import { rebuildProjectPacks } from '../../../resources/context/packs'
+import { hideRecallLine, seedObservation } from '../../../resources/tests/context/test-support'
+import { upsertProject, upsertSession } from '../../../resources/store/writes'
+import { runHook as runHookInProcess } from '../../cli/hook'
+import { NUDGE_BUDGET_MS } from '../../cli/record'
 
-const HOOK = join(import.meta.dir, 'hook.ts')
-const FIXTURES = join(import.meta.dir, '../../test/fixtures/claude-code')
+const HOOK = join(import.meta.dir, '../../cli/hook.ts')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures/claude-code')
 
 let root: string
 let dataDir: string

@@ -4,22 +4,22 @@
 // downloaded path checks the tarball hash, then the member's own hash before
 // it is written 0600; the embedded path checks the bytes before the file is
 // touched. A wrong hash stops the plan with nothing written. The daemon loads
-// the member through sqlite3mc (src/install/sqlite3mc-install.ts), which
+// the member through sqlite3mc (src/controllers/install/sqlite3mc-install.ts), which
 // allows extensions, so no other SQLite is needed.
 
-import { readBodyCapped } from '../fs/capped-body'
+import { readBodyCapped } from '../../system/fs/capped-body'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { type EmbeddedAssets, embeddedAssets } from '../runtime/embedded'
-import { hasLibraryBuild } from '../sqlite/library'
-import { DATA_DIR_MODE, DATA_FILE_MODE } from '../store/data-dir'
-import { sha256File, vec0FileName, vec0Path } from '../vectors/extension'
-import { VEC0_VERSION, type Vec0Asset, vec0AssetFor } from '../vectors/vec0-release'
+import { type EmbeddedAssets, embeddedAssets } from '../../system/runtime/embedded'
+import { hasLibraryBuild } from '../../resources/sqlite/library'
+import { DATA_DIR_MODE, DATA_FILE_MODE } from '../../resources/store/data-dir'
+import { sha256File, vec0FileName, vec0Path } from '../../resources/vectors/extension'
+import { VEC0_VERSION, type Vec0Asset, vec0AssetFor } from '../../resources/vectors/vec0-release'
 import type { Health } from './daemon-client'
-import type { InstallEnv } from './env'
-import { writeFileAtomic } from './files'
-import type { Action } from './plan'
+import type { InstallEnv } from '../../resources/install-plan/env'
+import { writeFileAtomic } from '../../resources/install-plan/files'
+import type { Action } from '../../resources/install-plan/plan'
 import { hasBuiltLibrary } from './sqlite3mc-install'
 
 export const VEC0_DOWNLOAD_TIMEOUT_MS = 60_000

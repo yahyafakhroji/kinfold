@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { seedObservation } from '../context/test-support'
-import { purge } from '../data-control/purge'
-import { DAY_MS, applyRetention, describeRetention } from '../data-control/retention'
+import { purge } from '../../data-control/purge'
+import { DAY_MS, applyRetention, describeRetention } from '../../data-control/retention'
 import { type TempStore, openTempStore } from '../observer/test-support'
-import { insertMcpRead } from './mcp-read-store'
-import { upsertProject, upsertSession } from './writes'
+import { insertMcpRead } from '../../store/mcp-read-store'
+import { upsertProject, upsertSession } from '../../store/writes'
 
 const NOW = 1_792_900_000_000
 

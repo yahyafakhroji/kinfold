@@ -3,7 +3,7 @@
 // Callers hold a KeyStore and never ask which one it is, so a new platform adds
 // a store module without touching them.
 
-import type { PlatformInfo } from '../platform/platform'
+import type { PlatformInfo } from '../../system/platform/platform'
 import { type CredentialProvider, NO_CREDENTIALS } from './credentials'
 import type { SecurityRunner } from './stores/keychain'
 

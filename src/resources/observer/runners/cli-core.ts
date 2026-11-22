@@ -28,7 +28,7 @@ import {
 import { classifyCliError, cliErrorText, cliFailure } from './cli-error'
 import { withCmdShims } from './windows-shim'
 import { DEFAULT_CLI_TIMEOUT_MS, type SpawnFn, type SpawnRequest, type SpawnResult, ensureObserverDir, spawnProcess } from './claude-cli'
-import { errorCode, errorName } from '../../errors'
+import { errorCode, errorName } from '../../../system/errors'
 
 export type Semver = readonly [number, number, number]
 

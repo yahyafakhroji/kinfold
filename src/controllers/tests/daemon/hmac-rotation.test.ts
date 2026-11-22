@@ -2,18 +2,18 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { normalizeClaudeCode } from '../adapters/claude-code'
-import { recordEvent } from '../cli/record'
-import { ulid } from '../contract/ulid'
-import { markerRefs, redactText, refMatches } from '../redaction/redact'
-import type { CredentialProvider } from '../secrets/credentials'
-import { credentialFingerprint } from '../secrets/fingerprint'
-import { HMAC_LEGACY_REF, HMAC_MASTER_REF, epochAt, fingerprintKey, markerSubKey } from '../secrets/hmac-keys'
-import { openTestDatabase } from '../sqlite/test-support'
-import { listSubKeyEpochs, readSubKey, subKeyDir, subKeyPath, writeSubKey } from '../store/hmac-key'
-import { startDaemon } from './daemon'
-import { WRITE_AHEAD_MS, createHmacKeys, rotateSubKeys, wantedEpochs } from './hmac-rotation'
-import { posixOnly } from '../../test/platform-guards'
+import { normalizeClaudeCode } from '../../../plugins/adapters/claude-code'
+import { recordEvent } from '../../cli/record'
+import { ulid } from '../../../system/contract/ulid'
+import { markerRefs, redactText, refMatches } from '../../../resources/redaction/redact'
+import type { CredentialProvider } from '../../../resources/secrets/credentials'
+import { credentialFingerprint } from '../../../resources/secrets/fingerprint'
+import { HMAC_LEGACY_REF, HMAC_MASTER_REF, epochAt, fingerprintKey, markerSubKey } from '../../../resources/secrets/hmac-keys'
+import { openTestDatabase } from '../../../resources/tests/sqlite/test-support'
+import { listSubKeyEpochs, readSubKey, subKeyDir, subKeyPath, writeSubKey } from '../../../resources/store/hmac-key'
+import { startDaemon } from '../../daemon/daemon'
+import { WRITE_AHEAD_MS, createHmacKeys, rotateSubKeys, wantedEpochs } from '../../daemon/hmac-rotation'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const MASTER = '3c'.repeat(32)
 const LEGACY = '7d'.repeat(32)
@@ -157,7 +157,7 @@ test('a daemon with a master writes the sub-key at start; capture then stores ep
     const epoch = epochAt(Date.now())
     expect(readSubKey(dataDir, epoch)).toBe(markerSubKey(MASTER, epoch))
     expect(existsSync(join(dataDir, 'hmac.key'))).toBe(false)
-    const recorded = JSON.parse(readFileSync(join(import.meta.dir, '../../test/fixtures/claude-code/post-tool-use.bash.json'), 'utf8'))
+    const recorded = JSON.parse(readFileSync(join(import.meta.dir, '../../../../test/fixtures/claude-code/post-tool-use.bash.json'), 'utf8'))
     const payload = { ...recorded, cwd: dir, tool_response: { ...recorded.tool_response, stdout: `token ${GITHUB}` } }
     const event = normalizeClaudeCode(payload, { now: () => Date.now(), newId: () => ulid() })!
     await recordEvent(event, dataDir)

@@ -7,13 +7,13 @@
 // the query or the answer.
 
 import { posix, win32 } from 'node:path'
-import type { Parsed } from '../context/types'
+import type { Parsed } from '../../resources/context/types'
 import type { MemoryReader } from '../mcp/reader'
 import type { SemanticClient } from '../mcp/semantic-client'
 import { callTool } from '../mcp/tools'
-import type { ProjectKeyResolver } from '../store/project-key'
+import type { ProjectKeyResolver } from '../../resources/store/project-key'
 import type { RouteAnswer } from './data-routes'
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 
 export const READ_TOOLS = ['search', 'timeline', 'get_observations'] as const
 export type ReadTool = (typeof READ_TOOLS)[number]

@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { getSafety, listSafety, recordSafety } from '../store/observer-safety-store'
-import { finishRun, markFailed, startRun } from '../store/observer-store'
-import type { PlantedCheckResult } from './planted-check'
-import type { CliObserverRunner, CliProbe } from './runners/cli-core'
-import { createSafetyGate } from './safety-gate'
+import { getSafety, listSafety, recordSafety } from '../../store/observer-safety-store'
+import { finishRun, markFailed, startRun } from '../../store/observer-store'
+import type { PlantedCheckResult } from '../../observer/planted-check'
+import type { CliObserverRunner, CliProbe } from '../../observer/runners/cli-core'
+import { createSafetyGate } from '../../observer/safety-gate'
 import { type TempStore, T0, openTempStore, seedEvent, seedSession, stateCounts } from './test-support'
-import { ObserverError, type ObserverSettings } from './types'
+import { ObserverError, type ObserverSettings } from '../../observer/types'
 
 let temp: TempStore
 let logs: string[]

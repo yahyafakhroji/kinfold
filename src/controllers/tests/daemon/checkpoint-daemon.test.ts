@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, renameSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Readers } from './daemon'
-import { type RunningDaemon, exclusiveOverAll, startDaemon } from './daemon'
-import { runNow } from '../vectors/vector-worker'
+import type { Readers } from '../../daemon/daemon'
+import { type RunningDaemon, exclusiveOverAll, startDaemon } from '../../daemon/daemon'
+import { runNow } from '../../../resources/vectors/vector-worker'
 
 let root: string
 let daemon: RunningDaemon | null

@@ -11,7 +11,7 @@ interface Row {
 async function render(search: Record<string, unknown>, rows: Row[], total = rows.length) {
   const { render: draw } = await import('@testing-library/react/pure')
   const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query')
-  const { ListView } = await import('./list-view')
+  const { ListView } = await import('../../../../dashboard/src/components/list-view')
   const daemon = fakeDaemon({ '/memory/list/memories': { body: { rows, total, page: 1, pageSize: 50, sort: 'age', dir: 'desc' } } })
   globalThis.fetch = daemon.fetch as typeof fetch
   const changes: Record<string, unknown>[] = []

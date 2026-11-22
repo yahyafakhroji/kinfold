@@ -2,10 +2,10 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type AuthDeps, SKEW_MS, createNonceCache, signedHeaders, verifyCentralRequest } from './auth'
-import { addDevice, removeDevice } from './devices'
-import { newKeyPair } from './keys'
-import type { TailscaleIdentity } from './tailscale'
+import { type AuthDeps, SKEW_MS, createNonceCache, signedHeaders, verifyCentralRequest } from '../../central/auth'
+import { addDevice, removeDevice } from '../../central/devices'
+import { newKeyPair } from '../../central/keys'
+import type { TailscaleIdentity } from '../../central/tailscale'
 
 const T0 = 1_700_000_000_000
 const key = newKeyPair()

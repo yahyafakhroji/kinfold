@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveEvidenceStrength, type SourceEvent } from './evidence'
+import { resolveEvidenceStrength, type SourceEvent } from '../evidence'
 
 const toolResult = (exitCode: number | undefined, outputChars: number): SourceEvent => ({
   eventId: `tool-${exitCode}-${outputChars}`,

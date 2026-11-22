@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { ULID_PATTERN, ulid } from './ulid'
+import { ULID_PATTERN, ulid } from '../../contract/ulid'
 
 describe('ulid', () => {
   test('produces 26 Crockford base32 characters', () => {

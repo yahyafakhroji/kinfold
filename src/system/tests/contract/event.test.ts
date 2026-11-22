@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { type NormalizedEvent, validateEvent } from './event'
-import { ulid } from './ulid'
+import { type NormalizedEvent, validateEvent } from '../../contract/event'
+import { ulid } from '../../contract/ulid'
 
 const base = (): NormalizedEvent => ({
   schemaVersion: 1,

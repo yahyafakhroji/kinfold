@@ -2,10 +2,10 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveDataDir, resolveInstallDataDir } from './data-dir'
+import { resolveDataDir, resolveInstallDataDir } from '../../../resources/store/data-dir'
 
-const HOOK = join(import.meta.dir, '..', 'cli', 'hook.ts')
-const FIXTURES = join(import.meta.dir, '..', '..', 'test', 'fixtures', 'claude-code')
+const HOOK = join(import.meta.dir, '..', '..', 'cli', 'hook.ts')
+const FIXTURES = join(import.meta.dir, '..', '..', '..', '..', 'test', 'fixtures', 'claude-code')
 
 let home: string
 let current: string

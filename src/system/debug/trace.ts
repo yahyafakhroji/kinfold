@@ -5,7 +5,7 @@
 // numbers and the redacted prompt's terms; never a transcript's text.
 
 import { randomBytes } from 'node:crypto'
-import type { TurnUsage } from '../daemon/transcript-usage'
+import type { TurnUsage } from '../../controllers/daemon/transcript-usage'
 
 export const TRACE_MAX_EVENTS = 400
 export const TRACE_MAX_BYTES = 1_048_576

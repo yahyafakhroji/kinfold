@@ -21,7 +21,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { writeFileAtomic } from '../fs/atomic'
+import { writeFileAtomic } from '../../system/fs/atomic'
 
 export const LOGIN_CODE_TTL_MS = 60_000
 export const PENDING_SIGN_IN_TTL_MS = 60_000

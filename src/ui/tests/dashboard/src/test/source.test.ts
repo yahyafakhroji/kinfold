@@ -6,7 +6,7 @@ import { expect, test } from 'bun:test'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-const SRC = join(import.meta.dir, '..')
+const SRC = join(import.meta.dir, '../../../../dashboard/src')
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

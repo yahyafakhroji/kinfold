@@ -1,14 +1,14 @@
 // Puts the pinned embedding model, its vocabulary and onnxruntime-web's wasm
 // under .cache/embed-model/, for a release build (gen-embedded) and for the
 // tests that run the real model. Every file is checked against the hash in
-// src/vectors/local-model.ts before it is written, whichever source served
+// src/resources/vectors/local-model.ts before it is written, whichever source served
 // it. It prints KINFOLD_TEST_MODEL_DIR and, in CI, adds it to GITHUB_ENV.
 
 import { createHash } from 'node:crypto'
-import { readBodyCapped } from '../src/fs/capped-body'
+import { readBodyCapped } from '../src/system/fs/capped-body'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { LOCAL_MODEL_FILES, type PinnedFile } from '../src/vectors/local-model'
+import { LOCAL_MODEL_FILES, type PinnedFile } from '../src/resources/vectors/local-model'
 
 const ROOT = join(import.meta.dir, '..')
 export const MODEL_CACHE_DIR = join(ROOT, '.cache', 'embed-model')

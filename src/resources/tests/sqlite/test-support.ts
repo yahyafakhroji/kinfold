@@ -3,14 +3,14 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { readEnv } from '../env-names'
-import { currentPlatform } from '../platform/platform'
-import { openWithLibrary } from './driver'
-import { SQLITE3MC_LIB_ENV } from './library'
-import { sqlite3mcLibraryExtension } from './release'
-import type { Database } from './types'
+import { readEnv } from '../../../system/env-names'
+import { currentPlatform } from '../../../system/platform/platform'
+import { openWithLibrary } from '../../sqlite/driver'
+import { SQLITE3MC_LIB_ENV } from '../../sqlite/library'
+import { sqlite3mcLibraryExtension } from '../../sqlite/release'
+import type { Database } from '../../sqlite/types'
 
-export const TEST_LIBRARY_DIR = join(import.meta.dir, '..', '..', '.cache', 'sqlite3mc')
+export const TEST_LIBRARY_DIR = join(import.meta.dir, '..', '..', '..', '..', '.cache', 'sqlite3mc')
 
 export function testLibraryPath(): string {
   const override = readEnv(process.env, 'SQLITE3MC_LIB')

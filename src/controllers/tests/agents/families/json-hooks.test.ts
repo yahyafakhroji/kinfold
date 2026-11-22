@@ -1,13 +1,13 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { CLAUDE_JSON_HOOKS, mergeSamHooks, removeSamHooks } from '../../install/claude-hooks'
-import { entryCommand } from '../../install/entry'
-import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, mergeHostHooks, removeHostHooks } from '../../install/host-hooks'
+import { CLAUDE_JSON_HOOKS, mergeSamHooks, removeSamHooks } from '../../../../resources/install-plan/claude-hooks'
+import { entryCommand } from '../../../../resources/install-plan/entry'
+import { CODEX_HOOK_SPEC, CURSOR_HOOK_SPEC, mergeHostHooks, removeHostHooks } from '../../../install/host-hooks'
 import { type FakeWorld, createWorld } from '../../install/test-support'
-import { cmdCommand, powershellCommand } from './hook-shell'
-import { type JsonHooksSpec, hookTarget, inspectJsonHooks, jsonHookItem, jsonHooksActions, jsonHooksUninstallActions, mergeJsonHooks, removeJsonHooks, shellCommand } from './json-hooks'
-import { assertWriterContract, fileWriter } from './writer-contract.test-support'
+import { cmdCommand, powershellCommand } from '../../../../plugins/agents/families/hook-shell'
+import { type JsonHooksSpec, hookTarget, inspectJsonHooks, jsonHookItem, jsonHooksActions, jsonHooksUninstallActions, mergeJsonHooks, removeJsonHooks, shellCommand } from '../../../../plugins/agents/families/json-hooks'
+import { assertWriterContract, fileWriter } from '../../../../plugins/tests/agents/families/writer-contract.test-support'
 
 let worlds: FakeWorld[] = []
 afterEach(async () => {
@@ -15,9 +15,9 @@ afterEach(async () => {
   worlds = []
 })
 
-const ENTRY = { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/sam/src/cli/hook.ts', '--data-dir', '/Users/dev/.kinfold'] }
+const ENTRY = { command: '/Users/dev/.bun/bin/bun', args: ['/Users/dev/sam/src/controllers/cli/hook.ts', '--data-dir', '/Users/dev/.kinfold'] }
 const forHost = (host: string) => ({ entry: { command: ENTRY.command, args: [...ENTRY.args, '--host', host] } })
-const CMD = (host: string) => `'/Users/dev/.bun/bin/bun' '/Users/dev/sam/src/cli/hook.ts' --data-dir '/Users/dev/.kinfold' --host ${host}`
+const CMD = (host: string) => `'/Users/dev/.bun/bin/bun' '/Users/dev/sam/src/controllers/cli/hook.ts' --data-dir '/Users/dev/.kinfold' --host ${host}`
 
 // What mergeSamHooks and mergeHostHooks wrote before they moved onto json-hooks.ts.
 const CLAUDE_IN = { theme: 'dark', hooks: { PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '/usr/local/bin/other-tool', timeout: 5 }] }] } }

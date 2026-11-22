@@ -33,8 +33,8 @@
 // stays a `command` every surface runs.
 
 import { join } from 'node:path'
-import { resolveAgentHome } from '../../install/codex-home'
-import type { InstallEnv } from '../../install/env'
+import { resolveAgentHome } from '../../../resources/install-plan/codex-home'
+import type { InstallEnv } from '../../../resources/install-plan/env'
 import { AGENT_HOOK_TIMEOUT_S, type AgentHome, type JsonAgentFile, jsonAgentWiring, mcpServersFile } from '../families/json-agent'
 import { type AgentProfile, type Capabilities, NO_TOOLS_OFF } from '../profile'
 

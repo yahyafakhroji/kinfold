@@ -10,7 +10,7 @@
 // runs it inline when the daemon is down.
 
 import { chmodSync, existsSync, rmSync } from 'node:fs'
-import { isCompiledProgram } from '../runtime/program'
+import { isCompiledProgram } from '../../system/runtime/program'
 import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
 import { maintenancePath, openEncrypted, openPlain } from '../sqlite/open'
 import type { Database } from '../sqlite/types'
@@ -25,7 +25,7 @@ const OPEN_BUSY_TIMEOUT_MS = 5_000
  * common folder (src/), as the search worker is. tools/build-release.test.ts
  * holds the two in step.
  */
-export const COMPILED_SNAPSHOT_WORKER_PATH = './backup/snapshot-worker.ts'
+export const COMPILED_SNAPSHOT_WORKER_PATH = './resources/backup/snapshot-worker.ts'
 
 export interface SnapshotFileInput {
   dbPath: string

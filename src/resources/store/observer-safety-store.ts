@@ -1,5 +1,5 @@
 // The daemon's record of which CLI login observers passed the planted-
-// instruction test (src/observer/safety-gate.ts). A row is keyed on provider,
+// instruction test (src/resources/observer/safety-gate.ts). A row is keyed on provider,
 // CLI version and resolved binary path, so a CLI update or a different binary
 // on PATH is a new key that gets its own test. Only the daemon writes here.
 

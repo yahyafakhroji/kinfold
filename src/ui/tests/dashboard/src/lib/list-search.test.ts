@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { apiParams, parseListSearch, withFilter } from './list-search'
+import { apiParams, parseListSearch, withFilter } from '../../../../dashboard/src/lib/list-search'
 
 test('the URL gives back the list it describes, and drops what it cannot be', () => {
   expect(parseListSearch({ page: '3', sort: 'prompts', dir: 'asc', q: ' bun ', open: '12' })).toEqual({ page: 3, sort: 'prompts', dir: 'asc', q: 'bun', open: 12 })

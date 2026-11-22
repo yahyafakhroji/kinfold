@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { MAX_VECTOR_DISTANCE, fuseRanks } from './fusion'
-import type { IndexRow } from './reader'
+import { MAX_VECTOR_DISTANCE, fuseRanks } from '../../mcp/fusion'
+import type { IndexRow } from '../../mcp/reader'
 
 const row = (id: number): IndexRow => ({
   id, projectKey: 'p', host: 'claude-code', type: 'discovery', evidence: 'tool-verified', title: `#${id}`,

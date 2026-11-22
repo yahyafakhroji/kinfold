@@ -3,7 +3,7 @@
 // credential, a Host check stops DNS rebinding, and no CORS headers means a
 // browser never hands a page the response. The credential is the
 // data-directory token, or for the routes the dashboard calls, its session
-// cookie (src/dashboard/access.ts decides which route takes which). Every
+// cookie (src/controllers/dashboard/access.ts decides which route takes which). Every
 // answer carries the dashboard's CSP and no-store headers.
 //
 // Bun's own body cap is server-wide, and the restore upload needs it high, so
@@ -13,15 +13,15 @@
 // cannot make the daemon read anything.
 
 import { timingSafeEqual } from 'node:crypto'
-import { type ContextRequest, type ContextResult, type Parsed, parseContextRequest } from '../context/types'
+import { type ContextRequest, type ContextResult, type Parsed, parseContextRequest } from '../../resources/context/types'
 import { type Access, type AccessResult, type Credential, accessFor, checkAccess } from '../dashboard/access'
 import { type DashboardAuth, sessionFromCookie } from '../dashboard/auth'
 import { type DashboardEvents, createDashboardEvents } from '../dashboard/events'
 import { withSecurityHeaders } from '../dashboard/headers'
 import { CLOSED_MESSAGE, LEASE_PREFIX, dashboardRoute } from '../dashboard/routes'
-import type { RetryTarget } from '../store/observer-reset'
-import type { McpRead } from '../store/mcp-read-store'
-import type { SessionSummary } from '../store/reads'
+import type { RetryTarget } from '../../resources/store/observer-reset'
+import type { McpRead } from '../../resources/store/mcp-read-store'
+import type { SessionSummary } from '../../resources/store/reads'
 import type { BackupRoutes } from './backup-routes'
 import { type DataHandlers, type RouteAnswer, dataRoute } from './data-routes'
 import { parseMcpRead } from './mcp-read-route'
@@ -32,15 +32,15 @@ import type { ObserverModelsRoute } from './observer-models-route'
 import type { ObserverTestRoute } from './observer-test'
 import type { EmbeddingRoute } from './embedding-route'
 import { type ObserverSettingsHandlers, parseRecheck, parseSettingsPut, parseTokenPut } from './settings-route'
-import { type SemanticAnswer, type SemanticRequest, parseSemanticRequest } from '../vectors/search'
-import type { Exclusive } from '../vectors/vector-worker'
+import { type SemanticAnswer, type SemanticRequest, parseSemanticRequest } from '../../resources/vectors/search'
+import type { Exclusive } from '../../resources/vectors/vector-worker'
 import type { AutoUpdateView } from '../update/auto'
 import type { InstallRun } from '../update/install-run'
 import { parseVersion } from '../update/version-order'
-import { type UpdateLevel, isUpdateLevel } from '../install/setup/record'
+import { type UpdateLevel, isUpdateLevel } from '../../resources/install-plan/setup/record'
 import { type DeviceRouting, deviceRoute } from '../central/device-routes'
-import { isRecord } from '../contract/event'
-import { declaredLength, readCapped } from '../http/capped'
+import { isRecord } from '../../system/contract/event'
+import { declaredLength, readCapped } from '../../system/http/capped'
 
 export interface ServerDeps {
   /** 0 picks a free port. */

@@ -3,9 +3,9 @@
 // module spins forever, so install and the entry both import this instead.
 
 import { join } from 'node:path'
-import type { InstallMode } from '../install/entry'
-import type { InstallEnv } from '../install/env'
-import { osOf } from '../platform/platform'
+import type { InstallMode } from '../../resources/install-plan/entry'
+import type { InstallEnv } from '../../resources/install-plan/env'
+import { osOf } from '../../system/platform/platform'
 
 /**
  * The same environment aimed at another data folder. An installed program

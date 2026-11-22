@@ -2,10 +2,10 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CODE_PATTERN, proofKey, verifierFor } from './code'
-import { INVITE_LIFE_MS, INVITE_TRIES, createInvite, redeemInvite } from './invites'
-import { addDevice, findDevice, listDevices, removeDevice } from './devices'
-import { CENTRAL_DIR } from './paths'
+import { CODE_PATTERN, proofKey, verifierFor } from '../../central/code'
+import { INVITE_LIFE_MS, INVITE_TRIES, createInvite, redeemInvite } from '../../central/invites'
+import { addDevice, findDevice, listDevices, removeDevice } from '../../central/devices'
+import { CENTRAL_DIR } from '../../central/paths'
 
 let dir: string
 beforeEach(() => {

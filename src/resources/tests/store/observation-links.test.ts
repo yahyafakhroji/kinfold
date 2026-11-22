@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { purge } from '../data-control/purge'
-import type { EvidenceStrength } from '../evidence'
+import { purge } from '../../data-control/purge'
+import type { EvidenceStrength } from '../../../system/evidence'
 import { PROJECT, type TempStore, T0, openTempStore, seedSession } from '../observer/test-support'
-import { EVIDENCE_STRENGTHS } from '../observer/types'
-import { canOverturn, insertLinks, linkTargets, linksOf, settleContradictions } from './observation-links'
-import { upsertProject } from './writes'
+import { EVIDENCE_STRENGTHS } from '../../observer/types'
+import { canOverturn, insertLinks, linkTargets, linksOf, settleContradictions } from '../../store/observation-links'
+import { upsertProject } from '../../store/writes'
 
 let temp: TempStore
 let session: number

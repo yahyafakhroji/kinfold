@@ -1,7 +1,7 @@
 // Builds the dashboard to static files the daemon serves and the release
 // build embeds: dist/index.html, dist/login.html and dist/assets/<name>-<hex>.js|css.
 // Names are lowercase with a hex hash so they pass the daemon's asset name
-// check (src/dashboard/routes.ts). Nothing is inlined: the daemon's CSP allows
+// check (src/controllers/dashboard/routes.ts). Nothing is inlined: the daemon's CSP allows
 // only its own scripts and styles.
 
 import tailwindcss from '@tailwindcss/vite'

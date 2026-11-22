@@ -5,10 +5,10 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { claudeHookInstallActions } from './claude-wiring'
-import { installPaths } from './env'
-import { readTextOrNull } from './files'
-import { type Action, ChangedSincePlannedError, applyAction, runPlan } from './plan'
+import { claudeHookInstallActions } from '../../../resources/install-plan/claude-wiring'
+import { installPaths } from '../../../resources/install-plan/env'
+import { readTextOrNull } from '../../../resources/install-plan/files'
+import { type Action, ChangedSincePlannedError, applyAction, runPlan } from '../../../resources/install-plan/plan'
 import { type FakeWorld, createWorld } from './test-support'
 
 let world: FakeWorld | null = null

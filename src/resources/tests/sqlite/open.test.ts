@@ -2,15 +2,15 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openReadOnly } from '../context/fallback'
-import type { CredentialProvider } from '../secrets/credentials'
-import type { KeyStoreDeps } from '../secrets/key-store'
-import { KEY_STORE_FILE, recordUnreadableMessage } from '../secrets/key-store-record'
-import { openStore } from '../store/db'
-import { upsertProject } from '../store/writes'
-import { DB_KEYSTORE_ENV, type DbKeyStore, NO_DB_KEYS, credentialDbKeyStore, dbKeyStoreFor, newDbKey } from './keys'
-import { fileState, openEncrypted, openStoreFile } from './open'
-import { posixOnly } from '../../test/platform-guards'
+import { openReadOnly } from '../../context/fallback'
+import type { CredentialProvider } from '../../secrets/credentials'
+import type { KeyStoreDeps } from '../../secrets/key-store'
+import { KEY_STORE_FILE, recordUnreadableMessage } from '../../secrets/key-store-record'
+import { openStore } from '../../store/db'
+import { upsertProject } from '../../store/writes'
+import { DB_KEYSTORE_ENV, type DbKeyStore, NO_DB_KEYS, credentialDbKeyStore, dbKeyStoreFor, newDbKey } from '../../sqlite/keys'
+import { fileState, openEncrypted, openStoreFile } from '../../sqlite/open'
+import { posixOnly } from '../../../../test/platform-guards'
 
 let dataDir: string
 beforeEach(() => {
@@ -134,7 +134,7 @@ test('the key store comes from the folder of the opened file', () => {
 const STOCK = '/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib'
 test.skipIf(!existsSync(STOCK))('a stock SQLite, which would ignore the key and write plaintext, is refused before anything opens', () => {
   const path = join(dataDir, 'stock.db')
-  const script = `import { openEncrypted } from '${join(import.meta.dir, 'open.ts')}'
+  const script = `import { openEncrypted } from '${join(import.meta.dir, '../../sqlite/open.ts')}'
 try { openEncrypted(${JSON.stringify(path)}, '${KEY}'); console.log('OPENED') } catch (e) { console.log(e.kind, e.message) }`
   const run = Bun.spawnSync([process.execPath, '-e', script], { env: { ...process.env, KINFOLD_SQLITE3MC_LIB: STOCK }, stdout: 'pipe', stderr: 'pipe' })
   expect(run.stdout.toString().trim()).toBe('library the SQLite library is not a sqlite3mc build; run kinfold install')
@@ -146,7 +146,7 @@ try { openEncrypted(${JSON.stringify(path)}, '${KEY}'); console.log('OPENED') } 
  * The key reaches it on stdin, never argv. Resolves once the lock is held.
  */
 async function holdLock(path: string, key: string, holdMs: number): Promise<{ done: Promise<number> }> {
-  const openModule = join(import.meta.dir, 'open.ts')
+  const openModule = join(import.meta.dir, '../../sqlite/open.ts')
   const script = `
     const { openEncrypted } = await import(${JSON.stringify(openModule)})
     const key = (await Bun.stdin.text()).trim()

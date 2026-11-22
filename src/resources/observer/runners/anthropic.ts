@@ -2,7 +2,7 @@
 // request carries no tools; a tool_use block in the answer is refused as
 // tool_attempt, and any block other than text or thinking is unreadable.
 
-import { isRecord } from '../../contract/event'
+import { isRecord } from '../../../system/contract/event'
 import { ObserverError, type ObserverPrompt, type ObserverRunner, type RunnerResult } from '../types'
 import { DEFAULT_HTTP_TIMEOUT_MS, type FetchFn, postJson } from './http-core'
 import { defaultFetch } from './openai-chat'

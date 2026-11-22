@@ -6,11 +6,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { templateStore } from '../backup/store-templates.test-support'
-import type { ToolCall } from '../contract/event'
-import { ulid } from '../contract/ulid'
-import { type Store, openStore } from '../store/db'
-import { insertEvent, upsertProject, upsertSession } from '../store/writes'
-import type { ObserverPrompt, ObserverRunner, RunnerResult } from './types'
+import type { ToolCall } from '../../../system/contract/event'
+import { ulid } from '../../../system/contract/ulid'
+import { type Store, openStore } from '../../store/db'
+import { insertEvent, upsertProject, upsertSession } from '../../store/writes'
+import type { ObserverPrompt, ObserverRunner, RunnerResult } from '../../observer/types'
 
 export interface TempStore {
   root: string

@@ -9,12 +9,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { currentPlatform } from '../../platform/platform'
-import type { InstallEnv } from '../env'
-import { createCommandRunner } from '../system'
-import { windowsSystemTool } from '../windows-system-path'
-import { bitlockerCheck } from './bitlocker'
-import { diskEncryptionLine } from './check'
+import { currentPlatform } from '../../../../system/platform/platform'
+import type { InstallEnv } from '../../../../resources/install-plan/env'
+import { createCommandRunner } from '../../../install/system'
+import { windowsSystemTool } from '../../../install/windows-system-path'
+import { bitlockerCheck } from '../../../install/disk/bitlocker'
+import { diskEncryptionLine } from '../../../install/disk/check'
 
 const LIVE = currentPlatform().os === 'windows' && process.env.KINFOLD_TEST_WINDOWS_DISK === '1'
 const HEADLESS_TIMEOUT_MS = 90_000
@@ -55,7 +55,7 @@ describe.skipIf(!LIVE)('BitLocker (live)', () => {
       writeFileSync(script, [
         `import { bitlockerCheck } from ${moduleUrl('bitlocker.ts')}`,
         `import { diskEncryptionLine } from ${moduleUrl('check.ts')}`,
-        `import { createCommandRunner } from ${moduleUrl('../system.ts')}`,
+        `import { createCommandRunner } from ${moduleUrl('../../../install/system.ts')}`,
         'const env: Record<string, string> = {}',
         'for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value',
         `const state = await bitlockerCheck.check({ dataDir: ${JSON.stringify(systemDriveRoot())}, envVars: process.env, run: createCommandRunner(env) } as never)`,

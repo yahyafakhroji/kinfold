@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
-import { type TempStore, openTempStore } from '../observer/test-support'
-import { listSafety, recordSafety } from '../store/observer-safety-store'
+import { type TempStore, openTempStore } from '../../../resources/tests/observer/test-support'
+import { listSafety, recordSafety } from '../../../resources/store/observer-safety-store'
 
 const LEAKY_PATH = '/Users/secret/bin/codex'
 let temp: TempStore

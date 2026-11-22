@@ -95,7 +95,7 @@ describe('ci workflow', () => {
   test('the test job restores sqlite3mc from a cache keyed on what builds it, and builds only on a miss', () => {
     const text = workflow('ci.yml')
     expect(text).toContain('path: .cache/sqlite3mc')
-    expect(text).toContain("key: sqlite3mc-${{ runner.os }}-${{ hashFiles('src/sqlite/release.ts', 'src/sqlite/build.ts', 'tools/build-sqlite3mc.ts', 'tools/pinned-download.ts') }}")
+    expect(text).toContain("key: sqlite3mc-${{ runner.os }}-${{ hashFiles('src/resources/sqlite/release.ts', 'src/resources/sqlite/build.ts', 'tools/build-sqlite3mc.ts', 'tools/pinned-download.ts') }}")
     expect(text).toMatch(/- name: Build sqlite3mc for the test preload\n {8}if: steps\.sqlite3mc\.outputs\.cache-hit != 'true'/)
   })
 })

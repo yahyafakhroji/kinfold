@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { DEFAULT_EMBED_DIMS, DEFAULT_EMBED_MODEL, EmbedError, OPENROUTER_EMBEDDINGS_ENDPOINT, REREAD_COOLDOWN_MS, createOpenRouterEmbedder, parseEmbeddings } from './embedder'
+import { DEFAULT_EMBED_DIMS, DEFAULT_EMBED_MODEL, EmbedError, OPENROUTER_EMBEDDINGS_ENDPOINT, REREAD_COOLDOWN_MS, createOpenRouterEmbedder, parseEmbeddings } from '../../vectors/embedder'
 
 const KEY = 'sk-or-test-not-a-real-key'
 

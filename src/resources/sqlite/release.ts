@@ -3,7 +3,7 @@
 // the pin covers the source, and the built library's own hash is recorded
 // next to it.
 
-import { type OsName, osOf } from '../platform/platform'
+import { type OsName, osOf } from '../../system/platform/platform'
 
 export const SQLITE3MC_VERSION = '2.6.1'
 export const SQLITE3MC_SQLITE_VERSION = '3.54.0'

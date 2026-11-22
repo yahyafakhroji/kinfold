@@ -8,8 +8,8 @@
 
 import { readFileSync, realpathSync } from 'node:fs'
 import { join, win32 } from 'node:path'
-import { writeFileAtomic } from '../../fs/atomic'
-import type { OsName } from '../../platform/platform'
+import { writeFileAtomic } from '../../../system/fs/atomic'
+import type { OsName } from '../../../system/platform/platform'
 import { DAEMON_TOOLS, type Which, bunWhich } from '../launch-agent'
 
 export const SERVICE_PATH_FILE = 'service-path.json'

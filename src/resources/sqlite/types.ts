@@ -1,6 +1,6 @@
 // The database surface every process uses. It is the subset of
 // bun:sqlite the code called before the switch, with the same signatures, so
-// call sites only changed their import. src/sqlite/contract.test.ts runs the
+// call sites only changed their import. src/resources/tests/sqlite/contract.test.ts runs the
 // same cases against both drivers.
 
 /** Any typed array binds as a BLOB of its bytes, as in bun:sqlite. */

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { writeDataSettings } from '../store/data-settings-store'
-import { setPromptReply } from '../store/writes'
+import { writeDataSettings } from '../../store/data-settings-store'
+import { setPromptReply } from '../../store/writes'
 import { type Fixture, seedFixture } from './test-support'
-import { formatBytes, sizeParts, sizeReport, sizeWarning } from './size'
+import { formatBytes, sizeParts, sizeReport, sizeWarning } from '../../data-control/size'
 
 const GB = 1024 * 1024 * 1024
 

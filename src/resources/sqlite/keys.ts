@@ -8,7 +8,7 @@
 // production environment can switch encryption off.
 
 import { randomBytes } from 'node:crypto'
-import { envName } from '../env-names'
+import { envName } from '../../system/env-names'
 import { type CredentialProvider, DB_KEY_REF } from '../secrets/credentials'
 import { isHexKey } from '../secrets/hmac-keys'
 import { type KeyStore, type KeyStoreDeps, credentialProviderOf } from '../secrets/key-store'

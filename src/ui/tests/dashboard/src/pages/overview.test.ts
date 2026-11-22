@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import type { Measured, Overview } from '../lib/types'
-import { weekSentence, worthALook } from './overview'
+import type { Measured, Overview } from '../../../../dashboard/src/lib/types'
+import { weekSentence, worthALook } from '../../../../dashboard/src/pages/overview'
 
 const overview = (change: Partial<Overview> = {}): Overview => ({
   memories: 294, projects: 3, sessions: 60, week: { sessions: 20, prompts: 42, promptsWithMemory: 37 },

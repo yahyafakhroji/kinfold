@@ -7,7 +7,7 @@
 // NAT with the mirrored advice and changes nothing, and a hook run in the
 // distro spools into the Windows folder, where the Windows daemon ingests it.
 
-import { NOT_LINKED_LINE, unreachableRefusal } from '../../src/wsl/entry'
+import { NOT_LINKED_LINE, unreachableRefusal } from '../../src/controllers/wsl/entry'
 import { SmokeError, type SmokeResult } from './platform'
 
 /** The distro's root user, whose home the WSL install would write to. */

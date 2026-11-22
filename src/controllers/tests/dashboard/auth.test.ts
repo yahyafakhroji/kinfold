@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DASHBOARD_SESSIONS_FILE, type DashboardAuth, LIVE_LEASE_TTL_MS, PENDING_SIGN_IN_TTL_MS, LOGIN_CODE_TTL_MS, MAX_LEASES, MAX_LOGIN_CODES, MAX_SESSIONS, PRINT_LEASE_TTL_MS, SESSION_TTL_MS, createDashboardAuth, fileSessionStore, sessionCookie, sessionFromCookie } from './auth'
+import { DASHBOARD_SESSIONS_FILE, type DashboardAuth, LIVE_LEASE_TTL_MS, PENDING_SIGN_IN_TTL_MS, LOGIN_CODE_TTL_MS, MAX_LEASES, MAX_LOGIN_CODES, MAX_SESSIONS, PRINT_LEASE_TTL_MS, SESSION_TTL_MS, createDashboardAuth, fileSessionStore, sessionCookie, sessionFromCookie } from '../../dashboard/auth'
 
 function clock(start: number = 1_000_000): { now: () => number; advance: (ms: number) => void } {
   let at = start

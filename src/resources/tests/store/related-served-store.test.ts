@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { seedObservation } from '../context/test-support'
-import { relatedByDistance } from '../dashboard/hit-rate'
+import { relatedByDistance } from '../../reports/hit-rate'
 import { T0, type TempStore, openTempStore, seedSession } from '../observer/test-support'
-import { expireRelatedServed, recordRelatedServed, relatedServedSince } from './related-served-store'
-import { upsertProject } from './writes'
+import { expireRelatedServed, recordRelatedServed, relatedServedSince } from '../../store/related-served-store'
+import { upsertProject } from '../../store/writes'
 
 let temp: TempStore
 beforeEach(() => {

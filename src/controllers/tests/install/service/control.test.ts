@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from 'bun:test'
 import { type FakeWorld, createWorld } from '../test-support'
-import { serviceFor } from './control'
-import { ScheduledTaskService } from './scheduled-task-service'
-import { StubService } from './stub-service'
-import { SystemdUserService } from './systemd-service'
+import { serviceFor } from '../../../install/service/control'
+import { ScheduledTaskService } from '../../../install/service/scheduled-task-service'
+import { StubService } from '../../../install/service/stub-service'
+import { SystemdUserService } from '../../../install/service/systemd-service'
 
 let world: FakeWorld | null = null
 afterEach(async () => {

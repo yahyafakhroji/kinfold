@@ -2,8 +2,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { type TempStore, openTempStore } from '../observer/test-support'
-import { loadVec0, vec0Path } from './extension'
-import { VEC0_ASSETS, vec0AssetFor } from './vec0-release'
+import { loadVec0, vec0Path } from '../../vectors/extension'
+import { VEC0_ASSETS, vec0AssetFor } from '../../vectors/vec0-release'
 
 let temp: TempStore
 beforeEach(() => {

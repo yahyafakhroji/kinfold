@@ -5,9 +5,9 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { runPlan } from '../../install/plan'
+import { runPlan } from '../../../../resources/install-plan/plan'
 import { type FakeWorld, createWorld } from '../../install/test-support'
-import { kiloTuiConfigPath, kiloTuiContent, kiloTuiInstallActions, kiloTuiLine, kiloTuiPath, kiloTuiUninstallActions } from './kilo-tui'
+import { kiloTuiConfigPath, kiloTuiContent, kiloTuiInstallActions, kiloTuiLine, kiloTuiPath, kiloTuiUninstallActions } from '../../../../plugins/agents/families/kilo-tui'
 
 let world: FakeWorld
 beforeEach(() => {

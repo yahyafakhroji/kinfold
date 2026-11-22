@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import type { BatchOutcome } from '../observer/process'
-import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../observer/test-support'
-import { DEFAULT_SCHEDULE, LEGACY_SCHEDULE, PARKED_MS, createObserverScheduler, dueReason, parseIdleMs, parseMaxWaitMs, shouldObserve } from './observer-scheduler'
+import type { BatchOutcome } from '../../../resources/observer/process'
+import { type TempStore, T0, openTempStore, seedEvent, seedSession } from '../../../resources/tests/observer/test-support'
+import { DEFAULT_SCHEDULE, LEGACY_SCHEDULE, PARKED_MS, createObserverScheduler, dueReason, parseIdleMs, parseMaxWaitMs, shouldObserve } from '../../daemon/observer-scheduler'
 
 let temp: TempStore
 let clock: number

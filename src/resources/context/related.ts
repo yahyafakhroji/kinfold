@@ -5,7 +5,7 @@
 // line format. Every id served is recorded, so a match is shown to a session
 // once. Same frame as the pack: data, not instructions.
 
-import { type VectorRow, fuseRanks } from '../mcp/fusion'
+import { type VectorRow, fuseRanks } from '../../controllers/mcp/fusion'
 import { FRAME_CLOSE, FRAME_OPEN, oneLine, renderItem } from './pack'
 import { CHARS_PER_TOKEN, type ContextResult, EMPTY_CONTEXT, type PackObservation, estimateTokens } from './types'
 

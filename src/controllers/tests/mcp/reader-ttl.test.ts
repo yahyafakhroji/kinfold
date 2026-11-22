@@ -2,10 +2,10 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openStore } from '../store/db'
-import { READER_TTL_MS, createMcpServer } from './server'
+import { openStore } from '../../../resources/store/db'
+import { READER_TTL_MS, createMcpServer } from '../../mcp/server'
 import { NOW, PROJECT_A, gitForProjectA, seedMcpObservation, seedMcpSession } from './test-support'
-import { posixOnly } from '../../test/platform-guards'
+import { posixOnly } from '../../../../test/platform-guards'
 
 let dataDir: string
 beforeEach(() => {

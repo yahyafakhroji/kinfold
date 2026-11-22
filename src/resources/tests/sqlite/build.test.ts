@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { deflateRawSync } from 'node:zlib'
-import { BuildError, buildSqlite3mc, compileCommand, defaultCompiler, runCompiler, zipMembers } from './build'
+import { BuildError, buildSqlite3mc, compileCommand, defaultCompiler, runCompiler, zipMembers } from '../../sqlite/build'
 
 interface Entry { name: string; data: Uint8Array; deflate?: boolean }
 

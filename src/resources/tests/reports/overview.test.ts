@@ -2,10 +2,10 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { recordInjection } from '../store/context-store'
-import { type Store, openStore } from '../store/db'
-import { insertPrompt, upsertProject, upsertSession } from '../store/writes'
-import { impactReport, overviewReport } from './overview'
+import { recordInjection } from '../../store/context-store'
+import { type Store, openStore } from '../../store/db'
+import { insertPrompt, upsertProject, upsertSession } from '../../store/writes'
+import { impactReport, overviewReport } from '../../reports/overview'
 
 const DAY = 86_400_000
 const NOW = 100 * DAY

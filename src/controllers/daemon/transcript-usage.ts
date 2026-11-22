@@ -14,8 +14,8 @@
 
 import { closeSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
-import type { Database } from '../sqlite/types'
-import { isRecord } from '../contract/event'
+import type { Database } from '../../resources/sqlite/types'
+import { isRecord } from '../../system/contract/event'
 
 export const MAX_TRANSCRIPT_TAIL_BYTES = 8 * 1024 * 1024
 

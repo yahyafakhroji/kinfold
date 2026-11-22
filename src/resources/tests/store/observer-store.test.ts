@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type TempStore, T0, openTempStore, seedEvent, seedSession, stateCounts } from '../observer/test-support'
 import { openTestDatabase } from '../sqlite/test-support'
-import { openStore, schemaVersionOf } from './db'
-import { MAX_OBSERVER_ATTEMPTS, QUEUE_STATS_SQL, endIdleSessions, markProcessing, queueStats, recoverInterrupted, startRun, upsertSummary } from './observer-store'
-import { LATEST_SCHEMA_VERSION, MIGRATIONS } from './schema'
+import { openStore, schemaVersionOf } from '../../store/db'
+import { MAX_OBSERVER_ATTEMPTS, QUEUE_STATS_SQL, endIdleSessions, markProcessing, queueStats, recoverInterrupted, startRun, upsertSummary } from '../../store/observer-store'
+import { LATEST_SCHEMA_VERSION, MIGRATIONS } from '../../store/schema'
 
 let root: string
 beforeEach(() => {

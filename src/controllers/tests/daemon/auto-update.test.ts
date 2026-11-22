@@ -5,13 +5,13 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { accessFor } from '../dashboard/access'
-import { type InstallRecord, readInstallRecord } from '../install/setup/record'
-import { type TempStore, openTempStore } from '../observer/test-support'
-import { QUIET_MS } from '../update/auto'
-import { mergeAutoState, readAutoState } from '../update/auto-state'
-import { writeUpdateState } from '../update/state'
-import { type DaemonOptions, type RunningDaemon, startDaemon } from './daemon'
+import { accessFor } from '../../dashboard/access'
+import { type InstallRecord, readInstallRecord } from '../../../resources/install-plan/setup/record'
+import { type TempStore, openTempStore } from '../../../resources/tests/observer/test-support'
+import { QUIET_MS } from '../../update/auto'
+import { mergeAutoState, readAutoState } from '../../update/auto-state'
+import { writeUpdateState } from '../../update/state'
+import { type DaemonOptions, type RunningDaemon, startDaemon } from '../../daemon/daemon'
 
 const RECORD: InstallRecord = { channel: 'curl', updateCheck: true, autoUpdate: true, autoUpdateIntro: false, agentHomes: {}, firstInstalledAt: 1 }
 const T0 = 1_792_900_000_000

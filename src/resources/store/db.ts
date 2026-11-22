@@ -53,7 +53,7 @@ export function enforceStoreModes(path: string): void {
   for (const suffix of SIDE_FILES) enforceFileMode(`${path}${suffix}`)
 }
 
-/** `keys` defaults to this platform's store (src/sqlite/keys.ts); tests pass their own. */
+/** `keys` defaults to this platform's store (src/resources/sqlite/keys.ts); tests pass their own. */
 export function openStore(dataDir: string, options: { keys?: DbKeyStore } = {}): Store {
   const path = join(ensureDataDir(dataDir), DB_FILE)
   closeSync(openSync(path, 'a', DATA_FILE_MODE))

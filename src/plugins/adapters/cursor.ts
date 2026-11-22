@@ -14,7 +14,7 @@
 // turn already ended with its reply and a second turn_end would add nothing.
 
 import { isAbsolute } from 'node:path'
-import { type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../contract/event'
+import { type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../../system/contract/event'
 import { type AdapterContext, AdapterInputError, str, nonEmpty } from './context'
 
 export const CURSOR_HOST = 'cursor'

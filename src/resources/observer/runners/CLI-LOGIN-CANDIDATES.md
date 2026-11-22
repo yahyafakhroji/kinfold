@@ -43,7 +43,7 @@ Agents with no CLI fit for the observer can still use any API provider
   `GOOSE_PATH_ROOT` moves goose's config, data, state and plugin (hook)
   folders into the run folder. One built-in tool, `load_skill`, is still
   offered; with `GOOSE_MODE=chat` goose answers any call to it with a fixed
-  text and never runs it (`crates/goose/src/agents/state_machine/ops_skills.rs`).
+  text and never runs it (`crates/goose/src/plugins/agents/state_machine/ops_skills.rs`).
   Any tool request in the output still rejects the run, and so does any
   advertised tool beyond `load_skill`.
 - Login reuse: provider keys live in the system keyring, which the moved

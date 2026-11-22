@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { METRICS_MAX_AGE_MS, keptMetricsRoute, metricsRoute } from '../dashboard/metrics'
-import { type TempStore, openTempStore } from '../observer/test-support'
-import { type StoreReader, inlineStoreReader } from '../workers/store-reader'
-import { dataHandlers } from './data-routes'
-import { memoryHandlers } from './memory-routes'
+import { METRICS_MAX_AGE_MS, keptMetricsRoute, metricsRoute } from '../../../resources/reports/metrics'
+import { type TempStore, openTempStore } from '../../../resources/tests/observer/test-support'
+import { type StoreReader, inlineStoreReader } from '../../../resources/workers/store-reader'
+import { dataHandlers } from '../../daemon/data-routes'
+import { memoryHandlers } from '../../daemon/memory-routes'
 
 let temp: TempStore
 let asked: string[]

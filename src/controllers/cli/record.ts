@@ -5,11 +5,11 @@
 // small read, never a Keychain lookup on the hook path.
 
 import { join } from 'node:path'
-import { captureEvent } from '../capture/capture'
-import type { NormalizedEvent } from '../contract/event'
+import { captureEvent } from '../../resources/capture/capture'
+import type { NormalizedEvent } from '../../system/contract/event'
 import { readDaemonEndpoint } from '../daemon/daemon-info'
-import { SPOOL_DIR, ensureDataDir } from '../store/data-dir'
-import { loadMarkerKey } from '../store/hmac-key'
+import { SPOOL_DIR, ensureDataDir } from '../../resources/store/data-dir'
+import { loadMarkerKey } from '../../resources/store/hmac-key'
 
 export const NUDGE_BUDGET_MS = 250
 

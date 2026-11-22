@@ -5,8 +5,8 @@
 
 import type { HookHostSpec } from './hook-spec'
 import { DEVIN_HOOK_ENV, HOOK_SPECS } from './hook-specs'
-import type { WiringState } from '../install/claude-hooks'
-import type { InstallEnv } from '../install/env'
+import type { WiringState } from '../../resources/install-plan/claude-hooks'
+import type { InstallEnv } from '../../resources/install-plan/env'
 import type { AgentId, AgentProfile, AgentWiring, ProfileTable } from './profile'
 import { AMP_PROFILE } from './profiles/amp'
 import { AUGGIE_PROFILE } from './profiles/auggie'

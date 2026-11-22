@@ -1,14 +1,14 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { type RunningDaemon, startDaemon } from '../daemon/daemon'
-import { ObserverError, type ObserverRunner } from '../observer/types'
-import { KEY_STORE_MODULES } from '../secrets/stores/select'
-import { stubKeyStoreModule } from '../secrets/stores/stub'
-import { samHookGroup } from './claude-hooks'
-import { installPaths } from './env'
-import { EXIT_BLOCKED, EXIT_OK, install } from './install'
-import { LAUNCHCTL } from './launch-agent'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import { ObserverError, type ObserverRunner } from '../../../resources/observer/types'
+import { KEY_STORE_MODULES } from '../../../resources/secrets/stores/select'
+import { stubKeyStoreModule } from '../../../resources/secrets/stores/stub'
+import { samHookGroup } from '../../../resources/install-plan/claude-hooks'
+import { installPaths } from '../../../resources/install-plan/env'
+import { EXIT_BLOCKED, EXIT_OK, install } from '../../install/install'
+import { LAUNCHCTL } from '../../install/launch-agent'
 import { BUN, type FakeWorld, YES, createWorld, snapshotTree } from './test-support'
 
 const KEY = 'sk-or-v1-TESTONLY0123456789abcdefFAKE'
@@ -104,10 +104,10 @@ test('dry run changes nothing in the temp home: same tree, modes and mtimes; onl
 test('project-level Kinfold wiring in the current directory is reported and left untouched', async () => {
   const w = make({ keychainRefs: ['openrouter'] })
   mkdirSync(join(w.cwd, '.claude'), { recursive: true })
-  const local = JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { entry: { command: BUN, args: ['/x/src/cli/hook.ts'] } })] } })
+  const local = JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { entry: { command: BUN, args: ['/x/src/controllers/cli/hook.ts'] } })] } })
   writeFileSync(join(w.cwd, '.claude', 'settings.local.json'), local)
   mkdirSync(join(w.cwd, '.opencode', 'plugins'), { recursive: true })
-  writeFileSync(join(w.cwd, '.opencode', 'plugins', 'shared-agent-memory.js'), 'export { default } from "../../src/plugins/opencode.ts";\n')
+  writeFileSync(join(w.cwd, '.opencode', 'plugins', 'shared-agent-memory.js'), 'export { default } from "../../../plugins/plugins/opencode.ts";\n')
   const before = snapshotTree(w.cwd)
   expect(await install(w.env, YES)).toBe(EXIT_OK)
   const out = w.out.join('\n')

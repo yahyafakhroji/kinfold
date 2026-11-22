@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { seedObservation } from '../context/test-support'
 import { type TempStore, openTempStore } from '../observer/test-support'
-import { recordInjection } from './context-store'
-import { backfillRoots, canonicalKey, listProjects, mergeProjects, planRootMerges, recentMerges, registerProject, splitProject } from './project-merge'
-import { upsertSession } from './writes'
+import { recordInjection } from '../../store/context-store'
+import { backfillRoots, canonicalKey, listProjects, mergeProjects, planRootMerges, recentMerges, registerProject, splitProject } from '../../store/project-merge'
+import { upsertSession } from '../../store/writes'
 import { join } from 'node:path'
 import { openTestDatabase } from '../sqlite/test-support'
-import { MIGRATIONS } from './schema'
+import { MIGRATIONS } from '../../store/schema'
 
 const ROOT = 'a'.repeat(40)
 const OTHER_ROOT = 'b'.repeat(40)

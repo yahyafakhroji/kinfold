@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type TempStore, T0, openTempStore, seedEvent, seedSession, stateCounts } from '../observer/test-support'
 import { openTestDatabase } from '../sqlite/test-support'
-import { openStore, schemaVersionOf } from './db'
-import { clearFailedSafety, getSafety, listSafety, recordSafety } from './observer-safety-store'
-import { resetSafetyFailedEvents } from './observer-reset'
-import { finishRun, markFailed, startRun } from './observer-store'
-import { LATEST_SCHEMA_VERSION, MIGRATIONS } from './schema'
+import { openStore, schemaVersionOf } from '../../store/db'
+import { clearFailedSafety, getSafety, listSafety, recordSafety } from '../../store/observer-safety-store'
+import { resetSafetyFailedEvents } from '../../store/observer-reset'
+import { finishRun, markFailed, startRun } from '../../store/observer-store'
+import { LATEST_SCHEMA_VERSION, MIGRATIONS } from '../../store/schema'
 
 let root: string
 let temp: TempStore

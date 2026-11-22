@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { isCompiledProgram } from './program'
+import { isCompiledProgram } from '../../runtime/program'
 
 describe('isCompiledProgram', () => {
   test('recognises the macOS and Linux virtual path', () => {
     expect(isCompiledProgram('/$bunfs/root/kinfold')).toBe(true)
-    expect(isCompiledProgram('/$bunfs/root/src/cli/kinfold.ts')).toBe(true)
+    expect(isCompiledProgram('/$bunfs/root/src/controllers/cli/kinfold.ts')).toBe(true)
   })
 
   test('recognises both spellings of the Windows virtual path', () => {
@@ -14,9 +14,9 @@ describe('isCompiledProgram', () => {
   })
 
   test('a checkout run is not compiled on any OS', () => {
-    expect(isCompiledProgram('/Users/me/kinfold/src/cli/kinfold.ts')).toBe(false)
-    expect(isCompiledProgram('/home/me/kinfold/src/cli/kinfold.ts')).toBe(false)
+    expect(isCompiledProgram('/Users/me/kinfold/src/controllers/cli/kinfold.ts')).toBe(false)
+    expect(isCompiledProgram('/home/me/kinfold/src/controllers/cli/kinfold.ts')).toBe(false)
     expect(isCompiledProgram('C:\\Users\\me\\kinfold\\src\\cli\\kinfold.ts')).toBe(false)
-    expect(isCompiledProgram('B:/kinfold/src/cli/kinfold.ts')).toBe(false)
+    expect(isCompiledProgram('B:/kinfold/src/controllers/cli/kinfold.ts')).toBe(false)
   })
 })

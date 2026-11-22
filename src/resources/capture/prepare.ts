@@ -2,7 +2,7 @@
 // spool write. The spool is a file on disk, so a secret that reaches it has
 // already leaked once.
 
-import type { NormalizedEvent, RedactionNote, ToolCall, WithheldReason } from '../contract/event'
+import type { NormalizedEvent, RedactionNote, ToolCall, WithheldReason } from '../../system/contract/event'
 import { type RedactOptions, type Redacted, redactJson, redactText } from '../redaction/redact'
 import { commandNamesSensitivePath, isSensitiveCommand, isSensitivePath } from '../redaction/rules'
 

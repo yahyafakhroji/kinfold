@@ -5,14 +5,14 @@
 // it, and every query is prepared up front so a search is one bound call.
 // A null project means "all projects" (the tools' `project: "*"`).
 
-import { canonicalKey } from '../store/project-merge'
-import type { DbKeyStore } from '../sqlite/keys'
+import { canonicalKey } from '../../resources/store/project-merge'
+import type { DbKeyStore } from '../../resources/sqlite/keys'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { openReadOnly } from '../context/fallback'
-import type { Database, Statement } from '../sqlite/types'
-import { DB_FILE } from '../store/data-dir'
-import { confirmBoostSql, confirmationsColumn, contradictionKindColumn, hasLinksTable } from '../store/observation-links'
+import { openReadOnly } from '../../resources/context/fallback'
+import type { Database, Statement } from '../../resources/sqlite/types'
+import { DB_FILE } from '../../resources/store/data-dir'
+import { confirmBoostSql, confirmationsColumn, contradictionKindColumn, hasLinksTable } from '../../resources/store/observation-links'
 
 export interface IndexRow {
   id: number

@@ -3,14 +3,14 @@
 // and the daemon writes one mcp_reads row. The body is checked strictly: an
 // exact key set, so a body that carries query text or any other field is
 // refused, ids are positive integers (at most 100), and the tool and status
-// come from fixed lists. Token only (src/dashboard/access.ts: not a
+// come from fixed lists. Token only (src/controllers/dashboard/access.ts: not a
 // dashboard route). Errors name the field and never echo a value.
 
-import type { Parsed } from '../context/types'
-import type { Database } from '../sqlite/types'
-import { MCP_READ_STATUSES, MCP_TOOLS, type McpRead, type McpReadStatus, type McpTool, insertMcpRead } from '../store/mcp-read-store'
-import { isRecord } from '../contract/event'
-import { HOST_NAME_PATTERN } from '../names'
+import type { Parsed } from '../../resources/context/types'
+import type { Database } from '../../resources/sqlite/types'
+import { MCP_READ_STATUSES, MCP_TOOLS, type McpRead, type McpReadStatus, type McpTool, insertMcpRead } from '../../resources/store/mcp-read-store'
+import { isRecord } from '../../system/contract/event'
+import { HOST_NAME_PATTERN } from '../../system/names'
 
 export const MAX_REPORTED_IDS = 100
 const MAX_ROWS = 1_000

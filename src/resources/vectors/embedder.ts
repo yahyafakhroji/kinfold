@@ -7,8 +7,8 @@
 // never a body, which could echo the input. A 401 re-reads the key once, so a
 // key replaced in the keychain takes effect without a daemon restart.
 
-import { isRecord } from '../contract/event'
-import { CLI_NAME } from '../names'
+import { isRecord } from '../../system/contract/event'
+import { CLI_NAME } from '../../system/names'
 
 export const OPENROUTER_EMBEDDINGS_ENDPOINT = 'https://openrouter.ai/api/v1/embeddings'
 export const DEFAULT_EMBED_MODEL = 'openai/text-embedding-3-small'

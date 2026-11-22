@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createEmbedQueue } from './embed-queue'
+import { createEmbedQueue } from '../../vectors/embed-queue'
 
 function recordingInference(): { order: string[]; embed: (text: string) => Promise<Float32Array> } {
   const order: string[] = []

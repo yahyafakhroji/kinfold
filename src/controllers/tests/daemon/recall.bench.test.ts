@@ -11,15 +11,15 @@ import { afterAll, beforeAll, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PROMPT_SERVE_BUDGET_MS } from './context-route'
-import { type RunningDaemon, startDaemon } from './daemon'
-import { openStore } from '../store/db'
-import { TOKEN_FILE } from '../store/data-dir'
-import { insertObservation } from '../store/observer-store'
-import { insertEvent, upsertProject, upsertSession } from '../store/writes'
-import { type DbKeyStore, newDbKey } from '../sqlite/keys'
-import { recordInjection } from '../store/context-store'
-import { benchWords } from '../../test/recall-bench-words'
+import { PROMPT_SERVE_BUDGET_MS } from '../../daemon/context-route'
+import { type RunningDaemon, startDaemon } from '../../daemon/daemon'
+import { openStore } from '../../../resources/store/db'
+import { TOKEN_FILE } from '../../../resources/store/data-dir'
+import { insertObservation } from '../../../resources/store/observer-store'
+import { insertEvent, upsertProject, upsertSession } from '../../../resources/store/writes'
+import { type DbKeyStore, newDbKey } from '../../../resources/sqlite/keys'
+import { recordInjection } from '../../../resources/store/context-store'
+import { benchWords } from '../../../../test/recall-bench-words'
 
 const MEMORIES = 30_000
 const SESSIONS = 200
@@ -51,7 +51,7 @@ let dataDir: string
 let daemon: RunningDaemon
 let token: string
 let load: ReturnType<typeof Bun.spawn> & { stdout: ReadableStream<Uint8Array> } | null = null
-const LOAD_SCRIPT = join(import.meta.dir, '../../test/recall-bench-load.ts')
+const LOAD_SCRIPT = join(import.meta.dir, '../../../../test/recall-bench-load.ts')
 // Encrypted, as the hub's store is: every page read is also decrypted.
 const KEY = newDbKey()
 const keys: DbKeyStore = { name: 'bench', read: () => KEY, exists: () => true }

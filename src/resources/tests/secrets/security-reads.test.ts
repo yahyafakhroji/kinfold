@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { posixOnly } from '../../test/platform-guards'
+import { posixOnly } from '../../../../test/platform-guards'
 
-const SRC = join(import.meta.dir, '..')
-const KEYCHAIN_MODULE = 'secrets/stores/keychain.ts'
+const SRC = join(import.meta.dir, '..', '..', '..')
+const KEYCHAIN_MODULE = 'resources/secrets/stores/keychain.ts'
 const MARKERS = ['/usr/bin/security', 'find-generic-password', 'add-generic-password'] as const
 
 /**
@@ -12,7 +12,7 @@ const MARKERS = ['/usr/bin/security', 'find-generic-password', 'add-generic-pass
  * matches that command when an agent's transcript holds it, so it must name it.
  */
 const ALLOWED: Readonly<Record<string, readonly (typeof MARKERS)[number][]>> = {
-  'redaction/rules.ts': ['find-generic-password'],
+  'resources/redaction/rules.ts': ['find-generic-password'],
 }
 
 function sourceFiles(dir: string): string[] {

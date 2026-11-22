@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { backupPath, foundBackupPath } from '../sqlite/convert'
-import { BACKUP_INFIX, existingBackups, plannedBackup } from './files'
+import { backupPath, foundBackupPath } from '../../../resources/sqlite/convert'
+import { BACKUP_INFIX, existingBackups, plannedBackup } from '../../../resources/install-plan/files'
 
 const withDir = (run: (dir: string) => void): void => {
   const dir = mkdtempSync(join(tmpdir(), 'kinfold-legacy-names-'))

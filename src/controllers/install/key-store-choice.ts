@@ -4,8 +4,8 @@
 // key-store.json names, never probing, so they cannot pick a different store
 // than the one holding the keys.
 
-import type { OsName } from '../platform/platform'
-import type { KeyStore, KeyStoreDeps, KeyStoreKind, KeyStoreModule } from '../secrets/key-store'
+import type { OsName } from '../../system/platform/platform'
+import type { KeyStore, KeyStoreDeps, KeyStoreKind, KeyStoreModule } from '../../resources/secrets/key-store'
 import {
   type KeyStoreRecord,
   keyStoreRecordPath,
@@ -14,10 +14,10 @@ import {
   recordMismatchMessage,
   recordUnreadableMessage,
   resolveKeyStore,
-} from '../secrets/key-store-record'
-import { KEY_STORE_MODULES, type KeyStoreRefusal, candidateKeyStores, openKeyStore, probeKeyStores } from '../secrets/stores/select'
-import { type InstallEnv, errorMessage, platformOf } from './env'
-import type { Action } from './plan'
+} from '../../resources/secrets/key-store-record'
+import { KEY_STORE_MODULES, type KeyStoreRefusal, candidateKeyStores, openKeyStore, probeKeyStores } from '../../resources/secrets/stores/select'
+import { type InstallEnv, errorMessage, platformOf } from '../../resources/install-plan/env'
+import type { Action } from '../../resources/install-plan/plan'
 
 type ModuleTable = Readonly<Record<KeyStoreKind, KeyStoreModule>>
 

@@ -13,7 +13,7 @@
 //     ~/.config/amp/settings.json or settings.jsonc, servers under
 //     "amp.mcpServers" with command, args, env)
 // The plugin is agents/families/amp-plugin.ts and the parser
-// src/adapters/amp.ts. The research marked the whole plugin API experimental;
+// src/plugins/adapters/amp.ts. The research marked the whole plugin API experimental;
 // the current docs mark only amp.experimental, so Amp ships with context.
 // A plugin that fails to load shows only in Amp (`amp plugins list`); nothing
 // Kinfold can read records it, so the limit names that check. The settings
@@ -23,7 +23,7 @@
 
 import { existsSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
-import { type InstallEnv, errorMessage } from '../../install/env'
+import { type InstallEnv, errorMessage } from '../../../resources/install-plan/env'
 import { ampPluginContent } from '../families/amp-plugin'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpEntryText, stdioMcpEntry } from '../families/json-agent'
 import { hookTarget } from '../families/json-hooks'

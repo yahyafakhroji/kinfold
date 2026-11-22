@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { type EventKind, type NormalizedEvent, validateEvent } from '../../contract/event'
-import { hookSpecFor } from '../../agents/hook-specs'
-import type { AgentId } from '../../agents/profile'
-import { normalizeGeminiStyle } from './gemini-style-parse'
+import { type EventKind, type NormalizedEvent, validateEvent } from '../../../../system/contract/event'
+import { hookSpecFor } from '../../../agents/hook-specs'
+import type { AgentId } from '../../../agents/profile'
+import { normalizeGeminiStyle } from '../../../adapters/families/gemini-style-parse'
 
-const FIXTURES = join(import.meta.dir, '../../../test/fixtures')
+const FIXTURES = join(import.meta.dir, '../../../../../test/fixtures')
 const fixture = (host: string, file: string): Record<string, unknown> => JSON.parse(readFileSync(join(FIXTURES, host, file), 'utf8'))
 const filesOf = (host: string): string[] => readdirSync(join(FIXTURES, host)).filter((file) => file.startsWith('docs-')).sort()
 

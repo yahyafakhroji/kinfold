@@ -24,7 +24,7 @@
 // ~, so a path that is not absolute is left out.
 
 import { isAbsolute } from 'node:path'
-import { type EventKind, type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../contract/event'
+import { type EventKind, type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../../system/contract/event'
 import { type AdapterContext, AdapterInputError, lenient, str } from './context'
 
 export const ANTIGRAVITY_HOST = 'antigravity'

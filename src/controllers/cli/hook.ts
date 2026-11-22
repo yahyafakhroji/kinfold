@@ -1,4 +1,4 @@
-// Host hook entry: `bun src/cli/hook.ts [--host codex|cursor]` with the hook
+// Host hook entry: `bun src/controllers/cli/hook.ts [--host codex|cursor]` with the hook
 // payload on stdin; no --host means Claude Code, which is how every existing
 // Claude Code entry calls it. Hosts read a hook's stdout as context and a
 // non-zero exit as a problem, so this exits 0 whatever happens and keeps
@@ -15,27 +15,27 @@
 // one (Cursor), otherwise from the installer's record (adapters/host-version.ts):
 // one file read and one stat, never a `--version` spawn.
 
-import { CLAUDE_CODE_HOST } from '../adapters/claude-code'
-import { defaultAdapterContext } from '../adapters/context'
-import { recordedHostVersion } from '../adapters/host-version'
-import { HOOK_SPECS, hookSpecFor } from '../agents/hook-specs'
-import type { AgentId } from '../agents/profile'
-import type { HookHostSpec } from '../agents/hook-spec'
-import { type ContextClientOptions, type ContextFetch, fetchContext } from '../context/client'
-import { readDisplayFile } from '../context/display-file'
+import { CLAUDE_CODE_HOST } from '../../plugins/adapters/claude-code'
+import { defaultAdapterContext } from '../../plugins/adapters/context'
+import { recordedHostVersion } from '../../plugins/adapters/host-version'
+import { HOOK_SPECS, hookSpecFor } from '../../plugins/agents/hook-specs'
+import type { AgentId } from '../../plugins/agents/profile'
+import type { HookHostSpec } from '../../plugins/agents/hook-spec'
+import { type ContextClientOptions, type ContextFetch, fetchContext } from '../../resources/context/client'
+import { readDisplayFile } from '../../resources/context/display-file'
 import {
   DAEMON_DOWN_LINE, DAEMON_DOWN_START_LINE, HELD_OUT_LINE, NO_ANSWER_LINE, NO_ANSWER_START_LINE, NO_PROMPT_MEMORY_LINE,
   cleanTitle, daemonDownWith, firstScreenLine, firstScreenList, recallLine,
-} from '../context/recall-line'
-import { promptForRecall } from '../context/prompt-text'
-import { type ContextChannel, MAX_CONTEXT_PROMPT_CHARS } from '../context/types'
+} from '../../resources/context/recall-line'
+import { promptForRecall } from '../../resources/context/prompt-text'
+import { type ContextChannel, MAX_CONTEXT_PROMPT_CHARS } from '../../resources/context/types'
 import { userMessage as noticeMessage } from '../update/notice-text'
-import type { NormalizedEvent } from '../contract/event'
-import { isObserverProcess } from '../observer/env'
-import { resolveDataDir } from '../store/data-dir'
-import { applyDataDirFlag } from '../store/data-dir-flag'
+import type { NormalizedEvent } from '../../system/contract/event'
+import { isObserverProcess } from '../../resources/observer/env'
+import { resolveDataDir } from '../../resources/store/data-dir'
+import { applyDataDirFlag } from '../../resources/store/data-dir-flag'
 import { recordEvent } from './record'
-import { errorMessage } from '../errors'
+import { errorMessage } from '../../system/errors'
 
 export type ErrorSink = (line: string) => void
 

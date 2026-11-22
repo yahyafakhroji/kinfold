@@ -9,7 +9,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { QUARANTINE_DIR } from '../src/spool/spool'
+import { QUARANTINE_DIR } from '../src/resources/spool/spool'
 import { sumsUrl } from './smoke-sums-url'
 import { SmokeError, type SmokeResult } from './smoke/platform'
 import { distroArgv, expectNatRefusal, expectNotLinked, hookPayload, sessionEventCount } from './smoke/wsl'

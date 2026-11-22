@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import type { PlatformInfo } from '../platform/platform'
-import { isOnWindowsDrive, mcpToolCallerFor } from './mcp-backend'
+import type { PlatformInfo } from '../../../system/platform/platform'
+import { isOnWindowsDrive, mcpToolCallerFor } from '../../wsl/mcp-backend'
 
 const WSL: PlatformInfo = { os: 'linux', wsl: true, node: 'linux' }
 const LINUX: PlatformInfo = { os: 'linux', wsl: false, node: 'linux' }

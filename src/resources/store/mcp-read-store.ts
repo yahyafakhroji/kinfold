@@ -2,7 +2,7 @@
 // so after each tool call it reports what it returned to the daemon, which
 // writes one mcp_reads row here. A row names the tool, the project scope, the
 // observation ids returned, counts and timing; never query text or arguments.
-// The read queries feed the hit-rate proxies in src/dashboard/hit-rate.ts.
+// The read queries feed the hit-rate proxies in src/resources/reports/hit-rate.ts.
 
 import type { Database } from '../sqlite/types'
 import { parseIds } from './ids'

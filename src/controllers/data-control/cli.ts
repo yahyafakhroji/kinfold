@@ -4,18 +4,18 @@
 // answer as counts, sizes, ids and rule names. A daemon that is down or
 // answers non-200 is exit 1 with the daemon's field message.
 
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 import { readDaemonEndpoint } from '../daemon/daemon-info'
 import type { FindingsView } from '../daemon/data-routes'
 import type { DataArgs } from '../install/args'
-import type { InstallEnv } from '../install/env'
+import type { InstallEnv } from '../../resources/install-plan/env'
 import type { Mark, Row } from '../install/prompt/prompts'
-import { type DataSettings, RETENTION_TABLES } from '../store/data-settings-store'
-import type { Finding } from '../store/findings-store'
-import type { PurgeReport } from './purge'
-import type { RetentionOutcome, RetentionPreview } from './retention'
-import type { ScanResult } from './scanner'
-import { type SizeReport, formatBytes } from './size'
+import { type DataSettings, RETENTION_TABLES } from '../../resources/store/data-settings-store'
+import type { Finding } from '../../resources/store/findings-store'
+import type { PurgeReport } from '../../resources/data-control/purge'
+import type { RetentionOutcome, RetentionPreview } from '../../resources/data-control/retention'
+import type { ScanResult } from '../../resources/data-control/scanner'
+import { type SizeReport, formatBytes } from '../../resources/data-control/size'
 
 export type DataCliEnv = Pick<InstallEnv, 'dataDir' | 'fetch' | 'out' | 'ui'>
 

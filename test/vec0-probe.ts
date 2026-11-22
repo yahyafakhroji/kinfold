@@ -1,4 +1,4 @@
-// Run by src/vectors/sqlite-vec.integration.test.ts in its own process, the
+// Run by src/resources/tests/vectors/sqlite-vec.integration.test.ts in its own process, the
 // way the daemon loads vec0: through sqlite3mc (KINFOLD_SQLITE3MC_LIB, inherited
 // from the test run). Args: a scratch data dir and the pinned vec0 member.
 // Prints one JSON line: the loader's answer and the nearest-observation
@@ -6,12 +6,12 @@
 
 import { copyFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { seedObservation } from '../src/context/test-support'
-import { T0, seedSession } from '../src/observer/test-support'
-import { openStore } from '../src/store/db'
-import { distancesFor, nearestObservations, upsertVectors } from '../src/store/vector-store'
-import { upsertProject } from '../src/store/writes'
-import { loadVec0, vec0Path } from '../src/vectors/extension'
+import { seedObservation } from '../src/resources/tests/context/test-support'
+import { T0, seedSession } from '../src/resources/tests/observer/test-support'
+import { openStore } from '../src/resources/store/db'
+import { distancesFor, nearestObservations, upsertVectors } from '../src/resources/store/vector-store'
+import { upsertProject } from '../src/resources/store/writes'
+import { loadVec0, vec0Path } from '../src/resources/vectors/extension'
 
 const [dataDir, vec0] = process.argv.slice(2)
 if (dataDir === undefined || vec0 === undefined) throw new Error('usage: vec0-probe.ts <dataDir> <vec0 member>')

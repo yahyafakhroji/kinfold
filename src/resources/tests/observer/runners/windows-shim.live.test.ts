@@ -5,9 +5,9 @@
 // resolves it and run with --version, with no shell in between.
 
 import { describe, expect, test } from 'bun:test'
-import { currentPlatform } from '../../platform/platform'
-import { spawnProcess } from './claude-cli'
-import { resolveCmdShim } from './windows-shim'
+import { currentPlatform } from '../../../../system/platform/platform'
+import { spawnProcess } from '../../../observer/runners/claude-cli'
+import { resolveCmdShim } from '../../../observer/runners/windows-shim'
 
 const LIVE = currentPlatform().os === 'windows' && process.env.KINFOLD_TEST_WINDOWS_SHIM === '1'
 const VERSION = /\d+\.\d+\.\d+/

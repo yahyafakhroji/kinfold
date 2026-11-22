@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { posixOnly } from '../../test/platform-guards'
-import type { InstallEnv } from './env'
-import { BLOCK_END, BLOCK_START, commandStatusLine, loginShellNote, pathQuestionNeeded, pathRemovalActions, planPathSetup, shellFiles, withBlock, withoutBlock } from './path-setup'
-import { type Action, describeAction, runPlan } from './plan'
-import type { InstallRecord } from './setup/record'
+import { posixOnly } from '../../../../test/platform-guards'
+import type { InstallEnv } from '../../../resources/install-plan/env'
+import { BLOCK_END, BLOCK_START, commandStatusLine, loginShellNote, pathQuestionNeeded, pathRemovalActions, planPathSetup, shellFiles, withBlock, withoutBlock } from '../../install/path-setup'
+import { type Action, describeAction, runPlan } from '../../../resources/install-plan/plan'
+import type { InstallRecord } from '../../../resources/install-plan/setup/record'
 import { type FakeWorld, createWorld } from './test-support'
 
 let world: FakeWorld | null = null

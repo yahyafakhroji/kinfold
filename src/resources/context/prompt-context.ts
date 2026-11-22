@@ -20,7 +20,7 @@ import type { ServedRelated } from '../store/related-served-store'
 import { NO_FILTERS } from '../store/vector-store'
 import type { SemanticAnswer, SemanticRequest } from '../vectors/search'
 import { type StoreReader, inlineStoreReader } from '../workers/store-reader'
-import type { CandidateSource, SearchTrace } from '../debug/trace'
+import type { CandidateSource, SearchTrace } from '../../system/debug/trace'
 import { explainRelated } from './explain'
 import { type LateHit, type LateMatches, lateSessionKey } from './late-matches'
 import { promptSecretRules, promptTermCandidates, termMatches } from './prompt-query'
@@ -28,7 +28,7 @@ import { searchablePrompt } from './prompt-text'
 import type { RecallKeywordAnswer, RecallRowsAnswer, TermCounts } from './recall-reads'
 import { RELATED_BUDGET_TOKENS, RELATED_CANDIDATES, type RelatedCandidate, type RelatedGate, type RelatedMode, buildRelated, isRelated, joinContext, rankRelated } from './related'
 import { type ContextRequest, type ContextResult, EMPTY_CONTEXT, MAX_CONTEXT_PROMPT_CHARS } from './types'
-import { errorName } from '../errors'
+import { errorName } from '../../system/errors'
 
 /** The hook gives the daemon 200 ms (client.ts); measured from when the request arrived, so every read and the embed count. */
 export const PROMPT_SEMANTIC_DEADLINE_MS = 150
@@ -54,7 +54,7 @@ export interface PromptContext extends ContextResult {
   deltaMs: number
   keywordMs: number
   relatedMs: number
-  /** The related lines in `relatedText`, with what earned them; recorded only when the answer is (src/daemon/context-route.ts). */
+  /** The related lines in `relatedText`, with what earned them; recorded only when the answer is (src/controllers/daemon/context-route.ts). */
   relatedServed: ServedRelated[]
   /** What the related search weighed and why, for `kinfold watch --debug`; null when none ran. Built only when called, after the answer. */
   explain: () => Promise<SearchTrace | null>

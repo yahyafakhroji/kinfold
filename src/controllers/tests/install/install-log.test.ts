@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { posixOnly } from '../../test/platform-guards'
-import { createInstallLog, installLogPath } from './install-log'
+import { posixOnly } from '../../../../test/platform-guards'
+import { createInstallLog, installLogPath } from '../../install/install-log'
 
 let dir: string | null = null
 afterEach(() => {

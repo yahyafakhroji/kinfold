@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { type EventKind, validateEvent } from '../contract/event'
-import { KIMI_CODE_EVENTS, normalizeKimiCode } from './kimi-code'
+import { type EventKind, validateEvent } from '../../../system/contract/event'
+import { KIMI_CODE_EVENTS, normalizeKimiCode } from '../../adapters/kimi-code'
 
-const DIR = join(import.meta.dir, '../../test/fixtures/kimi-code')
+const DIR = join(import.meta.dir, '../../../../test/fixtures/kimi-code')
 const fixture = (file: string): Record<string, unknown> => JSON.parse(readFileSync(join(DIR, file), 'utf8'))
 let counter = 0
 const context = { now: () => 1_792_841_878_000, newId: () => `01JB${String(++counter).padStart(22, '0')}` }

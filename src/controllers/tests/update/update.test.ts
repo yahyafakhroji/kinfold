@@ -1,23 +1,23 @@
 import { fakeTerminal } from '../install/prompt/fake-terminal'
-import { runFramed } from '../install/prompt/frame'
+import { runFramed } from '../../install/prompt/frame'
 import { afterEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, fstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { installedProgramPath } from '../install/entry'
-import { installProgram, releaseAssetName } from '../install/self-install'
+import { installedProgramPath } from '../../../resources/install-plan/entry'
+import { installProgram, releaseAssetName } from '../../install/self-install'
 import { type FakeService, type FakeWorld, countingService, createWorld, fakeService } from '../install/test-support'
-import type { ServiceControl } from '../install/service/control'
-import { StubService } from '../install/service/stub-service'
-import { mergeAutoState, readAutoState } from './auto-state'
-import { LATEST_RELEASE_URL, RELEASES_URL } from './check'
-import { readInstallRun } from './install-run'
-import { STAGE_DIR } from './stage'
-import { UPDATE_LOCK_FILE, acquireUpdateLock, updateLockHolder } from './lock'
-import { writeUpdateState } from './state'
-import { QUIET_MS } from './auto'
-import { AUTO_INSTALL_TIMEOUT_MS, AUTO_LOG_KEEP_BYTES, AUTO_LOG_MAX_BYTES, NOT_RUN_BY_SERVICE, QUIET_WAIT_CAP_MS, programUrl, runUpdate , captureProgram } from './update'
-import { posixOnly } from '../../test/platform-guards'
+import type { ServiceControl } from '../../install/service/control'
+import { StubService } from '../../install/service/stub-service'
+import { mergeAutoState, readAutoState } from '../../update/auto-state'
+import { LATEST_RELEASE_URL, RELEASES_URL } from '../../update/check'
+import { readInstallRun } from '../../update/install-run'
+import { STAGE_DIR } from '../../update/stage'
+import { UPDATE_LOCK_FILE, acquireUpdateLock, updateLockHolder } from '../../update/lock'
+import { writeUpdateState } from '../../update/state'
+import { QUIET_MS } from '../../update/auto'
+import { AUTO_INSTALL_TIMEOUT_MS, AUTO_LOG_KEEP_BYTES, AUTO_LOG_MAX_BYTES, NOT_RUN_BY_SERVICE, QUIET_WAIT_CAP_MS, programUrl, runUpdate , captureProgram } from '../../update/update'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const ARCH = 'arm64'
 const ASSET = releaseAssetName('darwin', ARCH)!
@@ -91,7 +91,7 @@ function noRun(): never {
 test('refuses on a checkout install', async () => {
   const { w, fetched } = updateWorld({}, 'checkout')
   expect(await runUpdate(w.env, { dryRun: false }, { version: '0.1.0', runProgram: noRun })).toBe(1)
-  expect(w.out).toEqual(['kinfold update: this is a checkout install; update it with git pull and bun src/cli/kinfold.ts install'])
+  expect(w.out).toEqual(['kinfold update: this is a checkout install; update it with git pull and bun src/controllers/cli/kinfold.ts install'])
   expect(fetched).toEqual([])
 })
 

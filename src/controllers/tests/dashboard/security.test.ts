@@ -1,11 +1,11 @@
 import { afterEach, beforeAll, beforeEach, expect, test } from 'bun:test'
 import { rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { DASHBOARD_SESSIONS_FILE } from './auth'
-import { type TempStore, openTempStore } from '../observer/test-support'
-import { IMMUTABLE_ASSET_CACHE, SECURITY_HEADERS } from './headers'
-import { assetListForTest } from './routes'
-import { ensureAppBuilt, listAssets } from './app-files'
+import { DASHBOARD_SESSIONS_FILE } from '../../dashboard/auth'
+import { type TempStore, openTempStore } from '../../../resources/tests/observer/test-support'
+import { IMMUTABLE_ASSET_CACHE, SECURITY_HEADERS } from '../../dashboard/headers'
+import { assetListForTest } from '../../dashboard/routes'
+import { ensureAppBuilt, listAssets } from '../../dashboard/app-files'
 import { type DashboardRig, startRig, RIG_LEASE } from './test-support'
 
 let temp: TempStore

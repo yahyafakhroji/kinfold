@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { posixOnly } from '../../test/platform-guards'
-import { EXIT_OK, install } from './install'
-import { MCP_SERVER_NAME, claudeMcpEntry, openCodeMcpEntry } from './mcp-config'
-import { claudeAddArgv, claudeMcpInstallActions, mcpPaths, mcpTarget, rollbackSafe } from './mcp-wiring'
-import { type FakeWorld, YES, createWorld } from './test-support'
-import { uninstall } from './uninstall'
+import { posixOnly } from '../../../../test/platform-guards'
+import { EXIT_OK, install } from '../../install/install'
+import { MCP_SERVER_NAME, claudeMcpEntry, openCodeMcpEntry } from '../../../resources/install-plan/mcp-config'
+import { claudeAddArgv, claudeMcpInstallActions, mcpPaths, mcpTarget, rollbackSafe } from '../../../resources/install-plan/mcp-wiring'
+import { type FakeWorld, YES, createWorld } from '../install/test-support'
+import { uninstall } from '../../install/uninstall'
 
 let world: FakeWorld | null = null
 afterEach(async () => {
@@ -175,7 +175,7 @@ test('a rollback replays only KINFOLD_MCP_HOST', async () => {
   })
   const w = world
   const target = mcpTarget(w.env)
-  const previous = { type: 'stdio', command: target.entry.command, args: ['/old/src/mcp/server.ts'], env: { KINFOLD_MCP_HOST: 'claude-code' } }
+  const previous = { type: 'stdio', command: target.entry.command, args: ['/old/src/controllers/mcp/server.ts'], env: { KINFOLD_MCP_HOST: 'claude-code' } }
   writeFileSync(mcpPaths(w.env).claudeUserConfig, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: previous } }))
 
   expect(await install(w.env, YES)).not.toBe(EXIT_OK)
@@ -194,7 +194,7 @@ test('a remove that times out does not claim the entry was kept', async () => {
   })
   const w = world
   const target = mcpTarget(w.env)
-  const previous = { type: 'stdio', command: target.entry.command, args: ['/old/src/mcp/server.ts'], env: { KINFOLD_MCP_HOST: 'claude-code' } }
+  const previous = { type: 'stdio', command: target.entry.command, args: ['/old/src/controllers/mcp/server.ts'], env: { KINFOLD_MCP_HOST: 'claude-code' } }
   writeFileSync(mcpPaths(w.env).claudeUserConfig, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: previous } }))
 
   expect(await install(w.env, YES)).not.toBe(EXIT_OK)

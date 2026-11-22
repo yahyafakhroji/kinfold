@@ -3,12 +3,12 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { seedObservation } from '../context/test-support'
-import { readEnv } from '../env-names'
+import { readEnv } from '../../../system/env-names'
 import { PROJECT, T0, type TempStore, openTempStore, seedSession } from '../observer/test-support'
-import { startActive } from '../store/vector-spaces'
-import { upsertVectors, dropVector } from '../store/vector-store'
-import { upsertProject } from '../store/writes'
-import { createVecIndex, dropVecIndex, dropVecIndexStep, knnCandidates, reconcileWindow, vecIndexExists, WINDOW_SQL, vecNearest, writeVecRows } from './vec-index'
+import { startActive } from '../../store/vector-spaces'
+import { upsertVectors, dropVector } from '../../store/vector-store'
+import { upsertProject } from '../../store/writes'
+import { createVecIndex, dropVecIndex, dropVecIndexStep, knnCandidates, reconcileWindow, vecIndexExists, WINDOW_SQL, vecNearest, writeVecRows } from '../../vectors/vec-index'
 import { reconcileVecIndex } from './vec-index.test-support'
 
 const VEC0 = readEnv(process.env, 'TEST_VEC0')

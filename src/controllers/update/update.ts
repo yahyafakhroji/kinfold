@@ -10,16 +10,16 @@
 
 import { chmodSync, closeSync, constants, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { envName } from '../env-names'
-import { writeFileAtomic } from '../fs/atomic'
-import { type InstallEnv, platformOf } from '../install/env'
+import { envName } from '../../system/env-names'
+import { writeFileAtomic } from '../../system/fs/atomic'
+import { type InstallEnv, platformOf } from '../../resources/install-plan/env'
 import type { CommandBusy } from '../install/prompt/frame'
 import { managedServiceOf, serviceOf } from '../install/service/control'
-import { installedProgramPath } from '../install/entry'
+import { installedProgramPath } from '../../resources/install-plan/entry'
 import { restartService } from '../install/install'
 import { RELEASE_BASE, fetchReleaseSums, fileSha256, parseSha256Sums, releaseAssetName, releaseSumsUrl } from '../install/self-install'
-import { applyAgentHomes, currentChannel, readInstallRecord } from '../install/setup/record'
-import { VERSION } from '../version'
+import { applyAgentHomes, currentChannel, readInstallRecord } from '../../resources/install-plan/setup/record'
+import { VERSION } from '../../system/version'
 import { getQuietForMs } from '../install/daemon-client'
 import { HIDDEN_WINDOW } from '../install/system'
 import { QUIET_MS } from './auto'
@@ -34,7 +34,7 @@ import { readUpdateState } from './state'
 
 export { MAX_PROGRAM_BYTES }
 import { compareVersions, isPatchUpdate, parseVersion } from './version-order'
-import { errorCode, errorName } from '../errors'
+import { errorCode, errorName } from '../../system/errors'
 
 export const DOWNLOAD_TIMEOUT_MS = 300_000
 
@@ -54,7 +54,7 @@ export function programUrl(version: string, assetName: string): string {
 export interface UpdateDeps {
   /** Runs the downloaded program and resolves with its exit code; default spawns it with this terminal's output and no stdin. */
   runProgram?: (path: string, argv: readonly string[], env: Readonly<Record<string, string>>) => Promise<number>
-  /** The running version; default src/version.ts. */
+  /** The running version; default src/system/version.ts. */
   version?: string
   /** Default MAX_PROGRAM_BYTES; a test lowers it rather than stream 300 MB. */
   maxProgramBytes?: number
@@ -648,7 +648,7 @@ async function runStaged(env: InstallEnv, deps: UpdateDeps, onInterrupt: () => v
 
 export async function runUpdate(env: InstallEnv, options: { dryRun: boolean; auto?: boolean; staged?: string }, deps: UpdateDeps = {}): Promise<number> {
   if (env.mode.kind === 'checkout') {
-    env.out(`${PREFIX} this is a checkout install; update it with git pull and bun src/cli/kinfold.ts install`)
+    env.out(`${PREFIX} this is a checkout install; update it with git pull and bun src/controllers/cli/kinfold.ts install`)
     return EXIT_FAILED
   }
   if (isDevVersion(deps.version ?? VERSION)) {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { errorCode, errorMessage, errorName } from './errors'
+import { errorCode, errorMessage, errorName } from '../errors'
 
 describe('error readers', () => {
   test('errorMessage reads an Error and turns anything else into text', () => {

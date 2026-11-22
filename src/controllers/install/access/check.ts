@@ -2,7 +2,7 @@
 // macOS and Linux, the access list on Windows. install applies the fixes a check
 // plans; status prints its lines.
 
-import { type InstallEnv, platformOf } from '../env'
+import { type InstallEnv, platformOf } from '../../../resources/install-plan/env'
 import type { ModeChange } from '../permissions'
 import { posixModeAccess } from './posix-modes'
 import { windowsAclAccess } from './windows-acl'

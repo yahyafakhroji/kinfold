@@ -17,7 +17,7 @@ import {
 } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { RedactedEvent } from '../capture/prepare'
-import { type NormalizedEvent, validateEvent } from '../contract/event'
+import { type NormalizedEvent, validateEvent } from '../../system/contract/event'
 
 export const DIR_MODE = 0o700
 export const FILE_MODE = 0o600

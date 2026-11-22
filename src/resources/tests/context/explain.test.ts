@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { type TempStore, openTempStore } from '../observer/test-support'
-import { type ExplainInputs, explainRelated } from './explain'
-import { type RelatedCandidate, isRelated, refusalRule } from './related'
-import type { PackObservation } from './types'
+import { type ExplainInputs, explainRelated } from '../../context/explain'
+import { type RelatedCandidate, isRelated, refusalRule } from '../../context/related'
+import type { PackObservation } from '../../context/types'
 
 let temp: TempStore
 beforeEach(() => {

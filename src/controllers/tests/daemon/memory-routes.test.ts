@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { contradict, seedObservation } from '../context/test-support'
-import { type Fixture, MARKERS, seedFixture } from '../data-control/test-support'
+import { contradict, seedObservation } from '../../../resources/tests/context/test-support'
+import { type Fixture, MARKERS, seedFixture } from '../../../resources/tests/data-control/test-support'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
-import { parseSearchQuery } from '../mcp/fts'
-import { T0, seedEvent } from '../observer/test-support'
-import { insertLinks, settleContradictions } from '../store/observation-links'
-import { PAGE_SIZE, parseBrowseQuery } from './memory-routes'
+import { parseSearchQuery } from '../../mcp/fts'
+import { T0, seedEvent } from '../../../resources/tests/observer/test-support'
+import { insertLinks, settleContradictions } from '../../../resources/store/observation-links'
+import { PAGE_SIZE, parseBrowseQuery } from '../../daemon/memory-routes'
 
 type Facet = { value: string; label: string; observations: number }
 

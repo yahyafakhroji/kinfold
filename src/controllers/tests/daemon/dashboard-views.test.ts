@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import type { Database } from '../sqlite/types'
-import type { StoreReader } from '../workers/store-reader'
-import { dashboardViews } from './dashboard-views'
+import type { Database } from '../../../resources/sqlite/types'
+import type { StoreReader } from '../../../resources/workers/store-reader'
+import { dashboardViews } from '../../daemon/dashboard-views'
 
 /** A reports reader that counts what it computes and answers at once. */
 function countingReader() {

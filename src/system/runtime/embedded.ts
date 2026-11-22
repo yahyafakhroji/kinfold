@@ -1,7 +1,7 @@
 // The files a release build carries inside the `kinfold` program: sqlite3mc,
 // sqlite-vec, the dashboard pages and the OpenCode and Kilo Code plugins. A checkout run has
 // none of them (the committed stub names no files, so this returns null) and
-// keeps using the local build, the pinned download and src/dashboard/app/dist.
+// keeps using the local build, the pinned download and src/ui/dashboard/dist.
 //
 // The byte accessors are lazy: reading an asset touches the embedded file only
 // when an install writes it. The recorded sha256 came from the release build,
@@ -16,7 +16,7 @@ export interface EmbeddedAssets {
   /** Every dashboard file the build carries: its two pages and its hashed assets. */
   dashboardNames: () => string[]
   opencodePlugin: () => Promise<string>
-  /** Kilo Code's plugin, which is a file of its own (src/plugins/kilo.ts). */
+  /** Kilo Code's plugin, which is a file of its own (src/plugins/plugins/kilo.ts). */
   kiloPlugin: () => Promise<string>
 }
 

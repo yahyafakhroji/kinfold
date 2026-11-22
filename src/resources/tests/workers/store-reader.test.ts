@@ -4,13 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { seedObservation } from '../context/test-support'
 import { PROJECT, T0, seedSession } from '../observer/test-support'
-import { newDbKey } from '../sqlite/keys'
+import { newDbKey } from '../../sqlite/keys'
 import { testLibraryPath } from '../sqlite/test-support'
-import { openStore } from '../store/db'
-import { observationFacets } from '../store/memory-reads'
-import { ReadExpiredError, type StoreReader, inlineStoreReader, readerOrInline, startStoreReader } from './store-reader'
+import { openStore } from '../../store/db'
+import { observationFacets } from '../../store/memory-reads'
+import { ReadExpiredError, type StoreReader, inlineStoreReader, readerOrInline, startStoreReader } from '../../workers/store-reader'
 
-const FAKE = new URL('../../test/fake-store-reader.ts', import.meta.url).href
+const FAKE = new URL('../../../../test/fake-store-reader.ts', import.meta.url).href
 
 let opened: StoreReader[] = []
 const roots: string[] = []

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { stripVTControlCharacters } from 'node:util'
-import { createBar } from './bar'
+import { createBar } from '../../../install/prompt/bar'
 
 /** What the screen holds after every write: a carriage return starts the line over, a newline keeps it. */
 function screen(writes: readonly string[]): string[] {

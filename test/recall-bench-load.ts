@@ -1,4 +1,4 @@
-// The load beside src/daemon/recall.bench.test.ts, in a process of its own as
+// The load beside src/controllers/tests/daemon/recall.bench.test.ts, in a process of its own as
 // in real use: hooks and the dashboard are separate processes from the daemon,
 // and run in the test's own process their file writes and requests took the
 // daemon's thread. Args: data dir, port, token, the project folder. Runs until
@@ -10,10 +10,10 @@
 //   read every 500 ms is far busier than a person clicking through.
 
 import { join } from 'node:path'
-import { captureEvent } from '../src/capture/capture'
-import { type NormalizedEvent, SCHEMA_VERSION } from '../src/contract/event'
-import { ulid } from '../src/contract/ulid'
-import { SPOOL_DIR } from '../src/store/data-dir'
+import { captureEvent } from '../src/resources/capture/capture'
+import { type NormalizedEvent, SCHEMA_VERSION } from '../src/system/contract/event'
+import { ulid } from '../src/system/contract/ulid'
+import { SPOOL_DIR } from '../src/resources/store/data-dir'
 import { benchWords } from './recall-bench-words'
 
 const [dataDir, port, token, cwd] = process.argv.slice(2)

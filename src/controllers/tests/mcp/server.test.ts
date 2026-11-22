@@ -3,11 +3,11 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
-import { openStore } from '../store/db'
+import { SQLITE3MC_LIB_ENV } from '../../../resources/sqlite/library'
+import { openStore } from '../../../resources/store/db'
 import { PAYLOAD_MARKER, T0, seedMcpObservation, seedMcpSession, seedPayloadEvent } from './test-support'
 
-const SERVER = join(import.meta.dir, 'server.ts')
+const SERVER = join(import.meta.dir, '../../mcp/server.ts')
 
 let root: string
 let cwd: string

@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { hostFromArgs } from '../cli/hook'
-import { KNOWN_HOSTS } from '../contract/event'
-import { HOOK_SPECS, hookSpecFor } from './hook-specs'
+import { hostFromArgs } from '../../cli/hook'
+import { KNOWN_HOSTS } from '../../../system/contract/event'
+import { HOOK_SPECS, hookSpecFor } from '../../../plugins/agents/hook-specs'
 
 
 describe('HOOK_SPECS', () => {
@@ -85,11 +85,12 @@ const underDir = (file: string, dir: string): boolean => {
 }
 
 describe('the hook import boundary', () => {
-  test('src/cli/hook.ts reaches nothing under src/install', () => {
-    const entry = resolve(import.meta.dir, '../cli/hook.ts')
+  test('src/controllers/cli/hook.ts reaches nothing in the installer', () => {
+    const entry = resolve(import.meta.dir, '../../cli/hook.ts')
     const reached = reachableFiles(entry)
     expect(reached.size).toBeGreaterThan(5)
-    expect([...reached].filter((file) => underDir(file, resolve(import.meta.dir, '../install')))).toEqual([])
+    const installer = [resolve(import.meta.dir, '../../install'), resolve(import.meta.dir, '../../../resources/install-plan')]
+    expect([...reached].filter((file) => installer.some((dir) => underDir(file, dir)))).toEqual([])
   })
 
   test('the walker catches an install import two hops down, in every import form', () => {

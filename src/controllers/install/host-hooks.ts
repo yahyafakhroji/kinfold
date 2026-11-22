@@ -27,8 +27,8 @@ import {
   mergeJsonHooks,
   removeJsonHooks,
   shellCommand,
-} from '../agents/families/json-hooks'
-import type { EntryCommand } from './entry'
+} from '../../plugins/agents/families/json-hooks'
+import type { EntryCommand } from '../../resources/install-plan/entry'
 
 export type CommandHookHost = 'codex' | 'cursor'
 

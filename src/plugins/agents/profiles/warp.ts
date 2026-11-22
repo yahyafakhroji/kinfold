@@ -21,8 +21,8 @@
 // MCP file; the manual step gives the Settings route and the same entry.
 
 import { join } from 'node:path'
-import type { InstallEnv } from '../../install/env'
-import { claudeMcpState } from '../../install/mcp-wiring'
+import type { InstallEnv } from '../../../resources/install-plan/env'
+import { claudeMcpState } from '../../../resources/install-plan/mcp-wiring'
 import { type JsonAgentFile, jsonAgentFileInstallActions, jsonAgentFileUninstallActions, mcpEntryText, mcpServersFile } from '../families/json-agent'
 import { mcpEntryState } from '../families/mcp-entry'
 import { type AgentProfile, type Capabilities, NO_TOOLS_OFF, SHORT_NO_HOOKS } from '../profile'

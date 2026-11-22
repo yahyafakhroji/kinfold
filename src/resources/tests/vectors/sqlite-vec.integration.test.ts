@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readEnv } from '../env-names'
+import { readEnv } from '../../../system/env-names'
 
 const VEC0 = readEnv(process.env, 'TEST_VEC0')
 const ready = VEC0 !== undefined && VEC0 !== ''
@@ -28,7 +28,7 @@ interface ProbeOut {
 
 test.skipIf(!ready)('sqlite-vec loads and ranks by cosine distance, within the project and the current model only', () => {
   // Explicit env: Bun.spawnSync hands a child the environment the process started with, not test/preload.ts's KINFOLD_SQLITE3MC_LIB.
-  const run = Bun.spawnSync([process.execPath, join(import.meta.dir, '../../test/vec0-probe.ts'), dataDir, VEC0!], { stderr: 'pipe', env: { ...process.env } })
+  const run = Bun.spawnSync([process.execPath, join(import.meta.dir, '../../../../test/vec0-probe.ts'), dataDir, VEC0!], { stderr: 'pipe', env: { ...process.env } })
   expect(run.exitCode).toBe(0)
   const out = JSON.parse(run.stdout.toString()) as ProbeOut
   expect(out.support).toMatchObject({ ok: true, detail: 'sqlite-vec v0.1.9' })

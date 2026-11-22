@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import type { KeyStoreDeps } from '../key-store'
-import { runKeyStoreContract } from './contract'
+import type { KeyStoreDeps } from '../../../secrets/key-store'
+import { runKeyStoreContract } from '../../../secrets/stores/contract'
 import {
   type BindingLoader,
   type SecretCollectionState,
@@ -13,7 +13,7 @@ import {
   createLibsecretStore,
   libsecretModule,
   probeLibsecret,
-} from './libsecret'
+} from '../../../secrets/stores/libsecret'
 
 const VALUE = 'libsecret-value-0123456789abcdef'
 const BUS = { DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus' }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { T0, type TempStore, openTempStore } from '../observer/test-support'
-import { activeSpace, buildingSpace, promoteBuilding, setVecReady, spaceOf, startBuilding, startActive } from './vector-spaces'
+import { activeSpace, buildingSpace, promoteBuilding, setVecReady, spaceOf, startBuilding, startActive } from '../../store/vector-spaces'
 
 let temp: TempStore
 beforeEach(() => {

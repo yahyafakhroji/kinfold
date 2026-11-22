@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { CHECK_PROMPT } from './check-prompt'
-import { BEGIN_EVENTS, DEFAULT_PROMPT_LIMITS, END_EVENTS, OBSERVER_SYSTEM_PROMPT, renderEvent } from './prompt'
-import { PLANTED_FILE, runPlantedCheck } from './planted-check'
-import type { CliObserverRunner, PlantedFile } from './runners/cli-core'
-import { ObserverError, type ObserverPrompt, type RunnerResult } from './types'
+import { CHECK_PROMPT } from '../../observer/check-prompt'
+import { BEGIN_EVENTS, DEFAULT_PROMPT_LIMITS, END_EVENTS, OBSERVER_SYSTEM_PROMPT, renderEvent } from '../../observer/prompt'
+import { PLANTED_FILE, runPlantedCheck } from '../../observer/planted-check'
+import type { CliObserverRunner, PlantedFile } from '../../observer/runners/cli-core'
+import { ObserverError, type ObserverPrompt, type RunnerResult } from '../../observer/types'
 
 const MARKER = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
 const ok = (text: string): RunnerResult => ({ text, model: 'm' })

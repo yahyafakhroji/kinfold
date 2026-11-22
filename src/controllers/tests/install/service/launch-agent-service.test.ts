@@ -1,14 +1,14 @@
 import { afterEach, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { DEFAULT_PORT } from '../../daemon/daemon'
-import { envName } from '../../env-names'
-import { DB_KEY_REF } from '../../secrets/credentials'
-import { installPaths } from '../env'
-import { bootoutArgv, bootstrapArgv, LAUNCHCTL, plistContent } from '../launch-agent'
-import { BOOTSTRAP_ATTEMPTS } from '../plan'
+import { DEFAULT_PORT } from '../../../daemon/daemon'
+import { envName } from '../../../../system/env-names'
+import { DB_KEY_REF } from '../../../../resources/secrets/credentials'
+import { installPaths } from '../../../../resources/install-plan/env'
+import { bootoutArgv, bootstrapArgv, LAUNCHCTL, plistContent } from '../../../install/launch-agent'
+import { BOOTSTRAP_ATTEMPTS } from '../../../../resources/install-plan/plan'
 import { type FakeWorld, UID, createWorld } from '../test-support'
-import { LaunchAgentService, LSOF, PS } from './launch-agent-service'
+import { LaunchAgentService, LSOF, PS } from '../../../install/service/launch-agent-service'
 
 let world: FakeWorld | null = null
 afterEach(async () => {

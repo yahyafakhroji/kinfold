@@ -1,15 +1,15 @@
 import { afterEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { HMAC_LEGACY_REF, HMAC_MASTER_REF, epochAt, isHexKey, markerSubKey } from '../secrets/hmac-keys'
-import { readSubKey, subKeyDir } from '../store/hmac-key'
-import { EXIT_FAILED, EXIT_OK, install } from './install'
-import { existingBackups } from './files'
-import { LAUNCHCTL } from './launch-agent'
-import { status } from './status'
-import { uninstall } from './uninstall'
+import { HMAC_LEGACY_REF, HMAC_MASTER_REF, epochAt, isHexKey, markerSubKey } from '../../../resources/secrets/hmac-keys'
+import { readSubKey, subKeyDir } from '../../../resources/store/hmac-key'
+import { EXIT_FAILED, EXIT_OK, install } from '../../install/install'
+import { existingBackups } from '../../../resources/install-plan/files'
+import { LAUNCHCTL } from '../../install/launch-agent'
+import { status } from '../../install/status'
+import { uninstall } from '../../install/uninstall'
 import { type FakeWorld, YES, createWorld, snapshotTree, worldSubKeyEpochs } from './test-support'
-import { posixOnly } from '../../test/platform-guards'
+import { posixOnly } from '../../../../test/platform-guards'
 
 const LEGACY = '4e'.repeat(32)
 let world: FakeWorld | null = null

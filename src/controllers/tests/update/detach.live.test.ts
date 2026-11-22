@@ -16,14 +16,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { LAUNCH_AGENT_LABEL } from '../install/env'
-import type { InstallMode } from '../install/entry'
-import { encodeText } from '../install/files'
-import { LAUNCHCTL, guiDomain, plistContent } from '../install/launch-agent'
-import { taskXml } from '../install/service/scheduled-task-service'
-import { SYSTEMCTL_CANDIDATES, unitContent } from '../install/service/systemd-service'
-import { windowsSystemTool } from '../install/windows-system-path'
-import { type OsName, currentPlatform } from '../platform/platform'
+import { LAUNCH_AGENT_LABEL } from '../../../resources/install-plan/env'
+import type { InstallMode } from '../../../resources/install-plan/entry'
+import { encodeText } from '../../../resources/install-plan/files'
+import { LAUNCHCTL, guiDomain, plistContent } from '../../install/launch-agent'
+import { taskXml } from '../../install/service/scheduled-task-service'
+import { SYSTEMCTL_CANDIDATES, unitContent } from '../../install/service/systemd-service'
+import { windowsSystemTool } from '../../install/windows-system-path'
+import { type OsName, currentPlatform } from '../../../system/platform/platform'
 
 const OS = currentPlatform().os
 const LIVE = process.env.KINFOLD_TEST_DETACH === '1'
@@ -46,7 +46,7 @@ const STAND_IN = [
   "import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'",
   "import { join } from 'node:path'",
   `import { detachPlan, spawnDetached } from ${JSON.stringify(moduleUrl('detach.ts'))}`,
-  `import { currentPlatform } from ${JSON.stringify(moduleUrl('../platform/platform.ts'))}`,
+  `import { currentPlatform } from ${JSON.stringify(moduleUrl('../../../system/platform/platform.ts'))}`,
   "const flag = process.argv.indexOf('--data-dir')",
   "const dataDir = (flag >= 0 ? process.argv[flag + 1] : process.env.KINFOLD_DATA_DIR) ?? ''",
   'mkdirSync(dataDir, { recursive: true })',
@@ -177,7 +177,7 @@ function scheduledTaskProbe(root: string, mode: InstallMode, dataDir: string): P
       if (mode.kind !== 'checkout') throw new Error('the probe runs a script under bun')
       const name = process.env.USERNAME ?? ''
       const domain = process.env.USERDOMAIN ?? ''
-      const xml = taskXml({ user: domain === '' ? name : `${domain}\\${name}`, program: mode.bunPath, script: join(mode.projectRoot, 'src', 'cli', 'kinfold.ts'), dataDir, port: PORT, logFile: join(dataDir, 'logs', 'daemon.log') })
+      const xml = taskXml({ user: domain === '' ? name : `${domain}\\${name}`, program: mode.bunPath, script: join(mode.projectRoot, 'src', 'controllers', 'cli', 'kinfold.ts'), dataDir, port: PORT, logFile: join(dataDir, 'logs', 'daemon.log') })
       writeFileSync(xmlPath, encodeText(xml, 'utf16le'))
       expect(run([schtasks, '/Create', '/TN', PROBE_TASK, '/XML', xmlPath, '/F'])).toBe(0)
       expect(run([schtasks, '/Run', '/TN', PROBE_TASK])).toBe(0)
@@ -209,8 +209,8 @@ describe.skipIf(!LIVE)('detached updater (live)', () => {
     const file = (name: string): string => join(dataDir, name)
     const pids: number[] = []
     try {
-      // The plist and the unit run src/daemon/main.ts; the task runs src/cli/kinfold.ts.
-      for (const script of [join('src', 'daemon', 'main.ts'), join('src', 'cli', 'kinfold.ts')]) {
+      // The plist and the unit run src/controllers/daemon/main.ts; the task runs src/controllers/cli/kinfold.ts.
+      for (const script of [join('src', 'controllers', 'daemon', 'main.ts'), join('src', 'controllers', 'cli', 'kinfold.ts')]) {
         mkdirSync(join(projectRoot, script, '..'), { recursive: true })
         writeFileSync(join(projectRoot, script), STAND_IN)
       }

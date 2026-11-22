@@ -1,12 +1,12 @@
 // OpenCode: a plugin file under ~/.config/opencode/plugins (the V2 plugin
 // contract, so 2.0 or later) and an MCP entry in opencode.json. Built from
-// recorded payloads in test/fixtures/opencode/ (src/adapters/opencode.ts).
+// recorded payloads in test/fixtures/opencode/ (src/plugins/adapters/opencode.ts).
 // The plugin captures every event itself, and takes no context back.
 
-import { detectOpenCode } from '../../install/detectors'
-import { opencodeInstallActions, opencodeUninstallActions, opencodeWiringLine, opencodeWiringState } from '../../install/host-wiring'
-import { opencodeMcpInstallActions, opencodeMcpUninstallActions } from '../../install/mcp-wiring'
-import { legacyShimRemoval } from '../../install/rename-migration'
+import { detectOpenCode } from '../../../resources/install-plan/detectors'
+import { opencodeInstallActions, opencodeUninstallActions, opencodeWiringLine, opencodeWiringState } from '../../../resources/install-plan/host-wiring'
+import { opencodeMcpInstallActions, opencodeMcpUninstallActions } from '../../../resources/install-plan/mcp-wiring'
+import { legacyShimRemoval } from '../../../resources/install-plan/rename-migration'
 import { opencodeTuiInstallActions, opencodeTuiUninstallActions } from '../families/opencode-tui'
 import type { AgentProfile, Capabilities } from '../profile'
 

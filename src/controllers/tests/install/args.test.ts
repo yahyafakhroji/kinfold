@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { USAGE, parseArgs } from './args'
+import { USAGE, parseArgs } from '../../install/args'
 
 const INSTALL = ['install', '--hosts', 'opencode', '--observer', 'opencode=claude-cli:haiku', '--no-encrypt', '--port', '40000', '--no-update-check', '--yes']
 

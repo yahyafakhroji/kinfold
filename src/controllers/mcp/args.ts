@@ -4,7 +4,7 @@
 // asking for 50 results still wants an answer; ids over the cap are refused,
 // because silently dropping some would read as "not found".
 
-import { isRecord } from '../contract/event'
+import { isRecord } from '../../system/contract/event'
 
 export const SEARCH_LIMIT_MAX = 20
 export const SEARCH_LIMIT_DEFAULT = 10

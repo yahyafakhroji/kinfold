@@ -2,10 +2,10 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { recordInjection } from './context-store'
-import { type Store, openStore } from './db'
-import { devicesSeen, memoriesPage, projectsPage, sessionHeader, sessionsPage } from './list-reads'
-import { insertPrompt, upsertProject, upsertSession } from './writes'
+import { recordInjection } from '../../store/context-store'
+import { type Store, openStore } from '../../store/db'
+import { devicesSeen, memoriesPage, projectsPage, sessionHeader, sessionsPage } from '../../store/list-reads'
+import { insertPrompt, upsertProject, upsertSession } from '../../store/writes'
 
 let root: string
 let store: Store

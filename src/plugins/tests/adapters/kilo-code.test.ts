@@ -4,10 +4,10 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { type NormalizedEvent, validateEvent } from '../contract/event'
-import { type KiloMapper, KILO_HOST, createKiloMapper } from './kilo-code'
+import { type NormalizedEvent, validateEvent } from '../../../system/contract/event'
+import { type KiloMapper, KILO_HOST, createKiloMapper } from '../../adapters/kilo-code'
 
-const FIXTURES = join(import.meta.dir, '../../test/fixtures/kilo-code')
+const FIXTURES = join(import.meta.dir, '../../../../test/fixtures/kilo-code')
 const fixture = <T = Record<string, any>>(name: string): T => JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8')) as T
 
 const DIRECTORY = '/Users/me/project'

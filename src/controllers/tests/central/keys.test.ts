@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { type SignedRequest, bodyHash, newKeyPair, signReply, signRequest, verifyReply, verifyRequest } from './keys'
-import { SKEW_MS, createNonceCache } from './auth'
+import { type SignedRequest, bodyHash, newKeyPair, signReply, signRequest, verifyReply, verifyRequest } from '../../central/keys'
+import { SKEW_MS, createNonceCache } from '../../central/auth'
 
 const device = newKeyPair()
 const hub = newKeyPair()

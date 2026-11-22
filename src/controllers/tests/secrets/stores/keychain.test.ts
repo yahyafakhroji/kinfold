@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
 import { type FakeKeychain, fakeSecurity } from '../../install/test-support'
-import { DB_KEY_REF } from '../credentials'
-import { dbKeyStoreOf } from '../../sqlite/keys'
-import { KEY_STORE_MODULES, candidateKeyStores } from './select'
+import { DB_KEY_REF } from '../../../../resources/secrets/credentials'
+import { dbKeyStoreOf } from '../../../../resources/sqlite/keys'
+import { KEY_STORE_MODULES, candidateKeyStores } from '../../../../resources/secrets/stores/select'
 import {
   ITEM_NOT_FOUND_EXIT,
   type SecurityCommand,
@@ -13,8 +13,8 @@ import {
   keychainArgs,
   keychainModule,
   legacyKeychainOf,
-} from './keychain'
-import { runKeyStoreContract } from './contract'
+} from '../../../../resources/secrets/stores/keychain'
+import { runKeyStoreContract } from '../../../../resources/secrets/stores/contract'
 
 /** A read-only view over a `security` command that takes argv only, as the daemon's reads do. */
 function reader(run: SecurityCommand) {

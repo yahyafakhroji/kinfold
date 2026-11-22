@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { type StallWatch, createStallWatch } from './stall-watch'
+import { type StallWatch, createStallWatch } from '../../daemon/stall-watch'
 
 let watch: StallWatch | null = null
 afterEach(() => watch?.stop())

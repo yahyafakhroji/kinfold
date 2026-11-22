@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { TRACE_MAX_EVENTS, WATCHING_MS, type TraceInput, createTraceBuffer } from './trace'
+import { TRACE_MAX_EVENTS, WATCHING_MS, type TraceInput, createTraceBuffer } from '../../debug/trace'
 
 const start = (n: number, fields: Partial<TraceInput> = {}): TraceInput =>
   ({ kind: 'start', at: n, host: 'claude-code', project: 'kinfold', projectKey: 'key-kinfold', hostSessionId: `s${n}`, rows: [], tokens: n, ...fields }) as TraceInput

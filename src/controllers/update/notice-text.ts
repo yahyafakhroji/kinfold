@@ -1,8 +1,8 @@
 // The notice wording alone, with no file or installer imports: the hook and
 // the OpenCode plugin load it, and neither may pull in the installer.
 
-import type { UpdateNotice } from '../context/types'
-import type { InstallChannel } from '../install/setup/record'
+import type { UpdateNotice } from '../../resources/context/types'
+import type { InstallChannel } from '../../resources/install-plan/setup/record'
 
 /** What the user types: the launcher's own command for npx and bunx, from npm's next tag for a beta; `kinfold update` for every other channel. */
 export function updateCommand(channel: InstallChannel, prerelease: boolean = false): string {
