@@ -120,7 +120,10 @@ jobs:
           {
             echo "Merging this releases Kinfold $NEXT: the version workflow tags v$NEXT and release.yml builds, smoke-tests and publishes it."
             echo
-            bun tools/changesets.ts notes "$NEXT"
+            # One line per changeset; the full notes are the CHANGELOG entry and become the release notes.
+            bun tools/changesets.ts digest "$NEXT"
+            echo
+            echo "Full notes: [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/$head/CHANGELOG.md#$(echo "$NEXT" | tr -d .))"
           } > "$RUNNER_TEMP/version-pr.md"
           git add -A
           git commit -m "chore: version $NEXT"

@@ -5,6 +5,8 @@
 //     for the version workflow (GITHUB_OUTPUT lines).
 //   bun tools/changesets.ts notes <version>    prints that version's CHANGELOG.md
 //     section, or a line saying there is none.
+//   bun tools/changesets.ts digest <version>   prints one line per entry of that
+//     section (its commit and first sentence), for the Version PR's body.
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
@@ -116,6 +118,30 @@ export function changelogSection(changelog: string, version: string): string | n
   return body === '' ? null : body
 }
 
+/** An entry's first sentence: up to the first `.`, `!` or `?` followed by a space or the end. */
+function firstSentence(text: string): string {
+  return /^(.+?[.!?])(?=\s|$)/.exec(text)?.[1] ?? text
+}
+
+/**
+ * A short form of a CHANGELOG section: each `### ... Changes` heading kept,
+ * and each entry cut to its commit and first sentence. The full section stays
+ * the CHANGELOG entry and the release notes; the Version PR only needs to say
+ * what is in the release.
+ */
+export function changelogDigest(section: string): string {
+  const out: string[] = []
+  for (const line of section.split(/\r?\n/)) {
+    if (line.startsWith('### ')) {
+      if (out.length > 0) out.push('')
+      out.push(line, '')
+    } else if (line.startsWith('- ')) {
+      out.push(`- ${firstSentence(line.slice(2).trim())}`)
+    }
+  }
+  return out.join('\n').trim()
+}
+
 function git(args: string[]): string {
   const result = spawnSync('git', args, { encoding: 'utf8' })
   if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.trim()}`)
@@ -162,7 +188,13 @@ function main(argv: string[]): number {
     console.log(changelogSection(existsSync(path) ? readFileSync(path, 'utf8') : '', arg) ?? NO_CHANGELOG)
     return 0
   }
-  console.error('usage: bun tools/changesets.ts check <base-ref> | plan | notes <version>')
+  if (command === 'digest') {
+    const path = join(root, 'CHANGELOG.md')
+    const section = changelogSection(existsSync(path) ? readFileSync(path, 'utf8') : '', arg)
+    console.log(section === null ? NO_CHANGELOG : changelogDigest(section))
+    return 0
+  }
+  console.error('usage: bun tools/changesets.ts check <base-ref> | plan | notes <version> | digest <version>')
   return 2
 }
 
