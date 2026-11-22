@@ -8,7 +8,7 @@ describe('isCompiledProgram', () => {
   })
 
   test('recognises both spellings of the Windows virtual path', () => {
-    expect(isCompiledProgram('B:\\~BUN\\root\\src\\cli\\kinfold.ts')).toBe(true)
+    expect(isCompiledProgram('B:\\~BUN\\root\\src\\controllers\\cli\\kinfold.ts')).toBe(true)
     // Bun 1.4 on Windows reports Bun.main with forward slashes.
     expect(isCompiledProgram('B:/~BUN/root/kinfold.exe')).toBe(true)
   })
@@ -16,7 +16,7 @@ describe('isCompiledProgram', () => {
   test('a checkout run is not compiled on any OS', () => {
     expect(isCompiledProgram('/Users/me/kinfold/src/controllers/cli/kinfold.ts')).toBe(false)
     expect(isCompiledProgram('/home/me/kinfold/src/controllers/cli/kinfold.ts')).toBe(false)
-    expect(isCompiledProgram('C:\\Users\\me\\kinfold\\src\\cli\\kinfold.ts')).toBe(false)
+    expect(isCompiledProgram('C:\\Users\\me\\kinfold\\src\\controllers\\cli\\kinfold.ts')).toBe(false)
     expect(isCompiledProgram('B:/kinfold/src/controllers/cli/kinfold.ts')).toBe(false)
   })
 })

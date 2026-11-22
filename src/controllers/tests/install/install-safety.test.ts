@@ -107,7 +107,7 @@ test('project-level Kinfold wiring in the current directory is reported and left
   const local = JSON.stringify({ hooks: { Stop: [samHookGroup('Stop', { entry: { command: BUN, args: ['/x/src/controllers/cli/hook.ts'] } })] } })
   writeFileSync(join(w.cwd, '.claude', 'settings.local.json'), local)
   mkdirSync(join(w.cwd, '.opencode', 'plugins'), { recursive: true })
-  writeFileSync(join(w.cwd, '.opencode', 'plugins', 'shared-agent-memory.js'), 'export { default } from "../../../plugins/plugins/opencode.ts";\n')
+  writeFileSync(join(w.cwd, '.opencode', 'plugins', 'shared-agent-memory.js'), 'export { default } from "../../src/plugins/plugins/opencode.ts";\n')
   const before = snapshotTree(w.cwd)
   expect(await install(w.env, YES)).toBe(EXIT_OK)
   const out = w.out.join('\n')

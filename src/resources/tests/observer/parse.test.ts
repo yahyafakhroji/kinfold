@@ -9,7 +9,7 @@ function observation(overrides: Record<string, unknown> = {}): Record<string, un
     title: 'Spool drains in host-time order',
     narrative: 'Entries sort by occurredAt.',
     facts: ['drain order follows host time'],
-    files: ['src/resources/spool/spool.ts'],
+    files: ['src/spool/spool.ts'],
     evidence: { strength: 'tool-verified', sourceEventIds: ['01JA'] },
     ...overrides,
   }

@@ -51,7 +51,7 @@ describe('normalizeCodex on documented payloads', () => {
   })
 
   test('a Bash call takes its exit code from the model-facing text', () => {
-    expect(normalize('post-tool-use.bash').tool).toMatchObject({ name: 'Bash', exitCode: 0, input: { command: 'bun test src/resources/store' } })
+    expect(normalize('post-tool-use.bash').tool).toMatchObject({ name: 'Bash', exitCode: 0, input: { command: 'bun test src/store' } })
     expect(normalize('post-tool-use.bash').tool?.isError).toBeUndefined()
     expect(normalize('post-tool-use.bash-failed').tool).toMatchObject({ exitCode: 1, isError: true })
   })

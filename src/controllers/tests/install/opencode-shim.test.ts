@@ -80,7 +80,7 @@ test('a data folder with quotes and spaces stays one string in the shim', () => 
 })
 
 // A Windows checkout's plugin entry, as installPaths gives it there; every OS runs this, so the Windows branch is covered off Windows too.
-const WIN_ENTRY = 'C:\\Users\\u\\kinfold\\src\\plugins\\opencode.ts'
+const WIN_ENTRY = 'C:\\Users\\u\\kinfold\\src\\plugins\\plugins\\opencode.ts'
 const WIN_DATA = 'C:\\Users\\u\\.kinfold'
 
 test('a shim whose plugin path uses backslashes is read as a shim: current, stale by folder, stale by checkout', () => {
@@ -89,10 +89,10 @@ test('a shim whose plugin path uses backslashes is read as a shim: current, stal
   expect(isOwnShim(current)).toBe(true)
   expect(inspectShim(current, { pluginEntry: WIN_ENTRY, dataDir: WIN_DATA })).toBe('yes')
   expect(inspectShim(current, { pluginEntry: WIN_ENTRY, dataDir: 'D:\\other' })).toBe('stale')
-  expect(inspectShim(shimContent('C:\\old\\src\\plugins\\opencode.ts', WIN_DATA), { pluginEntry: WIN_ENTRY, dataDir: WIN_DATA })).toBe('stale')
+  expect(inspectShim(shimContent('C:\\old\\src\\plugins\\plugins\\opencode.ts', WIN_DATA), { pluginEntry: WIN_ENTRY, dataDir: WIN_DATA })).toBe('stale')
   // The pre-data-folder re-export, with the backslashes a JS string literal carries.
   const reexport = `// kinfold: written by \`kinfold install\`, removed by \`kinfold uninstall\`.\nexport { default } from ${JSON.stringify(WIN_ENTRY)};\n`
   expect(inspectShim(reexport, { pluginEntry: WIN_ENTRY, dataDir: WIN_DATA })).toBe('stale')
   // A path that only resembles the plugin's is still not a shim.
-  expect(shimTarget(`const plugin = await import(${JSON.stringify('C:\\x\\src\\plugins\\other.ts')});`)).toBeNull()
+  expect(shimTarget(`const plugin = await import(${JSON.stringify('C:\\x\\src\\plugins\\plugins\\other.ts')});`)).toBeNull()
 })

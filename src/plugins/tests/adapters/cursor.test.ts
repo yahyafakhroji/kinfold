@@ -53,7 +53,7 @@ describe('normalizeCursor on documented payloads', () => {
   })
 
   test('tool output is unwrapped from its JSON string, with the exit code when it is there', () => {
-    expect(normalize('post-tool-use.shell').tool).toMatchObject({ name: 'Shell', output: ' 12 pass\n 0 fail\n', exitCode: 0, input: { command: 'bun test src/resources/store' } })
+    expect(normalize('post-tool-use.shell').tool).toMatchObject({ name: 'Shell', output: ' 12 pass\n 0 fail\n', exitCode: 0, input: { command: 'bun test src/store' } })
     expect(normalize('post-tool-use.shell-cli').tool).toMatchObject({ name: 'Shell', output: ' 12 pass\n 0 fail\n', exitCode: 0 })
     expect(normalize('post-tool-use.read').tool?.exitCode).toBeUndefined()
   })

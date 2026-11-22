@@ -32,7 +32,7 @@ if (VERSION_PATTERN.test(version)) {
   Bun.plugin({
     name: 'demo-version',
     setup(build) {
-      build.onLoad({ filter: /[\\/]src[\\/]version\.ts$/ }, () => ({ contents: `export const VERSION = '${version}'\n`, loader: 'ts' }))
+      build.onLoad({ filter: /[\\/]src[\\/]system[\\/]version\.ts$/ }, () => ({ contents: `export const VERSION = '${version}'\n`, loader: 'ts' }))
     },
   })
 }

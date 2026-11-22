@@ -57,7 +57,7 @@ describe('the entry command', () => {
 
   test('a compiled program is recognised by the virtual path bun runs it from', () => {
     expect(isCompiledProgram('/$bunfs/root/src/controllers/cli/kinfold.ts')).toBe(true)
-    expect(isCompiledProgram('B:\\~BUN\\root\\src\\cli\\kinfold.ts')).toBe(true)
+    expect(isCompiledProgram('B:\\~BUN\\root\\src\\controllers\\cli\\kinfold.ts')).toBe(true)
     expect(isCompiledProgram('/Users/me/kinfold/src/controllers/cli/kinfold.ts')).toBe(false)
   })
 })
