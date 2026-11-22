@@ -15,6 +15,7 @@ import { SERVICE_PATH_FILE, readServicePath } from '../../../install/service/ser
 import { HEALTH_WAIT_MS, applyAction } from '../../../../resources/install-plan/plan'
 import { status } from '../../../install/status'
 import { BUN, type FakeWorld, YES, createWorld } from '../test-support'
+import { LEGACY_CHECKOUT_PATHS } from '../../../../resources/install-plan/legacy-checkout-paths'
 import {
   STOP_POLL_MS, ScheduledTaskService, TASK_CONFIG_FILE, TASK_NAME, type TaskProcessDeps,
   splitWindowsArgs, taskConfigPath, taskDataDir, taskPort, taskStateOf, taskStateScript, taskXml, windowsArg,
@@ -477,4 +478,31 @@ test('the install plan writes the task file and starts the task', async () => {
   w.out.length = 0
   expect(await status({ ...answering, service: running })).toBe(EXIT_OK)
   expect(w.out).toContain('service (scheduled task): config present; running: yes')
+})
+
+test('an install over a checkout entry from before the move leaves one current entry: the scheduled task', () => {
+  const w = windowsWorld()
+  const service = new ScheduledTaskService(w.env)
+  const current = join(w.projectRoot, 'src/controllers/cli/kinfold.ts')
+  const content = service.configContent(37811) ?? ''
+  expect(content).toContain(current)
+  const path = taskConfigPath(w.env)
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, Buffer.from(content.replaceAll(current, join(w.projectRoot, LEGACY_CHECKOUT_PATHS.cli)), 'utf16le'))
+  const situation = { health: { up: false, reason: 'down' } as const, loaded: true, pid: null, port: 37811, legacyLoaded: false, foreign: false }
+  const writes = serviceActions(w.env, service, situation, false, false, 37811).filter((action) => action.kind === 'write' && action.path === path)
+  // One task file, rewritten whole to name the new kinfold.ts.
+  expect(writes.map((action) => action.kind === 'write' && action.content)).toEqual([content])
+})
+
+test('uninstall removes a checkout entry from before the move: the scheduled task', async () => {
+  const w = windowsWorld()
+  const path = taskConfigPath(w.env)
+  const current = join(w.projectRoot, 'src/controllers/cli/kinfold.ts')
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, (new ScheduledTaskService(w.env).configContent(37811) ?? '').replaceAll(current, join(w.projectRoot, LEGACY_CHECKOUT_PATHS.cli)))
+  const runner = schtasksRunner({}, READY)
+  expect(await uninstall({ ...w.env, fetch: healthFetch(null), run: runner.run }, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
+  expect(runner.argvs).toContainEqual([SCHTASKS, '/Delete', '/TN', TASK_NAME, '/F'])
+  expect(readTextOrNull(path)).toBeNull()
 })

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { posixOnly } from '../../../../../test/platform-guards'
@@ -7,6 +7,9 @@ import { DEFAULT_PORT } from '../../../daemon/daemon'
 import { envName } from '../../../../system/env-names'
 import type { CommandResult, InstallEnv } from '../../../../resources/install-plan/env'
 import { type FakeWorld, createWorld } from '../test-support'
+import { LEGACY_CHECKOUT_PATHS } from '../../../../resources/install-plan/legacy-checkout-paths'
+import { EXIT_OK, serviceActions } from '../../../install/install'
+import { uninstall } from '../../../install/uninstall'
 import { SYSTEMCTL_CANDIDATES, SYSTEMD_UNIT, SystemdUserService, procFileHolders, systemctlArgv, systemdQuote, systemdUserDir, unitContent, unitEnvironment, userManagerOf } from '../../../install/service/systemd-service'
 
 let world: FakeWorld | null = null
@@ -368,4 +371,26 @@ posixOnly('file modes')('fileHolders reads /proc', async () => {
     chmodSync(join(procRoot, '456', 'fd'), 0o700)
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+posixOnly('POSIX paths')('an install over a checkout entry from before the move leaves one current entry: the systemd unit', async () => {
+  const { service } = managerWorld(scripted(['inactive']))
+  const env = { ...world!.env, envVars: { XDG_RUNTIME_DIR: join(world!.root, 'run') }, service }
+  const current = join(env.projectRoot, 'src/controllers/daemon/main.ts')
+  const content = service.configContent(DEFAULT_PORT) ?? ''
+  expect(content).toContain(current)
+  writeUnit(service, content.replaceAll(current, join(env.projectRoot, LEGACY_CHECKOUT_PATHS.scripts.daemon)))
+  const situation = { health: { up: false, reason: 'down' } as const, loaded: true, pid: null, port: DEFAULT_PORT, legacyLoaded: false, foreign: false }
+  const writes = serviceActions(env, service, situation, false, false, DEFAULT_PORT).filter((action) => action.kind === 'write')
+  // One unit file, rewritten whole to name the new main.ts.
+  expect(writes.map((action) => action.kind === 'write' && [action.path, action.content])).toEqual([[service.configPath() ?? '', content]])
+})
+
+posixOnly('POSIX paths')('uninstall removes a checkout entry from before the move: the systemd unit', async () => {
+  const { service } = managerWorld(scripted(['inactive']))
+  const env = { ...world!.env, envVars: { XDG_RUNTIME_DIR: join(world!.root, 'run') }, service }
+  const current = join(env.projectRoot, 'src/controllers/daemon/main.ts')
+  writeUnit(service, (service.configContent(DEFAULT_PORT) ?? '').replaceAll(current, join(env.projectRoot, LEGACY_CHECKOUT_PATHS.scripts.daemon)))
+  expect(await uninstall(env, { dryRun: false, removeCredentials: false })).toBe(EXIT_OK)
+  expect(existsSync(service.configPath()!)).toBe(false)
 })

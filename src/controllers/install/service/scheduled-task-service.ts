@@ -29,6 +29,7 @@ const ACTIVE_TASK_STATES: readonly number[] = [2, 4]
 const NO_USERNAME = 'USERNAME is not set, so the task cannot name its user'
 /** The checkout's CLI entry, which takes `--data-dir` and `daemon` the way the program does. */
 const CHECKOUT_CLI = 'src/controllers/cli/kinfold.ts'
+// A task written before the src move names LEGACY_CHECKOUT_PATHS.cli; the task is found by its name, so install rewrites it whole and uninstall deletes it.
 
 export interface TaskXmlInput {
   user: string

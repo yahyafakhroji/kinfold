@@ -6,7 +6,7 @@ import type { InstallMode } from '../../../../resources/install-plan/entry'
 import { createWorld } from '../../install/test-support'
 import { posixOnly } from '../../../../../test/platform-guards'
 import { KILO_PLUGIN_SPEC } from '../../../../plugins/agents/profiles/kilo-code'
-import { pluginFileActions, pluginFileContent, pluginFileState, pluginFileUninstallActions, shimContent } from '../../../../plugins/agents/families/plugin-file'
+import { inspectShim, isOwnShim, pluginFileActions, pluginFileContent, pluginFileState, pluginFileUninstallActions, shimContent, shimTarget } from '../../../../plugins/agents/families/plugin-file'
 
 const PROGRAM: InstallMode = { kind: 'program', binPath: '/home/u/.kinfold/bin/kinfold' }
 const BUNDLE = '// @bun\nvar plugin_default = { id: "kinfold", setup() {} };\nexport { plugin_default as default };\n'
@@ -154,5 +154,22 @@ posixOnly('POSIX paths')("a program writes each agent its own plugin's bundle, a
     await expect(pluginFileActions(program, KILO_PLUGIN_SPEC, null)).rejects.toThrow('this build carries no Kilo Code plugin')
   } finally {
     await w.cleanup()
+  }
+})
+
+test('a Kilo plugin file from before the move reads as stale in its own checkout, and as ours only there', () => {
+  const w = createWorld({ withLibrary: false })
+  try {
+    const current = join(w.projectRoot, 'src', 'plugins', 'plugins', 'kilo.ts')
+    mkdirSync(join(w.projectRoot, 'src', 'plugins', 'plugins'), { recursive: true })
+    writeFileSync(current, '')
+    const old = shimContent(join(w.projectRoot, 'src', 'plugins', 'kilo.ts'), w.dataDir, 'kilo-code', 'Kilo Code')
+    expect(shimTarget(old)).toBe(join(w.projectRoot, 'src', 'plugins', 'kilo.ts'))
+    expect(isOwnShim(old)).toBe(true)
+    expect(inspectShim(old, { pluginEntry: current, dataDir: w.dataDir, host: 'kilo-code', label: 'Kilo Code' })).toBe('stale')
+    // The same old suffix in a folder with no Kinfold checkout is not a Kinfold plugin path.
+    expect(shimTarget(shimContent(join(w.root, 'elsewhere', 'src', 'plugins', 'kilo.ts'), w.dataDir))).toBeNull()
+  } finally {
+    rmSync(w.root, { recursive: true, force: true })
   }
 })

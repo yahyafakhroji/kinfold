@@ -14,6 +14,7 @@
 import { join } from 'node:path'
 import { cmdWords, powershellWords } from '../../plugins/agents/families/hook-shell'
 import { osOf } from '../../system/platform/platform'
+import { LEGACY_CHECKOUT_PATHS, legacyCheckoutRoot } from './legacy-checkout-paths'
 
 export { isCompiledProgram } from '../../system/runtime/program'
 
@@ -120,10 +121,11 @@ function classify(command: string, args: readonly string[]): ParsedEntry | null 
   return role === null ? null : { command, args: list, role }
 }
 
-/** A checkout runs bun with one of our scripts, then --data-dir; a hook may add its host. */
+/** A checkout runs bun with one of our scripts (or its path before the src move, in a checkout that now holds it), then --data-dir; a hook may add its host. */
 function checkoutRole(args: readonly string[]): EntryRole | null {
   const script = normalizePath(args[0] ?? '')
   const role = PROGRAM_SUBCOMMANDS.find((candidate) => script.endsWith(`/${CHECKOUT_SCRIPTS[candidate]}`))
+    ?? PROGRAM_SUBCOMMANDS.find((candidate) => legacyCheckoutRoot(args[0] ?? '', LEGACY_CHECKOUT_PATHS.scripts[candidate], CHECKOUT_SCRIPTS[candidate]) !== null)
   if (role === undefined) return null
   return restAllowed(role, args.slice(1))
 }

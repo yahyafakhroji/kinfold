@@ -19,6 +19,7 @@ import { installPaths } from '../../../resources/install-plan/env'
 import type { InstallMode } from '../../../resources/install-plan/entry'
 import { describeTextChange, readTextOrNull } from '../../../resources/install-plan/files'
 import type { Action } from '../../../resources/install-plan/plan'
+import { LEGACY_CHECKOUT_PATHS, legacyCheckoutRoot } from '../../../resources/install-plan/legacy-checkout-paths'
 import { LEGACY_SHIM_MARKER, SHIM_MARKER } from '../../../system/names'
 import { type EmbeddedAssets, embeddedAssets } from '../../../system/runtime/embedded'
 import type { AgentId } from '../profile'
@@ -123,7 +124,9 @@ function pluginPathIn(literal: string | undefined): string | null {
   if (literal === undefined) return null
   try {
     const path: unknown = JSON.parse(literal)
-    return typeof path === 'string' && PLUGIN_SUFFIXES.some((suffix) => path.replaceAll('\\', '/').endsWith(suffix)) ? path : null
+    if (typeof path !== 'string') return null
+    if (PLUGIN_SUFFIXES.some((suffix) => path.replaceAll('\\', '/').endsWith(suffix))) return path
+    return LEGACY_CHECKOUT_PATHS.pluginFiles.some((legacy) => legacyCheckoutRoot(path, legacy, legacy.replace('src/plugins/', 'src/plugins/plugins/')) !== null) ? path : null
   } catch {
     return null
   }
