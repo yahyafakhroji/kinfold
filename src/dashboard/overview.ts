@@ -5,7 +5,7 @@
 // list row uses the same one. Counts and ids only: an observer error leaves as
 // its class, never its text.
 
-import { OBSERVER_ERROR_CLASSES } from '../observer/types'
+import { errorClassOf } from '../observer/types'
 import type { Database } from '../sqlite/types'
 import { type Page, type SessionHeader, type SessionListRow, type SessionsQuery, sessionHeader, sessionsPage } from '../store/list-reads'
 import { impactSummary, type ImpactSummary } from './impact'
@@ -43,11 +43,6 @@ function savedSince(db: Database, since: number, measured: ReadonlyMap<string, M
   ).all({ since })
   const estimates = estimateSaved(db, sessions.map((row) => row.id))
   return sessions.map((row) => savedFor(row, measured, estimates.get(row.id)))
-}
-
-function errorClassOf(error: string | null): string {
-  const named = error?.slice(0, error.indexOf(':')) ?? ''
-  return (OBSERVER_ERROR_CLASSES as readonly string[]).includes(named) ? named : 'other'
 }
 
 function failingAgents(db: Database): FailingAgent[] {

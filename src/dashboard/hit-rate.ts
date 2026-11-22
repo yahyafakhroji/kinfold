@@ -84,8 +84,10 @@ function injectionTimes(injections: readonly InjectedIds[]): Map<string, { proje
   for (const row of injections) {
     for (const id of row.observationIds) {
       const key = JSON.stringify([row.projectKey, id])
-      const pair = pairs.get(key) ?? { project: row.projectKey, id, times: [] }
-      pairs.set(key, { ...pair, times: [...pair.times, row.occurredAt] })
+      // Appended in place: the arrays are this function's own, and copying one per injection is quadratic for a memory recalled on most prompts.
+      const pair = pairs.get(key)
+      if (pair === undefined) pairs.set(key, { project: row.projectKey, id, times: [row.occurredAt] })
+      else pair.times.push(row.occurredAt)
     }
   }
   return pairs
@@ -96,9 +98,29 @@ function fetchesById(reads: readonly StoredMcpRead[]): Map<number, Fetch[]> {
   const byId = new Map<number, Fetch[]>()
   for (const read of reads) {
     if (read.tool !== 'get_observations' || read.status !== 'ok') continue
-    for (const id of read.returnedIds) byId.set(id, [...(byId.get(id) ?? []), { projectKey: read.projectKey, at: read.occurredAt }])
+    for (const id of read.returnedIds) {
+      const fetch = { projectKey: read.projectKey, at: read.occurredAt }
+      const known = byId.get(id)
+      if (known === undefined) byId.set(id, [fetch])
+      else known.push(fetch)
+    }
   }
   return byId
+}
+
+/** Whether any of `fetchTimes` falls within `horizonMs` after any of `times`. One pass over both, sorted, where every time used to be tested against every fetch. */
+export function anyWithin(times: readonly number[], fetchTimes: readonly number[], horizonMs: number): boolean {
+  if (times.length === 0 || fetchTimes.length === 0) return false
+  const starts = [...times].sort((a, b) => a - b)
+  const fetched = [...fetchTimes].sort((a, b) => a - b)
+  let next = 0
+  for (const at of starts) {
+    // Fetches before this injection are before every later one too.
+    while (next < fetched.length && fetched[next]! < at) next += 1
+    if (next === fetched.length) return false
+    if (fetched[next]! <= at + horizonMs) return true
+  }
+  return false
 }
 
 export function fetchAfterInject(injections: readonly InjectedIds[], reads: readonly StoredMcpRead[], horizonMs: number = FETCH_HORIZON_MS): FetchAfterInject {
@@ -106,8 +128,8 @@ export function fetchAfterInject(injections: readonly InjectedIds[], reads: read
   const fetches = fetchesById(reads)
   let fetched = 0
   for (const pair of pairs.values()) {
-    const matching = (fetches.get(pair.id) ?? []).filter((fetch) => fetch.projectKey === pair.project || fetch.projectKey === '*')
-    if (pair.times.some((at) => matching.some((fetch) => fetch.at >= at && fetch.at <= at + horizonMs))) fetched += 1
+    const matching = (fetches.get(pair.id) ?? []).filter((fetch) => fetch.projectKey === pair.project || fetch.projectKey === '*').map((fetch) => fetch.at)
+    if (anyWithin(pair.times, matching, horizonMs)) fetched += 1
   }
   return { injected: pairs.size, fetched, rate: ratio(fetched, pairs.size), horizonMs }
 }

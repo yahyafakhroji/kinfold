@@ -4,6 +4,7 @@
 // like a finished one; this bar only writes, and a signal does what it did
 // before there was a bar.
 
+import { clean } from './clean'
 import type { Mark, Progress } from './prompts'
 
 export interface BarOptions {
@@ -23,9 +24,6 @@ const MIN_BAR_SIZE = 4
 const LABEL_ROOM = 12
 const ERASE_LINE = '\r\u001b[2K'
 const MIN_COLUMNS = 20
-
-/** Control and format characters never reach the screen, as in the prompts. */
-const clean = (text: string): string => text.replace(/[\p{Cc}\p{Cf}]/gu, '')
 
 interface Glyphs {
   frames: readonly string[]

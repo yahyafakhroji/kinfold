@@ -10,8 +10,8 @@
 
 import { isAbsolute } from 'node:path'
 import { type EventKind, type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../../contract/event'
-import { type AdapterContext, AdapterInputError } from '../../adapters/context'
-import type { AgentId } from '../profile'
+import { type AdapterContext, AdapterInputError, lenient, str } from '../context'
+import type { AgentId } from '../../agents/profile'
 
 export type GeminiStyleEventMap = Readonly<Record<string, EventKind>>
 
@@ -24,10 +24,6 @@ export const GEMINI_CLI_EVENTS: GeminiStyleEventMap = {
   AfterTool: 'tool_result',
   AfterAgent: 'turn_end',
   SessionEnd: 'session_end',
-}
-
-function str(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
 }
 
 function partsText(parts: readonly unknown[]): string {
@@ -105,12 +101,5 @@ export function parseGeminiStyle(eventMap: GeminiStyleEventMap, host: AgentId, p
  * map is not captured, rather than an error.
  */
 export function normalizeGeminiStyle(eventMap: GeminiStyleEventMap, host: AgentId): (payload: unknown, ctx: AdapterContext) => NormalizedEvent | null {
-  return (payload, ctx) => {
-    try {
-      return parseGeminiStyle(eventMap, host, payload, ctx)
-    } catch (error: unknown) {
-      if (error instanceof AdapterInputError) return null
-      throw error
-    }
-  }
+  return lenient((payload, ctx) => parseGeminiStyle(eventMap, host, payload, ctx))
 }

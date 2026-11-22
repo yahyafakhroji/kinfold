@@ -4,12 +4,15 @@
 // the parameter without echoing what was sent.
 
 import type { Parsed } from '../context/types'
+import { HOST_NAME_PATTERN } from '../names'
 import type { SortDir } from '../store/list-reads'
 
 export const LIST_PAGE_SIZE = 50
 export const MAX_LIST_PAGE = 10_000
 export const MAX_QUERY_CHARS = 200
-export const HOST_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
+export const HOST_PATTERN = HOST_NAME_PATTERN
+/** The longest project name or key a filter of the memory and session lists takes. */
+export const MAX_PROJECT_CHARS = 512
 export const DEVICE_PATTERN = /^(local|dev-[A-Za-z0-9_-]{1,64})$/
 const MAX_KEY_CHARS = 4_200
 
@@ -37,8 +40,8 @@ export interface ListParams<S extends string, F extends string> {
   filters: Record<F, string | null>
 }
 
-/** An empty value is the same as an absent one: a cleared filter. */
-function optional(params: URLSearchParams, name: string): string | null {
+/** An empty value is the same as an absent one: a cleared filter in the page's form. */
+export function optional(params: URLSearchParams, name: string): string | null {
   const value = params.get(name)
   return value === null || value.trim() === '' ? null : value.trim()
 }

@@ -25,7 +25,7 @@
 
 import { isAbsolute } from 'node:path'
 import { type EventKind, type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../contract/event'
-import { type AdapterContext, AdapterInputError } from './context'
+import { type AdapterContext, AdapterInputError, lenient, str } from './context'
 
 export const ANTIGRAVITY_HOST = 'antigravity'
 
@@ -33,10 +33,6 @@ export const ANTIGRAVITY_HOST = 'antigravity'
 export const ANTIGRAVITY_EVENTS = ['SessionStart', 'PreInvocation', 'PostToolUse', 'Stop'] as const
 
 type Payload = Record<string, unknown>
-
-function str(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
-}
 
 /** The fields of the docs' SessionStart example. */
 const SESSION_START_FIELDS: ReadonlySet<string> = new Set(['conversationId', 'workspacePaths', 'transcriptPath', 'artifactDirectoryPath', 'modelName'])
@@ -99,14 +95,7 @@ export function parseAntigravity(payload: unknown, context: AdapterContext): Nor
 }
 
 /** A payload it cannot map is not captured, rather than an error, since the agent is built from docs. */
-export function normalizeAntigravity(payload: unknown, context: AdapterContext): NormalizedEvent | null {
-  try {
-    return parseAntigravity(payload, context)
-  } catch (error: unknown) {
-    if (error instanceof AdapterInputError) return null
-    throw error
-  }
-}
+export const normalizeAntigravity: (payload: unknown, context: AdapterContext) => NormalizedEvent | null = lenient(parseAntigravity)
 
 /** Session-start context goes back as an injected system step, in the shape of the docs' SessionStart example. */
 export function injectStepsOutput(text: string): string {

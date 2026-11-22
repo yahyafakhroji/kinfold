@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
-import { BACKUP_FORMAT_VERSION, type BackupManifest, BackupError, MAX_MANIFEST_BYTES, extractSnapshot, parseManifest, readArchive, sha256OfFile, writeArchive } from './archive'
+import { BACKUP_FORMAT_VERSION, type BackupManifest, BackupError, MAX_MANIFEST_BYTES, archiveSync, extractSnapshot, parseManifest, readArchive, sha256OfFile, writeArchive } from './archive'
 
 let dir: string
 let snapshot: string
@@ -160,4 +160,34 @@ test('a manifest that is not JSON is refused as format', async () => {
   bytes.write('{{', 16)
   writeFileSync(archive, bytes)
   expect(kindOf(() => readArchive(archive))).toBe('format')
+})
+
+test('the archive and the extracted snapshot are synced to disk before they are closed, and a failed sync leaves no file behind', async () => {
+  const real = archiveSync.fsync
+  let synced = 0
+  archiveSync.fsync = (fd) => {
+    synced += 1
+    real(fd)
+  }
+  try {
+    await writeArchive(archive, manifest(), snapshot)
+    expect(synced).toBe(1)
+    const out = join(dir, 'out.db')
+    await extractSnapshot(archive, readArchive(archive), out)
+    expect(synced).toBe(2)
+    expect(existsSync(out)).toBe(true)
+
+    // A disk that cannot take the sync: the write fails as a whole, and nothing with the final name remains.
+    archiveSync.fsync = () => {
+      throw Object.assign(new Error('input/output error'), { code: 'EIO' })
+    }
+    const second = join(dir, 'second.kfb')
+    await expect(writeArchive(second, manifest(), snapshot)).rejects.toThrow('input/output error')
+    expect(existsSync(second)).toBe(false)
+    const cut = join(dir, 'cut.db')
+    await expect(extractSnapshot(archive, readArchive(archive), cut)).rejects.toThrow('input/output error')
+    expect(existsSync(cut)).toBe(false)
+  } finally {
+    archiveSync.fsync = real
+  }
 })

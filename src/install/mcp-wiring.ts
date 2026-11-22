@@ -159,6 +159,7 @@ export function opencodeMcpInstallActions(env: InstallEnv): Action[] {
       kind: 'write',
       path: paths.opencodeConfig,
       content: serializeJson(merged.config, file.exists ? file.text : null),
+      before: file.exists ? file.text : null,
       mode: file.exists ? file.mode : FILE_MODE,
       summary: parts.join('; '),
     },
@@ -180,7 +181,7 @@ export function opencodeMcpUninstallActions(env: InstallEnv): Action[] {
   const backup = plannedBackup(path, env.now())
   return [
     ...(backup !== null ? [{ kind: 'backup', from: path, to: backup } as const] : []),
-    { kind: 'write', path, content: serializeJson(removed.config, file.text), mode: file.mode, summary: 'remove the Kinfold MCP server; every other key kept' },
+    { kind: 'write', path, content: serializeJson(removed.config, file.text), before: file.text, mode: file.mode, summary: 'remove the Kinfold MCP server; every other key kept' },
   ]
 }
 

@@ -8,7 +8,8 @@ import { PROJECT, T0, type TempStore, openTempStore, seedSession } from '../obse
 import { startActive } from '../store/vector-spaces'
 import { upsertVectors, dropVector } from '../store/vector-store'
 import { upsertProject } from '../store/writes'
-import { createVecIndex, dropVecIndex, dropVecIndexStep, knnCandidates, reconcileVecIndex, reconcileWindow, vecIndexExists, WINDOW_SQL, vecNearest, writeVecRows } from './vec-index'
+import { createVecIndex, dropVecIndex, dropVecIndexStep, knnCandidates, reconcileWindow, vecIndexExists, WINDOW_SQL, vecNearest, writeVecRows } from './vec-index'
+import { reconcileVecIndex } from './vec-index.test-support'
 
 const VEC0 = readEnv(process.env, 'TEST_VEC0')
 

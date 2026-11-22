@@ -14,6 +14,7 @@ import { type EmbeddingSettings, parseEmbeddingSettings } from '../vectors/embed
 import { type ObserverFlag, defaultInput, parseProviderModel, withObserverEndpoint } from './observer-choice'
 import { type UpdateLevel, isUpdateLevel } from './setup/record'
 import { parseVersion } from '../update/version-order'
+import { MAX_PORT } from '../daemon/port'
 
 export const COMMANDS = ['install', 'uninstall', 'status', 'update'] as const
 export type Command = (typeof COMMANDS)[number]
@@ -436,7 +437,6 @@ function valueOf(argv: readonly string[], index: number, name: string): { value:
 }
 
 const MIN_PORT = 1024
-const MAX_PORT = 65_535
 
 function parsePort(value: string): Parsed<number> {
   const port = /^\d+$/.test(value) ? Number(value) : Number.NaN

@@ -85,12 +85,16 @@ export function providerBackoff(db: Database, provider: string): ProviderBackoff
     db.query<{ at: number | null }, { key: string }>('SELECT value AS at FROM data_settings WHERE key = $key').get({ key: clearKey(provider) })?.at ?? 0,
   )
   if (latest.at <= settingsAt) return null
+  // The streak starts after the newest run that broke it. That run is found by walking (provider, id) from the newest
+  // and stopping at the first match: max(id) over the same filter read every run the provider ever made, on a table
+  // that is never pruned, several times per batch while a provider fails.
   const streak = db.query<{ failures: number; since: number | null }, { provider: string; errorClass: string; restart: string; settingsAt: number }>(
     `SELECT count(*) AS failures, min(started_at) AS since FROM observer_runs
      WHERE provider = $provider AND status = 'failed' AND ${CLASS_OF} = $errorClass AND coalesce(finished_at, started_at) > $settingsAt
-       AND id > (SELECT coalesce(max(id), 0) FROM observer_runs
+       AND id > coalesce((SELECT id FROM observer_runs
                  WHERE provider = $provider AND status <> 'running'
-                   AND (status = 'succeeded' OR error IS NULL OR ${CLASS_OF} NOT IN ($errorClass, $restart)))`,
+                   AND (status = 'succeeded' OR error IS NULL OR ${CLASS_OF} NOT IN ($errorClass, $restart))
+                 ORDER BY id DESC LIMIT 1), 0)`,
   ).get({ provider, errorClass: latest.errorClass, restart: RESTART_CLASS, settingsAt })
   if (streak === null || streak.failures === 0 || streak.since === null) return null
   return { provider, errorClass: latest.errorClass, failures: streak.failures, since: streak.since, lastFailedAt: latest.at, retryAt: latest.at + backoffDelayMs(streak.failures, latest.errorClass) }

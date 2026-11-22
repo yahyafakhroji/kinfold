@@ -28,12 +28,13 @@ import { UpdateCheckError, fetchNewestRelease } from './check'
 import { betaChannelOn } from './enabled'
 import { writeInstallRun } from './install-run'
 import { isDevVersion } from './release'
-import { type UpdateLockDeps, acquireUpdateLock, updateLockHolder } from './lock'
+import { type UpdateLockDeps, acquireUpdateLock, updateLockHolder, pidAlive } from './lock'
 import { MAX_PROGRAM_BYTES, removeStaged, stagedProgram } from './stage'
 import { readUpdateState } from './state'
 
 export { MAX_PROGRAM_BYTES }
 import { compareVersions, isPatchUpdate, parseVersion } from './version-order'
+import { errorCode, errorName } from '../errors'
 
 export const DOWNLOAD_TIMEOUT_MS = 300_000
 
@@ -118,19 +119,8 @@ function tempPath(env: InstallEnv): string {
   return join(binDir(env), `.kinfold-update-${process.pid}${suffix}`)
 }
 
-/** EPERM means the pid exists under another user, so only ESRCH counts as gone. */
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error: unknown) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
-  }
-}
-
-function errorLabel(error: unknown): string {
-  return (error as NodeJS.ErrnoException).code ?? (error instanceof Error ? error.name : 'error')
-}
+/** The errno code when there is one, else the class name; never the message, which can hold a path. */
+const errorLabel = (error: unknown): string => errorCode(error) ?? errorName(error, 'error')
 
 /**
  * The temp programs of update runs that are gone, by name. A live run's file is

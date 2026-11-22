@@ -18,10 +18,11 @@ import { DATA_FILE_MODE } from '../store/data-dir'
 import { plainName } from './mode'
 import { centralDir, centralPath } from './paths'
 import { type VersionGap, versionGap } from './version-rule'
+import { errorName } from '../errors'
+import { MAX_ANSWER_BYTES, readCappedText } from '../http/capped'
 
 export const DEFAULT_CALL_TIMEOUT_MS = 5_000
-/** Far above any real answer: a dashboard view or an MCP read. */
-export const MAX_ANSWER_BYTES = 16 * 1024 * 1024
+export { MAX_ANSWER_BYTES }
 
 export type HubFetch = (url: string, init: RequestInit) => Promise<Response>
 
@@ -64,32 +65,7 @@ export function readKey(dataDir: string, file: string): string | null {
   return existsSync(path) ? readFileSync(path, 'utf8') : null
 }
 
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : 'Error'
-}
-
-const isTimeout = (error: unknown): boolean => ['TimeoutError', 'AbortError'].includes(errorName(error))
-
-/** The body, read a chunk at a time and dropped the moment it passes the cap: a fake hub cannot make the device hold more. */
-async function readText(response: Response): Promise<string | null> {
-  const length = Number(response.headers.get('content-length') ?? '0')
-  if (Number.isFinite(length) && length > MAX_ANSWER_BYTES) return null
-  if (response.body === null) return ''
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    total += value.byteLength
-    if (total > MAX_ANSWER_BYTES) {
-      await reader.cancel().catch(() => {})
-      return null
-    }
-    chunks.push(value)
-  }
-  return Buffer.concat(chunks).toString('utf8')
-}
+const isTimeout = (error: unknown): boolean => ['TimeoutError', 'AbortError'].includes(errorName(error, 'Error'))
 
 function parse(text: string): unknown {
   try {
@@ -115,7 +91,7 @@ export async function callHub(endpoint: HubEndpoint, path: string, payload: unkn
       method: 'POST', body, redirect: 'error', headers: { ...headers, 'content-type': 'application/json' },
       signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS),
     })
-    text = await readText(response)
+    text = await readCappedText(response, MAX_ANSWER_BYTES)
   } catch (error: unknown) {
     return { ok: false, reason: isTimeout(error) ? 'timeout' : 'unreachable' }
   }
@@ -171,13 +147,13 @@ async function postPlain(input: PairInput, path: string, body: unknown, timeoutE
       method: 'POST', body: JSON.stringify(body), redirect: 'error', headers: { 'content-type': 'application/json' },
       signal: AbortSignal.timeout(input.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS),
     })
-    const text = await readText(response)
+    const text = await readCappedText(response, MAX_ANSWER_BYTES)
     const value = text === null ? undefined : parse(text)
     if (value === undefined) return { ok: false, error: `the hub at ${where} sent an answer Kinfold cannot read` }
     return { ok: true, value: { status: response.status, value } }
   } catch (error: unknown) {
     if (isTimeout(error)) return { ok: false, error: timeoutError }
-    return { ok: false, error: `could not reach the hub at ${where} (${errorName(error)}); is it running kinfold central serve, and is Tailscale up on both machines?` }
+    return { ok: false, error: `could not reach the hub at ${where} (${errorName(error, 'Error')}); is it running kinfold central serve, and is Tailscale up on both machines?` }
   }
 }
 

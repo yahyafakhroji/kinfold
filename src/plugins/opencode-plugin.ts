@@ -20,12 +20,14 @@ import type { NormalizedEvent } from '../contract/event'
 import { type OpenCodeContext, OPENCODE_HOST, createOpenCodeBusMapper, normalizeOpenCodePrompt, normalizeOpenCodeToolAfter } from '../adapters/opencode'
 import { defaultAdapterContext } from '../adapters/context'
 import { recordedHostVersion } from '../adapters/host-version'
-import { recordEvent } from '../cli/record'
 import { DAEMON_ONLY_TIMEOUT_MS, fetchDaemonContext } from '../context/daemon'
 import type { ContextRequest, ContextResult } from '../context/types'
 import { isObserverProcess } from '../observer/env'
 import { resolveDataDir } from '../store/data-dir'
+import { recent, recentlySeen } from '../adapters/recency'
 import { createContextInjector } from './context-injector'
+import { createPluginRecorder } from './recorder'
+import { errorMessage } from '../errors'
 
 export const OPENCODE_PLUGIN_ID = 'kinfold'
 
@@ -57,10 +59,6 @@ export interface OpenCodePluginOptions {
   fetchContext?: ContextFetcher
   /** Test seam; the default is the process-wide registry on globalThis. */
   sessionOwners?: Map<string, string>
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
@@ -112,7 +110,7 @@ export function createInstanceFilter(owners: Map<string, string> = new Map()): I
   return (envelope, instanceId) => {
     const sessionId = sessionIdOf(envelope)
     if (sessionId === undefined) return false
-    const owner = owners.get(sessionId)
+    const owner = recent(owners, sessionId)
     if (owner === undefined) {
       own(sessionId, instanceId)
       return false
@@ -133,7 +131,7 @@ export function createStartSynthesizer(): (envelope: unknown) => unknown | null 
   const seen = new Set<string>()
   return (envelope) => {
     const sessionId = sessionIdOf(envelope)
-    if (sessionId === undefined || seen.has(sessionId)) return null
+    if (sessionId === undefined || recentlySeen(seen, sessionId)) return null
     if (seen.size >= MAX_OWNED_SESSIONS) {
       const oldest = seen.values().next().value
       if (oldest !== undefined) seen.delete(oldest)
@@ -166,14 +164,14 @@ export function createOpenCodePlugin(options: OpenCodePluginOptions = {}): OpenC
       sessionVersions: new Map(),
     }
 
+    const recorder = createPluginRecorder({ dataDir, onNudgeSkipped: (reason, events) => log(`kinfold-opencode: ${events} event(s) spooled, nudge skipped: ${reason}`) })
     const record = (event: NormalizedEvent | null): void => {
       if (event === null) return
-      recordEvent(event, dataDir).then(
-        ({ nudge }) => {
-          if (!nudge.ok) log(`kinfold-opencode: event ${event.eventId} spooled, nudge skipped: ${nudge.reason}`)
-        },
-        (error: unknown) => log(`kinfold-opencode: event ${event.eventId} not captured: ${errorMessage(error)}`),
-      )
+      try {
+        recorder.record(event)
+      } catch (error: unknown) {
+        log(`kinfold-opencode: event ${event.eventId} not captured: ${errorMessage(error)}`)
+      }
     }
     const guarded = (map: (input: unknown) => NormalizedEvent | null): Handler => (input) => {
       try {

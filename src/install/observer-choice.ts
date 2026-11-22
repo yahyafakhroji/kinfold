@@ -30,6 +30,7 @@ import type { InstallHost } from './detect'
 import type { InstallEnv } from './env'
 import type { MissingClis } from './observer-clis'
 import { keyStoreOf } from './key-store-choice'
+import { isCliLoginProvider } from '../observer/types'
 
 export const MAX_CHOICE_ATTEMPTS = 5
 
@@ -212,10 +213,6 @@ export function flagInput(host: InstallHost, flag: ObserverFlag, saved?: Observe
 export interface Candidate {
   input: ObserverSettingsInput
   origin: ObserverChoice['origin']
-}
-
-export function isCliLoginProvider(provider: string): provider is CliLoginProvider {
-  return (CLI_LOGIN_PROVIDERS as readonly string[]).includes(provider)
 }
 
 /** Up to 20 names the CLI reports, as plain lines; or the error class when it cannot list. Names are never interpreted; a name with a control or format character (an escape, a bidi override, a zero-width) is dropped. */

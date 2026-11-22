@@ -34,11 +34,14 @@ type EventBody = { kind: 'request'; method: string; path: string; status: number
 
 export function createDashboardEvents(now: () => number = Date.now, cap: number = MAX_EVENTS): DashboardEvents {
   const epoch = randomBytes(EPOCH_BYTES).toString('base64url')
-  let kept: readonly DashboardEvent[] = []
+  // This closure's own array, appended to and trimmed in place: a daemon request is one or two pushes, and copying the
+  // whole log for each made every request allocate `cap` entries. after() hands out a filtered copy, never this array.
+  const kept: DashboardEvent[] = []
   let lastId = 0
   const push = (body: EventBody): void => {
     lastId += 1
-    kept = [...kept.slice(Math.max(0, kept.length - (cap - 1))), { id: lastId, at: now(), ...body }]
+    kept.push({ id: lastId, at: now(), ...body })
+    if (kept.length > cap) kept.splice(0, kept.length - cap)
   }
   return {
     request: (method, path, status, ms) => {

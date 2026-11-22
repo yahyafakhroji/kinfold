@@ -161,3 +161,22 @@ test('the mapper forgets its oldest sessions rather than growing without end', (
   }
   expect(mapper.trackedSessions()).toBeLessThanOrEqual(256)
 })
+
+test('a session still in use is not the one forgotten when the mapper is full', () => {
+  // The first session, then enough others to fill the map, with the first one prompting in between.
+  created()
+  const template = fixture('event.session.created')
+  const open = (index: number): void => {
+    const event = structuredClone(template)
+    event.properties.sessionID = `ses_${index}`
+    event.properties.info.id = `ses_${index}`
+    mapper.event(event)
+  }
+  for (let index = 0; index < 255; index += 1) open(index)
+  expect(prompt().map((event) => event.kind)).toEqual(['user_prompt'])
+  for (let index = 255; index < 300; index += 1) open(index)
+  expect(mapper.knows(SESSION)).toBe(true)
+  // No second session_start for it: the state was kept.
+  expect(prompt().map((event) => event.kind)).toEqual(['user_prompt'])
+  expect(mapper.knows('ses_0')).toBe(false)
+})

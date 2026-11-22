@@ -10,6 +10,7 @@ import type { Recalled } from '../context/recall-line'
 import type { Database } from '../sqlite/types'
 import { titlesFor } from './context-store'
 import { readDisplaySettings } from './display-settings'
+import { parseIds } from './ids'
 
 export const SESSIONS_PAGE = 30
 export const TURNS_PAGE = 20
@@ -108,15 +109,6 @@ interface PromptRow {
   reply: string | null
   expiredAt: number | null
   summaryId: number | null
-}
-
-function parseIds(json: string): number[] {
-  try {
-    const value: unknown = JSON.parse(json)
-    return Array.isArray(value) ? value.filter((id): id is number => Number.isSafeInteger(id)) : []
-  } catch {
-    return []
-  }
 }
 
 /** One page of a session's turns after prompt `after`; null for a session that does not exist. */

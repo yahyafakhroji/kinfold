@@ -9,6 +9,7 @@ import { isCompiledProgram } from '../runtime/program'
 import { type DaemonMiss, DAEMON_SHARE_MS, type FetchFn, askDaemon } from './daemon'
 import { readStoredContext } from './fallback'
 import { type ContextRequest, type ContextResult } from './types'
+import { errorName } from '../errors'
 
 export { DAEMON_SHARE_MS, type FetchFn } from './daemon'
 
@@ -34,10 +35,6 @@ export interface ContextClientOptions {
   now?: () => number
   /** True when the stored pack may be read after the daemon misses; a compiled program's hook uses false. */
   fallback?: boolean
-}
-
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : 'unknown error'
 }
 
 const isMiss = (value: ContextResult | DaemonMiss): value is DaemonMiss => 'reason' in value

@@ -13,7 +13,7 @@
 // as in the other Claude-shaped agents, and the output is empty otherwise.
 
 import type { EventKind, NormalizedEvent } from '../contract/event'
-import { normalizeClaudeStyle } from '../agents/families/claude-style-parse'
+import { normalizeClaudeStyle } from './families/claude-style-parse'
 import type { AdapterContext } from './context'
 
 export const KIRO_HOST = 'kiro'

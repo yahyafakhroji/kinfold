@@ -13,7 +13,7 @@ import type { Database } from '../sqlite/types'
 import {
   type StoredSpace, activeSpace, buildingSpace, promoteBuilding, removeSpace, spaceOf, startActive, startBuilding,
 } from '../store/vector-spaces'
-import { type VectorSpace, vectorCounts } from '../store/vector-store'
+import { type VectorSpace, vectorCounts, backlogExceeds } from '../store/vector-store'
 import { RECONCILE_CHUNK, RECONCILE_WINDOW, createVecIndex, dropVecIndexStep, reconcileWindow, vecIndexExists, writeVecRows } from './vec-index'
 
 /** Rows of a dropped space removed per step; secure_delete zeroes each freed page, and a 1536-dimension row is 6 KB. */
@@ -156,8 +156,10 @@ export function createSpaceManager(options: SpaceManagerOptions): SpaceManager {
   /** buildEnded: a pass over the building index ended in this step, so it holds every vector stored before the step. */
   const maybePromote = (buildEnded: boolean): void => {
     const building = buildingSpace(db)
-    if (building === null || vectorCounts(db, { model: building.model, dims: building.dims }).pending > backlog) return
+    if (building === null) return
+    // The check that reads nothing first; then a probe that stops just past the backlog it allows.
     if (options.vec0 && !(buildEnded && building.vecReady)) return
+    if (backlogExceeds(db, { model: building.model, dims: building.dims }, backlog)) return
     const old = promoteBuilding(db)
     if (old !== null) passes.delete(old.id)
     sweeping = true

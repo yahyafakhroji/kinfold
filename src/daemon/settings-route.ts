@@ -11,7 +11,7 @@ import { KNOWN_HOSTS, isRecord } from '../contract/event'
 import { checkEndpoint } from '../observer/endpoint'
 import { parseGooseModel } from '../observer/runners/goose-cli'
 import { CLAUDE_TOKEN_REF, credentialRefProblem, isEndpointProvider, providerTakesKey, resolveObserverSettings } from '../observer/settings'
-import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError } from '../observer/types'
+import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, OBSERVER_PROVIDERS, type ObserverProvider, type ObserverSettings, toObserverError, isCliLoginProvider } from '../observer/types'
 import { assertCredentialRef, assertStorableValue, isSystemCredentialRef } from '../secrets/credentials'
 import type { KeyStore } from '../secrets/key-store'
 import { type SafetyRow, clearFailedSafety, listSafety } from '../store/observer-safety-store'
@@ -97,10 +97,6 @@ export interface ObserverSettingsHandlers {
   recheck: (provider: CliLoginProvider) => number
   /** The claude-cli token; null when this daemon has no key store to keep it in. */
   token: { auth: () => ClaudeAuth; save: (value: string) => void; remove: () => void } | null
-}
-
-export function isCliLoginProvider(provider: unknown): provider is CliLoginProvider {
-  return (CLI_LOGIN_PROVIDERS as readonly unknown[]).includes(provider)
 }
 
 /** POST /observer/recheck body. The error names the field and never echoes the value. */

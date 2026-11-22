@@ -15,20 +15,11 @@
 
 import { isAbsolute } from 'node:path'
 import { type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../contract/event'
-import { type AdapterContext, AdapterInputError } from './context'
+import { type AdapterContext, AdapterInputError, str, nonEmpty } from './context'
 
 export const CURSOR_HOST = 'cursor'
 
 type Payload = Record<string, unknown>
-
-function str(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
-}
-
-function nonEmpty(value: unknown): string | undefined {
-  const text = str(value)
-  return text === undefined || text === '' ? undefined : text
-}
 
 /** tool_output is documented as a JSON-stringified string; the shape inside is not, so text fields are tried in turn. */
 export function flattenCursorOutput(raw: unknown): { output: string; exitCode?: number } {

@@ -52,11 +52,11 @@ function addCounts(into: Readonly<Record<string, number>>, more: Readonly<Record
   return out
 }
 
-/** One batch across the tables, in table order, at most batchSize rows. */
-export function scanBatch(db: Database, options: ScanOptions): ScanResult {
-  const startedAt = Date.now()
+/** One batch across the tables, in table order, at most batchSize rows; what is left is not counted here. */
+function runBatch(db: Database, options: ScanOptions): { scanned: number; byRule: Record<string, number>; full: boolean } {
   const version = options.version ?? RULES_VERSION
-  let budget = options.batchSize ?? DEFAULT_SCAN_BATCH
+  const size = options.batchSize ?? DEFAULT_SCAN_BATCH
+  let budget = size
   const outcome = db.transaction(() => {
     let scanned = 0
     let byRule: Record<string, number> = {}
@@ -70,20 +70,48 @@ export function scanBatch(db: Database, options: ScanOptions): ScanResult {
     }
     return { scanned, byRule }
   })()
-  const findings = Object.values(outcome.byRule).reduce((sum, n) => sum + n, 0)
-  return { ...outcome, findings, remaining: countUnscanned(db, version), ms: Date.now() - startedAt }
+  // A batch that came back short reached the end of every table.
+  return { ...outcome, full: size > 0 && outcome.scanned >= size }
 }
 
-/** Batches until nothing is left or the time budget is spent (POST /data/scan). */
-export function scanUntil(db: Database, options: ScanOptions, budgetMs: number): ScanResult {
+const findingsIn = (byRule: Record<string, number>): number => Object.values(byRule).reduce((sum, n) => sum + n, 0)
+
+/** One batch, and how many rows still wait (the daemon's scan tick). */
+export function scanBatch(db: Database, options: ScanOptions): ScanResult {
   const startedAt = Date.now()
-  let total: ScanResult = { scanned: 0, findings: 0, byRule: {}, remaining: countUnscanned(db, options.version ?? RULES_VERSION), ms: 0 }
-  while (total.remaining > 0 && Date.now() - startedAt < budgetMs) {
-    const batch = scanBatch(db, options)
-    total = { scanned: total.scanned + batch.scanned, findings: total.findings + batch.findings, byRule: addCounts(total.byRule, batch.byRule), remaining: batch.remaining, ms: 0 }
-    if (batch.scanned === 0) break
+  const { scanned, byRule } = runBatch(db, options)
+  return { scanned, byRule, findings: findingsIn(byRule), remaining: countUnscanned(db, options.version ?? RULES_VERSION), ms: Date.now() - startedAt }
+}
+
+/** Batches worked in one go before other work is let through. Far under a hook's 200 ms share of the daemon. */
+export const SCAN_SLICE_MS = 50
+
+const nextTurn = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
+
+/**
+ * Batches until nothing is left or the time budget is spent (POST /data/scan).
+ * It works a slice, then lets the event loop run before the next one, so a
+ * scan of a large backlog no longer holds hooks and /health for the whole
+ * budget. The backlog is counted once, at the end: counting it after every
+ * batch made a full rescan read the remaining rows again per batch.
+ */
+export async function scanUntil(db: Database, options: ScanOptions, budgetMs: number, pause: () => Promise<void> = nextTurn): Promise<ScanResult> {
+  const startedAt = Date.now()
+  let scanned = 0
+  let byRule: Record<string, number> = {}
+  let more = true
+  while (more && Date.now() - startedAt < budgetMs) {
+    const sliceStartedAt = Date.now()
+    // At least one batch per slice, so a slow clock read or a slow batch cannot leave a slice with nothing done.
+    do {
+      const batch = runBatch(db, options)
+      scanned += batch.scanned
+      byRule = addCounts(byRule, batch.byRule)
+      more = batch.full
+    } while (more && Date.now() - sliceStartedAt < SCAN_SLICE_MS && Date.now() - startedAt < budgetMs)
+    if (more) await pause()
   }
-  return { ...total, ms: Date.now() - startedAt }
+  return { scanned, byRule, findings: findingsIn(byRule), remaining: more || (options.batchSize ?? DEFAULT_SCAN_BATCH) <= 0 ? countUnscanned(db, options.version ?? RULES_VERSION) : 0, ms: Date.now() - startedAt }
 }
 
 /** The log line for a scan: counts and rule names only. */

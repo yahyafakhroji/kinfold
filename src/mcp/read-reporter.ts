@@ -11,6 +11,7 @@
 import { readDaemonEndpoint } from '../daemon/daemon-info'
 import { envName, readEnv } from '../env-names'
 import type { McpRead } from '../store/mcp-read-store'
+import { HOST_NAME_PATTERN } from '../names'
 
 export const REPORT_TIMEOUT_MS = 200
 /** The env var each host's MCP entry sets to name itself (src/install/mcp-config.ts). */
@@ -18,7 +19,6 @@ export const MCP_HOST_ENV = envName('MCP_HOST')
 /** Same cap the daemon enforces. */
 export const MAX_REPORTED_IDS = 100
 
-const HOST_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
 
 export type ReportFetch = (url: string, init: RequestInit) => Promise<Response>
 
@@ -42,7 +42,7 @@ export interface ReadReporter {
 /** KINFOLD_MCP_HOST (or legacy SAM_MCP_HOST) when it is a short lowercase name, else null. */
 export function hostFromEnv(env: Readonly<Record<string, string | undefined>>): string | null {
   const value = readEnv(env, 'MCP_HOST')
-  return value !== undefined && HOST_PATTERN.test(value) ? value : null
+  return value !== undefined && HOST_NAME_PATTERN.test(value) ? value : null
 }
 
 export function createReadReporter(options: ReadReporterOptions): ReadReporter {

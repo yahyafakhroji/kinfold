@@ -3,7 +3,8 @@ import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { DASHBOARD_SESSIONS_FILE } from './auth'
 import { type TempStore, openTempStore } from '../observer/test-support'
-import { SECURITY_HEADERS } from './headers'
+import { IMMUTABLE_ASSET_CACHE, SECURITY_HEADERS } from './headers'
+import { assetListForTest } from './routes'
 import { ensureAppBuilt, listAssets } from './app-files'
 import { type DashboardRig, startRig, RIG_LEASE } from './test-support'
 
@@ -159,7 +160,7 @@ test('a daemon restart keeps a live session; without its sessions file the resta
   expect((await rig.page('GET', '/metrics/summary', { cookie })).status).toBe(401)
 })
 
-test('every dashboard response carries the CSP, nosniff, no-referrer, no-store and no CORS header', async () => {
+test('every dashboard response carries the CSP, nosniff, no-referrer and no CORS header; only a built file under its hashed name may be kept by the browser', async () => {
   const cookie = await rig.login()
   const responses = [
     await rig.page('GET', '/dashboard/login'),
@@ -177,9 +178,16 @@ test('every dashboard response carries the CSP, nosniff, no-referrer, no-store a
   ]
   for (const response of responses) {
     expect(response.headers.get('content-security-policy')).toBe(CSP)
-    for (const [name, value] of Object.entries(SECURITY_HEADERS)) expect(response.headers.get(name)).toBe(value)
+    // A served build file is the one answer that is not no-store: its name changes when its content does.
+    const builtFile = response.status === 200 && new URL(response.url).pathname.startsWith('/dashboard/assets/')
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) expect(response.headers.get(name)).toBe(name === 'cache-control' && builtFile ? IMMUTABLE_ASSET_CACHE : value)
     expect([...response.headers.keys()].filter((name) => name.startsWith('access-control-'))).toEqual([])
   }
+  const kept = responses.filter((response) => response.headers.get('cache-control') === IMMUTABLE_ASSET_CACHE)
+  expect(kept.length).toBe(assetPaths().length)
+  expect(kept.length).toBeGreaterThan(0)
+  // Pages, the API and a missing file are never kept.
+  for (const index of [0, 1, 4, responses.length - 1]) expect(responses[index]!.headers.get('cache-control')).toBe('no-store')
 })
 
 test('assets are served by allowlist with their types; nothing outside the build is reachable', async () => {
@@ -237,4 +245,25 @@ test('a cookie GET that changes something is refused from a page on another 127.
   // Reads that change nothing, and the token, are as before.
   expect((await fromPage('/data/size', { 'sec-fetch-site': 'same-site' })).status).toBe(200)
   expect((await rig.bearer('GET', '/update')).status).toBe(200)
+})
+
+test('a dashboard rebuilt while the daemon runs is served under its new file names, and a made-up name lists nothing', () => {
+  const { isAsset, forget } = assetListForTest
+  forget()
+  let built = new Set(['index-aaa111.js', 'index-aaa111.css'])
+  let listings = 0
+  const list = (): ReadonlySet<string> => ((listings += 1), built)
+  expect(isAsset('index-aaa111.js', null, list)).toBe(true)
+  expect(isAsset('index-aaa111.css', null, list)).toBe(true)
+  expect(listings).toBe(1)
+  // `bun run dashboard:build` empties the folder and writes new hashed names.
+  built = new Set(['index-bbb222.js', 'index-bbb222.css'])
+  expect(isAsset('index-bbb222.js', null, list)).toBe(true)
+  expect(isAsset('index-bbb222.css', null, list)).toBe(true)
+  expect(isAsset('index-aaa111.js', null, list)).toBe(false)
+  // A name that is no build file reads no folder; an unknown one that could be reads it once per ask.
+  const before = listings
+  for (const name of ['../routes.ts', 'index.html', 'A.JS', '']) expect(isAsset(name, null, list)).toBe(false)
+  expect(listings).toBe(before)
+  forget()
 })

@@ -13,7 +13,7 @@
 
 import { isAbsolute } from 'node:path'
 import { type EventKind, type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../contract/event'
-import { type AdapterContext, AdapterInputError } from './context'
+import { type AdapterContext, AdapterInputError, lenient, str } from './context'
 
 export const AMP_HOST = 'amp'
 
@@ -25,10 +25,6 @@ const KINDS: Readonly<Record<string, EventKind>> = {
 }
 
 type Payload = Record<string, unknown>
-
-function str(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
-}
 
 const asText = (value: unknown): string => (value === undefined || value === null ? '' : typeof value === 'string' ? value : JSON.stringify(value))
 
@@ -76,14 +72,7 @@ export function parseAmp(payload: unknown, context: AdapterContext): NormalizedE
 }
 
 /** A payload it cannot map is not captured, rather than an error, since the agent is built from docs. */
-export function normalizeAmp(payload: unknown, context: AdapterContext): NormalizedEvent | null {
-  try {
-    return parseAmp(payload, context)
-  } catch (error: unknown) {
-    if (error instanceof AdapterInputError) return null
-    throw error
-  }
-}
+export const normalizeAmp: (payload: unknown, context: AdapterContext) => NormalizedEvent | null = lenient(parseAmp)
 
 /** The AgentStartResult agent.start returns: a message appended after the user's text, not shown in the UI. */
 export function ampMessageOutput(text: string): string {

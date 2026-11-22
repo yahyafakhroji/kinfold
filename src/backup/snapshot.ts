@@ -43,7 +43,12 @@ export interface SnapshotWorkerInput {
   libraryOverride: string | null
   /** The worker script; tests pass their own. */
   workerUrl?: string
+  /** How long the worker may take; default SNAPSHOT_TIMEOUT_MS. */
+  timeoutMs?: number
 }
+
+/** Far past any real snapshot (VACUUM INTO of a multi-gigabyte store on a slow disk): a worker still silent by then is stuck. */
+export const SNAPSHOT_TIMEOUT_MS = 30 * 60_000
 
 export type SnapshotWorkerReply = { ok: true; schemaVersion: number } | { ok: false; reason: string }
 
@@ -86,16 +91,25 @@ export function workerEnv(libraryOverride: string | null): Readonly<Record<strin
 export function snapshotInWorker(input: SnapshotWorkerInput): Promise<number> {
   return new Promise<number>((resolve, reject) => {
     const worker = new Worker(input.workerUrl ?? workerUrl())
-    worker.onmessage = (event: MessageEvent<SnapshotWorkerReply>) => {
+    // Settles once, whichever comes first: the reply, an error, the worker ending without either, or the deadline.
+    // Without the last two a worker that died silently left the backup request waiting for good, with WAL
+    // checkpoints held back for as long as it waited.
+    let settled = false
+    const settle = (finish: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(deadline)
       worker.terminate()
-      if (event.data.ok) resolve(event.data.schemaVersion)
-      else reject(new Error(event.data.reason))
+      finish()
+    }
+    const deadline = setTimeout(() => settle(() => reject(new Error('the snapshot worker did not answer in time'))), input.timeoutMs ?? SNAPSHOT_TIMEOUT_MS)
+    worker.onmessage = (event: MessageEvent<SnapshotWorkerReply>) => {
+      const reply = event.data
+      settle(() => (reply.ok ? resolve(reply.schemaVersion) : reject(new Error(reply.reason))))
     }
     // The event's own message can quote a path; the fixed text is enough.
-    worker.onerror = () => {
-      worker.terminate()
-      reject(new Error('the snapshot worker failed'))
-    }
+    worker.onerror = () => settle(() => reject(new Error('the snapshot worker failed')))
+    worker.addEventListener('close', () => settle(() => reject(new Error('the snapshot worker stopped without an answer'))))
     worker.postMessage({ dbPath: input.dbPath, key: input.key, dest: input.dest, libraryOverride: input.libraryOverride })
   })
 }

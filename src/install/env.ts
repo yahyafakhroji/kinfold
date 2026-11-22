@@ -209,6 +209,4 @@ export function noticeOf(env: Pick<InstallEnv, 'out' | 'notice'>): (line: string
   return env.notice ?? env.out
 }
 
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
+export { errorMessage } from '../errors'

@@ -62,7 +62,7 @@ function fieldsOf(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null
 }
 
-const isTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
+export const isTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 
 function attemptOf(value: unknown): AutoUpdateAttempt | null {
   const fields = fieldsOf(value)

@@ -12,7 +12,8 @@ import { setVecReady, startActive } from '../store/vector-spaces'
 import { encodeVector, nearestObservations } from '../store/vector-store'
 import { upsertProject } from '../store/writes'
 import { LOCAL_MODEL_DIMS, LOCAL_MODEL_ID } from './local-model'
-import { createVecIndex, nearestFor, reconcileVecIndex } from './vec-index'
+import { createVecIndex, nearestFor } from './vec-index'
+import { reconcileVecIndex } from './vec-index.test-support'
 
 const VEC0 = readEnv(process.env, 'TEST_VEC0')
 const BENCH_VECTORS = 50_000

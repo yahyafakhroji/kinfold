@@ -34,7 +34,7 @@ function plan(env: InstallEnv, path: string, file: TomlFile, next: string, summa
   return [
     ...(existsSync(dirname(path)) ? [] : [{ kind: 'mkdir', path: dirname(path), mode: DIR_MODE } as const]),
     ...(backup !== null ? [{ kind: 'backup', from: path, to: backup } as const] : []),
-    { kind: 'write', path, content: next, mode, summary },
+    { kind: 'write', path, content: next, before: file.text, mode, summary },
   ]
 }
 

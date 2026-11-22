@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { type SignedRequest, bodyHash, newKeyPair, signReply, signRequest, verifyReply, verifyRequest } from './keys'
+import { SKEW_MS, createNonceCache } from './auth'
 
 const device = newKeyPair()
 const hub = newKeyPair()
@@ -40,4 +41,37 @@ test('a request signature never verifies as a reply', () => {
 test('public keys travel as base64 SPKI DER and private keys as PKCS8 PEM', () => {
   expect(Buffer.from(device.publicKey, 'base64').length).toBe(44)
   expect(device.privateKey).toStartWith('-----BEGIN PRIVATE KEY-----')
+})
+
+test('keys used again verify the same, a bad key never starts verifying, and more keys than are kept still work', () => {
+  const pairs = Array.from({ length: 70 }, () => newKeyPair())
+  const request: SignedRequest = { method: 'POST', path: '/central/capture', deviceId: 'dev-1', time: 1, nonce: 'n'.repeat(16), bodySha256: bodyHash(new Uint8Array(0)) }
+  for (let round = 0; round < 2; round += 1) {
+    for (const [index, pair] of pairs.entries()) {
+      const signature = signRequest(pair.privateKey, request)
+      expect(verifyRequest(pair.publicKey, request, signature)).toBe(true)
+      expect(verifyRequest(pairs[(index + 1) % pairs.length]!.publicKey, request, signature)).toBe(false)
+    }
+  }
+  const signature = signRequest(pairs[0]!.privateKey, request)
+  for (let attempt = 0; attempt < 2; attempt += 1) expect(verifyRequest('not a key', request, signature)).toBe(false)
+  expect(() => signRequest('not a pem', request)).toThrow()
+  expect(() => signRequest('not a pem', request)).toThrow()
+})
+
+test('the nonce cache drops what expired and still refuses a live nonce seen before many others', () => {
+  let now = 1_000
+  const cache = createNonceCache(() => now)
+  expect(cache.claim('dev-1', 'first')).toBe(true)
+  for (let index = 0; index < 500; index += 1) {
+    now += 1
+    expect(cache.claim('dev-1', `n${index}`)).toBe(true)
+  }
+  expect(cache.claim('dev-1', 'first')).toBe(false)
+  expect(cache.claim('dev-1', 'n499')).toBe(false)
+  // Past the window for the early ones only: they may be claimed again, the late ones may not.
+  now = 1_000 + 2 * SKEW_MS + 100
+  expect(cache.claim('dev-1', 'first')).toBe(true)
+  expect(cache.claim('dev-1', 'n50')).toBe(true)
+  expect(cache.claim('dev-1', 'n499')).toBe(false)
 })

@@ -109,7 +109,7 @@ test('every embedding call the daemon makes is counted when it is made, and a co
 // --- the holdout comparison ---
 
 const sample = (heldOut: boolean, tokens: number, toolCalls = 2, durationMs: number | null = 10_000, projectKey = 'org/repo'): TurnSample =>
-  ({ heldOut, projectKey, tokens, outputTokens: Math.round(tokens / 10), toolCalls, durationMs })
+  ({ host: 'claude-code', heldOut, projectKey, tokens, outputTokens: Math.round(tokens / 10), toolCalls, durationMs })
 
 test('spread is the median and the quartiles, in plain numbers', () => {
   expect(spread([])).toEqual({ n: 0, median: null, low: null, high: null })
@@ -160,7 +160,7 @@ test('the metrics summary carries the impact block: costs over the window, the d
   countEmbeddingCall(db, 3, T0 + 3)
   db.run(`INSERT INTO turn_usage (session_id, prompt_number, host, project_key, held_out, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, tool_calls, duration_ms, occurred_at)
     VALUES (${a}, 1, 'claude-code', 'org/repo', 1, 10, 20, 300, 40, 3, 5000, ${T0 + 4})`)
-  expect(turnUsageRows(db)).toEqual([{ heldOut: true, projectKey: 'org/repo', tokens: 370, outputTokens: 20, toolCalls: 3, durationMs: 5000 }])
+  expect(turnUsageRows(db)).toEqual([{ host: 'claude-code', heldOut: true, projectKey: 'org/repo', tokens: 370, outputTokens: 20, toolCalls: 3, durationMs: 5000 }])
 
   const impact = impactSummary(db, T0, '24h')
   expect(impact.context).toEqual([{ host: 'claude-code', sessions: 1, prompts: 1, startTokens: 700, promptTokens: 0, tokens: 700, heldOut: 0, tokensPerSession: 700, tokensPerPrompt: 0 }])

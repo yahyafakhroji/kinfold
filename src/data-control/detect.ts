@@ -8,7 +8,7 @@
 
 import type { NormalizedEvent, RedactionNote } from '../contract/event'
 import { isRecord } from '../contract/event'
-import { secondPass } from '../daemon/ingest'
+import { secondPass } from '../capture/second-pass'
 import { type RedactOptions, redactText } from '../redaction/redact'
 import type { ScanRow } from '../store/scan-store'
 

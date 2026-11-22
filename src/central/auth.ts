@@ -37,7 +37,12 @@ export function createNonceCache(now: () => number = Date.now): NonceCache {
     claim: (deviceId, nonce) => {
       const at = now()
       // Anything older than both sides of the clock window could no longer pass, so it need not be remembered.
-      for (const [key, until] of seen) if (until < at) seen.delete(key)
+      // Every entry lives the same time, so the map's insertion order is its expiry order: stop at the first one still
+      // live and a claim costs what has expired, not everything seen in the window.
+      for (const [key, until] of seen) {
+        if (until >= at) break
+        seen.delete(key)
+      }
       const key = `${deviceId}\n${nonce}`
       if (seen.has(key)) return false
       seen.set(key, at + 2 * SKEW_MS)

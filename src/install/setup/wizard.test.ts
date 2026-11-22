@@ -960,3 +960,15 @@ for (const [name, enter] of [['\\r', '\r'], ['\\r\\n', '\r\n']] as const) test(`
     clearInterval(typing)
   }
 })
+
+test('a typed port that is in use is refused with who holds it, and the question is asked again', async () => {
+  // Folder, then the port typed twice (a busy one, then a free one), then the rest by default.
+  const { w, term } = setup([ENTER, `40123${ENTER}`, `40124${ENTER}`, ENTER, ENTER, ENTER])
+  w.env.portFree = async (port) => port !== 40123
+  w.env.run = async (request) => (request.argv[0] === '/usr/sbin/lsof' ? { exitCode: 0, stdout: '4242\n', stderr: '' } : { exitCode: 1, stdout: '', stderr: '' })
+  const answers = await runWizard(w.env, ask(w), await readSetupState(w.env), flagsOf({ hosts: [], noEncrypt: true }), NO_CHOICE)
+  expect(answers.port).toBe(40124)
+  expect(term.output()).toContain('Port 40123 is in use (process 4242). Port for the daemon:')
+  // The suggested port was free, so the first question names no busy port.
+  expect(term.output()).not.toContain('Port 37811 is in use')
+})

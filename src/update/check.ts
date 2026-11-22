@@ -8,6 +8,7 @@ import { betaChannelOn, updatesEnabled } from './enabled'
 import { type ReleaseInfo, releaseFromGithub } from './release'
 import { mergeUpdateState, readUpdateState } from './state'
 import { compareVersions, isPatchUpdate } from './version-order'
+import { readCappedText } from '../http/capped'
 
 export const LATEST_RELEASE_URL = 'https://api.github.com/repos/yahyafakhroji/kinfold/releases/latest'
 /** The beta channel's one URL: /releases/latest never names a prerelease. */
@@ -35,25 +36,6 @@ export class UpdateCheckError extends Error {
     this.name = 'UpdateCheckError'
     this.label = label
   }
-}
-
-/** Reads the body up to the cap and stops there; a longer one is refused, not truncated. */
-async function readCapped(response: Response): Promise<string> {
-  const reader = response.body?.getReader()
-  if (reader === undefined) return ''
-  const chunks: Uint8Array[] = []
-  let size = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    size += value.byteLength
-    if (size > MAX_RELEASE_BYTES) {
-      await reader.cancel().catch(() => undefined)
-      throw new UpdateCheckError('response too large')
-    }
-    chunks.push(value)
-  }
-  return new TextDecoder().decode(Buffer.concat(chunks))
 }
 
 /** The newest of `releases` the channel takes: finals, and prereleases with beta on. */
@@ -104,7 +86,9 @@ async function fetchJson(fetchFn: UpdateCheckDeps['fetch'], url: string): Promis
     await response.body?.cancel().catch(() => undefined)
     throw new UpdateCheckError(String(response.status))
   }
-  const text = await readCapped(response)
+  // A longer body is refused, not truncated.
+  const text = await readCappedText(response, MAX_RELEASE_BYTES)
+  if (text === null) throw new UpdateCheckError('response too large')
   try {
     return JSON.parse(text)
   } catch {

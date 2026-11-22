@@ -18,6 +18,7 @@ import { type PrepareOptions, cleanText } from '../capture/prepare'
 import { sessionWritable } from './hub-capture'
 import type { HubAnswer } from './hub-server'
 import { centralProjectKey, parseDeviceProject } from './project-key'
+import { isRecord } from '../contract/event'
 
 /** Well under the hub's 4 MB cap. */
 export const IMPORT_CHUNK_BYTES = 1_500_000
@@ -95,12 +96,16 @@ class ChunkBuilder {
     return header + (row === undefined ? 0 : bytesOf(row) + 1)
   }
 
-  add(piece: Piece): void {
-    this.bytes += this.cost(piece)
+  /** `cost` is what cost(piece) answered, so the piece is turned into JSON once and not twice. */
+  add(piece: Piece, cost: number): void {
+    this.bytes += cost
     if (piece.session !== null) {
       const key = sessionKey(piece.session)
+      // The arrays are this builder's own, so a session of thousands of prompts is appended to, not copied per prompt.
       const held = this.sessions.get(key) ?? { ...piece.session, prompts: [], summaries: [] }
-      this.sessions.set(key, { ...held, prompts: piece.prompt === undefined ? held.prompts : [...held.prompts, piece.prompt], summaries: piece.summary === undefined ? held.summaries : [...held.summaries, piece.summary] })
+      if (piece.prompt !== undefined) held.prompts.push(piece.prompt)
+      if (piece.summary !== undefined) held.summaries.push(piece.summary)
+      this.sessions.set(key, held)
     }
     if (piece.observation !== undefined) this.observations.push(piece.observation)
   }
@@ -140,11 +145,14 @@ export function* exportProject(db: Database, project: ProjectKey, deviceId: stri
   const central = centralProjectKey(project, deviceId)
   let chunk = new ChunkBuilder(central)
   for (const piece of piecesOf(db, project)) {
-    if (!chunk.empty && chunk.size + chunk.cost(piece) > chunkBytes) {
+    let cost = chunk.cost(piece)
+    if (!chunk.empty && chunk.size + cost > chunkBytes) {
       yield chunk.build()
       chunk = new ChunkBuilder(central)
+      // A new chunk carries the session's header again.
+      cost = chunk.cost(piece)
     }
-    chunk.add(piece)
+    chunk.add(piece, cost)
   }
   if (!chunk.empty) yield chunk.build()
 }
@@ -153,7 +161,6 @@ export function* exportProject(db: Database, project: ProjectKey, deviceId: stri
 
 const HOST = /^[a-z][a-z0-9-]{1,31}$/
 const EVIDENCE = new Set(['tool-verified', 'interpretation', 'user-stated'])
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const isTime = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0
 const isCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0
 const isText = (value: unknown, max = MAX_TEXT): value is string => typeof value === 'string' && value.length <= max
@@ -240,6 +247,12 @@ export function importChunk(db: Database, body: unknown, deviceId: string, now: 
       }
     }
     for (const observation of chunk.observations) {
+      // An observation may name a session this chunk does not list. It is held to the same rule as a listed one:
+      // a device cannot attach a memory to another device's session, or to one of the hub's own.
+      if (observation.session !== null && !skipped.has(sessionKey(observation.session)) && !sessionWritable(db, observation.session.host, observation.session.hostSessionId, chunk.project.key, deviceId)) {
+        skipped.add(sessionKey(observation.session))
+        counts.skippedSessions += 1
+      }
       if (observation.session !== null && skipped.has(sessionKey(observation.session))) continue
       const session = observation.session === null ? null : sessionId(db, observation.session.host, observation.session.hostSessionId)
       const { session: _ref, ...raw } = observation

@@ -45,6 +45,8 @@ const kindCheck = (value: string): string | null => (value.split(',').every(isAc
 export type ViewRoute = ((method: string, url: URL) => Promise<RouteAnswer | null>) & {
   /** Computes the kept reports now, so the first page that asks finds them ready; failures are logged. */
   warm: () => Promise<void>
+  /** After rows were removed (a purge, a retention run): the next ask of each kept report computes it again, so the pages do not show counts from before. */
+  invalidate: () => void
 }
 
 export function dashboardViews(db: Database, reports: StoreReader, options: DashboardViewOptions = {}): ViewRoute {
@@ -129,5 +131,8 @@ export function dashboardViews(db: Database, reports: StoreReader, options: Dash
       options.log?.(`dashboard report warm-up failed: ${error instanceof Error ? error.name : 'error'}`)
     }
   }
-  return Object.assign(route, { warm })
+  const invalidate = (): void => {
+    for (const kept of [measured, overview, ...impact.values()]) kept.invalidate()
+  }
+  return Object.assign(route, { warm, invalidate })
 }

@@ -9,6 +9,7 @@
 import { closeSync, linkSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { DATA_FILE_MODE } from '../store/data-dir'
+import { errorCode } from '../errors'
 
 export const UPDATE_LOCK_FILE = 'auto-update.lock'
 /** Far longer than an update takes: the download gives up after five minutes and the install after fifteen. */
@@ -31,7 +32,7 @@ export interface UpdateLock {
 }
 
 /** EPERM means the pid exists under another user, so only ESRCH counts as gone. */
-function pidAlive(pid: number): boolean {
+export function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
     return true
@@ -68,10 +69,6 @@ export function lockHolder(dataDir: string, file: string, alive: (pid: number) =
   const lock = written(dataDir, file)
   if (lock === null || now - lock.takenAt > LOCK_MAX_AGE_MS) return null
   return alive(lock.pid) ? lock.pid : null
-}
-
-function errorCode(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException).code
 }
 
 /**

@@ -15,6 +15,7 @@
 import { closeSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import type { Database } from '../sqlite/types'
+import { isRecord } from '../contract/event'
 
 export const MAX_TRANSCRIPT_TAIL_BYTES = 8 * 1024 * 1024
 
@@ -40,10 +41,6 @@ export interface TurnEnd {
 
 type Entry = Record<string, unknown>
 
-function isRecord(value: unknown): value is Entry {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 /** A turn_end older than this is not read: by then the transcript's last turn may be a later one. */
 export const MAX_TURN_END_AGE_MS = 60_000
 
@@ -66,27 +63,64 @@ export function freshTurnEnds(turns: readonly TurnEnd[], now: number): TurnEnd[]
 /** First read of the file's end; it grows from here only while the turn's prompt is not in view. */
 const FIRST_TAIL_BYTES = 256 * 1024
 
-/** The last `maxBytes` of the file as whole lines; null when it cannot be read. */
-function tailLines(path: string, maxBytes: number): string[] | null {
+/** Reads bytes [start, end) of an open file; fewer when the file ends first. */
+function readRange(fd: number, start: number, end: number): Buffer {
+  const buffer = Buffer.alloc(end - start)
+  let read = 0
+  while (read < buffer.length) {
+    const got = readSync(fd, buffer, read, buffer.length - read, start + read)
+    if (got === 0) break
+    read += got
+  }
+  return buffer.subarray(0, read)
+}
+
+const NEWLINE = 0x0a
+
+/**
+ * The turn at the file's end: its prompt entry and the entries after it, or
+ * null when no prompt is within the last `maxBytes`. The file is read from its
+ * end backward, a region at a time, and each region is read and parsed once:
+ * lines are parsed from the newest back to the turn's prompt and no further.
+ * A long turn used to re-read the whole tail at every widening step and parse
+ * every line in it, about 13 MB of JSON for a prompt 8 MB back.
+ */
+function lastTurn(fd: number, size: number, maxBytes: number): { prompt: Entry; after: Entry[] } | null {
+  /** Entries newer than the region being read, oldest first. */
+  let after: Entry[] = []
+  /** The start of the region already read: a line's tail whose head is in the region before it. Bytes, so a character cut by the boundary is whole again when joined. */
+  let carry: Buffer = Buffer.alloc(0)
+  let end = size
+  for (let bytes = Math.min(FIRST_TAIL_BYTES, maxBytes); ; bytes = Math.min(bytes * 4, maxBytes)) {
+    const start = Math.max(0, size - bytes)
+    const region = Buffer.concat([readRange(fd, start, end), carry])
+    // A region that starts mid-file starts mid-line: that first piece waits for the region before it.
+    const firstBreak = start > 0 ? region.indexOf(NEWLINE) : -1
+    carry = start > 0 ? region.subarray(0, firstBreak === -1 ? region.length : firstBreak) : Buffer.alloc(0)
+    const lines = start > 0 ? (firstBreak === -1 ? [] : region.subarray(firstBreak + 1).toString('utf8').split('\n')) : region.toString('utf8').split('\n')
+    const found: Entry[] = []
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const entry = parse(lines[index]!)
+      if (entry === null) continue
+      if (isPrompt(entry)) return { prompt: entry, after: [...found.reverse(), ...after] }
+      found.push(entry)
+    }
+    after = [...found.reverse(), ...after]
+    end = start
+    if (start === 0 || bytes >= maxBytes) return null
+  }
+}
+
+/** The turn at the end of the transcript; null when the file cannot be read or holds no prompt in reach. */
+function readLastTurn(path: string, maxBytes: number): { prompt: Entry; after: Entry[] } | null {
   let fd: number | null = null
   try {
     // Checked before opening: opening a FIFO for reading blocks until something writes to it, which would hang the daemon.
     if (!lstatSync(path).isFile()) return null
     fd = openSync(path, 'r')
     const stat = fstatSync(fd)
-    if (!stat.isFile()) return null
-    const length = Math.min(stat.size, maxBytes)
-    const start = stat.size - length
-    const buffer = Buffer.alloc(length)
-    let read = 0
-    while (read < length) {
-      const got = readSync(fd, buffer, read, length - read, start + read)
-      if (got === 0) break
-      read += got
-    }
-    const lines = buffer.subarray(0, read).toString('utf8').split('\n')
-    // A read that starts mid-file starts mid-line: that first piece is dropped.
-    return start > 0 ? lines.slice(1) : lines
+    // The size is taken once: an agent appending to the file while it is read cannot shift the regions.
+    return stat.isFile() ? lastTurn(fd, stat.size, maxBytes) : null
   } catch {
     return null
   } finally {
@@ -135,25 +169,15 @@ interface Call {
  */
 export function readTurnUsage(path: string, maxBytes: number = MAX_TRANSCRIPT_TAIL_BYTES): TurnUsage | null {
   if (!isAbsolute(path) || !path.endsWith('.jsonl')) return null
-  // A turn sits at the file's end and is usually small, so the read starts small and widens only until the turn's prompt is in view.
-  let entries: Entry[] = []
-  let promptAt = -1
-  for (let bytes = Math.min(FIRST_TAIL_BYTES, maxBytes); ; bytes = Math.min(bytes * 4, maxBytes)) {
-    const tail = tailLines(path, bytes)
-    if (tail === null) return null
-    entries = tail.map(parse).filter((entry): entry is Entry => entry !== null)
-    promptAt = entries.length - 1
-    while (promptAt >= 0 && !isPrompt(entries[promptAt]!)) promptAt -= 1
-    if (promptAt !== -1 || bytes >= maxBytes) break
-  }
-  if (promptAt === -1) return null
+  const turn = readLastTurn(path, maxBytes)
+  if (turn === null) return null
 
   // Claude Code writes one entry per content block, each repeating its call's message id and usage.
   const calls = new Map<string, Call>()
   const tools = new Set<string>()
   let lastAt: number | null = null
   let unnamed = 0
-  for (const entry of entries.slice(promptAt + 1)) {
+  for (const entry of turn.after) {
     if (entry.type !== 'assistant' || !mainThread(entry) || !isRecord(entry.message)) continue
     const message = entry.message
     const used = isRecord(message.usage) ? message.usage : null
@@ -175,7 +199,7 @@ export function readTurnUsage(path: string, maxBytes: number = MAX_TRANSCRIPT_TA
     lastAt = timeOf(entry) ?? lastAt
   }
   if (calls.size === 0) return null
-  const startedAt = timeOf(entries[promptAt]!)
+  const startedAt = timeOf(turn.prompt)
   const total = [...calls.values()].reduce((sum, call) => ({
     input: sum.input + call.input, output: sum.output + call.output, cacheRead: sum.cacheRead + call.cacheRead, cacheCreation: sum.cacheCreation + call.cacheCreation,
   }))

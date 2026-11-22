@@ -114,7 +114,7 @@ export interface SpoolCursor {
   reset(): void
 }
 
-function listEntries(dir: string): string[] {
+export function listEntries(dir: string): string[] {
   return existsSync(dir) ? readdirSync(dir).filter((file) => ENTRY_NAME.test(file)).sort() : []
 }
 

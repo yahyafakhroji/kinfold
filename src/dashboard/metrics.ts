@@ -13,7 +13,7 @@
 // used (src/dashboard/hit-rate.ts says what each one does and does not show).
 
 import type { StoreReader } from '../workers/store-reader'
-import { OBSERVER_ERROR_CLASSES, type ObserverErrorClass } from '../observer/types'
+import { errorClassOf } from '../observer/types'
 import type { Database } from '../sqlite/types'
 import { type EventStageRow, type TurnLagRow, eventStages, turnLags } from '../store/latency-reads'
 import { injectedIdsSince, mcpReadsSince } from '../store/mcp-read-store'
@@ -105,11 +105,7 @@ export function percentiles(values: readonly number[]): Percentiles {
   return { samples: values.length, p50: percentile(values, 0.5), p95: percentile(values, 0.95) }
 }
 
-/** The class part of a stored run error; unknown shapes become "other". */
-export function errorClassOf(error: string | null): ObserverErrorClass | 'other' {
-  const head = (error ?? '').split(':')[0]?.trim() ?? ''
-  return OBSERVER_ERROR_CLASSES.includes(head as ObserverErrorClass) ? (head as ObserverErrorClass) : 'other'
-}
+export { errorClassOf }
 
 function summarizeGroup(host: string, provider: string, rows: readonly RunRow[]): RunGroup {
   const succeeded = rows.filter((row) => row.status === 'succeeded').length

@@ -10,7 +10,7 @@ import { openStore } from '../store/db'
 import { shimContent } from '../install/opencode-shim'
 import { upsertProject, upsertSession } from '../store/writes'
 import * as entry from './opencode'
-import { type ContextFetcher, type OpenCodeSetupContext, createOpenCodePlugin } from './opencode-plugin'
+import { type ContextFetcher, type OpenCodeSetupContext, createInstanceFilter, createOpenCodePlugin, createStartSynthesizer } from './opencode-plugin'
 
 const FIXTURES = join(import.meta.dir, '../../test/fixtures/opencode')
 const fixture = <T = unknown>(name: string): T =>
@@ -350,4 +350,28 @@ test('the checkout shim carries a non-default folder', async () => {
     if (saved.env !== undefined) process.env.KINFOLD_DATA_DIR = saved.env
     if (saved.home !== undefined) process.env.HOME = saved.home
   }
+})
+
+test('a session still in use keeps its owner and gets no second synthetic start when the maps are full', () => {
+  const envelope = (sessionID: string): unknown => ({ type: 'message.updated', created: 1, location: {}, data: { sessionID } })
+  const owners = new Map<string, string>()
+  const ignore = createInstanceFilter(owners)
+  const startFor = createStartSynthesizer()
+  expect(ignore(envelope('live'), 'a')).toBe(false)
+  expect(startFor(envelope('live'))).not.toBeNull()
+  for (let index = 0; index < 255; index += 1) {
+    ignore(envelope(`s${index}`), 'a')
+    startFor(envelope(`s${index}`))
+  }
+  // The first session is used again, then more sessions than the maps hold arrive.
+  expect(ignore(envelope('live'), 'a')).toBe(false)
+  expect(startFor(envelope('live'))).toBeNull()
+  for (let index = 255; index < 455; index += 1) {
+    ignore(envelope(`s${index}`), 'a')
+    startFor(envelope(`s${index}`))
+  }
+  // Another instance still may not take it, and it is not started a second time.
+  expect(ignore(envelope('live'), 'b')).toBe(true)
+  expect(startFor(envelope('live'))).toBeNull()
+  expect(owners.size).toBeLessThanOrEqual(256)
 })

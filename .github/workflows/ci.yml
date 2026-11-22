@@ -32,9 +32,11 @@ jobs:
           - os: windows-latest
             required: true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
 
@@ -70,8 +72,9 @@ jobs:
       # src/mcp/semantic-client.test.ts and src/vectors/embedder.test.ts await,
       # and the per-test timeout cannot end that await, so those two files are
       # skipped there and every other file still reports.
+      # The Windows runner takes 9 to 11 minutes on a good run and has slow stretches, so it gets 20; the others keep 12.
       - name: Test
-        timeout-minutes: 12
+        timeout-minutes: ${{ matrix.os == 'windows-latest' && 20 || 12 }}
         shell: bash
         run: |
           ignore=()
@@ -99,9 +102,11 @@ jobs:
           - os: windows-latest
             required: true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
 
@@ -123,11 +128,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
 

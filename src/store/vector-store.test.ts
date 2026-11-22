@@ -5,7 +5,7 @@ import { PROJECT, T0, type TempStore, openTempStore, seedSession } from '../obse
 import { FAKE_DIMS, fakeVector } from '../vectors/test-support'
 import {
   EMBEDDING_INPUTS_SQL, type EmbeddingInput, INDEXED_COUNT_SQL, MAX_EMBED_CHARS, PENDING_COUNT_SQL,
-  decodeVector, embeddingInputs, embeddingText, encodeVector, upsertVectors, vectorCounts,
+  backlogExceeds, decodeVector, embeddingInputs, embeddingText, encodeVector, upsertVectors, vectorCounts,
 } from './vector-store'
 
 let temp: TempStore
@@ -113,4 +113,16 @@ test('the table refuses an embedding whose length does not match its dims', () =
   const id = seed('bad blob')
   expect(() => temp.store.db.query('INSERT INTO observation_vectors (observation_id, model, dims, embedding, created_at) VALUES (?, ?, ?, ?, ?)')
     .run(id, 'm1', FAKE_DIMS, new Uint8Array(3), T0)).toThrow()
+})
+
+test('backlogExceeds answers whether more than the allowed backlog waits, reading no further than one past it', () => {
+  for (let index = 0; index < 5; index += 1) seed(`note ${index}`, T0 + index)
+  const m1 = space('m1')
+  expect(backlogExceeds(temp.store.db, m1, 4)).toBe(true)
+  expect(backlogExceeds(temp.store.db, m1, 5)).toBe(false)
+  expect(backlogExceeds(temp.store.db, m1, 0)).toBe(true)
+  expect(embedAll('m1')).toBe(5)
+  expect(backlogExceeds(temp.store.db, m1, 0)).toBe(false)
+  // Another space has embedded none of them.
+  expect(backlogExceeds(temp.store.db, space('m2'), 4)).toBe(true)
 })

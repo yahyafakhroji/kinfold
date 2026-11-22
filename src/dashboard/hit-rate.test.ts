@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { type TempStore, openTempStore } from '../observer/test-support'
 import { recordInjection } from '../store/context-store'
 import { type InjectedIds, type StoredMcpRead, insertMcpRead } from '../store/mcp-read-store'
-import { FETCH_HORIZON_MS, fetchAfterInject, groupReads, searchHit } from './hit-rate'
+import { FETCH_HORIZON_MS, anyWithin, fetchAfterInject, groupReads, searchHit } from './hit-rate'
 import { metricsSummary } from './metrics'
 
 const HOUR = 3_600_000
@@ -75,4 +75,26 @@ test('the summary reads seeded rows over the window and leaves older ones out', 
   })
   expect(summary.injectionLatency).toEqual([{ host: 'opencode', channel: 'request', durationMs: { samples: 1, p50: 2, p95: 2 } }])
   expect(metricsSummary(temp.store.db, '24h', NOW + 23 * HOUR).hitRate.fetchAfterInject).toMatchObject({ injected: 0, rate: null })
+})
+
+test('anyWithin finds a fetch inside the horizon after any injection, whatever the order the times come in', () => {
+  expect(anyWithin([100, 500], [90, 450], 60)).toBe(false)
+  expect(anyWithin([100, 500], [90, 560], 60)).toBe(true)
+  expect(anyWithin([500, 100], [560, 90], 60)).toBe(true)
+  expect(anyWithin([100], [100], 0)).toBe(true)
+  expect(anyWithin([100], [161], 60)).toBe(false)
+  expect(anyWithin([100, 300], [50, 250, 299], 60)).toBe(false)
+  expect(anyWithin([], [1], 60)).toBe(false)
+  expect(anyWithin([1], [], 60)).toBe(false)
+})
+
+test('a memory recalled thousands of times is grouped without copying its list each time', () => {
+  const injections = Array.from({ length: 20_000 }, (_, index) => ({ projectKey: 'org/repo', observationIds: [1, 2], occurredAt: index * 10 }))
+  const reads = Array.from({ length: 2_000 }, (_, index) => ({ host: 'codex', tool: 'get_observations', status: 'ok', rows: 1, projectKey: 'org/repo', returnedIds: [2], occurredAt: 1_000_000_000 + index }))
+  const startedAt = performance.now()
+  const result = fetchAfterInject(injections as never, reads as never, 60_000)
+  const ms = performance.now() - startedAt
+  expect(result).toMatchObject({ injected: 2, fetched: 0 })
+  // About 300 ms with a copy per append and every time tested against every fetch, about 5 ms now: a slow runner has fifty times the room.
+  expect(ms).toBeLessThan(250)
 })

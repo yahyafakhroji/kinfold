@@ -18,6 +18,7 @@
 // usage. A measured result, whatever it found, always wins over it.
 
 import type { Database } from '../sqlite/types'
+import { TURN_USAGE_LIMIT, comparableTurns, turnUsageRows } from '../store/impact-reads'
 import { MIN_HOLDOUT_SAMPLE } from './impact'
 
 export const BOOTSTRAP_RESAMPLES = 2_000
@@ -61,9 +62,52 @@ function seeded(seed: number): () => number {
   }
 }
 
-function resampledMedian(values: readonly number[], random: () => number): number {
-  const sample = Array.from({ length: values.length }, () => values[Math.floor(random() * values.length)]!)
-  return median(sample.sort((a, b) => a - b))
+/** Puts the k-th smallest of `values` at index k, with nothing larger before it and nothing smaller after it (quickselect, in place). */
+function selectInPlace(values: Float64Array, k: number): void {
+  let low = 0
+  let high = values.length - 1
+  while (low < high) {
+    const pivot = values[(low + high) >>> 1]!
+    let left = low
+    let right = high
+    while (left <= right) {
+      while (values[left]! < pivot) left += 1
+      while (values[right]! > pivot) right -= 1
+      if (left <= right) {
+        const held = values[left]!
+        values[left] = values[right]!
+        values[right] = held
+        left += 1
+        right -= 1
+      }
+    }
+    if (k <= right) high = right
+    else if (k >= left) low = left
+    else return
+  }
+}
+
+/** The median of `values`, which it reorders: the same number sorting would give, without the sort. */
+export function medianInPlace(values: Float64Array): number {
+  const upper = values.length >>> 1
+  selectInPlace(values, upper)
+  if (values.length % 2 === 1) return values[upper]!
+  // Even: the other middle value is the largest of those the selection left before it.
+  let lower = values[0]!
+  for (let index = 1; index < upper; index += 1) if (values[index]! > lower) lower = values[index]!
+  return (lower + values[upper]!) / 2
+}
+
+/**
+ * The median of one resample (as many draws, with replacement, as there are
+ * values), drawn into `scratch`. The draws are the ones a sorted copy would be
+ * made from, so the figures are unchanged; what changed is the cost: a fresh
+ * array sorted 4,000 times per agent took about 0.9 s at the 20,000-turn cap,
+ * and this takes about half of that, most of it the draws themselves.
+ */
+function resampledMedian(values: readonly number[], random: () => number, scratch: Float64Array): number {
+  for (let index = 0; index < values.length; index += 1) scratch[index] = values[Math.floor(random() * values.length)]!
+  return medianInPlace(scratch)
 }
 
 function compare(held: readonly number[], normal: readonly number[], minSample: number): Measured {
@@ -71,7 +115,9 @@ function compare(held: readonly number[], normal: readonly number[], minSample: 
   const sortedHeld = [...held].sort((a, b) => a - b)
   const sortedNormal = [...normal].sort((a, b) => a - b)
   const random = seeded(SEED)
-  const differences = Array.from({ length: BOOTSTRAP_RESAMPLES }, () => resampledMedian(held, random) - resampledMedian(normal, random)).sort((a, b) => a - b)
+  const heldScratch = new Float64Array(held.length)
+  const normalScratch = new Float64Array(normal.length)
+  const differences = Array.from({ length: BOOTSTRAP_RESAMPLES }, () => resampledMedian(held, random, heldScratch) - resampledMedian(normal, random, normalScratch)).sort((a, b) => a - b)
   const low = Math.round(differences[Math.floor(BOOTSTRAP_RESAMPLES * 0.025)]!)
   const high = Math.round(differences[Math.ceil(BOOTSTRAP_RESAMPLES * 0.975) - 1]!)
   const perTurn = Math.round(median(sortedHeld) - median(sortedNormal))
@@ -84,22 +130,17 @@ export function measureSaving(rows: readonly HostTurn[], minSample: number = MIN
   const hosts = [...new Set(rows.map((row) => row.host))].sort()
   return new Map(hosts.map((host) => {
     const own = rows.filter((row) => row.host === host)
-    const withHeld = new Set(own.filter((row) => row.heldOut).map((row) => row.projectKey))
-    const withNormal = new Set(own.filter((row) => !row.heldOut).map((row) => row.projectKey))
-    const compared = own.filter((row) => withHeld.has(row.projectKey) && withNormal.has(row.projectKey))
+    const compared = comparableTurns(own)
     const tokens = (heldOut: boolean): number[] => compared.filter((row) => row.heldOut === heldOut).map((row) => row.tokens)
     return [host, compare(tokens(true), tokens(false), minSample)] as const
   }))
 }
 
-/** Most recent turns read for the comparison; at one held-out turn in ten this is far past the minimum sample. */
-export const HOST_TURN_LIMIT = 20_000
+/** The same rows the Impact page compares (store/impact-reads.ts), so the two figures are drawn from one read and one limit. */
+export const HOST_TURN_LIMIT = TURN_USAGE_LIMIT
 
 export function hostTurns(db: Database, limit: number = HOST_TURN_LIMIT): HostTurn[] {
-  return db.query<Omit<HostTurn, 'heldOut'> & { heldOut: number }, { limit: number }>(
-    `SELECT host, project_key AS projectKey, held_out AS heldOut, input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens AS tokens
-     FROM turn_usage ORDER BY occurred_at DESC LIMIT $limit`,
-  ).all({ limit }).map((row) => ({ ...row, heldOut: row.heldOut !== 0 }))
+  return turnUsageRows(db, limit).map(({ host, projectKey, heldOut, tokens }) => ({ host, projectKey, heldOut, tokens }))
 }
 
 export interface Estimate {

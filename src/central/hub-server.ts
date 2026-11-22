@@ -17,6 +17,7 @@ import { pendingInvite, redeemInvite } from './invites'
 import { bodyHash, signReply } from './keys'
 import { isLoopbackAddress, isTailscaleAddress } from './tailscale'
 import { versionGap } from './version-rule'
+import { readCapped } from '../http/capped'
 
 export const DEFAULT_HUB_PORT = 37_812
 export const MAX_BODY_BYTES = 16_384
@@ -71,36 +72,6 @@ const PAIR_START_PATH = '/central/pair/start'
 
 function json(status: number, body: unknown, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...extra } })
-}
-
-function declaredLength(request: Request): number {
-  const length = Number(request.headers.get('content-length') ?? '0')
-  return Number.isFinite(length) ? length : 0
-}
-
-async function readCapped(request: Request, limit: number): Promise<Uint8Array | null> {
-  if (declaredLength(request) > limit) return null
-  if (request.body === null) return new Uint8Array(0)
-  const reader = request.body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    total += value.byteLength
-    if (total > limit) {
-      await reader.cancel().catch(() => {})
-      return null
-    }
-    chunks.push(value)
-  }
-  const bytes = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return bytes
 }
 
 function parseJson(bytes: Uint8Array): { ok: true; value: unknown } | { ok: false } {

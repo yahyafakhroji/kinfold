@@ -93,11 +93,22 @@ function mergeRepo(db: Database, root: string, seen: string | null, now: number)
  * batch's transaction, so a merge and the event that caused it commit as one.
  */
 export function registerProject(db: Database, project: ProjectKey, now: number): string {
-  db.query(
-    `INSERT INTO projects (key, key_kind, display_name, created_at, root_commit) VALUES ($key, $kind, $displayName, $now, $root)
-     ON CONFLICT (key) DO UPDATE SET root_commit = coalesce(projects.root_commit, excluded.root_commit)`,
-  ).run({ key: project.key, kind: project.kind, displayName: project.displayName, now, root: project.rootCommit ?? null })
-  if (project.rootCommit !== undefined) mergeRepo(db, project.rootCommit, project.key, now)
+  const root = project.rootCommit ?? null
+  const known = db.query<{ root: string | null }, { key: string }>('SELECT root_commit AS root FROM projects WHERE key = $key').get({ key: project.key })
+  // A key the store holds, with nothing new to record: a read. The hub calls this for every prompt of every device,
+  // and the upsert it used to run each time opened a write on the daemon's one writer for no change.
+  if (known !== null && root === null) return canonicalKey(db, project.key)
+  // One transaction of its own (a savepoint inside a caller's): a merge moves rows in several tables and then writes the
+  // record that lets `kinfold project split` undo it. Cut short between the two, it could not be split back.
+  db.transaction(() => {
+    if (known === null || known.root === null) {
+      db.query(
+        `INSERT INTO projects (key, key_kind, display_name, created_at, root_commit) VALUES ($key, $kind, $displayName, $now, $root)
+         ON CONFLICT (key) DO UPDATE SET root_commit = coalesce(projects.root_commit, excluded.root_commit)`,
+      ).run({ key: project.key, kind: project.kind, displayName: project.displayName, now, root })
+    }
+    if (root !== null) mergeRepo(db, root, project.key, now)
+  })()
   return canonicalKey(db, project.key)
 }
 
@@ -290,8 +301,12 @@ function unrooted(db: Database): Unrooted[] {
 export function planRootMerges(db: Database, rootFor: RootFor): MergeDone[] {
   const roots = keepsRoots(db)
   const known = new Map<string, string>()
+  // Two keys of one repo usually share a folder: the lookup runs once per folder, not once per project.
+  const rootOf = new Map<string, string | null>()
   for (const row of unrooted(db)) {
-    const root = row.cwd === null ? null : rootFor(row.cwd)
+    if (row.cwd === null) continue
+    if (!rootOf.has(row.cwd)) rootOf.set(row.cwd, rootFor(row.cwd))
+    const root = rootOf.get(row.cwd) ?? null
     if (root !== null) known.set(row.key, root)
   }
   if (roots) {

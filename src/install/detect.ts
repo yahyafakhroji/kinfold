@@ -38,17 +38,32 @@ export type InstallHost = AgentId
 export async function detectHosts(env: InstallEnv, override: readonly InstallHost[] | null, profiles: ProfileTable = INSTALL_PROFILES): Promise<HostDetection[]> {
   const excluded = (host: InstallHost): HostDetection => ({ host, selected: false, version: null, note: 'left out by --hosts', leftOut: true })
   const forced = override !== null
-  const detections: HostDetection[] = []
-  for (const host of INSTALL_HOSTS) {
-    const profile = profiles[host]
-    if (override !== null && !override.includes(host)) {
-      detections.push(excluded(host))
-      continue
-    }
-    const { detection } = profile
-    detections.push(typeof detection === 'function' ? await detection(env, forced) : await detectFromSpec(env, host, detection, forced))
+  const detect = (host: InstallHost): HostDetection | Promise<HostDetection> => {
+    if (override !== null && !override.includes(host)) return excluded(host)
+    const { detection } = profiles[host]
+    return typeof detection === 'function' ? detection(env, forced) : detectFromSpec(env, host, detection, forced)
   }
-  return detections
+  return inOrder(INSTALL_HOSTS, DETECT_AT_ONCE, detect)
+}
+
+/**
+ * How many agents are probed at once. Each probe starts the agent's CLI
+ * (`<cli> --version`, half a second or more for a Node-based one, up to its
+ * 5 s timeout when it hangs), and one after another over every known agent
+ * that was the sum of them all. A few at a time keeps the wait near the
+ * slowest one without starting twenty programs together.
+ */
+export const DETECT_AT_ONCE = 6
+
+/** `work` over `items`, at most `limit` running, results in the order of `items` whatever order they finish in. */
+export async function inOrder<Item, Result>(items: readonly Item[], limit: number, work: (item: Item) => Result | Promise<Result>): Promise<Result[]> {
+  const results = new Array<Result>(items.length)
+  let next = 0
+  const worker = async (): Promise<void> => {
+    for (let index = next++; index < items.length; index = next++) results[index] = await work(items[index]!)
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker))
+  return results
 }
 
 export function selectedHosts(detections: readonly HostDetection[]): InstallHost[] {

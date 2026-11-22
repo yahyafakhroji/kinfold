@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ContextRequest, ContextResult } from '../context/types'
 import * as entry from './kilo'
-import { type KiloHooks, KILO_LOG_FILE, MAX_LOG_BYTES, createKiloPlugin } from './kilo-plugin'
+import { type KiloHooks, KILO_LOG_FILE, MAX_LOG_BYTES, createKiloPlugin, fileLog } from './kilo-plugin'
 
 const FIXTURES = join(import.meta.dir, '../../test/fixtures/kilo-code')
 const fixture = <T = Record<string, any>>(name: string): T => JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8')) as T
@@ -208,11 +208,33 @@ test('the log file starts over when it has grown past its cap, so it never fills
   const path = join(root, 'logs', KILO_LOG_FILE)
   const plugin = createKiloPlugin({ dataDir: () => root, env: {}, fetchContext: async () => PACK })
   const hooks = await plugin.server(fixture('server.input'))
+  // Left by an earlier Kilo run: the file is measured when this run writes its first line.
+  mkdirSync(join(root, 'logs'), { recursive: true })
+  writeFileSync(path, 'x'.repeat(MAX_LOG_BYTES + 1))
   const chat = fixture('chat.message')
   await hooks['chat.message']!(chat.input, chat.output)
   await hooks['experimental.chat.system.transform']!({ sessionID: SESSION, model: {} }, { system: [] })
-  writeFileSync(path, 'x'.repeat(MAX_LOG_BYTES + 1))
   await hooks['experimental.session.compacting']!({ sessionID: SESSION }, { context: [] })
   expect(statSync(path).size).toBeLessThan(1024)
   expect(readFileSync(path, 'utf8')).toContain('compaction')
+})
+
+test('the log file also starts over when this run itself grows it past the cap, counting its own lines', () => {
+  const path = join(root, 'logs', KILO_LOG_FILE)
+  const log = fileLog(root)
+  const line = 'y'.repeat(64 * 1024)
+  for (let written = 0; written < MAX_LOG_BYTES; written += line.length) log(line)
+  expect(statSync(path).size).toBeGreaterThan(MAX_LOG_BYTES)
+  log('after the cap')
+  expect(statSync(path).size).toBeLessThan(1024)
+  expect(readFileSync(path, 'utf8')).toContain('after the cap')
+})
+
+test('a log folder removed while Kilo runs is made again for the line after the one that was lost', () => {
+  const log = fileLog(root)
+  log('first')
+  rmSync(join(root, 'logs'), { recursive: true, force: true })
+  log('lost')
+  log('second')
+  expect(readFileSync(join(root, 'logs', KILO_LOG_FILE), 'utf8')).toContain('second')
 })

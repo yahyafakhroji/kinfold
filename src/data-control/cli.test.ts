@@ -267,7 +267,7 @@ test('--dry-run asks nothing on a terminal and deletes nothing', async () => {
 const FINDING = { id: 4, table: 'events', rowId: 12, field: 'payload', rule: 'aws-key', ruleVersion: 2, matches: 1, foundAt: 1, action: 'pending', resolvedAt: null }
 
 /** The world's daemon, with the findings routes answered here: one pending finding, and a record of what was asked. */
-function findingsWorld(findings: unknown[] = [FINDING]): { asked: string[] } {
+function findingsWorld(findings: { id: number }[] = [FINDING], daemon: 'current' | 'before the by-id route' = 'current'): { asked: string[] } {
   startWorldDaemon()
   const asked: string[] = []
   const real = world.env.fetch
@@ -278,6 +278,11 @@ function findingsWorld(findings: unknown[] = [FINDING]): { asked: string[] } {
       if (!path.startsWith('/data/findings')) return real(url, init)
       asked.push(`${init.method ?? 'GET'} ${path}${init.body === undefined ? '' : ` ${String(init.body)}`}`)
       if (init.method === 'POST') return new Response(JSON.stringify({ resolved: { ...FINDING, action: 'purged' } }))
+      const one = /^\/data\/findings\/(\d+)$/.exec(path)
+      if (one !== null) {
+        const finding = daemon === 'current' ? findings.find((candidate) => candidate.id === Number(one[1])) : undefined
+        return finding === undefined ? new Response(JSON.stringify({ error: daemon === 'current' ? 'no such finding' : 'not found' }), { status: 404 }) : new Response(JSON.stringify({ finding }))
+      }
       return new Response(JSON.stringify({ pendingByRule: { 'aws-key': findings.length }, findings }))
     },
   }
@@ -286,6 +291,7 @@ function findingsWorld(findings: unknown[] = [FINDING]): { asked: string[] } {
 
 const RESOLVE = 'POST /data/findings/4/resolve {"action":"purge"}'
 const LIST = 'GET /data/findings?action=pending'
+const ONE = 'GET /data/findings/4'
 
 test('--yes is a findings flag for --purge', () => {
   expect(parsed(['findings', '--purge', '4', '--yes'])).toEqual({ command: 'findings', all: false, resolve: { id: 4, action: 'purge' }, yes: true })
@@ -319,7 +325,7 @@ test('on a terminal findings --purge shows the finding, never its secret, asks w
   expect(lines).toContain('  ! #4 events 12 payload aws-key v2 x1 pending')
   expect(lines.some((line) => line.startsWith('Delete the events row this finding is in? This cannot be undone. (y/N)'))).toBe(true)
   expect(lines).toContain('finding resolved: #4 events 12 payload aws-key v2 x1 purged')
-  expect(asked).toEqual([LIST, RESOLVE])
+  expect(asked).toEqual([ONE, RESOLVE])
 })
 
 test('Enter, n, Ctrl-C or a closed terminal at the findings question deletes nothing', async () => {
@@ -327,7 +333,7 @@ test('Enter, n, Ctrl-C or a closed terminal at the findings question deletes not
     const { asked } = findingsWorld()
     const term = onTerminal(keys)
     expect(await runKinfold(['findings', '--purge', '4'], world.env)).toBe(code)
-    expect(asked).toEqual([LIST])
+    expect(asked).toEqual([ONE])
     if (code === 0) expect(drawnLines(term)).toContain('nothing was deleted')
     await world.cleanup()
     world = createWorld()
@@ -339,7 +345,31 @@ test('a finding that is not pending is named as such and nothing is asked or del
   const term = onTerminal(['y'])
   expect(await runKinfold(['findings', '--purge', '4'], world.env)).toBe(1)
   expect(drawnLines(term)).toContain('x kinfold findings: no pending finding #4; nothing was deleted')
-  expect(asked).toEqual([LIST])
+  expect(asked).toEqual([ONE, LIST])
+})
+
+test('a pending finding older than the newest hundred is found by its id, shown and purged on yes', async () => {
+  // The list holds the newest hundred only; #4 is not among them.
+  const newest = Array.from({ length: 100 }, (_, index) => ({ ...FINDING, id: 1_000 + index }))
+  const real = findingsWorld([...newest, FINDING])
+  const term = onTerminal(['y'])
+  expect(await runKinfold(['findings', '--purge', '4'], world.env)).toBe(0)
+  expect(drawnLines(term)).toContain('  ! #4 events 12 payload aws-key v2 x1 pending')
+  expect(real.asked).toEqual([ONE, RESOLVE])
+})
+
+test('a finding already resolved is not offered again, and a daemon from before the by-id route is asked for its list', async () => {
+  const resolved = findingsWorld([{ ...FINDING, action: 'redacted' } as typeof FINDING])
+  const term = onTerminal(['y'])
+  expect(await runKinfold(['findings', '--purge', '4'], world.env)).toBe(1)
+  expect(drawnLines(term)).toContain('x kinfold findings: no pending finding #4; nothing was deleted')
+  expect(resolved.asked).toEqual([ONE])
+  await world.cleanup()
+  world = createWorld()
+  const older = findingsWorld([FINDING], 'before the by-id route')
+  onTerminal(['y'])
+  expect(await runKinfold(['findings', '--purge', '4'], world.env)).toBe(0)
+  expect(older.asked).toEqual([ONE, LIST, RESOLVE])
 })
 
 test('--redact deletes no row, so it asks nothing', async () => {

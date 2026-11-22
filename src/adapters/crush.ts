@@ -7,7 +7,7 @@
 // Interrupt and StopFailure end a turn as TurnEnd does.
 
 import type { EventKind, NormalizedEvent } from '../contract/event'
-import { normalizeClaudeStyle } from '../agents/families/claude-style-parse'
+import { normalizeClaudeStyle } from './families/claude-style-parse'
 import type { AdapterContext } from './context'
 
 export const CRUSH_HOST = 'crush'

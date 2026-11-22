@@ -10,7 +10,8 @@
 
 import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fsyncDirectory } from '../fs/atomic'
 import { readInstallRecord } from '../install/setup/record'
 import { fileState } from '../sqlite/open'
 import { DATA_DIR_MODE } from '../store/data-dir'
@@ -76,6 +77,12 @@ export async function createBackup(input: CreateBackupInput): Promise<BackupMani
     // A file that appeared meanwhile is someone else's: the rename would replace it.
     if (existsSync(input.dest)) throw new BackupError('state', `${input.dest} exists already; choose another name or remove it`)
     renameSync(partial, input.dest)
+    // The new name too, before the backup is recorded as made. A folder that cannot be synced does not fail a backup that is written.
+    try {
+      fsyncDirectory(dirname(input.dest))
+    } catch {
+      // Some filesystems refuse an fsync on a folder; the file's own bytes are already on disk.
+    }
     if (input.record !== false) writeBackupRecord(input.dataDir, createdAt)
     return manifest
   } finally {

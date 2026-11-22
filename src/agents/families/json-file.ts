@@ -74,6 +74,7 @@ export function plainJsonFileActions(env: InstallEnv, path: string, edits: reado
         kind: 'write',
         path,
         content: serializeJson(folded.settings, file.exists ? file.text : null),
+        before: file.exists ? file.text : null,
         mode: file.exists ? file.mode : FILE_MODE,
         summary: [...folded.summaries, 'every other key and entry kept'].join('; '),
       },
@@ -99,7 +100,7 @@ export function plainJsonFileUninstallActions(env: InstallEnv, path: string, edi
     if (emptied) return [...(backup !== null ? [{ kind: 'backup', from: path, to: backup } as const] : []), { kind: 'remove', path, summary: 'the Kinfold file, which holds nothing else' }]
     return [
       ...(backup !== null ? [{ kind: 'backup', from: path, to: backup } as const] : []),
-      { kind: 'write', path, content: uninstallText(path, folded.settings, file.text), mode: file.mode, summary: [...folded.summaries, 'every other key and entry kept'].join('; ') },
+      { kind: 'write', path, content: uninstallText(path, folded.settings, file.text), before: file.text, mode: file.mode, summary: [...folded.summaries, 'every other key and entry kept'].join('; ') },
     ]
   })
 }

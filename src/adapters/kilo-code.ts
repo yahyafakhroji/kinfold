@@ -13,7 +13,8 @@
 
 import { isAbsolute } from 'node:path'
 import { type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../contract/event'
-import type { AdapterContext } from './context'
+import { type AdapterContext, nonEmpty } from './context'
+import { recent } from './recency'
 import { resolveInputPaths } from './opencode'
 
 export const KILO_HOST = 'kilo-code'
@@ -47,16 +48,13 @@ interface SessionState {
   reply?: string
 }
 
-function str(value: unknown): string | undefined {
-  return typeof value === 'string' && value !== '' ? value : undefined
-}
-
 function time(value: unknown): number | undefined {
   return Number.isSafeInteger(value) && (value as number) > 0 ? (value as number) : undefined
 }
 
 /** The text the user typed: text parts in order, without the ones Kilo marks as its own. */
-function promptText(parts: unknown): string {
+/** The text the person typed in a chat.message: its text parts, without the ones Kilo added itself. */
+export function promptText(parts: unknown): string {
   if (!Array.isArray(parts)) return ''
   return parts
     .filter((part): part is { text: string } => isRecord(part) && part.type === 'text' && typeof part.text === 'string' && part.synthetic !== true)
@@ -65,11 +63,11 @@ function promptText(parts: unknown): string {
 }
 
 export function createKiloMapper(context: KiloContext): KiloMapper {
-  // Insertion order is age: the oldest session is dropped when the map is full.
+  // Insertion order is age, and a session in use is moved to the newest end: the one dropped when the map is full is the one idle longest.
   const sessions = new Map<string, SessionState>()
 
   const stateOf = (sessionId: string): { state: SessionState; isNew: boolean } => {
-    const known = sessions.get(sessionId)
+    const known = recent(sessions, sessionId)
     if (known !== undefined) return { state: known, isNew: false }
     if (sessions.size >= MAX_TRACKED_SESSIONS) {
       const oldest = sessions.keys().next().value
@@ -103,19 +101,19 @@ export function createKiloMapper(context: KiloContext): KiloMapper {
 
   const created = (properties: Record<string, unknown>): NormalizedEvent[] => {
     const info = isRecord(properties.info) ? properties.info : {}
-    const sessionId = str(properties.sessionID) ?? str(info.id)
+    const sessionId = nonEmpty(properties.sessionID) ?? nonEmpty(info.id)
     if (sessionId === undefined) return []
     const { state, isNew } = stateOf(sessionId)
-    const directory = str(info.directory)
+    const directory = nonEmpty(info.directory)
     if (directory !== undefined && isAbsolute(directory)) state.directory = directory
-    const version = str(info.version)
+    const version = nonEmpty(info.version)
     if (version !== undefined) state.version = version
     if (!isNew) return []
     return [{ ...base(sessionId, state, time(isRecord(info.time) ? info.time.created : undefined) ?? context.now()), kind: 'session_start' }]
   }
 
   const idle = (properties: Record<string, unknown>): NormalizedEvent[] => {
-    const sessionId = str(properties.sessionID)
+    const sessionId = nonEmpty(properties.sessionID)
     const state = sessionId === undefined ? undefined : sessions.get(sessionId)
     // Kilo also goes idle with no prompt behind it; only a prompt opens a turn to end.
     if (sessionId === undefined || state === undefined || !state.inTurn) return []
@@ -135,12 +133,12 @@ export function createKiloMapper(context: KiloContext): KiloMapper {
 
     chatMessage(input, output) {
       if (!isRecord(input) || !isRecord(output)) return []
-      const sessionId = str(input.sessionID)
+      const sessionId = nonEmpty(input.sessionID)
       const text = promptText(output.parts)
       if (sessionId === undefined || text.trim() === '') return []
       const message = isRecord(output.message) ? output.message : {}
       const occurredAt = time(isRecord(message.time) ? message.time.created : undefined) ?? context.now()
-      const messageId = str(message.id)
+      const messageId = nonEmpty(message.id)
       return withStart(sessionId, occurredAt, (state) => {
         state.inTurn = true
         delete state.reply
@@ -156,8 +154,8 @@ export function createKiloMapper(context: KiloContext): KiloMapper {
 
     toolAfter(input, output) {
       if (!isRecord(input)) return []
-      const sessionId = str(input.sessionID)
-      const name = str(input.tool)
+      const sessionId = nonEmpty(input.sessionID)
+      const name = nonEmpty(input.tool)
       if (sessionId === undefined || name === undefined) return []
       const result = isRecord(output) ? output : {}
       const exit = isRecord(result.metadata) && Number.isInteger(result.metadata.exit) ? (result.metadata.exit as number) : undefined
@@ -175,8 +173,8 @@ export function createKiloMapper(context: KiloContext): KiloMapper {
     },
 
     textComplete(input, output) {
-      const sessionId = isRecord(input) ? str(input.sessionID) : undefined
-      const text = isRecord(output) ? str(output.text) : undefined
+      const sessionId = isRecord(input) ? nonEmpty(input.sessionID) : undefined
+      const text = isRecord(output) ? nonEmpty(output.text) : undefined
       const state = sessionId === undefined ? undefined : sessions.get(sessionId)
       if (state !== undefined && text !== undefined) state.reply = text
     },

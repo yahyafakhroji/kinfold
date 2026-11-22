@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { recordInjection } from '../store/context-store'
 import { type Store, openStore } from '../store/db'
 import { upsertProject, upsertSession } from '../store/writes'
-import { type HostTurn, estimateSaved, measureSaving, savedFor, savedTotals } from './saved'
+import { type HostTurn, estimateSaved, measureSaving, medianInPlace, savedFor, savedTotals } from './saved'
 
 const turns = (host: string, heldOut: boolean, values: readonly number[], projectKey = 'p'): HostTurn[] =>
   values.map((tokens) => ({ host, projectKey, heldOut, tokens }))
@@ -109,4 +109,32 @@ test('totals keep the two kinds apart', () => {
     { kind: 'estimate', tokens: 50, partial: true },
     { kind: 'none' },
   ])).toEqual({ measured: { tokens: 1000, sessions: 2 }, estimate: { tokens: 50, sessions: 1, partial: true } })
+})
+
+test('the in-place median is the sorted median, for every length and with repeated values', () => {
+  const reference = (values: readonly number[]): number => {
+    const sorted = [...values].sort((a, b) => a - b)
+    const middle = (sorted.length - 1) / 2
+    return (sorted[Math.floor(middle)]! + sorted[Math.ceil(middle)]!) / 2
+  }
+  let state = 12345
+  const next = (): number => (state = (state * 1_103_515_245 + 12_345) % 2_147_483_648)
+  for (let length = 1; length <= 60; length += 1) {
+    for (let round = 0; round < 20; round += 1) {
+      // A narrow range on odd rounds, so most values repeat.
+      const values = Array.from({ length }, () => next() % (round % 2 === 0 ? 1_000_000 : 5))
+      expect(medianInPlace(Float64Array.from(values))).toBe(reference(values))
+    }
+  }
+  expect(medianInPlace(Float64Array.from([3, 3, 3, 3]))).toBe(3)
+  expect(medianInPlace(Float64Array.from([5, 1]))).toBe(3)
+})
+
+/** What the version that sorted every resample answered for the rows below, recorded before it was replaced. */
+const SORTED_REFERENCE = { status: 'saving' as const, perTurn: 1590, low: 1081, high: 2080, heldOut: 400, normal: 3600 }
+
+test('the saving figure is the one a sort of every resample gives', () => {
+  // The same draws as before, so the interval is unchanged by the faster median: these are the figures the sorted version produced.
+  const rows = Array.from({ length: 4_000 }, (_, index) => ({ host: 'claude-code', projectKey: `p${index % 7}`, heldOut: index % 10 === 0, tokens: 40_000 + ((index * 7_919) % 9_000) - (index % 10 === 0 ? 0 : 1_500) }))
+  expect(measureSaving(rows).get('claude-code')).toEqual(SORTED_REFERENCE)
 })

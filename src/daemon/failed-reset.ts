@@ -19,6 +19,22 @@ import type { Database } from '../sqlite/types'
 import { type HostFingerprints, hostsWithFailedEvents, readFingerprints, resetExhaustedForHost, writeFingerprints } from '../store/observer-reset'
 
 export const DEFAULT_RESET_CHECK_MS = 30_000
+/** How long a credential's fingerprint is trusted before the key store is asked again. On macOS each ask spawns `security`, on the thread that answers hooks. */
+export const CREDENTIAL_RECHECK_MS = 120_000
+/** How far back a backing-off provider's runs are read for their hosts: observer_runs is never pruned, and the runs that made the backoff are recent. */
+export const BACKOFF_HOSTS_WINDOW_MS = 7 * 24 * 3_600_000
+
+/** What one daemon remembers between checks, so a check every 30 s does not repeat its key-store reads and its log lines. */
+export interface ResetMemo {
+  /** Per key scheme and ref: the fingerprint last read and when. Never the credential. */
+  credentials: Map<string, { fingerprint: string; readAt: number }>
+  /** Per host: the reason its check was last skipped, so the reason is logged when it changes and not on every tick. */
+  skipped: Map<string, string>
+}
+
+export function createResetMemo(): ResetMemo {
+  return { credentials: new Map(), skipped: new Map() }
+}
 const INVALID_SETTINGS = 'invalid'
 
 export interface FailedResetDeps {
@@ -27,6 +43,8 @@ export interface FailedResetDeps {
   /** Null while the key is unavailable: credential checks pause. */
   fingerprintKey: FingerprintKey | null
   now?: () => number
+  /** Left out, every check reads the key store and logs every skip, as a one-off check should. */
+  memo?: ResetMemo
   log?: (line: string) => void
 }
 
@@ -55,11 +73,21 @@ export function currentFingerprints(deps: FailedResetDeps, host: string): Finger
   const key = deps.fingerprintKey
   if (key === null) return { ok: false, skipped: 'hmac key unavailable' }
   try {
-    const credential = credentialFingerprint(key.key, ref, deps.credentials.get(ref), key.scheme)
-    return { ok: true, fingerprints: { settings: settingsFingerprint(settings), credential } }
+    return { ok: true, fingerprints: { settings: settingsFingerprint(settings), credential: credentialOf(deps, key, ref) } }
   } catch {
     return { ok: false, skipped: 'credential lookup failed' }
   }
+}
+
+/** The credential's fingerprint, from the memo while it is fresh. A lookup that throws is not remembered. */
+function credentialOf(deps: FailedResetDeps, key: FingerprintKey, ref: string): string {
+  const now = (deps.now ?? Date.now)()
+  const memoKey = `${key.scheme}\n${ref}`
+  const known = deps.memo?.credentials.get(memoKey)
+  if (known !== undefined && now >= known.readAt && now - known.readAt < CREDENTIAL_RECHECK_MS) return known.fingerprint
+  const fingerprint = credentialFingerprint(key.key, ref, deps.credentials.get(ref), key.scheme)
+  deps.memo?.credentials.set(memoKey, { fingerprint, readAt: now })
+  return fingerprint
 }
 
 /** Two keyed fingerprints under different key schemes compare nothing: the key moved, not the credential. */
@@ -80,9 +108,11 @@ function reasonFor(before: HostFingerprints, after: HostFingerprints): ResetReas
 function checkHost(deps: FailedResetDeps, host: string, now: number): ResetOutcome | null {
   const read = currentFingerprints(deps, host)
   if (!read.ok) {
-    deps.log?.(`observer reset check host=${host} skipped: ${read.skipped}`)
+    if (deps.memo?.skipped.get(host) !== read.skipped) deps.log?.(`observer reset check host=${host} skipped: ${read.skipped}`)
+    deps.memo?.skipped.set(host, read.skipped)
     return null
   }
+  deps.memo?.skipped.delete(host)
   const after = read.fingerprints
   const before = readFingerprints(deps.db, host)
   const reason = before === null ? null : reasonFor(before, after)
@@ -105,16 +135,18 @@ function clearHostBackoff(db: Database, host: string, now: number): void {
 }
 
 /** Hosts with failed events, and hosts whose recent runs used a provider that is backing off (its events wait as pending). */
-function hostsToCheck(db: Database): string[] {
+function hostsToCheck(db: Database, now: number): string[] {
+  // By time first (observer_runs_by_time), so the read is the last week's runs and not every run ever recorded.
   const waiting = providerBackoffs(db).flatMap((entry) =>
-    db.query<{ host: string }, { provider: string }>('SELECT DISTINCT host FROM observer_runs WHERE provider = $provider').all({ provider: entry.provider }).map((row) => row.host))
+    db.query<{ host: string }, { provider: string; since: number }>('SELECT DISTINCT host FROM observer_runs WHERE started_at > $since AND provider = $provider')
+      .all({ provider: entry.provider, since: now - BACKOFF_HOSTS_WINDOW_MS }).map((row) => row.host))
   return [...new Set([...hostsWithFailedEvents(db), ...waiting])].sort()
 }
 
 /** One pass over hosts with failed events. Returns the hosts whose settings or credential changed. */
 export function checkFailedResets(deps: FailedResetDeps): ResetOutcome[] {
   const now = (deps.now ?? Date.now)()
-  const outcomes = hostsToCheck(deps.db)
+  const outcomes = hostsToCheck(deps.db, now)
     .map((host) => checkHost(deps, host, now))
     .filter((outcome): outcome is ResetOutcome => outcome !== null)
   for (const outcome of outcomes) deps.log?.(`observer reset host=${outcome.host} reason=${outcome.reason} events=${outcome.events}`)

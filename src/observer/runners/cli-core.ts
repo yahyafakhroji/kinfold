@@ -14,7 +14,6 @@
 import { randomBytes } from 'node:crypto'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { isRecord } from '../../contract/event'
 import { DATA_DIR_MODE } from '../../store/data-dir'
 import { LEGACY_OBSERVER_ENV_FLAG, OBSERVER_ENV_FLAG } from '../env'
 import {
@@ -29,8 +28,17 @@ import {
 import { classifyCliError, cliErrorText, cliFailure } from './cli-error'
 import { withCmdShims } from './windows-shim'
 import { DEFAULT_CLI_TIMEOUT_MS, type SpawnFn, type SpawnRequest, type SpawnResult, ensureObserverDir, spawnProcess } from './claude-cli'
+import { errorCode, errorName } from '../../errors'
 
 export type Semver = readonly [number, number, number]
+
+/** The three numbers a version pattern captured from `--version` output, or null when it did not match. */
+export function parseSemver(pattern: RegExp, stdout: string): Semver | null {
+  const match = pattern.exec(stdout)
+  if (match === null) return null
+  const parts = [Number(match[1]), Number(match[2]), Number(match[3])] as const
+  return parts.every(Number.isSafeInteger) ? parts : null
+}
 export interface CliProbe { version: string; binaryPath: string }
 export interface PlantedFile { name: string; content: string }
 /** `files` are written into runDir before spawn. */
@@ -140,13 +148,9 @@ function plantFiles(runDir: string, files: readonly PlantedFile[]): void {
     try {
       writeFileSync(join(runDir, file.name), file.content, { mode: PLANTED_FILE_MODE, flag: 'wx' })
     } catch (error: unknown) {
-      throw new ObserverError('internal', `planted file could not be written (${errorCode(error, 'write failed')})`)
+      throw new ObserverError('internal', `planted file could not be written (${errorCode(error) ?? 'write failed'})`)
     }
   }
-}
-
-function errorCode(error: unknown, fallback: string): string {
-  return isRecord(error) && typeof error.code === 'string' ? error.code : fallback
 }
 
 /** Spawns; a failure to start maps by code. */
@@ -156,7 +160,7 @@ async function spawnStarted(spawn: SpawnFn, request: SpawnRequest, label: string
   } catch (error: unknown) {
     // A refusal from the spawn itself (an unresolvable .cmd) already says what is wrong.
     if (error instanceof ObserverError) throw error
-    const code = errorCode(error, 'spawn failed')
+    const code = errorCode(error) ?? 'spawn failed'
     throw new ObserverError(code === 'ENOENT' ? 'cli_missing' : 'internal', `${label} could not start (${code})`)
   }
 }
@@ -234,7 +238,7 @@ async function inRunDir<T>(
   try {
     runDir = makeRunDir(dataDir)
   } catch (error: unknown) {
-    throw new ObserverError('internal', `run folder could not be made (${errorCode(error, 'mkdir failed')})`)
+    throw new ObserverError('internal', `run folder could not be made (${errorCode(error) ?? 'mkdir failed'})`)
   }
   let outcome: { ok: true; value: T } | { ok: false; error: unknown }
   try {
@@ -293,7 +297,7 @@ export function createCliObserverRunner(adapter: CliAdapter, options: CliRunnerO
     } catch (error: unknown) {
       if (error instanceof ObserverError) throw error
       // An fs error's message holds a path, and a parseVersion error could quote output: keep the code only.
-      throw new ObserverError('internal', `${label} probe failed (${errorCode(error, error instanceof Error ? error.name : 'unknown error')})`)
+      throw new ObserverError('internal', `${label} probe failed (${errorCode(error) ?? errorName(error)})`)
     }
   }
 

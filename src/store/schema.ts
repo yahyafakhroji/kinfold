@@ -610,11 +610,23 @@ CREATE INDEX ${CONTRADICTED_INDEX} ON observations(contradicted_by) WHERE contra
 CREATE INDEX ${TURN_END_INDEX} ON events(occurred_at) WHERE kind = 'turn_end';
 `
 
+export const SUMMARIES_TIME_INDEX = 'summaries_by_time'
+
+// v20: the timeline's summaries by time. An anchored timeline reads the
+//   summaries just before and just after a moment, a handful of rows, but no
+//   index led with occurred_at: both reads joined and sorted every summary in
+//   the store, one row per prompt ever asked. With this they walk from the
+//   anchor and stop at the limit.
+const V20_SUMMARIES_BY_TIME = `
+CREATE INDEX ${SUMMARIES_TIME_INDEX} ON summaries(occurred_at, id);
+`
+
 /** Index i holds the migration that takes user_version from i to i + 1. */
 export const MIGRATIONS: readonly string[] = [
   V1_CORE + V1_MEMORY + V1_DELIVERY, V2_OBSERVER, V3_CONTEXT, V4_DATA_CONTROL, V5_LINKS, V6_USAGE, V7_SHARED_SUMMARIES, V8_VECTORS, V9_RELATED_SERVED,
   V10_OBSERVER_SAFETY, V11_VECTOR_SPACE_INDEX, V12_VISIBLE, V13_LATE_AND_INDEXES,
   V14_OBSERVER_ENDPOINT, V15_EMBEDDING_SPACES, V16_PROJECT_MERGES, V17_RECALL_INDEX, V18_DASHBOARD_RECORDS, V19_SCAN_INDEXES,
+  V20_SUMMARIES_BY_TIME,
 ]
 
 /**

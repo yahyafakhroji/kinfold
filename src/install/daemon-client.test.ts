@@ -136,5 +136,11 @@ test('project merge lines name each recent merge once, and say nothing when ther
     .toEqual(['project: merged shared-agent-memory into kinfold (same repo)', 'project: merged rea into kinfold (kinfold project merge)'])
   expect(await lines({ projects: [], merges: [] })).toEqual([])
   expect(await lines({ error: 'x' }, 404)).toEqual([])
+  // An entry of another shape is left out, not printed as "merged undefined into undefined"; the merges alone are enough.
+  expect(await lines({ merges: [{ from: 'a' }, null, { from: 'x', into: 'y', reason: 'same-repo' }] })).toEqual(['project: merged x into y (same repo)'])
+  // Status asks for the merges only, with the token.
+  const asked: { url: string; auth: string | null }[] = []
+  await projectMergeLines({ dataDir: dir, fetch: async (url: string, init?: RequestInit) => (asked.push({ url, auth: new Headers(init?.headers).get('authorization') }), Response.json({ merges: [] })) } as never)
+  expect(asked).toEqual([{ url: 'http://127.0.0.1:40123/projects?merges=only', auth: `Bearer ${'a'.repeat(64)}` }])
   rmSync(dir, { recursive: true, force: true })
 })

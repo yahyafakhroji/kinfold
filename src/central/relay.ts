@@ -11,15 +11,17 @@
 import { cleanText, type PrepareOptions } from '../capture/prepare'
 import { shownBudgetMs } from '../daemon/context-route'
 import type { RouteAnswer } from '../daemon/data-routes'
-import { unavailableOutcome } from '../wsl/daemon-tools'
+import { unavailableOutcome } from '../mcp/outcome'
+import type { ToolOutcome } from '../mcp/tools'
 import { type ContextRequest, type ContextResult, EMPTY_CONTEXT } from '../context/types'
 import type { McpRead } from '../store/mcp-read-store'
 import type { ProjectKey, ProjectKeyResolver } from '../store/project-key'
-import { countSpool, quarantineSpoolEntry, readSpool, removeSpoolEntry } from '../spool/spool'
+import { type SpoolEntry, countSpool, createSpoolCursor, quarantineSpoolEntry, removeSpoolEntry } from '../spool/spool'
 import type { SemanticAnswer, SemanticRequest } from '../vectors/search'
 import { type HubCall, type HubEndpoint, type HubFailure, callHub } from './client'
 import { centralProjectKey } from './project-key'
 import { type VersionGap, gapLine } from './version-rule'
+import { isRecord } from '../contract/event'
 
 /** Events per capture call; the byte budget below usually ends a batch first. */
 export const RELAY_BATCH_EVENTS = 200
@@ -46,6 +48,8 @@ export interface RelayDeps {
   now?: () => number
   /** The byte budget of one capture call; default RELAY_BATCH_BYTES. */
   batchBytes?: number
+  /** Test seam: how the spool folder is listed. */
+  listSpool?: (dir: string) => string[]
   /** Default VIEW_TIMEOUT_MS. */
   viewTimeoutMs?: number
 }
@@ -100,8 +104,6 @@ function unavailableLine(failure: HubFailure, request: ContextRequest, hubName: 
   return `kinfold · central memory unavailable: ${failureReason(failure, hubName, gap)}`
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
-
 /** A tool's string arguments that carry free text: the search query. */
 const FREE_TEXT_ARGS = ['query'] as const
 
@@ -136,14 +138,29 @@ export function createRelay(deps: RelayDeps): Relay {
     // Read once per forward: the key file does not change under a running daemon.
     const scope = scopedFor(deps.endpoint())
     const budget = deps.batchBytes ?? RELAY_BATCH_BYTES
+    // One listing of the spool per forward, walked in batches: a backlog of N files is listed and sorted once, not
+    // once per request. `held` is what was read but did not fit the last request's bytes; it goes first in the next.
+    const cursor = createSpoolCursor(deps.spoolDir, deps.listSpool)
+    let held: SpoolEntry[] = []
+    let more = true
     for (;;) {
-      const batch = readSpool(deps.spoolDir, RELAY_BATCH_EVENTS)
-      if (batch.quarantined.length > 0) deps.log(`relay quarantined=${batch.quarantined.length}`)
-      if (batch.entries.length === 0) return { sent, failure: null }
-      const taken: typeof batch.entries = []
+      if (held.length === 0) {
+        // A used-up listing is followed by one more: an event spooled meanwhile had its nudge folded into this
+        // forward, so this forward is the one that sends it. Nothing new ends the forward.
+        const batch = cursor.next(RELAY_BATCH_EVENTS)
+        if (!more && batch.entries.length === 0) {
+          if (batch.quarantined.length > 0) deps.log(`relay quarantined=${batch.quarantined.length}`)
+          return { sent, failure: null }
+        }
+        if (batch.quarantined.length > 0) deps.log(`relay quarantined=${batch.quarantined.length}`)
+        held = batch.entries
+        more = batch.more
+        continue
+      }
+      const taken: SpoolEntry[] = []
       const items: unknown[] = []
       let bytes = 0
-      for (const entry of batch.entries) {
+      for (const entry of held) {
         // The transcript is a file on this device; the hub must never be handed a path to read.
         const { transcriptPath: _local, ...event } = entry.event
         const item = { event, project: scope(event.cwd) }
@@ -168,8 +185,7 @@ export function createRelay(deps: RelayDeps): Relay {
       }
       if (rejected.size > 0) deps.log(`relay capture rejected=${rejected.size}; set aside in the spool's quarantine`)
       sent += taken.length - rejected.size
-      if (taken.length < batch.entries.length) continue
-      if (batch.entries.length < RELAY_BATCH_EVENTS) return { sent, failure: null }
+      held = held.slice(taken.length)
     }
   }
 
@@ -231,10 +247,8 @@ export function createRelay(deps: RelayDeps): Relay {
 }
 
 /** The MCP answer while the hub cannot be asked: no memory, and the reason in the words the user reads. */
-function unavailableOutcomeFor(failure: HubFailure, reason: string): ReturnType<typeof unavailableOutcome> {
-  const outcome = unavailableOutcome(reason)
-  const text = `central memory is ${failure === 'unreachable' || failure === 'timeout' ? 'unreachable' : 'unavailable'}: ${reason}`
-  return { ...outcome, result: { ...outcome.result, content: [{ type: 'text', text }] } }
+function unavailableOutcomeFor(failure: HubFailure, reason: string): ToolOutcome {
+  return unavailableOutcome(`central memory is ${failure === 'unreachable' || failure === 'timeout' ? 'unreachable' : 'unavailable'}: `, reason)
 }
 
 /** The event ids the hub would not take; anything unreadable counts as none. */

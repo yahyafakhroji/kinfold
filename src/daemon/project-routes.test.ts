@@ -58,3 +58,8 @@ test('a central device sends every project command to the hub', async () => {
 test('other paths are not this route', async () => {
   expect(await get('/projectsx')).toBeNull()
 })
+
+test('GET /projects?merges=only answers the merges without the project list, which counts every memory and session', async () => {
+  expect(await get('/projects?merges=only')).toEqual({ status: 200, body: { merges: [] } })
+  expect(Object.keys(((await get('/projects')) as { body: object }).body).sort()).toEqual(['merges', 'projects'])
+})

@@ -4,7 +4,7 @@
 // No observer work here: rows wait with observer_state 'pending'.
 
 import { createHash } from 'node:crypto'
-import { DEFAULT_MAX_FIELD_CHARS, type PrepareOptions, type RedactedEvent, prepareForSpool } from '../capture/prepare'
+import type { PrepareOptions } from '../capture/prepare'
 import type { NormalizedEvent } from '../contract/event'
 import { type QuarantinedEntry, type SpoolCursor, type SpoolEntry, type SpoolRead, createSpoolCursor, removeSpoolEntry } from '../spool/spool'
 import type { Database } from '../sqlite/types'
@@ -24,6 +24,8 @@ import {
   upsertSession,
 } from '../store/writes'
 import { registerProject } from '../store/project-merge'
+import { errorMessage } from '../errors'
+import { secondPass } from '../capture/second-pass'
 
 export interface DrainOptions extends PrepareOptions {
   spoolDir: string
@@ -52,30 +54,7 @@ export interface DrainResult {
 
 export const DEFAULT_BATCH_SIZE = 200
 
-/** The edge already capped fields; the slack lets a capped field plus its truncation marker through untouched. */
-const SECOND_PASS_SLACK = 256
-const WITHHELD_MARKER = /^<withheld reason="[a-z_]+" lines="\d+" chars="\d+"\/>$/
-
-/**
- * The daemon's redaction pass, in case the rules changed since
- * capture. Redaction markers survive a re-run unchanged; the withheld marker
- * would not (it would describe itself), so an intact one is kept, and the
- * edge's redaction notes are kept alongside any new ones.
- */
-export function secondPass(event: NormalizedEvent, options: PrepareOptions): RedactedEvent {
-  const maxFieldChars = (options.maxFieldChars ?? DEFAULT_MAX_FIELD_CHARS) + SECOND_PASS_SLACK
-  const again = prepareForSpool(event, { ...options, maxFieldChars })
-  const original = event.tool
-  const keepMarker = original?.withheld !== undefined && WITHHELD_MARKER.test(original.output)
-  const freshNotes = (again.redactions ?? []).filter(
-    (note) => !(keepMarker && note.field === 'tool.output' && note.rule === original?.withheld),
-  )
-  return {
-    ...again,
-    ...(keepMarker && again.tool !== undefined ? { tool: { ...again.tool, output: original!.output } } : {}),
-    redactions: [...(event.redactions ?? []), ...freshNotes],
-  } as RedactedEvent
-}
+export { secondPass }
 
 /** sha256 over the redacted text an observer would read, so repeats can skip an observer call. */
 export function contentHash(event: NormalizedEvent): string {
@@ -173,10 +152,6 @@ function commitBatch(db: Database, entries: readonly SpoolEntry[], options: Drai
     const inserted = entries.filter((entry) => ingestEvent(db, entry.event, resolved, now, turnEnds)).length
     return { inserted, turnEnds }
   })()
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /** An event whose project another machine already resolved: what a hub stores for a device. */

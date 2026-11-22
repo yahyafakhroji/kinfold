@@ -29,9 +29,9 @@ function seedV1Leak(): string {
   return id
 }
 
-test('the scanner finds a fragment a v1 row kept, without storing, logging or returning the value', () => {
+test('the scanner finds a fragment a v1 row kept, without storing, logging or returning the value', async () => {
   const eventId = seedV1Leak()
-  const result = scanUntil(temp.store.db, options, 5_000)
+  const result = await scanUntil(temp.store.db, options, 5_000)
   expect(result).toMatchObject({ scanned: 2, findings: 1, byRule: { key_fragment: 1 }, remaining: 0 })
   const findings = listFindings(temp.store.db, { action: 'pending', limit: 10 })
   expect(findings).toEqual([expect.objectContaining({ table: 'events', rowId: eventId, field: 'tool.output', rule: 'key_fragment', ruleVersion: RULES_VERSION, matches: 1, action: 'pending' })])
@@ -45,9 +45,9 @@ test('the scanner finds a fragment a v1 row kept, without storing, logging or re
   expect(versions('events')).toEqual([RULES_VERSION])
 })
 
-test('a second run finds nothing new, and rows written under the current rules are not re-checked', () => {
+test('a second run finds nothing new, and rows written under the current rules are not re-checked', async () => {
   seedV1Leak()
-  scanUntil(temp.store.db, options, 5_000)
+  await scanUntil(temp.store.db, options, 5_000)
   expect(scanBatch(temp.store.db, options)).toMatchObject({ scanned: 0, findings: 0, remaining: 0 })
   seedEvent(temp.store, session, { kind: 'tool_result', at: T0 + 2, tool: { name: 'Bash', output: FRAGMENT } })
   expect(scanBatch(temp.store.db, options)).toMatchObject({ scanned: 0, findings: 0 })
@@ -83,9 +83,9 @@ test('batches stay small: a batch of 1 leaves the rest for later ticks', () => {
   expect(scanBatch(temp.store.db, { ...options, batchSize: 1 })).toMatchObject({ scanned: 1, remaining: 0 })
 })
 
-test('resolve redact rewrites the field in place with the current rules and settles the finding', () => {
+test('resolve redact rewrites the field in place with the current rules and settles the finding', async () => {
   const eventId = seedV1Leak()
-  scanUntil(temp.store.db, options, 5_000)
+  await scanUntil(temp.store.db, options, 5_000)
   const [finding] = listFindings(temp.store.db, { action: 'pending', limit: 1 })
   const outcome = resolveFinding(temp.store.db, finding!.id, 'redact', options)
   expect(outcome).toMatchObject({ ok: true, finding: { action: 'redacted', resolvedAt: T0 + 1_000 }, purge: null })
@@ -145,4 +145,34 @@ test('resolve redact on an observation updates FTS; resolve purge deletes the ro
   expect(outcome).toMatchObject({ ok: true, finding: { action: 'purged' }, purge: { counts: { observations: 1, findings: 1 } } })
   expect(ftsMatch(temp, 'qxpurgeword')).toEqual([])
   expect(all(`SELECT id FROM observations WHERE id = ${purged}`)).toEqual([])
+})
+
+test('an on-demand scan lets other work through between slices, stops at its budget, and says what is left', async () => {
+  for (let index = 0; index < 30; index += 1) seedEvent(temp.store, session, { kind: 'tool_result', at: T0 + index, promptNumber: 1, tool: { name: 'Bash', output: `line ${index}`, exitCode: 0 } })
+  markV1(temp, 'events')
+  let pauses = 0
+  let ranBetween = 0
+  // Three rows per batch and a slice that ends after each batch: the pause is taken between batches.
+  const realNow = Date.now
+  let clock = realNow()
+  Date.now = () => (clock += 60)
+  try {
+    const result = await scanUntil(temp.store.db, { ...options, batchSize: 3 }, 60_000, async () => {
+      pauses += 1
+      // What a hook would see mid-scan: the store answers, with some rows done and some not.
+      ranBetween += (temp.store.db.query(`SELECT count(*) AS n FROM events WHERE scanned_version < ${RULES_VERSION}`).get() as { n: number }).n > 0 ? 1 : 0
+    })
+    expect(result).toMatchObject({ scanned: 30, remaining: 0 })
+    expect(pauses).toBeGreaterThanOrEqual(9)
+    expect(ranBetween).toBeGreaterThan(0)
+
+    // A budget that ends first: the answer carries the rows still waiting.
+    markV1(temp, 'events')
+    const cut = await scanUntil(temp.store.db, { ...options, batchSize: 3 }, 100, async () => {})
+    expect(cut.scanned).toBeGreaterThan(0)
+    expect(cut.scanned).toBeLessThan(30)
+    expect(cut.remaining).toBe(30 - cut.scanned)
+  } finally {
+    Date.now = realNow
+  }
 })

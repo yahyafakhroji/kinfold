@@ -6,7 +6,7 @@
 import { readDaemonEndpoint } from '../daemon/daemon-info'
 import { READ_TOOLS } from '../daemon/read-routes'
 import type { ToolCaller, ToolOutcome } from '../mcp/tools'
-import { parseToolOutcome, unavailableOutcome } from '../wsl/daemon-tools'
+import { parseToolOutcome, unavailableOutcome } from '../mcp/outcome'
 
 export const CENTRAL_READ_TIMEOUT_MS = 6_000
 
@@ -19,10 +19,7 @@ export interface CentralCallerOptions {
   timeoutMs?: number
 }
 
-function unavailable(reason: string): ToolOutcome {
-  const outcome = unavailableOutcome(reason)
-  return { ...outcome, result: { ...outcome.result, content: [{ type: 'text', text: `central memory is unavailable: ${reason}` }] } }
-}
+const unavailable = (reason: string): ToolOutcome => unavailableOutcome('central memory is unavailable: ', reason)
 
 const DAEMON_DOWN = 'the Kinfold daemon on this device is not running (kinfold status says why)'
 

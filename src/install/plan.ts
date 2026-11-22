@@ -20,7 +20,7 @@ import { createDbKey, createPlainStore, describeCreateDbKey, describeCreatePlain
 import { type InstallEnv, installPaths, noticeOf } from './env'
 import { NOT_FOUND_EXIT } from './system'
 import { requireKeyStore } from './key-store-choice'
-import { type TextEncoding, encodeText, writeBackup, writeFileAtomic } from './files'
+import { type TextEncoding, encodeText, readTextOrNull, writeBackup, writeFileAtomic } from './files'
 import { backupRemovalSummary, removeHmacBackup, removeRedundantBackup, restoreLegacyKey } from './hmac-cleanup'
 import { type ModeChange, applyModeChange, describeModeChange } from './permissions'
 import { describeEmbeddedSqlite3mcInstall, describeSqlite3mcInstall, installEmbeddedSqlite3mc, installSqlite3mc } from './sqlite3mc-install'
@@ -37,6 +37,8 @@ import { linkCommand, unlinkCommand } from './path-setup'
 import { type UserPathChange, changeWindowsUserPath } from './path-windows'
 
 export const HEALTH_WAIT_MS = 15_000
+/** How long launchctl, a host's own CLI or any other command a plan step runs may take. */
+export const COMMAND_TIMEOUT_MS = 15_000
 export const TAKEOVER_WAIT_MS = 300_000
 
 export type Action =
@@ -44,7 +46,12 @@ export type Action =
   | { kind: 'chmod'; dataDir: string; change: ModeChange }
   | { kind: 'touch'; path: string; mode: number }
   | { kind: 'backup'; from: string; to: string }
-  | { kind: 'write'; path: string; content: string; mode: number; summary: string; encoding?: TextEncoding }
+  /**
+   * `before`, when given, is the file's text as the plan read it (null: there was no file), for a file the user or an
+   * agent also edits. The write is refused if the file no longer reads that way: `content` was merged from that text,
+   * so writing it would drop whatever was saved in between.
+   */
+  | { kind: 'write'; path: string; content: string; mode: number; summary: string; encoding?: TextEncoding; before?: string | null }
   /** recursive: a directory and everything in it (hmac.d/ on --remove-hmac-keys). */
   /** install.json, merged with what is on disk at the moment of the write (writeInstallRecord). */
   | { kind: 'install-record'; path: string; dataDir: string; record: InstallRecord; summary: string }
@@ -189,7 +196,7 @@ export async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Pr
   const attempts = argv[1] === 'bootstrap' ? BOOTSTRAP_ATTEMPTS : 1
   let exitCode = 0
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    exitCode = (await env.run({ argv, timeoutMs: 15_000 })).exitCode
+    exitCode = (await env.run({ argv, timeoutMs: COMMAND_TIMEOUT_MS })).exitCode
     if (exitCode !== BOOTSTRAP_BUSY_EXIT || attempt === attempts) break
     await env.sleep(BOOTSTRAP_RETRY_MS)
   }
@@ -204,7 +211,7 @@ export async function runLaunchctl(env: InstallEnv, argv: readonly string[]): Pr
  * run is a failure the user has to see.
  */
 async function runCommand(env: InstallEnv, action: Extract<Action, { kind: 'command' }>): Promise<void> {
-  const { exitCode } = await env.run({ argv: action.argv, timeoutMs: 15_000 })
+  const { exitCode } = await env.run({ argv: action.argv, timeoutMs: COMMAND_TIMEOUT_MS })
   if (exitCode === NOT_FOUND_EXIT && action.whenMissing !== undefined) {
     env.out(action.whenMissing)
     return
@@ -217,7 +224,7 @@ async function replaceClaudeMcp(env: InstallEnv, previous: Record<string, unknow
   let timedOut = false
   const step = async (argv: readonly string[]): Promise<boolean> => {
     try {
-      const result = await env.run({ argv, timeoutMs: 15_000 })
+      const result = await env.run({ argv, timeoutMs: COMMAND_TIMEOUT_MS })
       timedOut = result.timedOut === true
       return result.exitCode === 0
     } catch {
@@ -267,13 +274,43 @@ function touch(path: string, mode: number): void {
   chmodSync(path, mode)
 }
 
+/** What each run has written, by path: two steps of one plan may write the same file, and the second then finds the first one's text, not the plan-time one. */
+const written = new WeakMap<InstallEnv, Map<string, string>>()
+
+function writtenBy(env: InstallEnv): Map<string, string> {
+  const known = written.get(env)
+  if (known !== undefined) return known
+  const fresh = new Map<string, string>()
+  written.set(env, fresh)
+  return fresh
+}
+
+/** Raised when a config file was saved by someone else between the plan and the write. Nothing was written to it. */
+export class ChangedSincePlannedError extends Error {
+  constructor(readonly path: string) {
+    super(`${path} changed while this was running, so it was left as it is; run the command again`)
+    this.name = 'ChangedSincePlannedError'
+  }
+}
+
+function refuseIfChanged(env: InstallEnv, action: Extract<Action, { kind: 'write' }>): void {
+  if (action.before === undefined) return
+  // Read the way the planners read it: a startup file or a TOML config saved as UTF-16 decodes to the same text both times.
+  const now = readTextOrNull(action.path)
+  if (now === action.before || (now !== null && now === writtenBy(env).get(action.path))) return
+  throw new ChangedSincePlannedError(action.path)
+}
+
 export async function applyAction(env: InstallEnv, action: Action): Promise<StepNote | void> {
   switch (action.kind) {
     case 'mkdir': return void (mkdirSync(action.path, { recursive: true, mode: action.mode }), chmodSync(action.path, action.mode))
     case 'chmod': return applyModeChange(action.dataDir, action.change)
     case 'touch': return touch(action.path, action.mode)
     case 'backup': return writeBackup(action.from, action.to)
-    case 'write': return writeFileAtomic(action.path, action.encoding === undefined ? action.content : encodeText(action.content, action.encoding), action.mode)
+    case 'write':
+      refuseIfChanged(env, action)
+      writeFileAtomic(action.path, action.encoding === undefined ? action.content : encodeText(action.content, action.encoding), action.mode)
+      return void writtenBy(env).set(action.path, action.content)
     case 'install-record': return writeInstallRecord(action.dataDir, action.record)
     case 'remove': return rmSync(action.path, { force: true, recursive: action.recursive === true })
     case 'remove-program-dir': return removeProgramDir(env, action.path)

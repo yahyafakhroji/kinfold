@@ -8,21 +8,14 @@
 import type { Database } from '../sqlite/types'
 import { SESSIONS_PAGE, TURNS_PAGE, listSessions, sessionTurns } from '../store/session-reads'
 import type { RouteAnswer } from './data-routes'
+import { HOST_PATTERN, MAX_PROJECT_CHARS, optional } from './list-params'
 
-const HOST_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
-const MAX_PROJECT_CHARS = 512
 const ID_PATTERN = /^\d{1,15}$/
 const TURNS_PATH = /^\/memory\/sessions\/(\d{1,15})\/turns$/
 const LIST_KEYS = new Set(['host', 'project', 'before'])
 const TURN_KEYS = new Set(['after'])
 
 const bad = (error: string): RouteAnswer => ({ status: 400, body: { error } })
-
-/** An empty value is the same as an absent one: a cleared filter in the page's form. */
-function optional(params: URLSearchParams, name: string): string | null {
-  const value = params.get(name)
-  return value === null || value.trim() === '' ? null : value.trim()
-}
 
 function list(db: Database, params: URLSearchParams, log: (line: string) => void): RouteAnswer {
   if ([...params.keys()].some((key) => !LIST_KEYS.has(key))) return bad('unknown query parameter')

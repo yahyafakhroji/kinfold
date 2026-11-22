@@ -154,3 +154,29 @@ test('the size report says when it was measured', async () => {
   const size = (await (await call('GET', '/data/size')).json()) as Record<string, unknown>
   expect(size.measuredAt).toEqual(expect.any(Number))
 })
+
+test('a purge shows on the dashboard overview at once: the kept report is computed again, not served from before', async () => {
+  const sessions = async (): Promise<number> => ((await (await call('GET', '/memory/overview')).json()) as { value: { sessions: number } }).value.sessions
+  expect(await sessions()).toBe(1)
+  // A dry run removed nothing, so the kept report stands.
+  expect((await call('POST', '/data/purge', { session, dryRun: true })).status).toBe(200)
+  expect(await sessions()).toBe(1)
+  expect((await call('POST', '/data/purge', { session })).status).toBe(200)
+  expect(await sessions()).toBe(0)
+})
+
+test('GET /data/findings/<id> answers one finding whatever its state, 404 for none, and never the matched text', async () => {
+  await call('POST', '/data/scan', {})
+  const listed = (await (await call('GET', '/data/findings')).json()) as { findings: { id: number }[] }
+  const id = listed.findings[0]!.id
+  const one = await call('GET', `/data/findings/${id}`)
+  const text = await one.text()
+  expect(one.status).toBe(200)
+  expect(JSON.parse(text)).toMatchObject({ finding: { id, table: 'events', rule: 'key_fragment', action: 'pending' } })
+  expect(text).not.toContain(FRAGMENT)
+  expect((await call('GET', '/data/findings/999999')).status).toBe(404)
+  expect((await call('DELETE', `/data/findings/${id}`)).status).toBe(405)
+  // Still there after it is resolved, so a caller can tell "resolved" from "never existed".
+  await call('POST', `/data/findings/${id}/resolve`, { action: 'redact' })
+  expect(((await (await call('GET', `/data/findings/${id}`)).json()) as { finding: { action: string } }).finding.action).toBe('redacted')
+})

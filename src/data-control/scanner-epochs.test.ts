@@ -23,11 +23,11 @@ const options = { hmacKey: HMAC_KEY, epoch: EPOCH, now: () => T0 + 1_000 }
 const payloadOf = (eventId: string): string =>
   String((temp.store.db.query(`SELECT payload FROM events WHERE event_id = '${eventId}'`).get() as { payload: string }).payload)
 
-test('rows holding untagged and epoch-tagged markers, side by side, are not findings', () => {
+test('rows holding untagged and epoch-tagged markers, side by side, are not findings', async () => {
   seedEvent(temp.store, session, { kind: 'tool_result', at: T0, tool: { name: 'Bash', output: `old ${OLD} new ${NEW} done` } })
   seedObservation(temp.store, { sessionId: session, projectKey: 'org/repo', host: 'claude-code', title: `Used ${NEW} and ${OLD}`, at: T0 })
   markV1(temp, 'events')
-  expect(scanUntil(temp.store.db, options, 5_000)).toMatchObject({ scanned: 2, findings: 0 })
+  expect(await scanUntil(temp.store.db, options, 5_000)).toMatchObject({ scanned: 2, findings: 0 })
 })
 
 test('resolve redact keeps both old and new markers and tags only the new hit with the current epoch', () => {

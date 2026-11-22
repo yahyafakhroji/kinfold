@@ -3,7 +3,7 @@
 
 import { isAbsolute, resolve } from 'node:path'
 import { type NormalizedEvent, SCHEMA_VERSION, type ToolCall, isRecord } from '../contract/event'
-import { type AdapterContext, AdapterInputError } from './context'
+import { type AdapterContext, AdapterInputError, str } from './context'
 
 export const OPENCODE_HOST = 'opencode'
 
@@ -22,10 +22,6 @@ export interface OpenCodeContext extends AdapterContext {
 
 const PATH_KEYS: ReadonlySet<string> = new Set(['path', 'filePath'])
 const MAX_TRACKED_SESSIONS = 256
-
-function str(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
-}
 
 function requireDirectory(context: OpenCodeContext): void {
   if (!isAbsolute(context.directory)) throw new AdapterInputError('OpenCode context without an absolute directory')

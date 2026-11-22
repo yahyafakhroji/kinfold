@@ -15,7 +15,7 @@ import { SizeStillComputingError, createSizeCache } from './size-cache'
 import type { Database } from '../sqlite/types'
 import { type DataSettings, type DataSettingsChange, readDataSettings, writeDataSettings } from '../store/data-settings-store'
 import { type DisplayChange, type DisplaySettings, readDisplaySettings, writeDisplaySettings } from '../store/display-settings'
-import { type Finding, type FindingQuery, listFindings, pendingByRule } from '../store/findings-store'
+import { type Finding, type FindingQuery, getFinding, listFindings, pendingByRule } from '../store/findings-store'
 import type { MarkerKey } from '../redaction/redact'
 import { type Exclusive, runNow } from '../vectors/vector-worker'
 import { type StoreReader, inlineStoreReader } from '../workers/store-reader'
@@ -40,8 +40,10 @@ export interface DataHandlers {
   putRetention: (change: DataSettingsChange) => { saved: DataSettings; applied: RetentionOutcome }
   /** Counts what putRetention would expire at once; saves nothing (PUT with preview: true). */
   previewRetention: (change: DataSettingsChange) => RetentionPreview
-  scan: () => ScanResult
+  scan: () => Promise<ScanResult>
   findings: (query: FindingQuery) => FindingsView
+  /** One finding by id, whatever its state; null when there is none. */
+  finding?: (id: number) => Finding | null
   resolve: (id: number, action: ResolveAction) => ResolveOutcome
   purge: (request: PurgeRequest) => PurgeReport
   /** GET /data/display: whether agents show what was recalled, and the opt-in impact test. */
@@ -66,6 +68,8 @@ export interface DataDeps {
   reports?: StoreReader
   /** Called after the display switches are saved; the daemon rewrites display.json for the hooks. */
   onDisplay?: (settings: DisplaySettings) => void
+  /** Called after rows were removed (a purge, a redacted finding's purge, a retention run): the daemon drops the dashboard's kept reports. */
+  onRemoved?: () => void
 }
 
 /** PUT /data/display takes {"showRecall": boolean} and/or {"holdout": boolean}, and nothing else. */
@@ -83,6 +87,11 @@ export function dataHandlers(deps: DataDeps): DataHandlers {
   const { db, log } = deps
   const displayView = (settings: DisplaySettings): DisplayView => ({ ...settings, holdoutHosts: deps.holdoutHosts ?? [] })
   const sizes = createSizeCache(() => (deps.reports ?? inlineStoreReader(db, deps.dbPath)).run('dataSize', {}), { now: deps.now })
+  /** Rows are gone: the size report and whatever the daemon keeps of the store's counts are out of date. */
+  const removed = (): void => {
+    sizes.stale()
+    deps.onRemoved?.()
+  }
   return {
     display: () => displayView(readDisplaySettings(db)),
     putDisplay: (change) => {
@@ -96,12 +105,12 @@ export function dataHandlers(deps: DataDeps): DataHandlers {
       return { ...measured.report, measuredAt: measured.measuredAt }
     },
     warmSize: () => sizes.refresh(),
-    sizeChanged: () => sizes.stale(),
+    sizeChanged: removed,
     retention: () => readDataSettings(db),
     putRetention: (change) => {
       const saved = writeDataSettings(db, change, deps.now())
       const applied = applyRetention(db, deps.now())
-      sizes.stale()
+      removed()
       log(`data retention saved events=${saved.retention.events} prompts=${saved.retention.prompts} observations=${saved.retention.observations} summaries=${saved.retention.summaries} warn_bytes=${saved.warnBytes}`)
       const line = describeRetention(applied)
       if (line !== null) log(line)
@@ -112,21 +121,22 @@ export function dataHandlers(deps: DataDeps): DataHandlers {
       log(describePreview(preview))
       return preview
     },
-    scan: () => {
-      const result = scanUntil(db, { ...deps.markerKey(), now: deps.now }, SCAN_REQUEST_BUDGET_MS)
+    scan: async () => {
+      const result = await scanUntil(db, { ...deps.markerKey(), now: deps.now }, SCAN_REQUEST_BUDGET_MS)
       log(describeScan(result))
       return result
     },
     findings: (query) => ({ findings: listFindings(db, query), pendingByRule: pendingByRule(db) }),
+    finding: (id) => getFinding(db, id),
     resolve: (id, action) => {
       const outcome = resolveFinding(db, id, action, { ...deps.markerKey(), now: deps.now })
-      if (outcome.ok && outcome.purge !== null) sizes.stale()
+      if (outcome.ok && outcome.purge !== null) removed()
       log(`data finding resolve id=${id} action=${action} ${outcome.ok ? 'ok' : `refused=${outcome.status}`}`)
       return outcome
     },
     purge: (request) => {
       const report = purge(db, request.target, { dryRun: request.dryRun, now: deps.now })
-      if (!request.dryRun) sizes.stale()
+      if (!request.dryRun) removed()
       log(describePurge(request.target, report))
       return report
     },
@@ -142,6 +152,7 @@ type ReadBody = () => Promise<Parsed<unknown>>
 
 const METHOD_NOT_ALLOWED: RouteAnswer = { status: 405, body: { error: 'method not allowed' } }
 const RESOLVE_PATH = /^\/data\/findings\/(\d{1,15})\/resolve$/
+const FINDING_PATH = /^\/data\/findings\/(\d{1,15})$/
 
 async function withBody<T>(readBody: ReadBody, parse: (body: unknown) => Parsed<T>, answer: (value: T) => RouteAnswer | Promise<RouteAnswer>): Promise<RouteAnswer> {
   const body = await readBody()
@@ -187,7 +198,7 @@ export async function dataRoute(method: string, url: URL, readBody: ReadBody, ha
     if (method !== 'PUT') return METHOD_NOT_ALLOWED
     return withBody(readBody, parseDisplayChange, (change) => ({ status: 200, body: handlers.putDisplay(change) }))
   }
-  if (path === '/data/scan') return method === 'POST' ? { status: 200, body: handlers.scan() } : METHOD_NOT_ALLOWED
+  if (path === '/data/scan') return method === 'POST' ? { status: 200, body: await handlers.scan() } : METHOD_NOT_ALLOWED
   if (path === '/data/findings') {
     if (method !== 'GET') return METHOD_NOT_ALLOWED
     const query = parseFindingsQuery(url.searchParams)
@@ -196,6 +207,12 @@ export async function dataRoute(method: string, url: URL, readBody: ReadBody, ha
   if (path === '/data/purge') {
     if (method !== 'POST') return METHOD_NOT_ALLOWED
     return withBody(readBody, parsePurgeBody, async (request) => ({ status: 200, body: await exclusive(() => handlers.purge(request)) }))
+  }
+  const one = FINDING_PATH.exec(path)
+  if (one !== null && handlers.finding !== undefined) {
+    if (method !== 'GET') return METHOD_NOT_ALLOWED
+    const finding = handlers.finding(Number(one[1]))
+    return finding === null ? { status: 404, body: { error: 'no such finding' } } : { status: 200, body: { finding } }
   }
   const resolve = RESOLVE_PATH.exec(path)
   if (resolve === null) return null

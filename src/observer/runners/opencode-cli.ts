@@ -17,9 +17,10 @@ import { chmodSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { isRecord } from '../../contract/event'
 import { ObserverError } from '../types'
-import type { CliAdapter, CliParsed, CliRunContext, Semver } from './cli-core'
+import { type CliAdapter, type CliParsed, type CliRunContext, type Semver, parseSemver } from './cli-core'
 import { cliFailure } from './cli-error'
 import type { SpawnFn, SpawnRequest, SpawnResult } from './claude-cli'
+import { errorCode } from '../../errors'
 
 export const OPENCODE_MIN_VERSION: Semver = [2, 0, 0]
 export const OBSERVER_AGENT = 'kinfold-observer'
@@ -82,19 +83,8 @@ function makeConfigDir(runDir: string): void {
     mkdirSync(dir, { recursive: true, mode: CONFIG_DIR_MODE })
     chmodSync(dir, CONFIG_DIR_MODE)
   } catch (error: unknown) {
-    throw new ObserverError('internal', `opencode config folder could not be made (${errorCode(error, 'mkdir failed')})`)
+    throw new ObserverError('internal', `opencode config folder could not be made (${errorCode(error) ?? 'mkdir failed'})`)
   }
-}
-
-function errorCode(error: unknown, fallback: string): string {
-  return isRecord(error) && typeof error.code === 'string' ? error.code : fallback
-}
-
-function parseVersion(stdout: string): Semver | null {
-  const match = VERSION_PATTERN.exec(stdout)
-  if (match === null) return null
-  const parts = [Number(match[1]), Number(match[2]), Number(match[3])] as const
-  return parts.every(Number.isSafeInteger) ? parts : null
 }
 
 /**
@@ -108,7 +98,7 @@ function assertNoSystemPlugins(systemDir: string): void {
     try {
       entries = readdirSync(join(systemDir, name))
     } catch (error: unknown) {
-      const code = errorCode(error, 'read failed')
+      const code = errorCode(error) ?? 'read failed'
       if (code === 'ENOENT' || code === 'ENOTDIR') continue
       throw new ObserverError('config_invalid', `opencode system plugin folder could not be read (${code})`)
     }
@@ -199,7 +189,7 @@ async function runCommand(spawn: SpawnFn, request: Omit<SpawnRequest, 'stdin' | 
   try {
     result = await spawn({ ...request, stdin: '', timeoutMs: COMMAND_TIMEOUT_MS })
   } catch (error: unknown) {
-    const code = errorCode(error, 'spawn failed')
+    const code = errorCode(error) ?? 'spawn failed'
     throw new ObserverError(code === 'ENOENT' ? 'cli_missing' : 'internal', `${label} could not start (${code})`)
   }
   if (result.timedOut) throw new ObserverError('timeout', `${label} did not finish in ${COMMAND_TIMEOUT_MS} ms`)
@@ -275,7 +265,7 @@ export function createOpencodeAdapter(options: OpencodeAdapterOptions = {}): Cli
     binary: 'opencode',
     extraEnv: ['XDG_DATA_HOME', 'OPENCODE_DB'],
     minVersion: OPENCODE_MIN_VERSION,
-    parseVersion,
+    parseVersion: (stdout) => parseSemver(VERSION_PATTERN, stdout),
     isolatedEnv,
     invocation: (input) => invocation(input, systemDir),
     parse,

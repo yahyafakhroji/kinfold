@@ -254,7 +254,10 @@ test('every secret goes through the store', async () => {
   expect(await uninstall(w.env, { dryRun: false, removeCredentials: false, removeHmacKeys: true })).toBe(EXIT_OK)
 
   // The claude-cli token is only looked up (metadata) at install and removed at uninstall; there is none here.
-  expect(new Set(store.seen)).toEqual(new Set([DB_KEY_REF, HMAC_MASTER_REF, HMAC_LEGACY_REF, 'openrouter', CLAUDE_TOKEN_REF]))
+  // An uninstall that keeps the credentials asks whether each default entry exists (metadata too), so it names only the ones that do.
+  const asked = ['anthropic', 'openai', 'gemini', 'dashscope', 'openai-compatible']
+  expect(new Set(store.seen)).toEqual(new Set([DB_KEY_REF, HMAC_MASTER_REF, HMAC_LEGACY_REF, 'openrouter', CLAUDE_TOKEN_REF, ...asked]))
+  for (const ref of asked) expect(w.out.some((line) => line.includes(`entry ${ref}`))).toBe(false)
   expect(store.values.has('openrouter')).toBe(true)
   expect(store.values.has(HMAC_MASTER_REF)).toBe(false)
 })

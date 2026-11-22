@@ -4,7 +4,7 @@
 
 import { type CredentialProvider, isSystemCredentialRef } from '../../secrets/credentials'
 import { CLAUDE_TOKEN_REF, credentialRefFor } from '../settings'
-import { CLI_LOGIN_PROVIDERS, type CliLoginProvider, HTTP_API_PROVIDERS, type HttpApiProvider, ObserverError, type ObserverProvider, type ObserverRunner, type ObserverSettings } from '../types'
+import { type CliLoginProvider, HTTP_API_PROVIDERS, type HttpApiProvider, ObserverError, type ObserverProvider, type ObserverRunner, type ObserverSettings, isCliLoginProvider } from '../types'
 import { type SpawnFn, createClaudeCliRunner } from './claude-cli'
 import { type CliAdapter, type CliObserverRunner, createCliObserverRunner } from './cli-core'
 import { codexAdapter } from './codex-cli'
@@ -50,10 +50,6 @@ function optionalCredential(credentials: CredentialProvider, ref: string): strin
 
 /** One adapter per CLI login provider. */
 const CLI_ADAPTERS: Record<CliLoginProvider, CliAdapter> = { 'codex-cli': codexAdapter, 'opencode-cli': opencodeAdapter, 'goose-cli': gooseAdapter }
-
-function isCliLoginProvider(provider: ObserverProvider): provider is CliLoginProvider {
-  return (CLI_LOGIN_PROVIDERS as readonly string[]).includes(provider)
-}
 
 /**
  * The one way to build a CLI login runner (run, probe, listModels). Throws
