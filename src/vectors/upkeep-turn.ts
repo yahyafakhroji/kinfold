@@ -2,7 +2,8 @@
 // bounded (space-manager.ts: one index window, one sweep chunk); between
 // slices the turn yields to the event loop, so a /health, a hook or a central
 // device's request waiting behind it is answered before the next slice. A turn
-// stops at its budget and the next tick goes on from there.
+// stops at its budget, or when it may not write just now, and the next tick
+// goes on from there.
 
 /** Work a turn may do before it waits for the next tick. */
 export const UPKEEP_TURN_BUDGET_MS = 250
@@ -10,6 +11,8 @@ export const UPKEEP_TURN_BUDGET_MS = 250
 export interface UpkeepTurnOptions {
   /** One bounded slice; true when there is more to do soon. */
   slice: () => boolean
+  /** Asked before every slice; false ends the turn, and the next tick asks again. Absent: always ready. */
+  ready?: () => boolean
   budgetMs?: number
   now?: () => number
   onError?: (error: unknown) => void
@@ -33,6 +36,7 @@ export function createUpkeepTurns(options: UpkeepTurnOptions): UpkeepTurns {
   const turn = async (): Promise<void> => {
     const startedAt = now()
     while (!stopped) {
+      if (options.ready?.() === false) return
       let more: boolean
       try {
         more = options.slice()

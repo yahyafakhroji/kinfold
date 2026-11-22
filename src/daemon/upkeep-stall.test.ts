@@ -52,7 +52,7 @@ describe.skipIf(VEC0 === undefined || VEC0 === '')(`vectors upkeep on ${OBSERVAT
   let daemon: RunningDaemon
   let token: string
   const logs: string[] = []
-  // PROBE (windows sweep stall): each line with when it came, to line a slow checkpoint up against a held thread.
+  // Each line with when it came, so a slow checkpoint can be lined up against a held thread.
   const stamped: string[] = []
   const record = (line: string): void => {
     logs.push(line)
@@ -127,7 +127,7 @@ describe.skipIf(VEC0 === undefined || VEC0 === '')(`vectors upkeep on ${OBSERVAT
       expected = at + 10
     }, 10)
     const until = performance.now() + RUN_MS
-    console.log(`upkeep-stall probe: load t=${Math.round(performance.now())}..${Math.round(until)}`)
+    console.log(`upkeep-stall load t=${Math.round(performance.now())}..${Math.round(until)}`)
     try {
       while (performance.now() < until) {
         samples.health.push(await timed(() => fetch(`${base}/health`)))
@@ -146,8 +146,7 @@ describe.skipIf(VEC0 === undefined || VEC0 === '')(`vectors upkeep on ${OBSERVAT
   const expectInBudget = (load: Load): void => {
     // On a miss, the stall watch's own lines name the step that held the thread.
     // The checkpoint lines too: whether the worker had taken over says which connection could have flushed the store.
-    for (const line of logs.filter((entry) => entry.startsWith('main thread') || entry.startsWith('vectors ') || entry.startsWith('checkpoint'))) console.log(`upkeep-stall log: ${line}`)
-    for (const line of stamped.filter((entry) => / (main thread|checkpoint|vectors switched)/.test(entry))) console.log(`upkeep-stall probe: ${line}`)
+    for (const line of stamped.filter((entry) => / (main thread|vectors |checkpoint)/.test(entry))) console.log(`upkeep-stall log: ${line}`)
     expect(max(load.health)).toBeLessThan(HEALTH_BUDGET_MS)
     expect(max(load.context)).toBeLessThan(CONTEXT_BUDGET_MS)
     expect(max(load.view)).toBeLessThan(VIEW_BUDGET_MS)

@@ -170,7 +170,7 @@ export function createSpaceManager(options: SpaceManagerOptions): SpaceManager {
   const sweep = (): boolean => (sweeping ? withFastDelete(db, sweepChunk) : false)
 
   const sweepChunk = (): boolean => {
-    // PROBE (windows sweep stall): the rows and the table timed apart.
+    // The rows and the table are named apart, so a held thread says which one held it.
     const removed = part('sweep rows', () => db.query(
       `DELETE FROM observation_vectors WHERE id IN (SELECT v.id FROM observation_vectors v
          WHERE NOT EXISTS (SELECT 1 FROM vector_spaces s WHERE s.model = v.model AND s.dims = v.dims) LIMIT $limit)`,

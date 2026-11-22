@@ -18,10 +18,15 @@ export const WAL_TRUNCATE_BYTES = 64 * 1024 * 1024
 export const CHECKPOINT_START_LIMIT_MS = 15_000
 /** How long one checkpoint may take before its caller stops waiting; the worker goes on. */
 export const CHECKPOINT_LIMIT_MS = 60_000
-/** PROBE: a checkpoint past this is logged. */
-export const CHECKPOINT_SLOW_MS = 250
-/** How long close waits for the worker to close its connection before ending it anyway. */
-export const CHECKPOINT_CLOSE_WAIT_MS = 2_000
+/** A checkpoint past this is logged, so a held thread can be set beside it. */
+export const CHECKPOINT_SLOW_MS = 1_000
+/**
+ * How long close waits for the worker to close its connection before ending
+ * it anyway. The worker answers after the checkpoint in flight, which took up
+ * to 4.5 s on the Windows runner; one ended before that keeps its file open,
+ * and Windows cannot delete it.
+ */
+export const CHECKPOINT_CLOSE_WAIT_MS = 10_000
 
 /** The worker inside a compiled program, by its path from the entries' common folder (tools/build-release.test.ts holds them in step). */
 export const COMPILED_CHECKPOINT_WORKER_PATH = './workers/checkpoint-worker.ts'
@@ -33,6 +38,12 @@ export interface Checkpointer {
   checkpointNow(): Promise<CheckpointResult | null>
   /** The last checkpoint's result; null before the first. */
   lastResult(): CheckpointResult | null
+  /**
+   * Whether a checkpoint is in flight. On Windows a write on another
+   * connection waits for it, its sync of the store above all, which took
+   * seconds on the CI runner.
+   */
+  busy(): boolean
   /** Settles once the worker has closed its connection and ended; the same promise on every call. */
   close(): Promise<void>
 }
@@ -151,7 +162,6 @@ export async function startCheckpointer(options: CheckpointerOptions): Promise<C
     })
   }
 
-  // PROBE (windows sweep stall): names a checkpoint that ran long, to set beside a held thread.
   const timedAsk = async (mode: CheckpointMode): Promise<CheckpointResult | null> => {
     const startedAt = performance.now()
     const result = await ask(mode)
@@ -203,6 +213,7 @@ export async function startCheckpointer(options: CheckpointerOptions): Promise<C
     },
     checkpointNow: () => (stopped ? Promise.resolve(null) : queued()),
     lastResult: () => last,
+    busy: () => pending.size > 0,
     close: () => {
       if (closeDone !== null) return closeDone
       closing = true
