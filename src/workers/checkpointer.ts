@@ -18,6 +18,8 @@ export const WAL_TRUNCATE_BYTES = 64 * 1024 * 1024
 export const CHECKPOINT_START_LIMIT_MS = 15_000
 /** How long one checkpoint may take before its caller stops waiting; the worker goes on. */
 export const CHECKPOINT_LIMIT_MS = 60_000
+/** PROBE: a checkpoint past this is logged. */
+export const CHECKPOINT_SLOW_MS = 250
 /** How long close waits for the worker to close its connection before ending it anyway. */
 export const CHECKPOINT_CLOSE_WAIT_MS = 2_000
 
@@ -149,11 +151,20 @@ export async function startCheckpointer(options: CheckpointerOptions): Promise<C
     })
   }
 
+  // PROBE (windows sweep stall): names a checkpoint that ran long, to set beside a held thread.
+  const timedAsk = async (mode: CheckpointMode): Promise<CheckpointResult | null> => {
+    const startedAt = performance.now()
+    const result = await ask(mode)
+    const ms = performance.now() - startedAt
+    if (ms >= CHECKPOINT_SLOW_MS) options.log(`checkpoint slow mode=${mode} ms=${Math.round(ms)} log=${result?.log ?? -1} checkpointed=${result?.checkpointed ?? -1} busy=${result?.busy ?? -1} wal_bytes=${walBytes(options.dbPath)}`)
+    return result
+  }
+
   const turn = async (): Promise<CheckpointResult | null> => {
     if (stopped) return null
-    const result = await ask('PASSIVE')
+    const result = await timedAsk('PASSIVE')
     // Every frame copied: a TRUNCATE now only resets the file, and without waiting for anyone.
-    if (result !== null && result.busy === 0 && result.checkpointed === result.log && walBytes(options.dbPath) > truncateBytes) return (await ask('TRUNCATE')) ?? result
+    if (result !== null && result.busy === 0 && result.checkpointed === result.log && walBytes(options.dbPath) > truncateBytes) return (await timedAsk('TRUNCATE')) ?? result
     return result
   }
 

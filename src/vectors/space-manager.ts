@@ -170,10 +170,11 @@ export function createSpaceManager(options: SpaceManagerOptions): SpaceManager {
   const sweep = (): boolean => (sweeping ? withFastDelete(db, sweepChunk) : false)
 
   const sweepChunk = (): boolean => {
-    const removed = db.query(
+    // PROBE (windows sweep stall): the rows and the table timed apart.
+    const removed = part('sweep rows', () => db.query(
       `DELETE FROM observation_vectors WHERE id IN (SELECT v.id FROM observation_vectors v
          WHERE NOT EXISTS (SELECT 1 FROM vector_spaces s WHERE s.model = v.model AND s.dims = v.dims) LIMIT $limit)`,
-    ).run({ limit: SWEEP_CHUNK }).changes
+    ).run({ limit: SWEEP_CHUNK }).changes)
     let tablesLeft = false
     // Rows first, then tables: one slice never zeroes both a chunk of rows and a vector chunk.
     if (options.vec0 && removed === 0) {
@@ -181,7 +182,7 @@ export function createSpaceManager(options: SpaceManagerOptions): SpaceManager {
       const retired = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'vec_space_%'").all()
         .map(({ name }) => VEC_TABLE.exec(name)?.[1]).filter((id): id is string => id !== undefined && !listed.has(Number(id)))
       // One table a step, a vector chunk at a time, until it is gone.
-      if (retired.length > 0) tablesLeft = !dropVecIndexStep(db, { id: Number(retired[0]) }) || retired.length > 1
+      if (retired.length > 0) tablesLeft = part('sweep table', () => !dropVecIndexStep(db, { id: Number(retired[0]) })) || retired.length > 1
     }
     sweeping = removed > 0 || tablesLeft
     return sweeping
