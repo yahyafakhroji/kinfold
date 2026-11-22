@@ -1,4 +1,4 @@
-// Made-up words for src/daemon/recall-bench.test.ts and its load process: a
+// Made-up words for src/daemon/recall.bench.test.ts and its load process: a
 // fixed pseudo-random sequence over a 3,000-word vocabulary, Zipf-like, so a
 // few words are everywhere and most are rare, as in real notes, and every run
 // seeds the same store.

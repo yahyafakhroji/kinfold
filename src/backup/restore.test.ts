@@ -15,6 +15,7 @@ import { BackupError, type BackupErrorKind, extractSnapshot, readArchive, writeA
 import { createBackup } from './create'
 import { FAULT_POINTS, type FaultPoint, RestoreCrash, RestoreStranded, applyRestore, asidePath, inspectBackup, replacedPath, resumeRestore, stageSnapshot, stagingDir } from './restore'
 import { snapshotInto } from './snapshot'
+import { templateStore } from './store-templates.test-support'
 
 let root: string
 let serial = 0
@@ -46,7 +47,7 @@ function seed(store: Store, title: string): void {
 async function makeSource(options: { encrypted?: boolean; title?: string; prepare?: (db: Database) => void; claimSchema?: number; spoil?: (snapshotPath: string) => void } = {}): Promise<Source> {
   serial += 1
   const dataDir = join(root, `source-${serial}`)
-  const key = options.encrypted === false ? null : newDbKey()
+  const { key } = templateStore(options.encrypted === false ? 'plain' : 'encrypted', dataDir)
   const store = openStore(dataDir, { keys: fixedKeys(key) })
   seed(store, options.title ?? 'from the backup')
   options.prepare?.(store.db)
@@ -71,15 +72,19 @@ function makeTarget(options: { encrypted?: boolean; memory?: boolean; store?: bo
   serial += 1
   const dataDir = join(root, `target-${serial}`)
   const keyStore = recordingKeyStore()
-  const key = options.encrypted === false ? null : newDbKey()
-  if (key !== null) keyStore.set(DB_KEY_REF, key)
   if (options.store === false) {
+    const key = options.encrypted === false ? null : newDbKey()
+    if (key !== null) keyStore.set(DB_KEY_REF, key)
     mkdirSync(dataDir, { recursive: true })
     return { dataDir, keyStore, key }
   }
-  const store = openStore(dataDir, { keys: fixedKeys(key) })
-  if (options.memory === true) seed(store, 'was here before')
-  store.db.close()
+  const { key } = templateStore(options.encrypted === false ? 'plain' : 'encrypted', dataDir)
+  if (key !== null) keyStore.set(DB_KEY_REF, key)
+  if (options.memory === true) {
+    const store = openStore(dataDir, { keys: fixedKeys(key) })
+    seed(store, 'was here before')
+    store.db.close()
+  }
   return { dataDir, keyStore, key }
 }
 

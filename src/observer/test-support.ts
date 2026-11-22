@@ -5,6 +5,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { templateStore } from '../backup/store-templates.test-support'
 import type { ToolCall } from '../contract/event'
 import { ulid } from '../contract/ulid'
 import { type Store, openStore } from '../store/db'
@@ -21,6 +22,7 @@ export interface TempStore {
 export function openTempStore(prefix: string): TempStore {
   const root = mkdtempSync(join(tmpdir(), prefix))
   const dataDir = join(root, 'data')
+  templateStore('plain', dataDir)
   const store = openStore(dataDir)
   return {
     root,

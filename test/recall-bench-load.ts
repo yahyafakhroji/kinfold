@@ -1,4 +1,4 @@
-// The load beside src/daemon/recall-bench.test.ts, in a process of its own as
+// The load beside src/daemon/recall.bench.test.ts, in a process of its own as
 // in real use: hooks and the dashboard are separate processes from the daemon,
 // and run in the test's own process their file writes and requests took the
 // daemon's thread. Args: data dir, port, token, the project folder. Runs until

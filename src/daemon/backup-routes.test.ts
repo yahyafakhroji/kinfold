@@ -7,6 +7,7 @@ import { BACKUP_TMP_DIR, createBackup } from '../backup/create'
 import { readBackupRecord } from '../backup/record'
 import { applyRestore, inspectBackup, replacedPath, stageSnapshot } from '../backup/restore'
 import { snapshotInto } from '../backup/snapshot'
+import { templateStore } from '../backup/store-templates.test-support'
 import { type DashboardRig, startRig } from '../dashboard/test-support'
 import { type RecordingKeyStore, recordingKeyStore } from '../install/test-support'
 import { PROJECT_A, seedMcpObservation, seedMcpSession } from '../mcp/test-support'
@@ -57,7 +58,7 @@ function box(options: { encrypted?: boolean; titles?: string[]; backup?: DaemonO
   serial += 1
   const dataDir = join(root, `data-${serial}`)
   const keyStore = options.keyStore ?? recordingKeyStore()
-  const key = options.encrypted === false ? null : newDbKey()
+  const { key } = templateStore(options.encrypted === false ? 'plain' : 'encrypted', dataDir)
   if (key !== null) keyStore.set(DB_KEY_REF, key)
   seedStore(dataDir, key, keyStore, options.titles ?? [])
   const rig = startRig(dataDir, { dbKeys: dbKeyStoreOf(keyStore), keyStore, ...(options.backup !== undefined ? { backup: options.backup } : {}) })
@@ -70,7 +71,7 @@ async function backupFile(options: { encrypted?: boolean; titles?: string[]; cla
   serial += 1
   const dataDir = join(root, `source-${serial}`)
   const keyStore = recordingKeyStore()
-  const key = options.encrypted === false ? null : newDbKey()
+  const { key } = templateStore(options.encrypted === false ? 'plain' : 'encrypted', dataDir)
   if (key !== null) keyStore.set(DB_KEY_REF, key)
   seedStore(dataDir, key, keyStore, options.titles ?? ['from the backup'])
   const store = openStore(dataDir, { keys: dbKeyStoreOf(key === null ? null : keyStore) })

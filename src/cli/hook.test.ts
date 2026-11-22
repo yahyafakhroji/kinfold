@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { templateStore } from '../backup/store-templates.test-support'
 import { type RunningDaemon, startDaemon } from '../daemon/daemon'
 import { SQLITE3MC_LIB_ENV } from '../sqlite/library'
 import { listRecentSessions } from '../store/reads'
@@ -23,6 +24,7 @@ let daemon: RunningDaemon | null
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'sam-hook-'))
   dataDir = join(root, 'data')
+  templateStore('plain', dataDir)
   // The recall line has its own tests (hook-recall.test.ts); with it off, these pin the context output alone.
   hideRecallLine(dataDir)
   daemon = null

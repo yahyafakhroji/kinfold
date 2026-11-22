@@ -5,6 +5,7 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readArchive } from '../backup/archive'
 import { inspectBackup, applyRestore, replacedPath, stageSnapshot } from '../backup/restore'
+import { templateStore } from '../backup/store-templates.test-support'
 import { applyUndo } from '../backup/undo'
 import { PROJECT_A, seedMcpObservation, seedMcpSession } from '../mcp/test-support'
 import { DB_KEY_NEXT_REF, DB_KEY_REF, DB_KEY_REPLACED_REF } from '../secrets/credentials'
@@ -38,7 +39,7 @@ function machine(options: { encrypted?: boolean; titles?: string[]; code?: strin
   const w = createWorld()
   worlds.push(w)
   const keyStore = recordingKeyStore()
-  const key = options.encrypted === false ? null : newDbKey()
+  const { key } = templateStore(options.encrypted === false ? 'plain' : 'encrypted', w.dataDir)
   if (key !== null) keyStore.set(DB_KEY_REF, key)
   const store = openStore(w.dataDir, { keys: dbKeyStoreOf(key === null ? null : keyStore) })
   for (const title of options.titles ?? []) {

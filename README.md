@@ -210,7 +210,7 @@ The local model and its runtime make the program about 36 MB larger: the model i
 
 ## Performance
 
-Measured on 2026-11-16 by `src/vectors/knn-bench.test.ts` on an Apple-silicon Mac, against a store seeded with 50,000 vectors of 384 dimensions:
+Measured on 2026-11-16 by `src/vectors/knn.bench.test.ts` on an Apple-silicon Mac, against a store seeded with 50,000 vectors of 384 dimensions:
 
 | What | Time |
 | --- | --- |
@@ -219,7 +219,7 @@ Measured on 2026-11-16 by `src/vectors/knn-bench.test.ts` on an Apple-silicon Ma
 | Loading the local model | 0.2 to 1 s on the five release targets |
 | Embedding three short texts with the local model | 39 to 176 ms on the same runners |
 
-Prompt-time recall, measured on 2026-11-17 by `src/daemon/recall-bench.test.ts` on an Apple-silicon Mac. The store is encrypted, with 30,000 memories, 150,000 captured events and 20,000 recall records. While the prompts ran, an observer failed and retried, captures arrived, and the dashboard read the data size, metrics and facets the whole time. Each prompt was a long one with a paste, timed from the client as a hook sees it:
+Prompt-time recall, measured on 2026-11-17 by `src/daemon/recall.bench.test.ts` on an Apple-silicon Mac. The store is encrypted, with 30,000 memories, 150,000 captured events and 20,000 recall records. While the prompts ran, an observer failed and retried, captures arrived, and the dashboard read the data size, metrics and facets the whole time. Each prompt was a long one with a paste, timed from the client as a hook sees it:
 
 | | p50 | p95 | max |
 | --- | --- | --- | --- |
