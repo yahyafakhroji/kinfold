@@ -53,8 +53,8 @@ describe('ci workflow', () => {
     const text = workflow('ci.yml')
     const lines = text.split('\n')
     const gates = lines.filter((line) => line.trim() === 'continue-on-error: ${{ !matrix.required }}')
-    expect(lines.filter((line) => line.trim() === 'runs-on: ${{ matrix.os }}').length).toBe(2)
-    expect(gates.length).toBe(2)
+    expect(lines.filter((line) => line.trim() === 'runs-on: ${{ matrix.os }}').length).toBe(1)
+    expect(gates.length).toBe(1)
     let entries = 0
     lines.forEach((line, index) => {
       const entry = /^\s*- os:\s*(\S+)\s*$/.exec(line)
@@ -64,6 +64,26 @@ describe('ci workflow', () => {
       expect(required).not.toBeNull()
       if (entry[1]?.startsWith('macos')) expect(required?.[1]).toBe('true')
     })
-    expect(entries).toBe(6)
+    expect(entries).toBe(3)
+  })
+
+  test('types runs once, on Linux, under the check name types', () => {
+    const text = workflow('ci.yml')
+    const types = text.slice(text.indexOf('\n  types:'), text.indexOf('\n  changeset:'))
+    expect(types).toContain('    name: types\n')
+    expect(types).toContain('    runs-on: ubuntu-latest\n')
+    expect(types).not.toContain('matrix')
+  })
+
+  test('a new push to a pull request cancels its running ci; pushes to main never do', () => {
+    const text = workflow('ci.yml')
+    expect(text).toContain("concurrency:\n  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n")
+  })
+
+  test('the test job restores sqlite3mc from a cache keyed on what builds it, and builds only on a miss', () => {
+    const text = workflow('ci.yml')
+    expect(text).toContain('path: .cache/sqlite3mc')
+    expect(text).toContain("key: sqlite3mc-${{ runner.os }}-${{ hashFiles('src/sqlite/release.ts', 'src/sqlite/build.ts', 'tools/build-sqlite3mc.ts', 'tools/pinned-download.ts') }}")
+    expect(text).toMatch(/- name: Build sqlite3mc for the test preload\n {8}if: steps\.sqlite3mc\.outputs\.cache-hit != 'true'/)
   })
 })
