@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { changelogSection, changesetNeeded, checkPullRequest, parseNameStatus, pendingChangesets, validateChangeset } from './changesets'
+import { changelogDigest, changelogSection, changesetNeeded, checkPullRequest, parseNameStatus, pendingChangesets, validateChangeset } from './changesets'
 
 describe('pendingChangesets', () => {
   test('counts every changeset file except the ones changesets ignores', () => {
@@ -119,5 +119,34 @@ describe('changelogSection', () => {
   test('returns null for a version with no section', () => {
     expect(changelogSection(changelog, '0.4.0')).toBeNull()
     expect(changelogSection('', '0.5.0')).toBeNull()
+  })
+})
+
+describe('changelogDigest', () => {
+  test('keeps the headings and cuts each entry to its commit and first sentence', () => {
+    const section = [
+      '### Patch Changes',
+      '',
+      '- abc1234: The remaining fixes from the 0.6.0 audit. Most of them make Kinfold do less work.',
+      '  ',
+      '  `kinfold findings --purge <id>` finds a pending finding however old it is.',
+      '- def5678: BREAKING: security fixes. Four things you may notice!',
+      '- 0123abc: One sentence with no stop',
+      '',
+      '### Minor Changes',
+      '',
+      '- 4567def: Add a page? It shows things.',
+    ].join('\n')
+    expect(changelogDigest(section)).toBe([
+      '### Patch Changes',
+      '',
+      '- abc1234: The remaining fixes from the 0.6.0 audit.',
+      '- def5678: BREAKING: security fixes.',
+      '- 0123abc: One sentence with no stop',
+      '',
+      '### Minor Changes',
+      '',
+      '- 4567def: Add a page?',
+    ].join('\n'))
   })
 })

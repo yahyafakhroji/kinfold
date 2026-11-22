@@ -159,7 +159,9 @@ describe('version workflow', () => {
     expect(pr).toContain('git ls-remote origin "refs/heads/$BRANCH"')
     expect(pr).toContain('changeset-release/$BRANCH')
     expect(pr).toContain('--title "Version $NEXT"')
-    expect(pr).toContain('bun tools/changesets.ts notes "$NEXT"')
+    // A short body: one line per changeset, and a link to the full notes.
+    expect(pr).toContain('bun tools/changesets.ts digest "$NEXT"')
+    expect(pr).toContain('blob/$head/CHANGELOG.md')
     expect(pr).toContain("git commit -m \"chore: version $NEXT\"")
     expect(pr).not.toMatch(/Co-Authored-By|Claude/i)
   })
