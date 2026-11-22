@@ -3,12 +3,12 @@
 // close it, and copy the closed file into each case's own folder. An
 // encrypted copy is rekeyed, so no two stores share a key unless a case asks.
 
-import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { newDbKey } from '../sqlite/keys'
 import { openEncrypted } from '../sqlite/open'
-import { DB_FILE } from '../store/data-dir'
+import { DB_FILE, enforceFileMode, ensureDataDir } from '../store/data-dir'
 import { openStore } from '../store/db'
 
 export type StoreKind = 'encrypted' | 'plain'
@@ -43,16 +43,18 @@ function template(kind: StoreKind): Template {
 }
 
 /**
- * A fresh, closed, migrated store at `dataDir`, which must not exist yet.
+ * A fresh, closed, migrated store in `dataDir`, which must hold no store yet.
  * An encrypted one gets `key` when given, else a new key of its own.
  */
 export function templateStore(kind: StoreKind, dataDir: string, key?: string): { dataDir: string; key: string | null } {
-  if (existsSync(dataDir)) throw new Error(`${dataDir} already exists`)
+  const path = join(dataDir, DB_FILE)
+  if (existsSync(path)) throw new Error(`${path} already exists`)
   const source = template(kind)
-  cpSync(source.dir, dataDir, { recursive: true })
+  copyFileSync(join(source.dir, DB_FILE), join(ensureDataDir(dataDir), DB_FILE))
+  enforceFileMode(path)
   if (source.key === null) return { dataDir, key: null }
   const own = key ?? newDbKey()
-  const db = openEncrypted(join(dataDir, DB_FILE), source.key)
+  const db = openEncrypted(path, source.key)
   try {
     db.exec('PRAGMA journal_mode = DELETE')
     db.exec(`PRAGMA rekey = 'raw:${own}'`)

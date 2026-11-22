@@ -4,6 +4,7 @@ import { runFramed } from './prompt/frame'
 import { decodeKeys } from './prompt/keys'
 import { copyFileSync, existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { templateStore } from '../backup/store-templates.test-support'
 import { seedObservation } from '../context/test-support'
 import { T0, seedSession } from '../observer/test-support'
 import { DB_KEY_NEXT_REF, DB_KEY_REF } from '../secrets/credentials'
@@ -37,6 +38,7 @@ function world(key: string | null, answer: (out: string[]) => string = (out) => 
   worlds.push(w)
   if (key !== null) w.keychainValues.set(DB_KEY_REF, key)
   const keys: DbKeyStore = key === null ? NO_DB_KEYS : { name: 'test', read: () => key, exists: () => true }
+  templateStore(key === null ? 'plain' : 'encrypted', w.dataDir, key ?? undefined)
   const store = openStore(w.dataDir, { keys })
   upsertProject(store.db, { key: 'p', kind: 'path', displayName: 'p' }, T0)
   const session = seedSession(store, 'claude-code', 's')
