@@ -14,6 +14,7 @@ import { createBackup } from './create'
 import { readUndoJournal } from './journal'
 import { RestoreStranded, applyRestore, asidePath, inspectBackup, replacedPath, stageSnapshot } from './restore'
 import { snapshotInto } from './snapshot'
+import { templateStore } from './store-templates.test-support'
 import { UNDO_FAULT_POINTS, type UndoFaultPoint, UndoCrash, applyUndo, checkUndo, keptStore, resumeUndo } from './undo'
 
 let root: string
@@ -52,16 +53,16 @@ const noSleep = async (): Promise<void> => {}
 /** A store with memory of kind `kept`, then a backup of kind `current` restored over it. */
 async function makePair(current: Kind, kept: Kind, sameKey = false): Promise<Pair> {
   serial += 1
-  const keptKey = kept === 'encrypted' ? newDbKey() : null
-  const currentKey = current === 'encrypted' ? (sameKey && keptKey !== null ? keptKey : newDbKey()) : null
+  const dataDir = join(root, `target-${serial}`)
+  const { key: keptKey } = templateStore(kept, dataDir)
   const sourceDir = join(root, `source-${serial}`)
+  const { key: currentKey } = templateStore(current, sourceDir, sameKey && keptKey !== null ? keptKey : undefined)
   const source = openStore(sourceDir, { keys: fixedKeys(currentKey) })
   seed(source, FROM_BACKUP)
   const archive = join(root, `backup-${serial}.kfb`)
   await createBackup({ dataDir: sourceDir, dest: archive, snapshot: (path) => snapshotInto(source.db, path), version: '0.4.0', now: () => 1_794_000_000_000 })
   source.db.close()
 
-  const dataDir = join(root, `target-${serial}`)
   const keyStore = recordingKeyStore()
   if (keptKey !== null) keyStore.set(DB_KEY_REF, keptKey)
   const target = openStore(dataDir, { keys: fixedKeys(keptKey) })
