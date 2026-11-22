@@ -54,7 +54,7 @@ runs:
 
     - name: Confirm the build restored its source stubs
       shell: bash
-      run: git diff --exit-code -- src/version.ts src/runtime/embedded.generated.ts
+      run: git diff --exit-code -- src/system/version.ts src/system/runtime/embedded.generated.ts
 
     - name: Smoke-run the program
       shell: bash

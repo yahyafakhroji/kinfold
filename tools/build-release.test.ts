@@ -136,6 +136,15 @@ test('the compile names each worker as an entry, and every named worker file exi
   expect(compiled).toEqual([COMPILED_WORKER_PATH, COMPILED_SNAPSHOT_WORKER_PATH, COMPILED_EMBED_WORKER_PATH, COMPILED_STORE_READER_PATH, COMPILED_CHECKPOINT_WORKER_PATH])
 })
 
+test('the release build checks the stubs it restores, by paths that exist', () => {
+  const action = readFileSync(join(REPO, '.github', 'actions', 'build-program', 'action.yml'), 'utf8')
+  const checked = /git diff --exit-code -- (.+)$/m.exec(action)?.[1]?.trim().split(/\s+/) ?? []
+  const paths = releasePaths(REPO)
+  const stubs = [paths.versionFile, paths.generated].map((path) => path.slice(REPO.length + 1).replaceAll('\\', '/'))
+  expect(checked.sort()).toEqual(stubs.sort())
+  for (const path of checked) expect(existsSync(join(REPO, path))).toBe(true)
+})
+
 test('the Windows program carries the .exe suffix', () => {
   expect(programName('windows-x64')).toBe('kinfold-windows-x64.exe')
   expect(programName('linux-arm64')).toBe('kinfold-linux-arm64')
